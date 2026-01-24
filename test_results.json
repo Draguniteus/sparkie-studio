@@ -1,0 +1,15 @@
+{
+  "timestamp": "2026-01-23T05:53:49.687047",
+  "tests": {
+    "Connectivity": true,
+    "Chat (MiniMax)": true,
+    "Image (Z-Image-Turbo)": true,
+    "Image (FLUX.2-pro)": true,
+    "Video (Wan-AI)": true,
+    "Fallback (Pollinations)": false
+  },
+  "summary": {
+    "passed": 5,
+    "failed": 1
+  }
+}
