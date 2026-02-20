@@ -3,15 +3,15 @@
 import { useState } from "react"
 import { useAppStore } from "@/store/appStore"
 import {
-  X, Monitor, FolderTree, Download, Code, Eye, Brain,
+  X, Monitor, FolderTree, Download, Code, Eye,
 } from "lucide-react"
 import { FileExplorer } from "@/components/ide/FileExplorer"
 import { CodeEditor } from "@/components/ide/CodeEditor"
 import { Preview } from "@/components/ide/Preview"
-import { Worklog } from "@/components/ide/Worklog"
+import { LiveCodeView } from "@/components/ide/LiveCodeView"
 
 export function IDEPanel() {
-  const { ideTab, setIDETab, toggleIDE, files, activeFileId, setActiveFile } = useAppStore()
+  const { ideTab, setIDETab, toggleIDE, files, isExecuting } = useAppStore()
   const [fileViewMode, setFileViewMode] = useState<"preview" | "code">("preview")
 
   const downloadAll = () => {
@@ -74,30 +74,20 @@ export function IDEPanel() {
         </div>
       </div>
 
-      {/* Content */}
+      {/* Content — full panel, state-driven swap */}
       <div className="flex-1 overflow-hidden flex flex-col">
         {ideTab === "process" ? (
-          /* Current Process = Live Preview + Worklog at bottom */
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <div className="flex-1 overflow-hidden">
-              <Preview />
-            </div>
-            {/* Worklog as collapsible bottom section */}
-            <div className="border-t border-hive-border max-h-[200px] overflow-y-auto">
-              <Worklog compact />
-            </div>
+          /* FULL SWAP: executing → full code view, done → full preview */
+          <div className="flex-1 overflow-hidden">
+            {isExecuting ? <LiveCodeView /> : <Preview />}
           </div>
         ) : (
           /* Files tab = file explorer left + code/preview right */
           <div className="flex-1 flex overflow-hidden">
-            {/* File explorer sidebar */}
             <div className="w-52 border-r border-hive-border shrink-0 overflow-hidden">
               <FileExplorer />
             </div>
-
-            {/* Editor/Preview area */}
             <div className="flex-1 flex flex-col overflow-hidden">
-              {/* Code/Preview toggle */}
               <div className="flex items-center justify-center py-2 border-b border-hive-border shrink-0">
                 <div className="flex bg-hive-elevated rounded-lg p-0.5">
                   <button
@@ -124,8 +114,6 @@ export function IDEPanel() {
                   </button>
                 </div>
               </div>
-
-              {/* Content area */}
               <div className="flex-1 overflow-hidden">
                 {fileViewMode === "preview" ? <Preview /> : <CodeEditor />}
               </div>

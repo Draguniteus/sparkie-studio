@@ -64,6 +64,8 @@ interface AppState {
   previewMode: boolean
   worklog: WorklogEntry[]
   isExecuting: boolean
+  liveCode: string
+  liveCodeFiles: string[]
 
   toggleSidebar: () => void
   toggleIDE: () => void
@@ -88,6 +90,10 @@ interface AppState {
   updateWorklogEntry: (id: string, updates: Partial<WorklogEntry>) => void
   clearWorklog: () => void
   setExecuting: (executing: boolean) => void
+  setLiveCode: (code: string) => void
+  appendLiveCode: (chunk: string) => void
+  addLiveCodeFile: (name: string) => void
+  clearLiveCode: () => void
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -104,6 +110,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   previewMode: false,
   worklog: [],
   isExecuting: false,
+  liveCode: '',
+  liveCodeFiles: [],
 
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   toggleIDE: () => set((s) => ({ ideOpen: !s.ideOpen })),
@@ -199,4 +207,12 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   clearWorklog: () => set({ worklog: [] }),
   setExecuting: (executing) => set({ isExecuting: executing }),
+
+  // Live code streaming state
+  setLiveCode: (code) => set({ liveCode: code }),
+  appendLiveCode: (chunk) => set((s) => ({ liveCode: s.liveCode + chunk })),
+  addLiveCodeFile: (name) => set((s) => ({
+    liveCodeFiles: s.liveCodeFiles.includes(name) ? s.liveCodeFiles : [...s.liveCodeFiles, name]
+  })),
+  clearLiveCode: () => set({ liveCode: '', liveCodeFiles: [] }),
 }))

@@ -33,10 +33,11 @@ export function ChatInput() {
   const [selectedVideoModel, setSelectedVideoModel] = useState("seedance")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const {
-    selectedModel, setSelectedModel, createChat, addMessage, appendToMessage,
+    selectedModel, setSelectedModel, createChat, addMessage,
     updateMessage, currentChatId, isStreaming, setStreaming,
-    openIDE, addWorklogEntry, updateWorklogEntry, clearWorklog,
-    setExecuting, addFile, setActiveFile, setIDETab, ideOpen,
+    openIDE, setExecuting, addFile, setActiveFile, setIDETab, ideOpen,
+    clearLiveCode, appendLiveCode, addLiveCodeFile,
+    addWorklogEntry, updateWorklogEntry,
   } = useAppStore()
 
   const streamChat = useCallback(async (chatId: string, userContent: string) => {
@@ -47,23 +48,18 @@ export function ChatInput() {
       .filter((m) => m.type !== "image" && m.type !== "video")
       .map((m) => ({ role: m.role, content: m.content }))
 
-    // Show a brief "working" message in chat — NOT the code
+    // Chat shows brief placeholder — code goes to LiveCodeView
     const assistantMsgId = addMessage(chatId, {
       role: "assistant", content: "⚡ Working on it...", model: selectedModel, isStreaming: true,
     })
 
     setStreaming(true)
     setExecuting(true)
+    clearLiveCode()
 
-    // Open IDE to Current Process
+    // Open IDE to Current Process — will show LiveCodeView since isExecuting=true
     if (!ideOpen) openIDE()
     setIDETab("process")
-
-    const thinkId = addWorklogEntry({
-      type: "thinking",
-      content: `Analyzing: "${userContent.slice(0, 100)}${userContent.length > 100 ? "..." : ""}"`,
-      status: "running",
-    })
 
     try {
       const response = await fetch("/api/chat", {
@@ -72,18 +68,13 @@ export function ChatInput() {
         body: JSON.stringify({ messages: apiMessages, model: selectedModel }),
       })
 
-      updateWorklogEntry(thinkId, { status: "done", duration: 500 })
-
       if (!response.ok) {
         const err = await response.json().catch(() => ({ error: "Unknown error" }))
         updateMessage(chatId, assistantMsgId, { content: `Error: ${err.error || response.statusText}`, isStreaming: false })
-        addWorklogEntry({ type: "error", content: `API error: ${err.error || response.statusText}`, status: "error" })
         setStreaming(false); setExecuting(false)
         return
       }
 
-      // Start streaming — code goes to worklog, NOT chat
-      const codeLogId = addWorklogEntry({ type: "code", content: "", status: "running" })
       const reader = response.body?.getReader()
       const decoder = new TextDecoder()
 
@@ -95,11 +86,7 @@ export function ChatInput() {
 
       let buffer = ""
       let fullContent = ""
-      const startTime = Date.now()
-      let lastLogUpdate = 0
       let filesCreated = 0
-
-      // Track which files we've already created during streaming
       const createdFileNames = new Set<string>()
 
       while (true) {
@@ -120,22 +107,13 @@ export function ChatInput() {
             const delta = parsed.choices?.[0]?.delta
             if (delta?.content) {
               fullContent += delta.content
+              // Stream directly to LiveCodeView
+              appendLiveCode(delta.content)
             }
           } catch { /* skip */ }
         }
 
-        // Update worklog with live code content (throttled to every 200ms)
-        const now = Date.now()
-        if (now - lastLogUpdate > 200) {
-          // Show last 500 chars of code being written
-          const displayContent = fullContent.length > 500
-            ? "..." + fullContent.slice(-500)
-            : fullContent
-          updateWorklogEntry(codeLogId, { content: displayContent })
-          lastLogUpdate = now
-        }
-
-        // Incrementally detect completed file blocks and create files
+        // Incrementally detect completed file blocks
         const partialParse = parseAIResponse(fullContent)
         for (const file of partialParse.files) {
           if (!createdFileNames.has(file.name)) {
@@ -157,13 +135,10 @@ export function ChatInput() {
             if (filesCreated === 0) setActiveFile(fileId)
             filesCreated++
 
-            addWorklogEntry({
-              type: "result",
-              content: `📄 Created ${file.name}`,
-              status: "done",
-            })
+            // Show file badge in LiveCodeView header
+            addLiveCodeFile(file.name)
           } else {
-            // File exists but content may have grown — update it
+            // Update existing file content as it grows
             const existing = useAppStore.getState().files.find(f => f.name === file.name)
             if (existing && existing.content !== file.content) {
               useAppStore.getState().updateFileContent(existing.id, file.content)
@@ -172,10 +147,7 @@ export function ChatInput() {
         }
       }
 
-      const elapsed = Date.now() - startTime
-      updateWorklogEntry(codeLogId, { status: "done", duration: elapsed, content: `Completed in ${(elapsed / 1000).toFixed(1)}s` })
-
-      // Final parse to catch any remaining files
+      // Final parse
       const finalParse = parseAIResponse(fullContent)
       for (const file of finalParse.files) {
         if (!createdFileNames.has(file.name)) {
@@ -185,15 +157,13 @@ export function ChatInput() {
             oldFiles.forEach(f => useAppStore.getState().deleteFile(f.id))
           }
           const fileId = addFile({
-            name: file.name,
-            type: "file",
-            content: file.content,
+            name: file.name, type: "file", content: file.content,
             language: getLanguageFromFilename(file.name),
           })
           if (filesCreated === 0) setActiveFile(fileId)
           filesCreated++
+          addLiveCodeFile(file.name)
         } else {
-          // Final content update
           const existing = useAppStore.getState().files.find(f => f.name === file.name)
           if (existing && existing.content !== file.content) {
             useAppStore.getState().updateFileContent(existing.id, file.content)
@@ -201,32 +171,25 @@ export function ChatInput() {
         }
       }
 
-      // Update chat with just the description — never code
+      // Update chat with description only
       if (filesCreated > 0) {
         const description = finalParse.text || `✨ Created ${filesCreated} file(s). Check the preview →`
         updateMessage(chatId, assistantMsgId, { content: description, isStreaming: false })
-        addWorklogEntry({
-          type: "result",
-          content: `✅ Project ready — ${filesCreated} file(s) created. Preview is live.`,
-          status: "done",
-        })
       } else {
-        // No files — regular text response, show in chat
         updateMessage(chatId, assistantMsgId, {
           content: fullContent || "The model used all tokens for reasoning. Try a simpler prompt.",
           isStreaming: false,
         })
-        addWorklogEntry({ type: "result", content: `Response complete (${fullContent.length} chars)`, status: "done" })
       }
     } catch (error) {
       console.error("Stream error:", error)
       updateMessage(chatId, assistantMsgId, { content: "Connection error. Please try again.", isStreaming: false })
-      addWorklogEntry({ type: "error", content: "Connection failed", status: "error" })
     } finally {
+      // Stop executing — IDEPanel will swap from LiveCodeView to Preview
       setStreaming(false)
       setExecuting(false)
     }
-  }, [selectedModel, addMessage, appendToMessage, updateMessage, setStreaming, addWorklogEntry, updateWorklogEntry, setExecuting, openIDE, setIDETab, ideOpen, addFile, setActiveFile])
+  }, [selectedModel, addMessage, updateMessage, setStreaming, setExecuting, openIDE, setIDETab, ideOpen, addFile, setActiveFile, clearLiveCode, appendLiveCode, addLiveCodeFile, addWorklogEntry, updateWorklogEntry])
 
   const generateMedia = useCallback(async (chatId: string, prompt: string, mediaType: "image" | "video") => {
     const model = mediaType === "video" ? selectedVideoModel : selectedImageModel
@@ -268,7 +231,7 @@ export function ChatInput() {
       updateMessage(chatId, assistantMsgId, {
         content: prompt, imageUrl: data.url, imagePrompt: prompt, isStreaming: false, type: mediaType, model: model,
       })
-      updateWorklogEntry(logId, { status: "done", duration: Date.now() - startTime, content: `${mediaType} generated` })
+      updateWorklogEntry(logId, { status: "done", duration: Date.now() - startTime })
     } catch (error) {
       console.error(`${mediaType} gen error:`, error)
       updateMessage(chatId, assistantMsgId, { content: `${mediaType} generation failed`, isStreaming: false, type: "text" })
