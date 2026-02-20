@@ -1,30 +1,36 @@
-import { WebContainer } from '@webcontainer/api'
+/**
+ * WebContainer singleton — browser only, loaded dynamically.
+ * Never import this at module level in a server-rendered component.
+ * Always use: const { getWebContainer } = await import('@/lib/webcontainer')
+ */
 
-let instance: WebContainer | null = null
-let bootPromise: Promise<WebContainer> | null = null
+// Lazy-loaded WC instance
+let _wc: unknown | null = null
+let _bootPromise: Promise<unknown> | null = null
 
-export async function getWebContainer(): Promise<WebContainer> {
-  if (instance) return instance
-  if (bootPromise) return bootPromise
+export async function getWebContainer() {
+  if (_wc) return _wc as import('@webcontainer/api').WebContainer
+  if (_bootPromise) return _bootPromise as Promise<import('@webcontainer/api').WebContainer>
 
-  bootPromise = WebContainer.boot().then((wc) => {
-    instance = wc
+  const { WebContainer } = await import('@webcontainer/api')
+  _bootPromise = WebContainer.boot().then((wc) => {
+    _wc = wc
     return wc
   })
-  return bootPromise
+  return _bootPromise as Promise<import('@webcontainer/api').WebContainer>
 }
 
 export function isWebContainerSupported(): boolean {
+  if (typeof window === 'undefined') return false
   return (
     typeof SharedArrayBuffer !== 'undefined' &&
     typeof crossOriginIsolated !== 'undefined' &&
-    crossOriginIsolated
+    (crossOriginIsolated as boolean)
   )
 }
 
-/** Write a virtual file tree into the WebContainer file system */
 export async function mountFiles(
-  wc: WebContainer,
+  wc: import('@webcontainer/api').WebContainer,
   files: Array<{ name: string; content: string }>
 ): Promise<void> {
   for (const file of files) {
@@ -37,17 +43,15 @@ export async function mountFiles(
   }
 }
 
-/** Detect if the project needs npm install (has a package.json) */
 export function needsNpm(files: Array<{ name: string }>): boolean {
   return files.some((f) => f.name === 'package.json' || f.name.endsWith('/package.json'))
 }
 
-/** Detect dev server start command from package.json scripts */
 export function getDevCommand(pkgJson: string): { cmd: string; args: string[] } {
   try {
     const pkg = JSON.parse(pkgJson)
     const scripts = pkg.scripts || {}
-    if (scripts.dev) return { cmd: 'npm', args: ['run', 'dev'] }
+    if (scripts.dev)   return { cmd: 'npm', args: ['run', 'dev'] }
     if (scripts.start) return { cmd: 'npm', args: ['start'] }
     if (scripts.serve) return { cmd: 'npm', args: ['run', 'serve'] }
   } catch {}
