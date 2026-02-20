@@ -7,6 +7,8 @@ export interface Message {
   type?: 'text' | 'image' | 'video'
   imageUrl?: string
   imagePrompt?: string
+  model?: string
+  isStreaming?: boolean
 }
 
 export interface Chat {
@@ -30,6 +32,7 @@ export type WorklogEntry = {
   content: string
   timestamp: Date
   status?: 'running' | 'done' | 'error'
+  duration?: number
 }
 
 export type IDETab = 'process' | 'files' | 'terminal'
@@ -44,16 +47,19 @@ export type ContainerStatus =
   | 'error'
 
 interface AppState {
-  // ── Chat / multi-chat ────────────────────────────────────────────────────
-  messages: Message[]           // active chat messages (backward compat)
+  // ── Chat ──────────────────────────────────────────────────────────────────
+  messages: Message[]
   chats: Chat[]
   currentChatId: string | null
   isLoading: boolean
   isStreaming: boolean
   selectedModel: string
-  addMessage: (msg: Message) => void
+
+  /** Add message to active messages array (1-arg) or to a specific chat (2-arg) */
+  addMessage: (chatIdOrMsg: string | Message, msg?: Partial<Message>) => string
   appendToMessage: (id: string, content: string) => void
-  updateMessage: (id: string, patch: Partial<Message>) => void
+  /** Update message in active messages (2-arg) or in a specific chat (3-arg) */
+  updateMessage: (chatIdOrId: string, idOrPatch: string | Partial<Message>, patch?: Partial<Message>) => void
   clearMessages: () => void
   setSelectedModel: (model: string) => void
   setStreaming: (v: boolean) => void
@@ -77,7 +83,7 @@ interface AppState {
   liveCodeFiles: string[]
   addFile: (file: Omit<FileNode, 'id'>) => string
   updateFile: (id: string, content: string) => void
-  updateFileContent: (id: string, content: string) => void  // alias for updateFile
+  updateFileContent: (id: string, content: string) => void
   renameFile: (id: string, name: string) => void
   deleteFile: (id: string) => void
   setActiveFile: (id: string | null) => void
@@ -85,7 +91,7 @@ interface AppState {
   openIDE: () => void
   toggleIDE: () => void
   setIdeTab: (tab: IDETab) => void
-  setIDETab: (tab: IDETab) => void   // alias for setIdeTab
+  setIDETab: (tab: IDETab) => void
   setExecuting: (v: boolean) => void
   appendLiveCode: (chunk: string) => void
   addLiveCodeFile: (name: string) => void
@@ -116,11 +122,54 @@ export const useAppStore = create<AppState>((set, get) => ({
   isStreaming: false,
   selectedModel: 'minimax-m2.5-free',
 
-  addMessage: (msg) => set((s) => ({ messages: [...s.messages, msg] })),
+  // Overloaded: addMessage(msg) or addMessage(chatId, msgPartial)
+  addMessage: (chatIdOrMsg, msgPartial) => {
+    const id = crypto.randomUUID()
+    if (typeof chatIdOrMsg === 'string') {
+      // 2-arg: addMessage(chatId, partial) — add to specific chat's messages
+      const chatId = chatIdOrMsg
+      const msg: Message = { id, role: 'user', content: '', ...msgPartial }
+      set((s) => ({
+        messages: [...s.messages, msg],
+        chats: s.chats.map((c) =>
+          c.id === chatId ? { ...c, messages: [...c.messages, msg] } : c
+        ),
+      }))
+    } else {
+      // 1-arg: addMessage(msg)
+      const msg: Message = { id, ...chatIdOrMsg as Message }
+      set((s) => ({ messages: [...s.messages, msg] }))
+    }
+    return id
+  },
+
   appendToMessage: (id, content) =>
-    set((s) => ({ messages: s.messages.map((m) => m.id === id ? { ...m, content: m.content + content } : m) })),
-  updateMessage: (id, patch) =>
-    set((s) => ({ messages: s.messages.map((m) => m.id === id ? { ...m, ...patch } : m) })),
+    set((s) => ({
+      messages: s.messages.map((m) => m.id === id ? { ...m, content: m.content + content } : m),
+    })),
+
+  // Overloaded: updateMessage(id, patch) or updateMessage(chatId, msgId, patch)
+  updateMessage: (chatIdOrId, idOrPatch, patch) => {
+    if (patch !== undefined) {
+      // 3-arg: updateMessage(chatId, msgId, patch)
+      const msgId = idOrPatch as string
+      set((s) => ({
+        messages: s.messages.map((m) => m.id === msgId ? { ...m, ...patch } : m),
+        chats: s.chats.map((c) =>
+          c.id === chatIdOrId
+            ? { ...c, messages: c.messages.map((m) => m.id === msgId ? { ...m, ...patch } : m) }
+            : c
+        ),
+      }))
+    } else {
+      // 2-arg: updateMessage(id, patch)
+      const p = idOrPatch as Partial<Message>
+      set((s) => ({
+        messages: s.messages.map((m) => m.id === chatIdOrId ? { ...m, ...p } : m),
+      }))
+    }
+  },
+
   clearMessages: () => set({ messages: [] }),
   setSelectedModel: (model) => set({ selectedModel: model }),
   setStreaming: (v) => set({ isStreaming: v }),
