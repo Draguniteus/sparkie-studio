@@ -24,6 +24,7 @@ export interface FileNode {
   content: string
   type: 'file' | 'folder'
   language?: string
+  children?: FileNode[]
 }
 
 export type WorklogEntry = {
@@ -47,18 +48,14 @@ export type ContainerStatus =
   | 'error'
 
 interface AppState {
-  // ── Chat ──────────────────────────────────────────────────────────────────
   messages: Message[]
   chats: Chat[]
   currentChatId: string | null
   isLoading: boolean
   isStreaming: boolean
   selectedModel: string
-
-  /** Add message to active messages array (1-arg) or to a specific chat (2-arg) */
   addMessage: (chatIdOrMsg: string | Message, msg?: Partial<Message>) => string
   appendToMessage: (id: string, content: string) => void
-  /** Update message in active messages (2-arg) or in a specific chat (3-arg) */
   updateMessage: (chatIdOrId: string, idOrPatch: string | Partial<Message>, patch?: Partial<Message>) => void
   clearMessages: () => void
   setSelectedModel: (model: string) => void
@@ -66,14 +63,10 @@ interface AppState {
   createChat: () => string
   setCurrentChat: (id: string) => void
   deleteChat: (id: string) => void
-
-  // ── Sidebar / navigation ──────────────────────────────────────────────────
   sidebarOpen: boolean
   activeTab: string
   toggleSidebar: () => void
   setActiveTab: (tab: string) => void
-
-  // ── IDE ───────────────────────────────────────────────────────────────────
   files: FileNode[]
   activeFileId: string | null
   ideOpen: boolean
@@ -96,14 +89,10 @@ interface AppState {
   appendLiveCode: (chunk: string) => void
   addLiveCodeFile: (name: string) => void
   clearLiveCode: () => void
-
-  // ── Worklog ───────────────────────────────────────────────────────────────
   worklog: WorklogEntry[]
   addWorklogEntry: (entry: Omit<WorklogEntry, 'id' | 'timestamp'>) => string
   updateWorklogEntry: (id: string, patch: Partial<WorklogEntry>) => void
   clearWorklog: () => void
-
-  // ── WebContainer ──────────────────────────────────────────────────────────
   containerStatus: ContainerStatus
   previewUrl: string | null
   terminalOutput: string
@@ -114,7 +103,6 @@ interface AppState {
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
-  // Chat
   messages: [],
   chats: [],
   currentChatId: null,
@@ -122,36 +110,28 @@ export const useAppStore = create<AppState>((set, get) => ({
   isStreaming: false,
   selectedModel: 'minimax-m2.5-free',
 
-  // Overloaded: addMessage(msg) or addMessage(chatId, msgPartial)
   addMessage: (chatIdOrMsg, msgPartial) => {
     const id = crypto.randomUUID()
     if (typeof chatIdOrMsg === 'string') {
-      // 2-arg: addMessage(chatId, partial) — add to specific chat's messages
-      const chatId = chatIdOrMsg
       const msg: Message = { id, role: 'user', content: '', ...msgPartial }
       set((s) => ({
         messages: [...s.messages, msg],
         chats: s.chats.map((c) =>
-          c.id === chatId ? { ...c, messages: [...c.messages, msg] } : c
+          c.id === chatIdOrMsg ? { ...c, messages: [...c.messages, msg] } : c
         ),
       }))
     } else {
-      // 1-arg: addMessage(msg)
-      const msg: Message = { id, ...chatIdOrMsg as Message }
+      const msg: Message = { id, ...(chatIdOrMsg as Message) }
       set((s) => ({ messages: [...s.messages, msg] }))
     }
     return id
   },
 
   appendToMessage: (id, content) =>
-    set((s) => ({
-      messages: s.messages.map((m) => m.id === id ? { ...m, content: m.content + content } : m),
-    })),
+    set((s) => ({ messages: s.messages.map((m) => m.id === id ? { ...m, content: m.content + content } : m) })),
 
-  // Overloaded: updateMessage(id, patch) or updateMessage(chatId, msgId, patch)
   updateMessage: (chatIdOrId, idOrPatch, patch) => {
     if (patch !== undefined) {
-      // 3-arg: updateMessage(chatId, msgId, patch)
       const msgId = idOrPatch as string
       set((s) => ({
         messages: s.messages.map((m) => m.id === msgId ? { ...m, ...patch } : m),
@@ -162,11 +142,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         ),
       }))
     } else {
-      // 2-arg: updateMessage(id, patch)
       const p = idOrPatch as Partial<Message>
-      set((s) => ({
-        messages: s.messages.map((m) => m.id === chatIdOrId ? { ...m, ...p } : m),
-      }))
+      set((s) => ({ messages: s.messages.map((m) => m.id === chatIdOrId ? { ...m, ...p } : m) }))
     }
   },
 
@@ -176,24 +153,20 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   createChat: () => {
     const id = crypto.randomUUID()
-    const chat: Chat = { id, title: 'New Chat', messages: [], createdAt: new Date() }
-    set((s) => ({ chats: [...s.chats, chat], currentChatId: id, messages: [] }))
+    set((s) => ({ chats: [...s.chats, { id, title: 'New Chat', messages: [], createdAt: new Date() }], currentChatId: id, messages: [] }))
     return id
   },
   setCurrentChat: (id) => {
     const chat = get().chats.find((c) => c.id === id)
     set({ currentChatId: id, messages: chat?.messages ?? [] })
   },
-  deleteChat: (id) =>
-    set((s) => ({ chats: s.chats.filter((c) => c.id !== id), currentChatId: null, messages: [] })),
+  deleteChat: (id) => set((s) => ({ chats: s.chats.filter((c) => c.id !== id), currentChatId: null, messages: [] })),
 
-  // Sidebar
   sidebarOpen: true,
   activeTab: 'chat',
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   setActiveTab: (tab) => set({ activeTab: tab }),
 
-  // IDE
   files: [],
   activeFileId: null,
   ideOpen: false,
@@ -207,12 +180,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((s) => ({ files: [...s.files, { ...file, id }] }))
     return id
   },
-  updateFile: (id, content) =>
-    set((s) => ({ files: s.files.map((f) => f.id === id ? { ...f, content } : f) })),
-  updateFileContent: (id, content) =>
-    set((s) => ({ files: s.files.map((f) => f.id === id ? { ...f, content } : f) })),
-  renameFile: (id, name) =>
-    set((s) => ({ files: s.files.map((f) => f.id === id ? { ...f, name } : f) })),
+  updateFile: (id, content) => set((s) => ({ files: s.files.map((f) => f.id === id ? { ...f, content } : f) })),
+  updateFileContent: (id, content) => set((s) => ({ files: s.files.map((f) => f.id === id ? { ...f, content } : f) })),
+  renameFile: (id, name) => set((s) => ({ files: s.files.map((f) => f.id === id ? { ...f, name } : f) })),
   deleteFile: (id) => set((s) => ({ files: s.files.filter((f) => f.id !== id) })),
   setActiveFile: (id) => set({ activeFileId: id }),
   setFiles: (files) => set({ files }),
@@ -226,18 +196,15 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((s) => ({ liveCodeFiles: s.liveCodeFiles.includes(name) ? s.liveCodeFiles : [...s.liveCodeFiles, name] })),
   clearLiveCode: () => set({ liveCode: '', liveCodeFiles: [] }),
 
-  // Worklog
   worklog: [],
   addWorklogEntry: (entry) => {
     const id = crypto.randomUUID()
     set((s) => ({ worklog: [...s.worklog, { ...entry, id, timestamp: new Date() }] }))
     return id
   },
-  updateWorklogEntry: (id, patch) =>
-    set((s) => ({ worklog: s.worklog.map((e) => e.id === id ? { ...e, ...patch } : e) })),
+  updateWorklogEntry: (id, patch) => set((s) => ({ worklog: s.worklog.map((e) => e.id === id ? { ...e, ...patch } : e) })),
   clearWorklog: () => set({ worklog: [] }),
 
-  // WebContainer
   containerStatus: 'idle',
   previewUrl: null,
   terminalOutput: '',
