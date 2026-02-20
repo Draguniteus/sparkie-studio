@@ -2,20 +2,27 @@
 
 import { useCallback } from "react"
 import { useAppStore } from "@/store/appStore"
-import { File } from "lucide-react"
+import { File, Download } from "lucide-react"
 
 export function CodeEditor() {
-  const { files, activeFileId, updateFileContent } = useAppStore()
+  const { files, activeFileId, updateFileContent, setActiveFile } = useAppStore()
   const activeFile = files.find((f) => f.id === activeFileId)
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      if (activeFileId) {
-        updateFileContent(activeFileId, e.target.value)
-      }
+      if (activeFileId) updateFileContent(activeFileId, e.target.value)
     },
     [activeFileId, updateFileContent]
   )
+
+  const downloadFile = () => {
+    if (!activeFile?.content) return
+    const blob = new Blob([activeFile.content], { type: "text/plain" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url; a.download = activeFile.name; a.click()
+    URL.revokeObjectURL(url)
+  }
 
   if (!activeFile) {
     return (
@@ -28,32 +35,45 @@ export function CodeEditor() {
 
   return (
     <div className="h-full flex flex-col">
-      {/* File tab bar */}
+      {/* File tabs */}
       <div className="flex items-center h-8 border-b border-hive-border bg-hive-700 px-1 shrink-0">
-        <div className="flex items-center gap-1.5 px-3 py-1 bg-hive-600 rounded-t text-xs text-honey-500 border border-hive-border border-b-0">
-          <span>{activeFile.name}</span>
-        </div>
+        {files.filter(f => f.type === "file").map((f) => (
+          <button
+            key={f.id}
+            onClick={() => setActiveFile(f.id)}
+            className={`flex items-center gap-1.5 px-3 py-1 text-xs rounded-t transition-colors ${
+              f.id === activeFileId
+                ? "bg-hive-600 text-honey-500 border border-hive-border border-b-0"
+                : "text-text-muted hover:text-text-secondary"
+            }`}
+          >
+            {f.name}
+          </button>
+        ))}
+      </div>
+
+      {/* File header with download */}
+      <div className="flex items-center justify-between h-7 px-3 bg-hive-700/50 border-b border-hive-border shrink-0">
+        <span className="text-[11px] text-text-secondary">{activeFile.name}</span>
+        <button onClick={downloadFile} className="p-0.5 rounded hover:bg-hive-hover text-text-muted hover:text-text-secondary">
+          <Download size={12} />
+        </button>
       </div>
 
       {/* Editor area */}
       <div className="flex-1 relative overflow-hidden">
-        {/* Line numbers */}
         <div className="absolute left-0 top-0 bottom-0 w-10 bg-hive-700 border-r border-hive-border overflow-hidden select-none">
           <div className="pt-3 px-1">
-            {(activeFile.content || "").split("\n").map((_, i) => (
-              <div key={i} className="text-[11px] text-text-muted text-right pr-2 leading-[20px] font-mono">
-                {i + 1}
-              </div>
+            {(activeFile.content || "").split("\\n").map((_, i) => (
+              <div key={i} className="text-[11px] text-text-muted text-right pr-2 leading-[20px] font-mono">{i + 1}</div>
             ))}
           </div>
         </div>
-
-        {/* Code textarea */}
         <textarea
           value={activeFile.content || ""}
           onChange={handleChange}
           spellCheck={false}
-          className="w-full h-full bg-transparent text-[13px] text-text-primary font-mono leading-[20px] p-3 pl-12 resize-none focus:outline-none overflow-auto whitespace-pre tab-size-2"
+          className="w-full h-full bg-transparent text-[13px] text-text-primary font-mono leading-[20px] p-3 pl-12 resize-none focus:outline-none overflow-auto whitespace-pre"
           style={{ tabSize: 2 }}
         />
       </div>
@@ -61,7 +81,7 @@ export function CodeEditor() {
       {/* Status bar */}
       <div className="flex items-center justify-between h-6 px-3 bg-hive-700 border-t border-hive-border text-[10px] text-text-muted shrink-0">
         <span>{activeFile.language || "plaintext"}</span>
-        <span>{(activeFile.content || "").split("\n").length} lines</span>
+        <span>{(activeFile.content || "").split("\\n").length} lines</span>
       </div>
     </div>
   )

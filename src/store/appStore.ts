@@ -54,7 +54,7 @@ interface AppState {
   sidebarOpen: boolean
   ideOpen: boolean
   activeTab: 'chat' | 'images' | 'assets'
-  ideTab: 'process' | 'files' | 'preview'
+  ideTab: 'process' | 'files'
   chats: Chat[]
   currentChatId: string | null
   isStreaming: boolean
@@ -64,12 +64,12 @@ interface AppState {
   previewMode: boolean
   worklog: WorklogEntry[]
   isExecuting: boolean
-  previewUrl: string | null
 
   toggleSidebar: () => void
   toggleIDE: () => void
+  openIDE: () => void
   setActiveTab: (tab: 'chat' | 'images' | 'assets') => void
-  setIDETab: (tab: 'process' | 'files' | 'preview') => void
+  setIDETab: (tab: 'process' | 'files') => void
   createChat: () => string
   deleteChat: (id: string) => void
   setCurrentChat: (id: string) => void
@@ -88,8 +88,6 @@ interface AppState {
   updateWorklogEntry: (id: string, updates: Partial<WorklogEntry>) => void
   clearWorklog: () => void
   setExecuting: (executing: boolean) => void
-  setPreviewUrl: (url: string | null) => void
-  openIDE: () => void
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -106,7 +104,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   previewMode: false,
   worklog: [],
   isExecuting: false,
-  previewUrl: null,
 
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   toggleIDE: () => set((s) => ({ ideOpen: !s.ideOpen })),
@@ -117,12 +114,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   createChat: () => {
     const id = uuidv4()
     const chat: Chat = {
-      id,
-      title: 'New Chat',
-      messages: [],
-      model: get().selectedModel,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+      id, title: 'New Chat', messages: [], model: get().selectedModel,
+      createdAt: Date.now(), updatedAt: Date.now(),
     }
     set((s) => ({ chats: [chat, ...s.chats], currentChatId: id }))
     return id
@@ -196,9 +189,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   addWorklogEntry: (entry) => {
     const id = uuidv4()
-    set((s) => ({
-      worklog: [...s.worklog, { ...entry, id, timestamp: Date.now() }]
-    }))
+    set((s) => ({ worklog: [...s.worklog, { ...entry, id, timestamp: Date.now() }] }))
     return id
   },
 
@@ -208,5 +199,4 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   clearWorklog: () => set({ worklog: [] }),
   setExecuting: (executing) => set({ isExecuting: executing }),
-  setPreviewUrl: (url) => set({ previewUrl: url }),
 }))

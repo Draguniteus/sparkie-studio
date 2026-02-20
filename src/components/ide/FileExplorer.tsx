@@ -2,52 +2,26 @@
 
 import { useState } from "react"
 import { useAppStore, FileNode } from "@/store/appStore"
+import { getFileSize } from "@/lib/fileParser"
 import {
-  File, Folder, FolderOpen, Plus, Trash2, ChevronRight, ChevronDown,
+  File, Folder, FolderOpen, Plus, Trash2, Download, ChevronRight, ChevronDown,
   FileCode, FileText, FileImage, FileJson,
 } from "lucide-react"
 
 function getFileIcon(name: string) {
   const ext = name.split(".").pop()?.toLowerCase()
   switch (ext) {
-    case "ts":
-    case "tsx":
-    case "js":
-    case "jsx":
-      return <FileCode size={14} className="text-blue-400" />
-    case "json":
-      return <FileJson size={14} className="text-yellow-400" />
-    case "md":
-    case "txt":
-      return <FileText size={14} className="text-text-muted" />
-    case "png":
-    case "jpg":
-    case "svg":
-      return <FileImage size={14} className="text-green-400" />
-    case "css":
-    case "scss":
-      return <FileCode size={14} className="text-pink-400" />
-    case "html":
-      return <FileCode size={14} className="text-orange-400" />
-    default:
-      return <File size={14} className="text-text-muted" />
+    case "ts": case "tsx": case "js": case "jsx": return <FileCode size={14} className="text-blue-400" />
+    case "json": return <FileJson size={14} className="text-yellow-400" />
+    case "md": case "txt": return <FileText size={14} className="text-text-muted" />
+    case "png": case "jpg": case "svg": return <FileImage size={14} className="text-green-400" />
+    case "css": case "scss": return <FileCode size={14} className="text-pink-400" />
+    case "html": return <FileCode size={14} className="text-orange-400" />
+    default: return <File size={14} className="text-text-muted" />
   }
 }
 
-function getLanguage(name: string): string {
-  const ext = name.split(".").pop()?.toLowerCase()
-  const map: Record<string, string> = {
-    ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript",
-    json: "json", md: "markdown", css: "css", scss: "scss",
-    html: "html", py: "python", txt: "plaintext",
-  }
-  return map[ext || ""] || "plaintext"
-}
-
-interface FileItemProps {
-  file: FileNode
-  depth: number
-}
+interface FileItemProps { file: FileNode; depth: number }
 
 function FileItem({ file, depth }: FileItemProps) {
   const [expanded, setExpanded] = useState(true)
@@ -55,46 +29,51 @@ function FileItem({ file, depth }: FileItemProps) {
   const isActive = activeFileId === file.id
   const isFolder = file.type === "folder"
 
+  const downloadFile = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (file.content) {
+      const blob = new Blob([file.content], { type: "text/plain" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url; a.download = file.name; a.click()
+      URL.revokeObjectURL(url)
+    }
+  }
+
   return (
     <div>
       <div
-        className={`flex items-center gap-1.5 px-2 py-1 rounded-md cursor-pointer group text-xs transition-colors ${
-          isActive ? "bg-honey-500/15 text-honey-500" : "text-text-secondary hover:bg-hive-hover"
+        className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer group text-xs transition-colors ${
+          isActive ? "bg-honey-500/10 text-text-primary" : "text-text-secondary hover:bg-hive-hover"
         }`}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
-        onClick={() => {
-          if (isFolder) {
-            setExpanded(!expanded)
-          } else {
-            setActiveFile(file.id)
-          }
-        }}
+        onClick={() => isFolder ? setExpanded(!expanded) : setActiveFile(file.id)}
       >
         {isFolder ? (
           <>
             {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-            {expanded ? (
-              <FolderOpen size={14} className="text-honey-500/70" />
-            ) : (
-              <Folder size={14} className="text-honey-500/70" />
-            )}
+            {expanded ? <FolderOpen size={14} className="text-honey-500/70" /> : <Folder size={14} className="text-honey-500/70" />}
           </>
         ) : (
-          <>
-            <span className="w-3" />
-            {getFileIcon(file.name)}
-          </>
+          <>{getFileIcon(file.name)}</>
         )}
         <span className="truncate flex-1">{file.name}</span>
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            deleteFile(file.id)
-          }}
-          className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-500/20 text-text-muted hover:text-red-400 transition-all"
-        >
-          <Trash2 size={11} />
-        </button>
+        {!isFolder && file.content && (
+          <span className="text-[10px] text-text-muted shrink-0">{getFileSize(file.content)}</span>
+        )}
+        <div className="opacity-0 group-hover:opacity-100 flex gap-0.5 shrink-0">
+          {!isFolder && (
+            <button onClick={downloadFile} className="p-0.5 rounded hover:bg-hive-hover text-text-muted hover:text-text-secondary">
+              <Download size={11} />
+            </button>
+          )}
+          <button
+            onClick={(e) => { e.stopPropagation(); deleteFile(file.id) }}
+            className="p-0.5 rounded hover:bg-red-500/20 text-text-muted hover:text-red-400"
+          >
+            <Trash2 size={11} />
+          </button>
+        </div>
       </div>
       {isFolder && expanded && file.children?.map((child) => (
         <FileItem key={child.id} file={child} depth={depth + 1} />
@@ -105,45 +84,44 @@ function FileItem({ file, depth }: FileItemProps) {
 
 export function FileExplorer() {
   const { files, addFile } = useAppStore()
-  const [showNewFile, setShowNewFile] = useState(false)
-  const [newFileName, setNewFileName] = useState("")
+  const [showNew, setShowNew] = useState(false)
+  const [newName, setNewName] = useState("")
 
-  const handleCreateFile = () => {
-    if (!newFileName.trim()) return
-    addFile({
-      name: newFileName.trim(),
-      type: newFileName.includes(".") ? "file" : "folder",
-      content: "",
-      language: getLanguage(newFileName.trim()),
+  const handleCreate = () => {
+    if (!newName.trim()) return
+    addFile({ name: newName.trim(), type: newName.includes(".") ? "file" : "folder", content: "" })
+    setNewName(""); setShowNew(false)
+  }
+
+  const downloadAll = () => {
+    files.filter(f => f.type === "file" && f.content).forEach(f => {
+      const blob = new Blob([f.content || ""], { type: "text/plain" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a"); a.href = url; a.download = f.name; a.click()
+      URL.revokeObjectURL(url)
     })
-    setNewFileName("")
-    setShowNewFile(false)
   }
 
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between p-2 border-b border-hive-border">
-        <span className="text-[10px] font-medium text-text-muted uppercase tracking-wider">Explorer</span>
-        <button
-          onClick={() => setShowNewFile(!showNewFile)}
-          className="p-1 rounded hover:bg-hive-hover text-text-muted hover:text-honey-500 transition-colors"
-          title="New file"
-        >
-          <Plus size={14} />
-        </button>
+        <span className="text-[10px] font-medium text-text-muted uppercase tracking-wider">Files</span>
+        <div className="flex gap-0.5">
+          <button onClick={downloadAll} className="p-1 rounded hover:bg-hive-hover text-text-muted hover:text-text-secondary" title="Download all">
+            <Download size={12} />
+          </button>
+          <button onClick={() => setShowNew(!showNew)} className="p-1 rounded hover:bg-hive-hover text-text-muted hover:text-honey-500" title="New file">
+            <Plus size={14} />
+          </button>
+        </div>
       </div>
 
-      {showNewFile && (
+      {showNew && (
         <div className="p-2 border-b border-hive-border">
           <input
-            autoFocus
-            value={newFileName}
-            onChange={(e) => setNewFileName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") handleCreateFile()
-              if (e.key === "Escape") { setShowNewFile(false); setNewFileName("") }
-            }}
-            placeholder="filename.ts"
+            autoFocus value={newName} onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") handleCreate(); if (e.key === "Escape") { setShowNew(false); setNewName("") } }}
+            placeholder="filename.ext"
             className="w-full px-2 py-1 rounded bg-hive-elevated border border-hive-border text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-honey-500/50"
           />
         </div>
@@ -155,9 +133,7 @@ export function FileExplorer() {
             <Folder size={20} className="mb-2 text-honey-500/40" />
             <p className="text-[11px] text-center">No files yet</p>
           </div>
-        ) : (
-          files.map((file) => <FileItem key={file.id} file={file} depth={0} />)
-        )}
+        ) : files.map((file) => <FileItem key={file.id} file={file} depth={0} />)}
       </div>
     </div>
   )
