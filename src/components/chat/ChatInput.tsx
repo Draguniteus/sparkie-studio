@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback } from "react"
 import { useAppStore } from "@/store/appStore"
 import { parseAIResponse, getLanguageFromFilename } from "@/lib/fileParser"
-import { Paperclip, ArrowUp, Sparkles, ChevronDown, Image as ImageIcon, Video, Code } from "lucide-react"
+import { Paperclip, ArrowUp, Sparkles, ChevronDown, Image as ImageIcon, Video } from "lucide-react"
 
 const MODELS = [
   { id: "minimax-m2.5-free", name: "MiniMax M2.5", tag: "Free", type: "chat" },
@@ -37,7 +37,6 @@ export function ChatInput() {
     updateMessage, currentChatId, isStreaming, setStreaming,
     openIDE, addWorklogEntry, updateWorklogEntry, clearWorklog,
     setExecuting, addFile, setActiveFile, setIDETab, ideOpen,
-    files: storeFiles,
   } = useAppStore()
 
   const streamChat = useCallback(async (chatId: string, userContent: string) => {
@@ -48,18 +47,23 @@ export function ChatInput() {
       .filter((m) => m.type !== "image" && m.type !== "video")
       .map((m) => ({ role: m.role, content: m.content }))
 
+    // Show a brief "working" message in chat — NOT the code
     const assistantMsgId = addMessage(chatId, {
-      role: "assistant", content: "", model: selectedModel, isStreaming: true,
+      role: "assistant", content: "⚡ Working on it...", model: selectedModel, isStreaming: true,
     })
 
     setStreaming(true)
     setExecuting(true)
 
-    // Open IDE to Current Process (live preview)
+    // Open IDE to Current Process
     if (!ideOpen) openIDE()
     setIDETab("process")
 
-    const thinkId = addWorklogEntry({ type: "thinking", content: `Analyzing: "${userContent.slice(0, 80)}${userContent.length > 80 ? "..." : ""}"`, status: "running" })
+    const thinkId = addWorklogEntry({
+      type: "thinking",
+      content: `Analyzing: "${userContent.slice(0, 100)}${userContent.length > 100 ? "..." : ""}"`,
+      status: "running",
+    })
 
     try {
       const response = await fetch("/api/chat", {
@@ -68,7 +72,6 @@ export function ChatInput() {
         body: JSON.stringify({ messages: apiMessages, model: selectedModel }),
       })
 
-      const thinkDone = Date.now()
       updateWorklogEntry(thinkId, { status: "done", duration: 500 })
 
       if (!response.ok) {
@@ -79,7 +82,8 @@ export function ChatInput() {
         return
       }
 
-      const streamId = addWorklogEntry({ type: "action", content: "Generating response...", status: "running" })
+      // Start streaming — code goes to worklog, NOT chat
+      const codeLogId = addWorklogEntry({ type: "code", content: "", status: "running" })
       const reader = response.body?.getReader()
       const decoder = new TextDecoder()
 
@@ -92,6 +96,11 @@ export function ChatInput() {
       let buffer = ""
       let fullContent = ""
       const startTime = Date.now()
+      let lastLogUpdate = 0
+      let filesCreated = 0
+
+      // Track which files we've already created during streaming
+      const createdFileNames = new Set<string>()
 
       while (true) {
         const { done, value } = await reader.read()
@@ -111,57 +120,103 @@ export function ChatInput() {
             const delta = parsed.choices?.[0]?.delta
             if (delta?.content) {
               fullContent += delta.content
-              appendToMessage(chatId, assistantMsgId, delta.content)
             }
           } catch { /* skip */ }
         }
+
+        // Update worklog with live code content (throttled to every 200ms)
+        const now = Date.now()
+        if (now - lastLogUpdate > 200) {
+          // Show last 500 chars of code being written
+          const displayContent = fullContent.length > 500
+            ? "..." + fullContent.slice(-500)
+            : fullContent
+          updateWorklogEntry(codeLogId, { content: displayContent })
+          lastLogUpdate = now
+        }
+
+        // Incrementally detect completed file blocks and create files
+        const partialParse = parseAIResponse(fullContent)
+        for (const file of partialParse.files) {
+          if (!createdFileNames.has(file.name)) {
+            createdFileNames.add(file.name)
+
+            // Clear old files on first file creation
+            if (filesCreated === 0) {
+              const oldFiles = useAppStore.getState().files
+              oldFiles.forEach(f => useAppStore.getState().deleteFile(f.id))
+            }
+
+            const fileId = addFile({
+              name: file.name,
+              type: "file",
+              content: file.content,
+              language: getLanguageFromFilename(file.name),
+            })
+
+            if (filesCreated === 0) setActiveFile(fileId)
+            filesCreated++
+
+            addWorklogEntry({
+              type: "result",
+              content: `📄 Created ${file.name}`,
+              status: "done",
+            })
+          } else {
+            // File exists but content may have grown — update it
+            const existing = useAppStore.getState().files.find(f => f.name === file.name)
+            if (existing && existing.content !== file.content) {
+              useAppStore.getState().updateFileContent(existing.id, file.content)
+            }
+          }
+        }
       }
 
-      updateWorklogEntry(streamId, { status: "done", duration: Date.now() - startTime })
+      const elapsed = Date.now() - startTime
+      updateWorklogEntry(codeLogId, { status: "done", duration: elapsed, content: `Completed in ${(elapsed / 1000).toFixed(1)}s` })
 
-      // *** KEY LOGIC: Parse response for file blocks ***
-      const parsed = parseAIResponse(fullContent)
-
-      if (parsed.files.length > 0) {
-        const codeId = addWorklogEntry({ type: "code", content: `Creating ${parsed.files.length} file(s): ${parsed.files.map(f => f.name).join(", ")}`, status: "running" })
-
-        // Clear old files from previous generation
-        const currentFiles = useAppStore.getState().files
-        currentFiles.forEach(f => useAppStore.getState().deleteFile(f.id))
-
-        // Create files in the store
-        let firstFileId: string | null = null
-        for (const file of parsed.files) {
+      // Final parse to catch any remaining files
+      const finalParse = parseAIResponse(fullContent)
+      for (const file of finalParse.files) {
+        if (!createdFileNames.has(file.name)) {
+          createdFileNames.add(file.name)
+          if (filesCreated === 0) {
+            const oldFiles = useAppStore.getState().files
+            oldFiles.forEach(f => useAppStore.getState().deleteFile(f.id))
+          }
           const fileId = addFile({
             name: file.name,
             type: "file",
             content: file.content,
             language: getLanguageFromFilename(file.name),
           })
-          if (!firstFileId) firstFileId = fileId
-        }
-
-        // Set first file as active
-        if (firstFileId) setActiveFile(firstFileId)
-
-        updateWorklogEntry(codeId, { status: "done", duration: 100 })
-
-        // Update chat message to show just the description (not the code)
-        const displayText = parsed.text || `Created ${parsed.files.length} file(s). Check the preview panel.`
-        updateMessage(chatId, assistantMsgId, { content: displayText, isStreaming: false })
-
-        addWorklogEntry({ type: "result", content: `Project ready! ${parsed.files.length} file(s) created. Preview is live.`, status: "done" })
-      } else {
-        // No files detected — show full response in chat as before
-        if (!fullContent.trim()) {
-          updateMessage(chatId, assistantMsgId, {
-            content: "The model used all tokens for reasoning. Try a simpler prompt or switch models.",
-            isStreaming: false,
-          })
+          if (filesCreated === 0) setActiveFile(fileId)
+          filesCreated++
         } else {
-          updateMessage(chatId, assistantMsgId, { isStreaming: false })
-          addWorklogEntry({ type: "result", content: `Response complete (${fullContent.length} chars)`, status: "done" })
+          // Final content update
+          const existing = useAppStore.getState().files.find(f => f.name === file.name)
+          if (existing && existing.content !== file.content) {
+            useAppStore.getState().updateFileContent(existing.id, file.content)
+          }
         }
+      }
+
+      // Update chat with just the description — never code
+      if (filesCreated > 0) {
+        const description = finalParse.text || `✨ Created ${filesCreated} file(s). Check the preview →`
+        updateMessage(chatId, assistantMsgId, { content: description, isStreaming: false })
+        addWorklogEntry({
+          type: "result",
+          content: `✅ Project ready — ${filesCreated} file(s) created. Preview is live.`,
+          status: "done",
+        })
+      } else {
+        // No files — regular text response, show in chat
+        updateMessage(chatId, assistantMsgId, {
+          content: fullContent || "The model used all tokens for reasoning. Try a simpler prompt.",
+          isStreaming: false,
+        })
+        addWorklogEntry({ type: "result", content: `Response complete (${fullContent.length} chars)`, status: "done" })
       }
     } catch (error) {
       console.error("Stream error:", error)
@@ -182,6 +237,9 @@ export function ChatInput() {
     })
 
     setStreaming(true)
+    if (!ideOpen) openIDE()
+    setIDETab("process")
+
     const logId = addWorklogEntry({ type: "action", content: `Generating ${mediaType} with ${model}: "${prompt.slice(0, 60)}..."`, status: "running" })
     const startTime = Date.now()
 
@@ -198,7 +256,7 @@ export function ChatInput() {
       if (!response.ok) {
         const err = await response.json().catch(() => ({ error: "Unknown" }))
         updateMessage(chatId, assistantMsgId, {
-          content: `${mediaType === "video" ? "Video" : "Image"} generation failed: ${err.error || response.status}`,
+          content: `${mediaType} generation failed: ${err.error || response.status}`,
           isStreaming: false, type: "text",
         })
         updateWorklogEntry(logId, { status: "error", duration: Date.now() - startTime })
@@ -210,7 +268,7 @@ export function ChatInput() {
       updateMessage(chatId, assistantMsgId, {
         content: prompt, imageUrl: data.url, imagePrompt: prompt, isStreaming: false, type: mediaType, model: model,
       })
-      updateWorklogEntry(logId, { status: "done", duration: Date.now() - startTime, content: `${mediaType} generated with ${model}` })
+      updateWorklogEntry(logId, { status: "done", duration: Date.now() - startTime, content: `${mediaType} generated` })
     } catch (error) {
       console.error(`${mediaType} gen error:`, error)
       updateMessage(chatId, assistantMsgId, { content: `${mediaType} generation failed`, isStreaming: false, type: "text" })
@@ -218,7 +276,7 @@ export function ChatInput() {
     } finally {
       setStreaming(false)
     }
-  }, [selectedImageModel, selectedVideoModel, addMessage, updateMessage, setStreaming, addWorklogEntry, updateWorklogEntry])
+  }, [selectedImageModel, selectedVideoModel, addMessage, updateMessage, setStreaming, addWorklogEntry, updateWorklogEntry, openIDE, setIDETab, ideOpen])
 
   const handleSubmit = useCallback(() => {
     if (!input.trim() || isStreaming) return

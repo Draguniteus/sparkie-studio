@@ -29,7 +29,7 @@ export function Worklog({ compact = false }: WorklogProps) {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [worklog.length])
+  }, [worklog, worklog.length])
 
   if (worklog.length === 0 && !isExecuting) {
     if (compact) return null
@@ -66,20 +66,20 @@ export function Worklog({ compact = false }: WorklogProps) {
               <div className="flex items-center gap-2">
                 <span className={`text-[10px] font-medium uppercase tracking-wider ${color}`}>{label}</span>
                 <span className="text-[10px] text-text-muted">{formatTime(entry.timestamp)}</span>
-                {entry.duration && (
+                {entry.duration != null && entry.status === "done" && (
                   <span className="text-[10px] text-text-muted">
                     {entry.duration < 1000 ? `${entry.duration}ms` : `${(entry.duration / 1000).toFixed(1)}s`}
                   </span>
                 )}
               </div>
-              {!compact && (
-                entry.type === "code" ? (
-                  <pre className="text-xs text-text-secondary font-mono bg-hive-elevated rounded p-2 overflow-x-auto whitespace-pre-wrap break-all mt-0.5">
+              {entry.content && (
+                entry.type === "code" && !compact ? (
+                  <pre className="text-[11px] text-text-secondary font-mono bg-hive-elevated rounded p-2 overflow-x-auto whitespace-pre-wrap break-all mt-1 max-h-[300px] overflow-y-auto leading-relaxed">
                     {entry.content}
                   </pre>
                 ) : (
-                  <p className="text-xs text-text-secondary leading-relaxed whitespace-pre-wrap mt-0.5">
-                    {entry.content}
+                  <p className={`text-xs text-text-secondary leading-relaxed whitespace-pre-wrap ${compact ? "" : "mt-0.5"}`}>
+                    {compact && entry.content.length > 80 ? entry.content.slice(0, 80) + "..." : entry.content}
                   </p>
                 )
               )}
