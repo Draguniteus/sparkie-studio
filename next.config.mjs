@@ -1,8 +1,3 @@
-import { fileURLToPath } from 'url'
-import { dirname, resolve } from 'path'
-
-const __dirname = dirname(fileURLToPath(import.meta.url))
-
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   async headers() {
@@ -15,16 +10,6 @@ const nextConfig = {
         ],
       },
     ]
-  },
-  webpack(config, { isServer }) {
-    if (isServer) {
-      config.resolve = config.resolve || {}
-      config.resolve.alias = {
-        ...config.resolve.alias,
-        '@webcontainer/api': resolve(__dirname, 'src/lib/webcontainer-stub.ts'),
-      }
-    }
-    return config
   },
 }
 

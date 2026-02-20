@@ -1,3 +1,11 @@
+/**
+ * WebContainer utilities — NEVER imported statically.
+ * Always loaded via: const { getWebContainer } = await import('@/lib/webcontainer')
+ *
+ * This file DOES import @webcontainer/api, but because it's only ever
+ * reached via dynamic import() calls inside browser event handlers / useEffect,
+ * webpack never statically traces into it during next build.
+ */
 import { WebContainer } from '@webcontainer/api'
 
 let _wc: WebContainer | null = null
@@ -27,10 +35,10 @@ export async function mountFiles(
 export function getDevCommand(pkgJson: string): { cmd: string; args: string[] } {
   try {
     const pkg = JSON.parse(pkgJson)
-    const scripts = pkg.scripts || {}
-    if (scripts.dev)   return { cmd: 'npm', args: ['run', 'dev'] }
-    if (scripts.start) return { cmd: 'npm', args: ['start'] }
-    if (scripts.serve) return { cmd: 'npm', args: ['run', 'serve'] }
+    const s = pkg.scripts || {}
+    if (s.dev)   return { cmd: 'npm', args: ['run', 'dev'] }
+    if (s.start) return { cmd: 'npm', args: ['start'] }
+    if (s.serve) return { cmd: 'npm', args: ['run', 'serve'] }
   } catch {}
   return { cmd: 'node', args: ['index.js'] }
 }
