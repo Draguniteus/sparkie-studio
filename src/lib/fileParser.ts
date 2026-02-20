@@ -1,6 +1,7 @@
 /**
  * Parse AI response to extract file blocks.
  * Format: ---FILE: filename.ext---\n(content)\n---END FILE---
+ * Fallback: ```lang\n(content)\n```
  */
 
 export interface ParsedFile {
@@ -9,76 +10,113 @@ export interface ParsedFile {
 }
 
 export interface ParseResult {
-  text: string          // non-file text (brief description)
-  files: ParsedFile[]   // extracted file blocks
+  text: string
+  files: ParsedFile[]
 }
 
 export function parseAIResponse(raw: string): ParseResult {
   const files: ParsedFile[] = []
   let text = raw
 
-  // Match ---FILE: name--- ... ---END FILE---
+  // Primary: ---FILE: name--- ... ---END FILE---
   const fileRegex = /---FILE:\s*(.+?)\s*---\n([\s\S]*?)---END FILE---/g
   let match: RegExpExecArray | null
-
   while ((match = fileRegex.exec(raw)) !== null) {
-    files.push({
-      name: match[1].trim(),
-      content: match[2].trimEnd(),
-    })
+    files.push({ name: match[1].trim(), content: match[2].trimEnd() })
   }
 
-  // Remove file blocks from text to get just the description
-  text = raw.replace(/---FILE:\s*.+?\s*---\n[\s\S]*?---END FILE---/g, '').trim()
+  if (files.length > 0) {
+    text = raw.replace(/---FILE:\s*.+?\s*---\n[\s\S]*?---END FILE---/g, '').trim()
+    return { text, files }
+  }
 
-  // Also try to catch ```filename.ext blocks as fallback
-  if (files.length === 0) {
-    const codeBlockRegex = /```(\w+)?\s*\n([\s\S]*?)```/g
-    let cbMatch: RegExpExecArray | null
-    let fileIndex = 0
+  // Fallback: fenced code blocks — try to extract filename from comment or language
+  const codeBlockRegex = /```([^\n]*)\n([\s\S]*?)```/g
+  let cbMatch: RegExpExecArray | null
+  let fileIndex = 0
 
-    while ((cbMatch = codeBlockRegex.exec(raw)) !== null) {
-      const lang = cbMatch[1] || 'txt'
-      const content = cbMatch[2].trimEnd()
+  while ((cbMatch = codeBlockRegex.exec(raw)) !== null) {
+    const langStr = cbMatch[1].trim()
+    const content = cbMatch[2].trimEnd()
+    if (!content) continue
 
-      // Try to detect filename from content or use generic
-      let name = `file${fileIndex > 0 ? fileIndex : ''}`
-      if (lang === 'html' || content.includes('<!DOCTYPE') || content.includes('<html')) {
-        name = 'index.html'
-      } else if (lang === 'css') {
-        name = 'styles.css'
-      } else if (lang === 'javascript' || lang === 'js') {
-        name = 'script.js'
-      } else if (lang === 'typescript' || lang === 'ts') {
-        name = 'script.ts'
-      } else if (lang === 'svg' || content.includes('<svg')) {
-        name = `image${fileIndex > 0 ? fileIndex : ''}.svg`
-      } else if (lang === 'python' || lang === 'py') {
-        name = 'main.py'
-      } else if (lang === 'json') {
-        name = 'data.json'
-      } else {
-        name = `file${fileIndex > 0 ? fileIndex : ''}.${lang}`
-      }
-
-      files.push({ name, content })
-      fileIndex++
+    // Check if langStr is actually a filename (contains a dot)
+    let name: string
+    if (langStr.includes('.')) {
+      name = langStr
+    } else {
+      name = inferFilename(langStr, content, fileIndex)
     }
 
-    if (files.length > 0) {
-      text = raw.replace(/```\w*\s*\n[\s\S]*?```/g, '').trim()
-    }
+    files.push({ name, content })
+    fileIndex++
+  }
+
+  if (files.length > 0) {
+    text = raw.replace(/```[^\n]*\n[\s\S]*?```/g, '').trim()
   }
 
   return { text, files }
+}
+
+function inferFilename(lang: string, content: string, index: number): string {
+  const suffix = index > 0 ? `${index}` : ''
+  const l = lang.toLowerCase()
+
+  // Web
+  if (l === 'html' || content.includes('<!DOCTYPE') || content.includes('<html')) return `index${suffix}.html`
+  if (l === 'css' || l === 'scss' || l === 'sass') return `styles${suffix}.${l}`
+  if (l === 'javascript' || l === 'js') return `script${suffix}.js`
+  if (l === 'typescript' || l === 'ts') return `script${suffix}.ts`
+  if (l === 'jsx') return `app${suffix}.jsx`
+  if (l === 'tsx') return `app${suffix}.tsx`
+  if (l === 'svg' || content.includes('<svg')) return `image${suffix}.svg`
+
+  // Systems
+  if (l === 'python' || l === 'py') return `main${suffix}.py`
+  if (l === 'rust' || l === 'rs') return `main${suffix}.rs`
+  if (l === 'go' || l === 'golang') return `main${suffix}.go`
+  if (l === 'c') return `main${suffix}.c`
+  if (l === 'cpp' || l === 'c++' || l === 'cxx') return `main${suffix}.cpp`
+  if (l === 'java') return `Main${suffix}.java`
+  if (l === 'kotlin' || l === 'kt') return `Main${suffix}.kt`
+  if (l === 'swift') return `main${suffix}.swift`
+  if (l === 'ruby' || l === 'rb') return `main${suffix}.rb`
+  if (l === 'php') return `index${suffix}.php`
+  if (l === 'csharp' || l === 'cs' || l === 'c#') return `Program${suffix}.cs`
+
+  // Data / Config
+  if (l === 'json') return `data${suffix}.json`
+  if (l === 'yaml' || l === 'yml') return `config${suffix}.yaml`
+  if (l === 'toml') return `config${suffix}.toml`
+  if (l === 'xml') return `data${suffix}.xml`
+  if (l === 'csv') return `data${suffix}.csv`
+  if (l === 'sql') return `query${suffix}.sql`
+  if (l === 'graphql' || l === 'gql') return `schema${suffix}.graphql`
+
+  // Markup / Docs
+  if (l === 'markdown' || l === 'md') return `readme${suffix}.md`
+  if (l === 'mdx') return `page${suffix}.mdx`
+
+  // Shell
+  if (l === 'bash' || l === 'sh' || l === 'shell' || l === 'zsh') return `script${suffix}.sh`
+  if (l === 'powershell' || l === 'ps1') return `script${suffix}.ps1`
+
+  // Default
+  const ext = l || 'txt'
+  return `file${suffix}.${ext}`
 }
 
 export function getLanguageFromFilename(name: string): string {
   const ext = name.split('.').pop()?.toLowerCase() || ''
   const map: Record<string, string> = {
     ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
-    json: 'json', md: 'markdown', css: 'css', scss: 'scss',
+    json: 'json', md: 'markdown', mdx: 'markdown', css: 'css', scss: 'scss', sass: 'scss',
     html: 'html', py: 'python', txt: 'plaintext', svg: 'xml',
+    rs: 'rust', go: 'go', c: 'c', cpp: 'cpp', cs: 'csharp',
+    java: 'java', kt: 'kotlin', swift: 'swift', rb: 'ruby', php: 'php',
+    yaml: 'yaml', yml: 'yaml', toml: 'toml', xml: 'xml', csv: 'plaintext',
+    sql: 'sql', graphql: 'graphql', sh: 'shell', bash: 'shell', ps1: 'powershell',
   }
   return map[ext] || 'plaintext'
 }
