@@ -21,13 +21,14 @@ export async function POST(req: NextRequest) {
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
+        'User-Agent': 'SparkieStudio/2.0',
       },
       body: JSON.stringify({
         model,
         messages,
         stream: true,
         temperature: 0.7,
-        max_tokens: 4096,
+        max_tokens: 16384,
       }),
     })
 
@@ -40,7 +41,6 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    // Stream the SSE response through
     return new Response(response.body, {
       headers: {
         'Content-Type': 'text/event-stream',

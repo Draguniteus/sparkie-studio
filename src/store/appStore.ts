@@ -94,7 +94,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   chats: [],
   currentChatId: null,
   isStreaming: false,
-  selectedModel: 'opencode/minimax-m2.5-free',
+  selectedModel: 'minimax-m2.5-free',
 
   // Initial IDE State
   files: [],

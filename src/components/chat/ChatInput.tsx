@@ -5,9 +5,9 @@ import { useAppStore } from "@/store/appStore"
 import { Paperclip, ArrowUp, Sparkles, ChevronDown, Image as ImageIcon } from "lucide-react"
 
 const MODELS = [
-  { id: "opencode/minimax-m2.5-free", name: "MiniMax M2.5", tag: "Free", type: "chat" },
-  { id: "opencode/glm-5-free", name: "GLM 5", tag: "Free", type: "chat" },
-  { id: "opencode/big-pickle", name: "Big Pickle", tag: "Free", type: "chat" },
+  { id: "minimax-m2.5-free", name: "MiniMax M2.5", tag: "Free", type: "chat" },
+  { id: "glm-5-free", name: "GLM 5", tag: "Free", type: "chat" },
+  { id: "big-pickle", name: "Big Pickle", tag: "Free", type: "chat" },
 ]
 
 const IMAGE_MODELS = [
@@ -29,12 +29,10 @@ export function ChatInput() {
     const chat = useAppStore.getState().chats.find((c) => c.id === chatId)
     if (!chat) return
 
-    // Build messages array for API
     const apiMessages = chat.messages
       .filter((m) => m.type !== "image")
       .map((m) => ({ role: m.role, content: m.content }))
 
-    // Create placeholder assistant message
     const assistantMsgId = addMessage(chatId, {
       role: "assistant",
       content: "",
@@ -94,9 +92,13 @@ export function ChatInput() {
 
           try {
             const parsed = JSON.parse(data)
-            const delta = parsed.choices?.[0]?.delta?.content
+            const delta = parsed.choices?.[0]?.delta
             if (delta) {
-              appendToMessage(chatId, assistantMsgId, delta)
+              // Handle both regular content and reasoning content
+              const text = delta.content || ""
+              if (text) {
+                appendToMessage(chatId, assistantMsgId, text)
+              }
             }
           } catch {
             // Skip malformed JSON chunks
@@ -104,11 +106,21 @@ export function ChatInput() {
         }
       }
 
-      updateMessage(chatId, assistantMsgId, { isStreaming: false })
+      // If content is still empty after stream, check if model only produced reasoning
+      const finalChat = useAppStore.getState().chats.find((c) => c.id === chatId)
+      const finalMsg = finalChat?.messages.find((m) => m.id === assistantMsgId)
+      if (finalMsg && !finalMsg.content.trim()) {
+        updateMessage(chatId, assistantMsgId, {
+          content: "🤔 The model used all tokens for reasoning. Try a simpler prompt or switch models.",
+          isStreaming: false,
+        })
+      } else {
+        updateMessage(chatId, assistantMsgId, { isStreaming: false })
+      }
     } catch (error) {
       console.error("Stream error:", error)
       updateMessage(chatId, assistantMsgId, {
-        content: `⚠️ Connection error. Please try again.`,
+        content: "⚠️ Connection error. Please try again.",
         isStreaming: false,
       })
     } finally {
@@ -203,7 +215,6 @@ export function ChatInput() {
   return (
     <div className="relative">
       <div className="rounded-2xl bg-hive-surface border border-hive-border focus-within:border-honey-500/40 transition-colors">
-        {/* Textarea */}
         <textarea
           ref={textareaRef}
           value={input}
@@ -214,15 +225,12 @@ export function ChatInput() {
           className="w-full px-4 pt-3 pb-2 bg-transparent text-sm text-text-primary placeholder:text-text-muted resize-none focus:outline-none min-h-[44px] max-h-[200px]"
         />
 
-        {/* Bottom Bar */}
         <div className="flex items-center justify-between px-3 pb-2">
           <div className="flex items-center gap-1">
-            {/* Attach */}
             <button className="p-1.5 rounded-md hover:bg-hive-hover text-text-muted hover:text-text-secondary transition-colors" title="Attach file">
               <Paperclip size={15} />
             </button>
 
-            {/* Image Mode Toggle */}
             <button
               onClick={() => setIsImageMode(!isImageMode)}
               className={`p-1.5 rounded-md transition-colors ${
@@ -235,7 +243,6 @@ export function ChatInput() {
               <ImageIcon size={15} />
             </button>
 
-            {/* Model Selector */}
             <div className="relative">
               <button
                 onClick={() => setShowModels(!showModels)}
@@ -283,7 +290,6 @@ export function ChatInput() {
             </div>
           </div>
 
-          {/* Send */}
           <button
             onClick={handleSubmit}
             disabled={!input.trim() || isStreaming}
