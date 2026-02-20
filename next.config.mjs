@@ -13,14 +13,12 @@ const nextConfig = {
   },
   webpack(config, { isServer }) {
     if (isServer) {
-      // Don't bundle WC + xterm on server — browser-only packages
-      config.externals = [
-        ...(Array.isArray(config.externals) ? config.externals : [config.externals].filter(Boolean)),
-        '@webcontainer/api',
-        '@xterm/xterm',
-        '@xterm/addon-fit',
-        '@xterm/addon-web-links',
-      ]
+      // On the server build, replace browser-only packages with stubs
+      config.resolve = config.resolve || {}
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        '@webcontainer/api': require('path').resolve('./src/lib/webcontainer-stub.ts'),
+      }
     }
     return config
   },

@@ -1,36 +1,17 @@
-/**
- * WebContainer singleton — browser only, loaded dynamically.
- * Never import this at module level in a server-rendered component.
- * Always use: const { getWebContainer } = await import('@/lib/webcontainer')
- */
+import { WebContainer } from '@webcontainer/api'
 
-// Lazy-loaded WC instance
-let _wc: unknown | null = null
-let _bootPromise: Promise<unknown> | null = null
+let _wc: WebContainer | null = null
+let _bootPromise: Promise<WebContainer> | null = null
 
-export async function getWebContainer() {
-  if (_wc) return _wc as import('@webcontainer/api').WebContainer
-  if (_bootPromise) return _bootPromise as Promise<import('@webcontainer/api').WebContainer>
-
-  const { WebContainer } = await import('@webcontainer/api')
-  _bootPromise = WebContainer.boot().then((wc) => {
-    _wc = wc
-    return wc
-  })
-  return _bootPromise as Promise<import('@webcontainer/api').WebContainer>
-}
-
-export function isWebContainerSupported(): boolean {
-  if (typeof window === 'undefined') return false
-  return (
-    typeof SharedArrayBuffer !== 'undefined' &&
-    typeof crossOriginIsolated !== 'undefined' &&
-    (crossOriginIsolated as boolean)
-  )
+export async function getWebContainer(): Promise<WebContainer> {
+  if (_wc) return _wc
+  if (_bootPromise) return _bootPromise
+  _bootPromise = WebContainer.boot().then((wc) => { _wc = wc; return wc })
+  return _bootPromise
 }
 
 export async function mountFiles(
-  wc: import('@webcontainer/api').WebContainer,
+  wc: WebContainer,
   files: Array<{ name: string; content: string }>
 ): Promise<void> {
   for (const file of files) {
@@ -41,10 +22,6 @@ export async function mountFiles(
     }
     await wc.fs.writeFile(file.name, file.content)
   }
-}
-
-export function needsNpm(files: Array<{ name: string }>): boolean {
-  return files.some((f) => f.name === 'package.json' || f.name.endsWith('/package.json'))
 }
 
 export function getDevCommand(pkgJson: string): { cmd: string; args: string[] } {
