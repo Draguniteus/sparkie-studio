@@ -9,6 +9,9 @@ export interface Message {
   model?: string
   attachments?: Attachment[]
   isStreaming?: boolean
+  type?: 'text' | 'image'
+  imageUrl?: string
+  imagePrompt?: string
 }
 
 export interface Attachment {
@@ -66,8 +69,9 @@ interface AppState {
   createChat: () => string
   deleteChat: (id: string) => void
   setCurrentChat: (id: string) => void
-  addMessage: (chatId: string, message: Omit<Message, 'id' | 'timestamp'>) => void
-  updateMessage: (chatId: string, messageId: string, content: string) => void
+  addMessage: (chatId: string, message: Omit<Message, 'id' | 'timestamp'>) => string
+  updateMessage: (chatId: string, messageId: string, updates: Partial<Message>) => void
+  appendToMessage: (chatId: string, messageId: string, chunk: string) => void
   setStreaming: (streaming: boolean) => void
   setSelectedModel: (model: string) => void
 
@@ -90,7 +94,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   chats: [],
   currentChatId: null,
   isStreaming: false,
-  selectedModel: 'deepseek/deepseek-chat-v3-0324:free',
+  selectedModel: 'opencode/minimax-m2.5-free',
 
   // Initial IDE State
   files: [],
@@ -131,28 +135,45 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setCurrentChat: (id) => set({ currentChatId: id }),
 
-  addMessage: (chatId, message) => set((s) => ({
-    chats: s.chats.map((chat) =>
-      chat.id === chatId
-        ? {
-            ...chat,
-            messages: [...chat.messages, { ...message, id: uuidv4(), timestamp: Date.now() }],
-            updatedAt: Date.now(),
-            title: chat.messages.length === 0 && message.role === 'user'
-              ? message.content.slice(0, 50) + (message.content.length > 50 ? '...' : '')
-              : chat.title,
-          }
-        : chat
-    ),
-  })),
+  addMessage: (chatId, message) => {
+    const msgId = uuidv4()
+    set((s) => ({
+      chats: s.chats.map((chat) =>
+        chat.id === chatId
+          ? {
+              ...chat,
+              messages: [...chat.messages, { ...message, id: msgId, timestamp: Date.now() }],
+              updatedAt: Date.now(),
+              title: chat.messages.length === 0 && message.role === 'user'
+                ? message.content.slice(0, 50) + (message.content.length > 50 ? '...' : '')
+                : chat.title,
+            }
+          : chat
+      ),
+    }))
+    return msgId
+  },
 
-  updateMessage: (chatId, messageId, content) => set((s) => ({
+  updateMessage: (chatId, messageId, updates) => set((s) => ({
     chats: s.chats.map((chat) =>
       chat.id === chatId
         ? {
             ...chat,
             messages: chat.messages.map((msg) =>
-              msg.id === messageId ? { ...msg, content } : msg
+              msg.id === messageId ? { ...msg, ...updates } : msg
+            ),
+          }
+        : chat
+    ),
+  })),
+
+  appendToMessage: (chatId, messageId, chunk) => set((s) => ({
+    chats: s.chats.map((chat) =>
+      chat.id === chatId
+        ? {
+            ...chat,
+            messages: chat.messages.map((msg) =>
+              msg.id === messageId ? { ...msg, content: msg.content + chunk } : msg
             ),
           }
         : chat
