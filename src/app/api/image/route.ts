@@ -10,16 +10,37 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Prompt is required' }, { status: 400 })
     }
 
-    // Pollinations.ai generates images via URL — encode prompt and return the image URL
+    const apiKey = process.env.POLLINATIONS_API_KEY
     const encodedPrompt = encodeURIComponent(prompt)
     const seed = Math.floor(Math.random() * 1000000)
-    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&model=${model}&seed=${seed}&nologo=true`
 
-    // Pre-fetch to ensure the image is generated (Pollinations generates on first request)
-    const prefetch = await fetch(imageUrl, { method: 'HEAD' })
+    // Build the Pollinations URL
+    const imageUrl = `https://gen.pollinations.ai/image/${encodedPrompt}?width=${width}&height=${height}&model=${model}&seed=${seed}&nologo=true`
+
+    // Fetch the image server-side (with API key if available)
+    const headers: Record<string, string> = {}
+    if (apiKey) {
+      headers['Authorization'] = `Bearer ${apiKey}`
+    }
+
+    const imageResponse = await fetch(imageUrl, { headers })
+
+    if (!imageResponse.ok) {
+      console.error('Pollinations error:', imageResponse.status, await imageResponse.text().catch(() => ''))
+      return NextResponse.json(
+        { error: `Image generation failed (${imageResponse.status})` },
+        { status: imageResponse.status }
+      )
+    }
+
+    // Return the image as a data URL for direct embedding
+    const imageBlob = await imageResponse.arrayBuffer()
+    const contentType = imageResponse.headers.get('content-type') || 'image/png'
+    const base64Image = btoa(String.fromCharCode(...new Uint8Array(imageBlob)))
+    const dataUrl = `data:${contentType};base64,${base64Image}`
 
     return NextResponse.json({
-      url: imageUrl,
+      url: dataUrl,
       prompt,
       width,
       height,
