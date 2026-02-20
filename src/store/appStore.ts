@@ -9,7 +9,7 @@ export interface Message {
   model?: string
   attachments?: Attachment[]
   isStreaming?: boolean
-  type?: 'text' | 'image'
+  type?: 'text' | 'image' | 'video'
   imageUrl?: string
   imagePrompt?: string
 }
@@ -42,30 +42,21 @@ export interface FileNode {
 }
 
 interface AppState {
-  // UI State
   sidebarOpen: boolean
   ideOpen: boolean
   activeTab: 'chat' | 'images' | 'assets'
   ideTab: 'process' | 'files'
-
-  // Chat State
   chats: Chat[]
   currentChatId: string | null
   isStreaming: boolean
   selectedModel: string
-
-  // IDE State
   files: FileNode[]
   activeFileId: string | null
   previewMode: boolean
-
-  // Actions - UI
   toggleSidebar: () => void
   toggleIDE: () => void
   setActiveTab: (tab: 'chat' | 'images' | 'assets') => void
   setIDETab: (tab: 'process' | 'files') => void
-
-  // Actions - Chat
   createChat: () => string
   deleteChat: (id: string) => void
   setCurrentChat: (id: string) => void
@@ -74,8 +65,6 @@ interface AppState {
   appendToMessage: (chatId: string, messageId: string, chunk: string) => void
   setStreaming: (streaming: boolean) => void
   setSelectedModel: (model: string) => void
-
-  // Actions - IDE
   setActiveFile: (id: string | null) => void
   togglePreview: () => void
   addFile: (file: FileNode) => void
@@ -84,30 +73,23 @@ interface AppState {
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
-  // Initial UI State
   sidebarOpen: true,
   ideOpen: false,
   activeTab: 'chat',
   ideTab: 'process',
-
-  // Initial Chat State
   chats: [],
   currentChatId: null,
   isStreaming: false,
   selectedModel: 'minimax-m2.5-free',
-
-  // Initial IDE State
   files: [],
   activeFileId: null,
   previewMode: false,
 
-  // UI Actions
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   toggleIDE: () => set((s) => ({ ideOpen: !s.ideOpen })),
   setActiveTab: (tab) => set({ activeTab: tab }),
   setIDETab: (tab) => set({ ideTab: tab }),
 
-  // Chat Actions
   createChat: () => {
     const id = uuidv4()
     const chat: Chat = {
@@ -118,19 +100,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       createdAt: Date.now(),
       updatedAt: Date.now(),
     }
-    set((s) => ({
-      chats: [chat, ...s.chats],
-      currentChatId: id,
-    }))
+    set((s) => ({ chats: [chat, ...s.chats], currentChatId: id }))
     return id
   },
 
   deleteChat: (id) => set((s) => {
     const chats = s.chats.filter((c) => c.id !== id)
-    return {
-      chats,
-      currentChatId: s.currentChatId === id ? (chats[0]?.id ?? null) : s.currentChatId,
-    }
+    return { chats, currentChatId: s.currentChatId === id ? (chats[0]?.id ?? null) : s.currentChatId }
   }),
 
   setCurrentChat: (id) => set({ currentChatId: id }),
@@ -157,12 +133,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   updateMessage: (chatId, messageId, updates) => set((s) => ({
     chats: s.chats.map((chat) =>
       chat.id === chatId
-        ? {
-            ...chat,
-            messages: chat.messages.map((msg) =>
-              msg.id === messageId ? { ...msg, ...updates } : msg
-            ),
-          }
+        ? { ...chat, messages: chat.messages.map((msg) => msg.id === messageId ? { ...msg, ...updates } : msg) }
         : chat
     ),
   })),
@@ -170,29 +141,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   appendToMessage: (chatId, messageId, chunk) => set((s) => ({
     chats: s.chats.map((chat) =>
       chat.id === chatId
-        ? {
-            ...chat,
-            messages: chat.messages.map((msg) =>
-              msg.id === messageId ? { ...msg, content: msg.content + chunk } : msg
-            ),
-          }
+        ? { ...chat, messages: chat.messages.map((msg) => msg.id === messageId ? { ...msg, content: msg.content + chunk } : msg) }
         : chat
     ),
   })),
 
   setStreaming: (streaming) => set({ isStreaming: streaming }),
   setSelectedModel: (model) => set({ selectedModel: model }),
-
-  // IDE Actions
   setActiveFile: (id) => set({ activeFileId: id }),
   togglePreview: () => set((s) => ({ previewMode: !s.previewMode })),
-
   addFile: (file) => set((s) => ({ files: [...s.files, file] })),
-
-  updateFileContent: (id, content) => set((s) => ({
-    files: s.files.map((f) => (f.id === id ? { ...f, content } : f)),
-  })),
-
+  updateFileContent: (id, content) => set((s) => ({ files: s.files.map((f) => (f.id === id ? { ...f, content } : f)) })),
   deleteFile: (id) => set((s) => ({
     files: s.files.filter((f) => f.id !== id),
     activeFileId: s.activeFileId === id ? null : s.activeFileId,

@@ -21,17 +21,16 @@ export function MessageBubble({ message }: Props) {
   }
 
   const isImage = message.type === "image" && message.imageUrl
+  const isVideo = message.type === "video" && message.imageUrl
 
   return (
     <div className={`flex gap-3 animate-fade-in ${isUser ? "justify-end" : ""}`}>
-      {/* Avatar */}
       {!isUser && (
         <div className="w-7 h-7 rounded-lg bg-honey-500/15 flex items-center justify-center shrink-0 mt-0.5">
           <Sparkles size={14} className="text-honey-500" />
         </div>
       )}
 
-      {/* Content */}
       <div className={`max-w-[80%] ${isUser ? "order-first" : ""}`}>
         <div
           className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
@@ -40,8 +39,37 @@ export function MessageBubble({ message }: Props) {
               : "bg-hive-surface text-text-primary rounded-bl-md"
           }`}
         >
-          {/* Image Display */}
-          {isImage && !message.isStreaming ? (
+          {/* Video Display */}
+          {isVideo && !message.isStreaming ? (
+            <div className="space-y-2">
+              <div className="relative group rounded-lg overflow-hidden">
+                <video
+                  src={message.imageUrl}
+                  controls
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  className="w-full max-w-md rounded-lg"
+                />
+                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <a
+                    href={message.imageUrl}
+                    download
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-1.5 rounded-md bg-black/60 text-white hover:bg-black/80 transition-colors"
+                  >
+                    <Download size={14} />
+                  </a>
+                </div>
+              </div>
+              {message.imagePrompt && (
+                <p className="text-xs text-text-muted italic">{message.imagePrompt}</p>
+              )}
+            </div>
+          ) : isImage && !message.isStreaming ? (
+            /* Image Display */
             <div className="space-y-2">
               <div className="relative group rounded-lg overflow-hidden">
                 <img
@@ -88,7 +116,6 @@ export function MessageBubble({ message }: Props) {
           )}
         </div>
 
-        {/* Message Actions */}
         {!isUser && !message.isStreaming && (
           <div className="flex items-center gap-1 mt-1 ml-1">
             <button
@@ -116,7 +143,6 @@ export function MessageBubble({ message }: Props) {
         )}
       </div>
 
-      {/* User Avatar */}
       {isUser && (
         <div className="w-7 h-7 rounded-lg bg-hive-elevated flex items-center justify-center shrink-0 mt-0.5">
           <User size={14} className="text-text-secondary" />

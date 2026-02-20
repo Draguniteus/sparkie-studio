@@ -2,20 +2,33 @@ import { NextRequest, NextResponse } from 'next/server'
 
 export const runtime = 'edge'
 
-// POST: initiate image generation, return metadata
+const VIDEO_MODELS = ['seedance', 'seedance-pro', 'veo', 'wan', 'ltx-2']
+
+// POST: initiate generation, return proxy URL
 export async function POST(req: NextRequest) {
   try {
-    const { prompt, width = 1024, height = 1024, model = 'flux' } = await req.json()
+    const { prompt, width = 1024, height = 1024, model = 'flux', duration } = await req.json()
 
     if (!prompt) {
       return NextResponse.json({ error: 'Prompt is required' }, { status: 400 })
     }
 
     const seed = Math.floor(Math.random() * 1000000)
+    const isVideo = VIDEO_MODELS.includes(model)
 
-    // Return a proxy URL that the client can use as an img src
-    // The GET handler below will proxy the actual image with the API key
-    const proxyUrl = `/api/image?prompt=${encodeURIComponent(prompt)}&width=${width}&height=${height}&model=${model}&seed=${seed}`
+    const params = new URLSearchParams({
+      prompt,
+      width: String(width),
+      height: String(height),
+      model,
+      seed: String(seed),
+    })
+
+    if (isVideo && duration) {
+      params.set('duration', String(duration))
+    }
+
+    const proxyUrl = `/api/image?${params.toString()}`
 
     return NextResponse.json({
       url: proxyUrl,
@@ -24,14 +37,15 @@ export async function POST(req: NextRequest) {
       height,
       model,
       seed,
+      type: isVideo ? 'video' : 'image',
     })
   } catch (error) {
-    console.error('Image API error:', error)
-    return NextResponse.json({ error: 'Failed to generate image' }, { status: 500 })
+    console.error('Media API error:', error)
+    return NextResponse.json({ error: 'Failed to generate media' }, { status: 500 })
   }
 }
 
-// GET: proxy the image binary from Pollinations (keeps API key server-side)
+// GET: proxy binary from Pollinations (keeps API key server-side)
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url)
@@ -40,13 +54,18 @@ export async function GET(req: NextRequest) {
     const height = searchParams.get('height') || '1024'
     const model = searchParams.get('model') || 'flux'
     const seed = searchParams.get('seed') || '0'
+    const duration = searchParams.get('duration')
 
     if (!prompt) {
       return new Response('Missing prompt', { status: 400 })
     }
 
     const encodedPrompt = encodeURIComponent(prompt)
-    const imageUrl = `https://gen.pollinations.ai/image/${encodedPrompt}?width=${width}&height=${height}&model=${model}&seed=${seed}&nologo=true`
+    let imageUrl = `https://gen.pollinations.ai/image/${encodedPrompt}?width=${width}&height=${height}&model=${model}&seed=${seed}&nologo=true`
+
+    if (duration) {
+      imageUrl += `&duration=${duration}`
+    }
 
     const headers: Record<string, string> = {
       'User-Agent': 'SparkieStudio/2.0',
@@ -60,18 +79,19 @@ export async function GET(req: NextRequest) {
     const response = await fetch(imageUrl, { headers })
 
     if (!response.ok) {
-      return new Response(`Image generation failed: ${response.status}`, { status: response.status })
+      return new Response(`Generation failed: ${response.status}`, { status: response.status })
     }
 
-    // Stream the image through
+    const contentType = response.headers.get('content-type') || 'image/png'
+
     return new Response(response.body, {
       headers: {
-        'Content-Type': response.headers.get('content-type') || 'image/png',
+        'Content-Type': contentType,
         'Cache-Control': 'public, max-age=86400',
       },
     })
   } catch (error) {
-    console.error('Image proxy error:', error)
+    console.error('Media proxy error:', error)
     return new Response('Internal server error', { status: 500 })
   }
 }
