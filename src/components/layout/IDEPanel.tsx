@@ -1,42 +1,93 @@
-'use client'
+"use client"
 
-import { useAppStore } from '@/store/appStore'
-import { X, Monitor, FolderTree, Download, Play } from 'lucide-react'
+import { useState } from "react"
+import { useAppStore } from "@/store/appStore"
+import {
+  X, Brain, FolderTree, Download, Code, Globe, PanelRightClose,
+  ChevronLeft, ChevronRight,
+} from "lucide-react"
+import { Worklog } from "@/components/ide/Worklog"
+import { FileExplorer } from "@/components/ide/FileExplorer"
+import { CodeEditor } from "@/components/ide/CodeEditor"
+import { Preview } from "@/components/ide/Preview"
+
+type ViewMode = "worklog" | "editor" | "preview"
 
 export function IDEPanel() {
   const { ideTab, setIDETab, toggleIDE, files, activeFileId } = useAppStore()
-  const activeFile = files.find(f => f.id === activeFileId)
+  const [viewMode, setViewMode] = useState<ViewMode>("worklog")
+  const [showExplorer, setShowExplorer] = useState(true)
+
+  // When in "files" tab, show explorer + editor/preview
+  // When in "process" tab, show worklog
+  const isFilesTab = ideTab === "files" || ideTab === "preview"
 
   return (
-    <div className="w-[480px] h-full bg-hive-700 border-l border-hive-border flex flex-col shrink-0 animate-slide-right">
+    <div className="w-[520px] h-full bg-hive-700 border-l border-hive-border flex flex-col shrink-0 animate-slide-right">
       {/* IDE Header */}
       <div className="flex items-center justify-between px-3 h-11 border-b border-hive-border shrink-0">
         <div className="flex gap-1">
           <button
-            onClick={() => setIDETab('process')}
+            onClick={() => { setIDETab("process"); setViewMode("worklog") }}
             className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-              ideTab === 'process'
-                ? 'bg-honey-500/15 text-honey-500'
-                : 'text-text-muted hover:text-text-secondary'
+              ideTab === "process"
+                ? "bg-honey-500/15 text-honey-500"
+                : "text-text-muted hover:text-text-secondary"
             }`}
           >
-            <Monitor size={13} className="inline mr-1.5" />
-            Current Process
+            <Brain size={13} className="inline mr-1.5" />
+            Worklog
           </button>
           <button
-            onClick={() => setIDETab('files')}
+            onClick={() => { setIDETab("files"); setViewMode("editor") }}
             className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-              ideTab === 'files'
-                ? 'bg-honey-500/15 text-honey-500'
-                : 'text-text-muted hover:text-text-secondary'
+              ideTab === "files"
+                ? "bg-honey-500/15 text-honey-500"
+                : "text-text-muted hover:text-text-secondary"
             }`}
           >
-            <FolderTree size={13} className="inline mr-1.5" />
-            Files
+            <Code size={13} className="inline mr-1.5" />
+            Editor
+          </button>
+          <button
+            onClick={() => { setIDETab("preview"); setViewMode("preview") }}
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+              ideTab === "preview"
+                ? "bg-honey-500/15 text-honey-500"
+                : "text-text-muted hover:text-text-secondary"
+            }`}
+          >
+            <Globe size={13} className="inline mr-1.5" />
+            Preview
           </button>
         </div>
         <div className="flex items-center gap-1">
-          <button className="p-1.5 rounded-md hover:bg-hive-hover text-text-muted hover:text-text-secondary transition-colors" title="Download">
+          {isFilesTab && (
+            <button
+              onClick={() => setShowExplorer(!showExplorer)}
+              className="p-1.5 rounded-md hover:bg-hive-hover text-text-muted hover:text-text-secondary transition-colors"
+              title={showExplorer ? "Hide explorer" : "Show explorer"}
+            >
+              <FolderTree size={14} />
+            </button>
+          )}
+          <button
+            className="p-1.5 rounded-md hover:bg-hive-hover text-text-muted hover:text-text-secondary transition-colors"
+            title="Download files"
+            onClick={() => {
+              const allFiles = files.filter((f) => f.type === "file" && f.content)
+              if (allFiles.length === 0) return
+              allFiles.forEach((f) => {
+                const blob = new Blob([f.content || ""], { type: "text/plain" })
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement("a")
+                a.href = url
+                a.download = f.name
+                a.click()
+                URL.revokeObjectURL(url)
+              })
+            }}
+          >
             <Download size={14} />
           </button>
           <button
@@ -50,42 +101,40 @@ export function IDEPanel() {
       </div>
 
       {/* IDE Content */}
-      <div className="flex-1 overflow-hidden">
-        {ideTab === 'process' ? (
-          <div className="h-full flex flex-col items-center justify-center text-text-muted p-8">
-            <div className="w-16 h-16 rounded-2xl bg-honey-500/10 flex items-center justify-center mb-4">
-              <Play size={24} className="text-honey-500" />
-            </div>
-            <p className="text-sm font-medium text-text-secondary mb-1">No active process</p>
-            <p className="text-xs text-center">Start a coding task and watch Sparkie work in real-time</p>
+      <div className="flex-1 overflow-hidden flex">
+        {/* Worklog view */}
+        {ideTab === "process" && (
+          <div className="flex-1 overflow-hidden">
+            <Worklog />
           </div>
-        ) : (
-          <div className="h-full flex flex-col">
-            {/* File Search */}
-            <div className="p-2 border-b border-hive-border">
-              <input
-                type="text"
-                placeholder="Search files..."
-                className="w-full px-3 py-1.5 rounded-md bg-hive-600 border border-hive-border text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-honey-500/50"
-              />
+        )}
+
+        {/* Editor view */}
+        {ideTab === "files" && (
+          <>
+            {showExplorer && (
+              <div className="w-48 border-r border-hive-border shrink-0 overflow-hidden">
+                <FileExplorer />
+              </div>
+            )}
+            <div className="flex-1 overflow-hidden">
+              <CodeEditor />
             </div>
-            {/* File Tree */}
-            <div className="flex-1 overflow-y-auto p-2">
-              {files.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-text-muted p-8">
-                  <FolderTree size={24} className="mb-2 text-honey-500/50" />
-                  <p className="text-xs text-center">No files yet. Files created during tasks will appear here.</p>
-                </div>
-              ) : (
-                files.map(file => (
-                  <div key={file.id} className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-hive-hover cursor-pointer text-sm text-text-secondary">
-                    <span className="text-honey-500/70">📄</span>
-                    <span className="truncate">{file.name}</span>
-                  </div>
-                ))
-              )}
+          </>
+        )}
+
+        {/* Preview view */}
+        {ideTab === "preview" && (
+          <>
+            {showExplorer && (
+              <div className="w-48 border-r border-hive-border shrink-0 overflow-hidden">
+                <FileExplorer />
+              </div>
+            )}
+            <div className="flex-1 overflow-hidden">
+              <Preview />
             </div>
-          </div>
+          </>
         )}
       </div>
     </div>

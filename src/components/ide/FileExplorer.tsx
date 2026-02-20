@@ -1,0 +1,164 @@
+"use client"
+
+import { useState } from "react"
+import { useAppStore, FileNode } from "@/store/appStore"
+import {
+  File, Folder, FolderOpen, Plus, Trash2, ChevronRight, ChevronDown,
+  FileCode, FileText, FileImage, FileJson,
+} from "lucide-react"
+
+function getFileIcon(name: string) {
+  const ext = name.split(".").pop()?.toLowerCase()
+  switch (ext) {
+    case "ts":
+    case "tsx":
+    case "js":
+    case "jsx":
+      return <FileCode size={14} className="text-blue-400" />
+    case "json":
+      return <FileJson size={14} className="text-yellow-400" />
+    case "md":
+    case "txt":
+      return <FileText size={14} className="text-text-muted" />
+    case "png":
+    case "jpg":
+    case "svg":
+      return <FileImage size={14} className="text-green-400" />
+    case "css":
+    case "scss":
+      return <FileCode size={14} className="text-pink-400" />
+    case "html":
+      return <FileCode size={14} className="text-orange-400" />
+    default:
+      return <File size={14} className="text-text-muted" />
+  }
+}
+
+function getLanguage(name: string): string {
+  const ext = name.split(".").pop()?.toLowerCase()
+  const map: Record<string, string> = {
+    ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript",
+    json: "json", md: "markdown", css: "css", scss: "scss",
+    html: "html", py: "python", txt: "plaintext",
+  }
+  return map[ext || ""] || "plaintext"
+}
+
+interface FileItemProps {
+  file: FileNode
+  depth: number
+}
+
+function FileItem({ file, depth }: FileItemProps) {
+  const [expanded, setExpanded] = useState(true)
+  const { activeFileId, setActiveFile, deleteFile } = useAppStore()
+  const isActive = activeFileId === file.id
+  const isFolder = file.type === "folder"
+
+  return (
+    <div>
+      <div
+        className={`flex items-center gap-1.5 px-2 py-1 rounded-md cursor-pointer group text-xs transition-colors ${
+          isActive ? "bg-honey-500/15 text-honey-500" : "text-text-secondary hover:bg-hive-hover"
+        }`}
+        style={{ paddingLeft: `${depth * 12 + 8}px` }}
+        onClick={() => {
+          if (isFolder) {
+            setExpanded(!expanded)
+          } else {
+            setActiveFile(file.id)
+          }
+        }}
+      >
+        {isFolder ? (
+          <>
+            {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            {expanded ? (
+              <FolderOpen size={14} className="text-honey-500/70" />
+            ) : (
+              <Folder size={14} className="text-honey-500/70" />
+            )}
+          </>
+        ) : (
+          <>
+            <span className="w-3" />
+            {getFileIcon(file.name)}
+          </>
+        )}
+        <span className="truncate flex-1">{file.name}</span>
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            deleteFile(file.id)
+          }}
+          className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-500/20 text-text-muted hover:text-red-400 transition-all"
+        >
+          <Trash2 size={11} />
+        </button>
+      </div>
+      {isFolder && expanded && file.children?.map((child) => (
+        <FileItem key={child.id} file={child} depth={depth + 1} />
+      ))}
+    </div>
+  )
+}
+
+export function FileExplorer() {
+  const { files, addFile } = useAppStore()
+  const [showNewFile, setShowNewFile] = useState(false)
+  const [newFileName, setNewFileName] = useState("")
+
+  const handleCreateFile = () => {
+    if (!newFileName.trim()) return
+    addFile({
+      name: newFileName.trim(),
+      type: newFileName.includes(".") ? "file" : "folder",
+      content: "",
+      language: getLanguage(newFileName.trim()),
+    })
+    setNewFileName("")
+    setShowNewFile(false)
+  }
+
+  return (
+    <div className="h-full flex flex-col">
+      <div className="flex items-center justify-between p-2 border-b border-hive-border">
+        <span className="text-[10px] font-medium text-text-muted uppercase tracking-wider">Explorer</span>
+        <button
+          onClick={() => setShowNewFile(!showNewFile)}
+          className="p-1 rounded hover:bg-hive-hover text-text-muted hover:text-honey-500 transition-colors"
+          title="New file"
+        >
+          <Plus size={14} />
+        </button>
+      </div>
+
+      {showNewFile && (
+        <div className="p-2 border-b border-hive-border">
+          <input
+            autoFocus
+            value={newFileName}
+            onChange={(e) => setNewFileName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleCreateFile()
+              if (e.key === "Escape") { setShowNewFile(false); setNewFileName("") }
+            }}
+            placeholder="filename.ts"
+            className="w-full px-2 py-1 rounded bg-hive-elevated border border-hive-border text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-honey-500/50"
+          />
+        </div>
+      )}
+
+      <div className="flex-1 overflow-y-auto py-1">
+        {files.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-text-muted p-6">
+            <Folder size={20} className="mb-2 text-honey-500/40" />
+            <p className="text-[11px] text-center">No files yet</p>
+          </div>
+        ) : (
+          files.map((file) => <FileItem key={file.id} file={file} depth={0} />)
+        )}
+      </div>
+    </div>
+  )
+}

@@ -41,11 +41,20 @@ export interface FileNode {
   parentId?: string
 }
 
+export interface WorklogEntry {
+  id: string
+  type: 'thinking' | 'action' | 'result' | 'error' | 'code'
+  content: string
+  timestamp: number
+  duration?: number
+  status?: 'running' | 'done' | 'error'
+}
+
 interface AppState {
   sidebarOpen: boolean
   ideOpen: boolean
   activeTab: 'chat' | 'images' | 'assets'
-  ideTab: 'process' | 'files'
+  ideTab: 'process' | 'files' | 'preview'
   chats: Chat[]
   currentChatId: string | null
   isStreaming: boolean
@@ -53,10 +62,14 @@ interface AppState {
   files: FileNode[]
   activeFileId: string | null
   previewMode: boolean
+  worklog: WorklogEntry[]
+  isExecuting: boolean
+  previewUrl: string | null
+
   toggleSidebar: () => void
   toggleIDE: () => void
   setActiveTab: (tab: 'chat' | 'images' | 'assets') => void
-  setIDETab: (tab: 'process' | 'files') => void
+  setIDETab: (tab: 'process' | 'files' | 'preview') => void
   createChat: () => string
   deleteChat: (id: string) => void
   setCurrentChat: (id: string) => void
@@ -67,9 +80,16 @@ interface AppState {
   setSelectedModel: (model: string) => void
   setActiveFile: (id: string | null) => void
   togglePreview: () => void
-  addFile: (file: FileNode) => void
+  addFile: (file: Omit<FileNode, 'id'> & { id?: string }) => string
   updateFileContent: (id: string, content: string) => void
   deleteFile: (id: string) => void
+  renameFile: (id: string, name: string) => void
+  addWorklogEntry: (entry: Omit<WorklogEntry, 'id' | 'timestamp'>) => string
+  updateWorklogEntry: (id: string, updates: Partial<WorklogEntry>) => void
+  clearWorklog: () => void
+  setExecuting: (executing: boolean) => void
+  setPreviewUrl: (url: string | null) => void
+  openIDE: () => void
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -84,9 +104,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   files: [],
   activeFileId: null,
   previewMode: false,
+  worklog: [],
+  isExecuting: false,
+  previewUrl: null,
 
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   toggleIDE: () => set((s) => ({ ideOpen: !s.ideOpen })),
+  openIDE: () => set({ ideOpen: true }),
   setActiveTab: (tab) => set({ activeTab: tab }),
   setIDETab: (tab) => set({ ideTab: tab }),
 
@@ -150,10 +174,39 @@ export const useAppStore = create<AppState>((set, get) => ({
   setSelectedModel: (model) => set({ selectedModel: model }),
   setActiveFile: (id) => set({ activeFileId: id }),
   togglePreview: () => set((s) => ({ previewMode: !s.previewMode })),
-  addFile: (file) => set((s) => ({ files: [...s.files, file] })),
-  updateFileContent: (id, content) => set((s) => ({ files: s.files.map((f) => (f.id === id ? { ...f, content } : f)) })),
+
+  addFile: (file) => {
+    const id = file.id || uuidv4()
+    set((s) => ({ files: [...s.files, { ...file, id }] }))
+    return id
+  },
+
+  updateFileContent: (id, content) => set((s) => ({
+    files: s.files.map((f) => (f.id === id ? { ...f, content } : f))
+  })),
+
   deleteFile: (id) => set((s) => ({
     files: s.files.filter((f) => f.id !== id),
     activeFileId: s.activeFileId === id ? null : s.activeFileId,
   })),
+
+  renameFile: (id, name) => set((s) => ({
+    files: s.files.map((f) => (f.id === id ? { ...f, name } : f))
+  })),
+
+  addWorklogEntry: (entry) => {
+    const id = uuidv4()
+    set((s) => ({
+      worklog: [...s.worklog, { ...entry, id, timestamp: Date.now() }]
+    }))
+    return id
+  },
+
+  updateWorklogEntry: (id, updates) => set((s) => ({
+    worklog: s.worklog.map((e) => (e.id === id ? { ...e, ...updates } : e))
+  })),
+
+  clearWorklog: () => set({ worklog: [] }),
+  setExecuting: (executing) => set({ isExecuting: executing }),
+  setPreviewUrl: (url) => set({ previewUrl: url }),
 }))

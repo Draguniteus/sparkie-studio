@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback } from "react"
 import { useAppStore } from "@/store/appStore"
-import { Paperclip, ArrowUp, Sparkles, ChevronDown, Image as ImageIcon, Video } from "lucide-react"
+import { Paperclip, ArrowUp, Sparkles, ChevronDown, Image as ImageIcon, Video, Code } from "lucide-react"
 
 const MODELS = [
   { id: "minimax-m2.5-free", name: "MiniMax M2.5", tag: "Free", type: "chat" },
@@ -31,7 +31,12 @@ export function ChatInput() {
   const [selectedImageModel, setSelectedImageModel] = useState("flux")
   const [selectedVideoModel, setSelectedVideoModel] = useState("seedance")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const { selectedModel, setSelectedModel, createChat, addMessage, appendToMessage, updateMessage, currentChatId, isStreaming, setStreaming } = useAppStore()
+  const {
+    selectedModel, setSelectedModel, createChat, addMessage, appendToMessage,
+    updateMessage, currentChatId, isStreaming, setStreaming,
+    openIDE, addWorklogEntry, updateWorklogEntry, clearWorklog,
+    setExecuting, addFile, setActiveFile, setIDETab, ideOpen,
+  } = useAppStore()
 
   const currentModel = MODELS.find((m) => m.id === selectedModel) || MODELS[0]
 
@@ -52,6 +57,9 @@ export function ChatInput() {
 
     setStreaming(true)
 
+    // Add worklog entries
+    const thinkId = addWorklogEntry({ type: "thinking", content: `Processing: "${userContent.slice(0, 80)}${userContent.length > 80 ? "..." : ""}"`, status: "running" })
+
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
@@ -59,26 +67,31 @@ export function ChatInput() {
         body: JSON.stringify({ messages: apiMessages, model: selectedModel }),
       })
 
+      updateWorklogEntry(thinkId, { status: "done", duration: Date.now() - Date.now() + 200 })
+
       if (!response.ok) {
         const err = await response.json().catch(() => ({ error: "Unknown error" }))
         updateMessage(chatId, assistantMsgId, {
-          content: `⚠️ Error: ${err.error || response.statusText}`,
+          content: `\u26a0\ufe0f Error: ${err.error || response.statusText}`,
           isStreaming: false,
         })
+        addWorklogEntry({ type: "error", content: `API error: ${err.error || response.statusText}`, status: "error" })
         setStreaming(false)
         return
       }
 
+      const streamId = addWorklogEntry({ type: "action", content: "Streaming response...", status: "running" })
       const reader = response.body?.getReader()
       const decoder = new TextDecoder()
 
       if (!reader) {
-        updateMessage(chatId, assistantMsgId, { content: "⚠️ Error: No response stream", isStreaming: false })
+        updateMessage(chatId, assistantMsgId, { content: "\u26a0\ufe0f Error: No response stream", isStreaming: false })
         setStreaming(false)
         return
       }
 
       let buffer = ""
+      const startTime = Date.now()
 
       while (true) {
         const { done, value } = await reader.read()
@@ -107,27 +120,31 @@ export function ChatInput() {
         }
       }
 
+      updateWorklogEntry(streamId, { status: "done", duration: Date.now() - startTime })
+
       const finalChat = useAppStore.getState().chats.find((c) => c.id === chatId)
       const finalMsg = finalChat?.messages.find((m) => m.id === assistantMsgId)
       if (finalMsg && !finalMsg.content.trim()) {
         updateMessage(chatId, assistantMsgId, {
-          content: "🤔 The model used all tokens for reasoning. Try a simpler prompt or switch models.",
+          content: "\ud83e\udd14 The model used all tokens for reasoning. Try a simpler prompt or switch models.",
           isStreaming: false,
         })
       } else {
         updateMessage(chatId, assistantMsgId, { isStreaming: false })
+        addWorklogEntry({ type: "result", content: `Response complete (${finalMsg?.content.length || 0} chars)`, status: "done" })
       }
     } catch (error) {
       console.error("Stream error:", error)
-      updateMessage(chatId, assistantMsgId, { content: "⚠️ Connection error. Please try again.", isStreaming: false })
+      updateMessage(chatId, assistantMsgId, { content: "\u26a0\ufe0f Connection error. Please try again.", isStreaming: false })
+      addWorklogEntry({ type: "error", content: "Connection failed", status: "error" })
     } finally {
       setStreaming(false)
     }
-  }, [selectedModel, addMessage, appendToMessage, updateMessage, setStreaming])
+  }, [selectedModel, addMessage, appendToMessage, updateMessage, setStreaming, addWorklogEntry, updateWorklogEntry])
 
   const generateMedia = useCallback(async (chatId: string, prompt: string, mediaType: "image" | "video") => {
     const model = mediaType === "video" ? selectedVideoModel : selectedImageModel
-    const emoji = mediaType === "video" ? "🎬" : "🎨"
+    const emoji = mediaType === "video" ? "\ud83c\udfac" : "\ud83c\udfa8"
 
     const assistantMsgId = addMessage(chatId, {
       role: "assistant",
@@ -137,12 +154,12 @@ export function ChatInput() {
     })
 
     setStreaming(true)
+    const logId = addWorklogEntry({ type: "action", content: `Generating ${mediaType} with ${model}: "${prompt.slice(0, 60)}..."`, status: "running" })
+    const startTime = Date.now()
 
     try {
       const body: Record<string, unknown> = { prompt, model }
-      if (mediaType === "video") {
-        body.duration = 4
-      }
+      if (mediaType === "video") body.duration = 4
 
       const response = await fetch("/api/image", {
         method: "POST",
@@ -153,10 +170,11 @@ export function ChatInput() {
       if (!response.ok) {
         const err = await response.json().catch(() => ({ error: "Unknown" }))
         updateMessage(chatId, assistantMsgId, {
-          content: `⚠️ ${mediaType === "video" ? "Video" : "Image"} generation failed: ${err.error || response.status}`,
+          content: `\u26a0\ufe0f ${mediaType === "video" ? "Video" : "Image"} generation failed: ${err.error || response.status}`,
           isStreaming: false,
           type: "text",
         })
+        updateWorklogEntry(logId, { status: "error", duration: Date.now() - startTime })
         setStreaming(false)
         return
       }
@@ -170,17 +188,19 @@ export function ChatInput() {
         type: mediaType,
         model: model,
       })
+      updateWorklogEntry(logId, { status: "done", duration: Date.now() - startTime, content: `${mediaType} generated with ${model}` })
     } catch (error) {
       console.error(`${mediaType} gen error:`, error)
       updateMessage(chatId, assistantMsgId, {
-        content: `⚠️ ${mediaType === "video" ? "Video" : "Image"} generation failed`,
+        content: `\u26a0\ufe0f ${mediaType === "video" ? "Video" : "Image"} generation failed`,
         isStreaming: false,
         type: "text",
       })
+      updateWorklogEntry(logId, { status: "error", duration: Date.now() - startTime })
     } finally {
       setStreaming(false)
     }
-  }, [selectedImageModel, selectedVideoModel, addMessage, updateMessage, setStreaming])
+  }, [selectedImageModel, selectedVideoModel, addMessage, updateMessage, setStreaming, addWorklogEntry, updateWorklogEntry])
 
   const handleSubmit = useCallback(() => {
     if (!input.trim() || isStreaming) return
@@ -194,6 +214,10 @@ export function ChatInput() {
 
     if (textareaRef.current) textareaRef.current.style.height = "auto"
 
+    // Open IDE worklog on any submit
+    if (!ideOpen) openIDE()
+    setIDETab("process")
+
     if (genMode === "image") {
       generateMedia(chatId, userContent, "image")
     } else if (genMode === "video") {
@@ -201,7 +225,7 @@ export function ChatInput() {
     } else {
       streamChat(chatId, userContent)
     }
-  }, [input, isStreaming, currentChatId, createChat, addMessage, genMode, streamChat, generateMedia])
+  }, [input, isStreaming, currentChatId, createChat, addMessage, genMode, streamChat, generateMedia, ideOpen, openIDE, setIDETab])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -222,7 +246,7 @@ export function ChatInput() {
   const activeModelName = activeModels.find(m => m.id === activeModelId)?.name || activeModels[0].name
 
   const placeholders: Record<GenMode, string> = {
-    chat: "Enter your task and submit it to Sparkie...",
+    chat: "Enter your task and submit to Sparkie...",
     image: "Describe the image you want to generate...",
     video: "Describe the video you want to generate...",
   }
@@ -246,7 +270,6 @@ export function ChatInput() {
               <Paperclip size={15} />
             </button>
 
-            {/* Image Mode */}
             <button
               onClick={() => setGenMode(genMode === "image" ? "chat" : "image")}
               className={`p-1.5 rounded-md transition-colors ${
@@ -257,7 +280,6 @@ export function ChatInput() {
               <ImageIcon size={15} />
             </button>
 
-            {/* Video Mode */}
             <button
               onClick={() => setGenMode(genMode === "video" ? "chat" : "video")}
               className={`p-1.5 rounded-md transition-colors ${
@@ -268,7 +290,15 @@ export function ChatInput() {
               <Video size={15} />
             </button>
 
-            {/* Model Selector */}
+            {/* IDE toggle */}
+            <button
+              onClick={() => { openIDE(); setIDETab("process") }}
+              className="p-1.5 rounded-md hover:bg-hive-hover text-text-muted hover:text-text-secondary transition-colors"
+              title="Open Worklog"
+            >
+              <Code size={15} />
+            </button>
+
             <div className="relative">
               <button
                 onClick={() => setShowModels(!showModels)}
