@@ -1,25 +1,26 @@
 /**
- * WebContainer utilities — NEVER imported statically.
- * Always loaded via: const { getWebContainer } = await import('@/lib/webcontainer')
- *
- * This file DOES import @webcontainer/api, but because it's only ever
- * reached via dynamic import() calls inside browser event handlers / useEffect,
- * webpack never statically traces into it during next build.
+ * WebContainer utilities.
+ * Uses only dynamic imports — no static @webcontainer/api import at module level.
  */
-import { WebContainer } from '@webcontainer/api'
 
-let _wc: WebContainer | null = null
-let _bootPromise: Promise<WebContainer> | null = null
+type WCType = typeof import('@webcontainer/api')['WebContainer']
+type WCInstance = InstanceType<WCType>
 
-export async function getWebContainer(): Promise<WebContainer> {
+let _wc: WCInstance | null = null
+let _bootPromise: Promise<WCInstance> | null = null
+
+export async function getWebContainer(): Promise<WCInstance> {
   if (_wc) return _wc
   if (_bootPromise) return _bootPromise
-  _bootPromise = WebContainer.boot().then((wc) => { _wc = wc; return wc })
+  // Dynamic import inside function body — webpack cannot trace this statically
+  _bootPromise = import('@webcontainer/api').then(({ WebContainer }) =>
+    WebContainer.boot().then((wc) => { _wc = wc; return wc })
+  )
   return _bootPromise
 }
 
 export async function mountFiles(
-  wc: WebContainer,
+  wc: WCInstance,
   files: Array<{ name: string; content: string }>
 ): Promise<void> {
   for (const file of files) {
