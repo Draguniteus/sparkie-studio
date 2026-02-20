@@ -1,0 +1,26 @@
+name: sparkie-studio
+region: nyc
+services:
+  - name: sparkie-studio
+    github:
+      repo: Draguniteus/sparkie-studio
+      branch: master
+      deploy_on_push: true
+    build_command: npm install && npm run build
+    run_command: npm start
+    source_dir: /
+    environment_slug: node-js
+    instance_size_slug: apps-s-1vcpu-1gb
+    instance_count: 1
+    http_port: 3000
+    envs:
+      - key: OPENROUTER_API_KEY
+        scope: RUN_TIME
+      - key: NEXT_PUBLIC_APP_URL
+        scope: BUILD_TIME
+      - key: NODE_ENV
+        value: production
+        scope: RUN_TIME
+alerts:
+  - rule: DEPLOYMENT_FAILED
+  - rule: DOMAIN_FAILED
