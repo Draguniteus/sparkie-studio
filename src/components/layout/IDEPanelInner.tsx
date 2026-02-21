@@ -86,7 +86,7 @@ export function IDEPanelInner() {
       <div className="flex-1 overflow-hidden">
         {ideTab === 'process' && (
           <div className="h-full">
-            {(isExecuting || liveCode.length > 0) ? <LiveCodeView /> : <Preview />}
+            {isExecuting ? <LiveCodeView /> : <Preview />}
           </div>
         )}
 
