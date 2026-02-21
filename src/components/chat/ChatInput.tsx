@@ -48,13 +48,15 @@ export function ChatInput() {
     const store = useAppStore.getState()
 
     if (parts.length === 1) {
-      // Flat file — check if exists, update or add
-      const existing = store.files.find(f => f.type === 'file' && f.name === parts[0])
+      // Flat file — read FRESH state each time (avoids stale closures when
+      // multiple files are upserted sequentially in the same streaming batch)
+      const fresh = useAppStore.getState()
+      const existing = fresh.files.find(f => f.type === 'file' && f.name === parts[0])
       if (existing) {
-        store.updateFileContent(existing.id, content)
+        fresh.updateFileContent(existing.id, content)
         return existing.id
       }
-      return store.addFile({ name: parts[0], type: 'file', content, language })
+      return fresh.addFile({ name: parts[0], type: 'file', content, language })
     }
 
     // Nested path — build/update tree
@@ -106,6 +108,55 @@ export function ChatInput() {
       .filter((m) => m.type !== "image" && m.type !== "video")
       .map((m) => ({ role: m.role, content: m.content }))
 
+    // ── Archive FIRST — before any state resets that could race with setFiles ──
+    // Read files synchronously right now, before any async state changes.
+    const currentFiles = useAppStore.getState().files
+    const isArchived = (f: import('@/store/appStore').FileNode) =>
+      f.type === 'folder' && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?-\d{4}$/.test(f.name)
+    const activeFiles = currentFiles.filter(f => !isArchived(f))
+    const existingArchives = currentFiles.filter(isArchived)
+
+    if (activeFiles.length > 0) {
+      // Name the folder after the most recent substantial user coding task.
+      // The NEW userContent (current submit) is NOT yet in the messages store,
+      // so look backwards through messages for the last user message with >4 words
+      // (skipping short conversational messages like "good job", "thanks", etc.)
+      const allUserMsgs = useAppStore.getState().messages.filter(m => m.role === 'user')
+      const prevCodingMsg = allUserMsgs.slice().reverse().find(m => m.content.trim().split(/\s+/).length > 4)
+      const nameSource = prevCodingMsg?.content || activeFiles[0]?.name || 'project'
+      const folderName = nameSource
+        .replace(/[^a-zA-Z0-9 ]/g, '')
+        .trim()
+        .split(/\s+/)
+        .slice(0, 5)
+        .join('-')
+        .toLowerCase() || 'project'
+      const timestamp = new Date()
+        .toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+        .replace(':', '')
+      const archiveName = `${folderName}-${timestamp}`
+
+      const deepCloneWithNewIds = (node: import('@/store/appStore').FileNode): import('@/store/appStore').FileNode => ({
+        ...node,
+        id: crypto.randomUUID(),
+        children: node.children?.map(deepCloneWithNewIds),
+      })
+
+      const archiveFolder: import('@/store/appStore').FileNode = {
+        id: crypto.randomUUID(),
+        name: archiveName,
+        type: 'folder',
+        content: '',
+        children: activeFiles.map(f => deepCloneWithNewIds(f)),
+      }
+
+      // Single atomic setFiles call — archives preserved, active workspace cleared
+      useAppStore.getState().setFiles([...existingArchives, archiveFolder])
+    } else {
+      useAppStore.getState().setFiles([])
+    }
+    // ── End archive ──────────────────────────────────────────────────────────
+
     // Chat shows brief placeholder — code goes to LiveCodeView
     const assistantMsgId = addMessage(chatId, {
       role: "assistant", content: "⚡ Working on it...", model: selectedModel, isStreaming: true,
@@ -117,45 +168,6 @@ export function ChatInput() {
     // Reset WebContainer state so the new task gets a fresh Preview
     setContainerStatus('idle')
     setPreviewUrl(null)
-
-    // Archive current files into a named project folder before clearing
-    const currentFiles = useAppStore.getState().files
-    // Archive everything that's not already an archived folder
-    const activeFiles = currentFiles.filter(f => !(f.type === 'folder' && /^[a-z0-9-]+-\d{4}$/.test(f.name)))
-    if (activeFiles.length > 0) {
-      // Derive folder name from last user message (truncated, slug-safe)
-      const lastMsg = useAppStore.getState().messages
-        .filter(m => m.role === 'user').slice(-2, -1)[0]?.content || 'project'
-      const folderName = lastMsg
-        .replace(/[^a-zA-Z0-9 ]/g, '')
-        .trim()
-        .split(' ')
-        .slice(0, 5)
-        .join('-')
-        .toLowerCase() || 'project'
-      const timestamp = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }).replace(':', '')
-      const archiveName = `${folderName}-${timestamp}`
-
-      const deepCloneWithNewIds = (node: import('@/store/appStore').FileNode): import('@/store/appStore').FileNode => ({
-        ...node,
-        id: crypto.randomUUID(),
-        children: node.children?.map(deepCloneWithNewIds),
-      })
-
-      const archiveFolder = {
-        id: crypto.randomUUID(),
-        name: archiveName,
-        type: 'folder' as const,
-        content: '',
-        children: activeFiles.map(f => deepCloneWithNewIds(f)),
-      }
-
-      // Keep existing archive folders, replace active files with fresh workspace
-      const existingArchives = currentFiles.filter(f => f.type === 'folder' && /^[a-z0-9-]+-\d{4}$/.test(f.name))
-      useAppStore.getState().setFiles([...existingArchives, archiveFolder])
-    } else {
-      useAppStore.getState().setFiles([])
-    }
 
     // Open IDE to Current Process — will show LiveCodeView since isExecuting=true
     if (!ideOpen) openIDE()
