@@ -35,11 +35,68 @@ export function ChatInput() {
   const {
     selectedModel, setSelectedModel, createChat, addMessage,
     updateMessage, currentChatId, isStreaming, setStreaming,
-    openIDE, setExecuting, addFile, setActiveFile, setIDETab, ideOpen,
+    openIDE, setExecuting, setActiveFile, setIDETab, ideOpen,
     clearLiveCode, appendLiveCode, addLiveCodeFile,
     addWorklogEntry, updateWorklogEntry,
     setContainerStatus, setPreviewUrl,
   } = useAppStore()
+
+  // Upsert a file with a potentially nested path (e.g. "public/index.html")
+  // into the Zustand files tree, creating intermediate folder nodes as needed.
+  const upsertFile = useCallback((filePath: string, content: string, language?: string): string => {
+    const parts = filePath.split('/').filter(Boolean)
+    const store = useAppStore.getState()
+
+    if (parts.length === 1) {
+      // Flat file — check if exists, update or add
+      const existing = store.files.find(f => f.type === 'file' && f.name === parts[0])
+      if (existing) {
+        store.updateFileContent(existing.id, content)
+        return existing.id
+      }
+      return store.addFile({ name: parts[0], type: 'file', content, language })
+    }
+
+    // Nested path — build/update tree
+    const setFiles = store.setFiles
+    const currentFiles = [...store.files]
+
+    function upsertInTree(nodes: import('@/store/appStore').FileNode[], pathParts: string[], fileContent: string, lang?: string): [import('@/store/appStore').FileNode[], string] {
+      const [head, ...rest] = pathParts
+      let resultId = ''
+
+      if (rest.length === 0) {
+        // Leaf — file node
+        const existingIdx = nodes.findIndex(n => n.type === 'file' && n.name === head)
+        if (existingIdx >= 0) {
+          const updated = [...nodes]
+          resultId = updated[existingIdx].id
+          updated[existingIdx] = { ...updated[existingIdx], content: fileContent, language: lang }
+          return [updated, resultId]
+        }
+        resultId = crypto.randomUUID()
+        return [[...nodes, { id: resultId, name: head, type: 'file' as const, content: fileContent, language: lang }], resultId]
+      }
+
+      // Directory node
+      const existingFolderIdx = nodes.findIndex(n => n.type === 'folder' && n.name === head)
+      if (existingFolderIdx >= 0) {
+        const folder = nodes[existingFolderIdx]
+        const [updatedChildren, id] = upsertInTree(folder.children ?? [], rest, fileContent, lang)
+        const updated = [...nodes]
+        updated[existingFolderIdx] = { ...folder, children: updatedChildren }
+        return [updated, id]
+      }
+
+      // New folder
+      const [children, id] = upsertInTree([], rest, fileContent, lang)
+      return [[...nodes, { id: crypto.randomUUID(), name: head, type: 'folder' as const, content: '', children }], id]
+    }
+
+    const [newTree, leafId] = upsertInTree(currentFiles, parts, content, language)
+    setFiles(newTree)
+    return leafId
+  }, [])
 
   const streamChat = useCallback(async (chatId: string, userContent: string) => {
     const chat = useAppStore.getState().chats.find((c) => c.id === chatId)
@@ -63,7 +120,8 @@ export function ChatInput() {
 
     // Archive current files into a named project folder before clearing
     const currentFiles = useAppStore.getState().files
-    const activeFiles = currentFiles.filter(f => f.type === 'file' && !f.name.startsWith('__archive'))
+    // Archive everything that's not already an archived folder
+    const activeFiles = currentFiles.filter(f => !(f.type === 'folder' && /^[a-z0-9-]+-\d{4}$/.test(f.name)))
     if (activeFiles.length > 0) {
       // Derive folder name from last user message (truncated, slug-safe)
       const lastMsg = useAppStore.getState().messages
@@ -78,16 +136,22 @@ export function ChatInput() {
       const timestamp = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }).replace(':', '')
       const archiveName = `${folderName}-${timestamp}`
 
+      const deepCloneWithNewIds = (node: import('@/store/appStore').FileNode): import('@/store/appStore').FileNode => ({
+        ...node,
+        id: crypto.randomUUID(),
+        children: node.children?.map(deepCloneWithNewIds),
+      })
+
       const archiveFolder = {
         id: crypto.randomUUID(),
         name: archiveName,
         type: 'folder' as const,
         content: '',
-        children: activeFiles.map(f => ({ ...f, id: crypto.randomUUID() })),
+        children: activeFiles.map(f => deepCloneWithNewIds(f)),
       }
 
       // Keep existing archive folders, replace active files with fresh workspace
-      const existingArchives = currentFiles.filter(f => f.type === 'folder')
+      const existingArchives = currentFiles.filter(f => f.type === 'folder' && /^[a-z0-9-]+-\d{4}$/.test(f.name))
       useAppStore.getState().setFiles([...existingArchives, archiveFolder])
     } else {
       useAppStore.getState().setFiles([])
@@ -161,12 +225,7 @@ export function ChatInput() {
               oldFiles.forEach(f => useAppStore.getState().deleteFile(f.id))
             }
 
-            const fileId = addFile({
-              name: file.name,
-              type: "file",
-              content: file.content,
-              language: getLanguageFromFilename(file.name),
-            })
+            const fileId = upsertFile(file.name, file.content, getLanguageFromFilename(file.name))
 
             if (filesCreated === 0) setActiveFile(fileId)
             filesCreated++
@@ -192,10 +251,7 @@ export function ChatInput() {
             const oldFiles = useAppStore.getState().files
             oldFiles.forEach(f => useAppStore.getState().deleteFile(f.id))
           }
-          const fileId = addFile({
-            name: file.name, type: "file", content: file.content,
-            language: getLanguageFromFilename(file.name),
-          })
+          const fileId = upsertFile(file.name, file.content, getLanguageFromFilename(file.name))
           if (filesCreated === 0) setActiveFile(fileId)
           filesCreated++
           addLiveCodeFile(file.name)
@@ -225,7 +281,7 @@ export function ChatInput() {
       setStreaming(false)
       setExecuting(false)
     }
-  }, [selectedModel, addMessage, updateMessage, setStreaming, setExecuting, openIDE, setIDETab, ideOpen, addFile, setActiveFile, clearLiveCode, appendLiveCode, addLiveCodeFile, addWorklogEntry, updateWorklogEntry, setContainerStatus, setPreviewUrl])
+  }, [selectedModel, addMessage, updateMessage, setStreaming, setExecuting, openIDE, setIDETab, ideOpen, upsertFile, setActiveFile, clearLiveCode, appendLiveCode, addLiveCodeFile, addWorklogEntry, updateWorklogEntry, setContainerStatus, setPreviewUrl])
 
   const generateMedia = useCallback(async (chatId: string, prompt: string, mediaType: "image" | "video") => {
     const model = mediaType === "video" ? selectedVideoModel : selectedImageModel

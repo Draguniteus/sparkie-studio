@@ -115,8 +115,12 @@ export function FileExplorer() {
     setNewName(""); setShowNew(false)
   }
 
+  const collectFiles = (nodes: FileNode[]): FileNode[] => {
+    return nodes.flatMap(n => n.type === 'folder' ? collectFiles(n.children ?? []) : [n])
+  }
+
   const downloadAll = () => {
-    files.filter(f => f.type === "file" && f.content).forEach(f => {
+    collectFiles(files).filter(f => f.content).forEach(f => {
       const blob = new Blob([f.content || ""], { type: "text/plain" })
       const url = URL.createObjectURL(blob)
       const a = document.createElement("a"); a.href = url; a.download = f.name; a.click()
