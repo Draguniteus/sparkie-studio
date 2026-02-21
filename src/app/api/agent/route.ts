@@ -80,19 +80,32 @@ When using Chart.js with a time scale (type: 'time'):
 - Interactive projects: make controls obvious
 - Animations: smooth 60fps`
 
+// Timeout for non-streaming (planner) calls — 20s is generous; if GLM-5 hangs, degrade gracefully
+const PLANNER_TIMEOUT_MS = 20_000
+
 async function callOpenCode(model: string, messages: {role: string, content: string}[], apiKey: string): Promise<string> {
-  const res = await fetch(`${OPENCODE_BASE}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-      'User-Agent': 'SparkieStudio/2.0',
-    },
-    body: JSON.stringify({ model, messages, stream: false, temperature: 0.7, max_tokens: 8192 }),
-  })
-  if (!res.ok) throw new Error(`OpenCode ${res.status}`)
-  const data = await res.json()
-  return data.choices?.[0]?.message?.content ?? ''
+  const abort = new AbortController()
+  const timer = setTimeout(() => abort.abort(), PLANNER_TIMEOUT_MS)
+  try {
+    const res = await fetch(`${OPENCODE_BASE}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+        'User-Agent': 'SparkieStudio/2.0',
+      },
+      body: JSON.stringify({ model, messages, stream: false, temperature: 0.7, max_tokens: 8192 }),
+      signal: abort.signal,
+    })
+    clearTimeout(timer)
+    if (!res.ok) throw new Error(`OpenCode ${res.status}`)
+    const data = await res.json()
+    return data.choices?.[0]?.message?.content ?? ''
+  } catch (err: unknown) {
+    clearTimeout(timer)
+    if (err instanceof Error && err.name === 'AbortError') throw new Error('Planner timed out')
+    throw err
+  }
 }
 
 async function callOpenCodeStream(model: string, messages: {role: string, content: string}[], apiKey: string, signal?: AbortSignal): Promise<ReadableStream> {
@@ -169,7 +182,16 @@ export async function POST(req: NextRequest) {
           { role: 'user', content: userMessage }
         ]
 
-        const planRaw = await callOpenCode('glm-5-free', plannerMessages, apiKey)
+        // Planner has a 20s timeout — if it times out, degrade gracefully with a stub plan
+        let planRaw: string
+        try {
+          planRaw = await callOpenCode('glm-5-free', plannerMessages, apiKey)
+        } catch (planErr: unknown) {
+          const isTimeout = planErr instanceof Error && planErr.message.includes('timed out')
+          send('thinking', { step: 'plan_done', text: isTimeout ? '⚡ Planner timed out — building directly' : '⚡ Planner unavailable — building directly' })
+          // Stub plan: build with just the user message and no search
+          planRaw = JSON.stringify({ title: 'App', files: [], searchQuery: null, context: '' })
+        }
 
         let plan: { title: string; files: string[]; approach: string; needsWebSearch: boolean; searchQuery: string }
         try {
@@ -239,30 +261,30 @@ export async function POST(req: NextRequest) {
           const reader = buildStream.getReader()
           const decoder = new TextDecoder()
 
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          const chunk = decoder.decode(value, { stream: true })
-          // Forward raw SSE chunks as build deltas
-          for (const line of chunk.split('\n')) {
-            if (line.startsWith('data: ') && line !== 'data: [DONE]') {
-              try {
-                const parsed = JSON.parse(line.slice(6))
-                const delta = parsed.choices?.[0]?.delta?.content
-                if (delta) {
-                  buildOutput += delta
-                  send('delta', { content: delta })
-                }
-              } catch { /* skip */ }
+          // while loop MUST be inside the try — so AbortError on reader.read() is caught
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            const chunk = decoder.decode(value, { stream: true })
+            for (const line of chunk.split('\n')) {
+              if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+                try {
+                  const parsed = JSON.parse(line.slice(6))
+                  const delta = parsed.choices?.[0]?.delta?.content
+                  if (delta) {
+                    buildOutput += delta
+                    send('delta', { content: delta })
+                  }
+                } catch { /* skip */ }
+              }
             }
           }
-        }
 
           clearTimeout(streamTimer)
         } catch (streamErr: unknown) {
           clearTimeout(streamTimer)
           const msg = streamErr instanceof Error && streamErr.name === 'AbortError'
-            ? 'Build timed out — try a simpler prompt'
+            ? '⏱ Build timed out — try a shorter or simpler prompt'
             : 'Stream error'
           send('error', { message: msg })
           return
