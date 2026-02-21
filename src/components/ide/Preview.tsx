@@ -110,8 +110,20 @@ export function Preview() {
 
     if (htmlFile?.content) {
       const base = `<style id="__sparkie">${PREVIEW_BASE_STYLES}html,body{overflow:auto;display:block}</style>`
-      let html = htmlFile.content.includes("<head>") ? htmlFile.content.replace("<head>",`<head>${base}`) : base + htmlFile.content
-      if (cssFile?.content) html = html.replace("</head>",`<style>${cssFile.content}</style></head>`)
+      // Hoist any @import rules in <style> blocks above the injected Sparkie base styles
+      const hoistedHtml = htmlFile.content.replace(/<style([^>]*)>([\s\S]*?)<\/style>/gi, (_match, attrs, css) => {
+        const imports = (css.match(/@import[^;]+;/g) || []).join('\n')
+        const rest = css.replace(/@import[^;]+;/g, '').trimStart()
+        return imports ? `${imports}\n<style${attrs}>${rest}</style>` : _match
+      })
+      let html = hoistedHtml.includes("<head>") ? hoistedHtml.replace("<head>",`<head>${base}`) : base + hoistedHtml
+      if (cssFile?.content) {
+        // Hoist @import rules before other declarations to satisfy CSS spec
+        const importRules = (cssFile.content.match(/@import[^;]+;/g) || []).join('\n')
+        const restCss = cssFile.content.replace(/@import[^;]+;/g, '').trim()
+        const orderedCss = importRules ? `${importRules}\n${restCss}` : restCss
+        html = html.replace("</head>",`<style>${orderedCss}</style></head>`)
+      }
       if (jsFile?.content)  html = html.replace("</body>",`<script>${jsFile.content}<\/script></body>`)
       return { previewHtml: html, previewType: "html" }
     }

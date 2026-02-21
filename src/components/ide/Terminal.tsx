@@ -41,7 +41,9 @@ export function Terminal() {
       </div>
       <div className="flex-1 overflow-y-auto p-3 font-mono text-[12px] leading-[18px]">
         {terminalOutput ? (
-          <pre className="whitespace-pre-wrap break-words text-[#e2e8f0]">{terminalOutput}</pre>
+          <pre className="whitespace-pre-wrap break-words text-[#e2e8f0]">
+            {terminalOutput.replace(/\x1b\[[0-9;]*[mKGABCDHJSTf]|\x1b\([AB]|\x1b[=>]|\r/g, '')}
+          </pre>
         ) : (
           <div className="h-full flex flex-col items-center justify-center text-text-muted">
             <TermIcon size={28} className="mb-3 text-honey-500/30" />

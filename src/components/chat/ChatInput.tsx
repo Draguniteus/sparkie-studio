@@ -333,6 +333,76 @@ export function ChatInput() {
     }
   }, [selectedImageModel, selectedVideoModel, addMessage, updateMessage, setStreaming, addWorklogEntry, updateWorklogEntry, openIDE, setIDETab, ideOpen])
 
+  // Detect conversational/non-coding messages that shouldn't trigger the IDE
+  const isConversational = useCallback((text: string): boolean => {
+    const t = text.trim().toLowerCase()
+    // Very short messages (≤4 words) that are praise, acknowledgements, or greetings
+    const words = t.split(/\s+/).filter(Boolean)
+    if (words.length > 8) return false
+    const conversationalPatterns = [
+      /^(ok|okay|alright|sure|got it|nice|cool|great|awesome|perfect|sounds good|makes sense)[\.!?]?$/,
+      /^(thanks?|thank you|ty|thx|cheers|appreciate it)[\.!?\s]*$/,
+      /^(excellent|amazing|fantastic|wonderful|brilliant|good job|well done|love it|beautiful|gorgeous)[\.!?\s]*\w*[\.!?]?$/,
+      /^(hello|hi|hey|yo|sup|howdy)[\.!?,\s]*\w*[\.!?]?$/,
+      /^(yes|no|nope|yep|yup|nah|maybe|sure thing)[\.!?]?$/,
+      /^(lol|haha|hehe|nice one|lmao|😂|🔥|💯|👍|❤️)[\.!?\s]*$/,
+      /^(wow|omg|oh|ah|oh wow|oh nice|oh great)[\.!?\s]*\w*[\.!?]?$/,
+    ]
+    return conversationalPatterns.some(p => p.test(t))
+  }, [])
+
+  // Lightweight chat-only reply (no IDE, no file generation)
+  const streamReply = useCallback(async (chatId: string, userContent: string) => {
+    const chat = useAppStore.getState().chats.find((c) => c.id === chatId)
+    if (!chat) return
+    const apiMessages = chat.messages
+      .filter((m) => m.type !== "image" && m.type !== "video")
+      .map((m) => ({ role: m.role, content: m.content }))
+    const assistantMsgId = addMessage(chatId, { role: "assistant", content: "", model: selectedModel, isStreaming: true })
+    setStreaming(true)
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: apiMessages, model: selectedModel }),
+      })
+      if (!response.ok) {
+        updateMessage(chatId, assistantMsgId, { content: "Something went wrong.", isStreaming: false })
+        setStreaming(false); return
+      }
+      const reader = response.body?.getReader()
+      const decoder = new TextDecoder()
+      if (!reader) { setStreaming(false); return }
+      let buffer = "", fullContent = ""
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split("\n")
+        buffer = lines.pop() || ""
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed || !trimmed.startsWith("data: ")) continue
+          const data = trimmed.slice(6)
+          if (data === "[DONE]") continue
+          try {
+            const parsed = JSON.parse(data)
+            const delta = parsed.choices?.[0]?.delta
+            if (delta?.content) {
+              fullContent += delta.content
+              updateMessage(chatId, assistantMsgId, { content: fullContent })
+            }
+          } catch { /* skip */ }
+        }
+      }
+      updateMessage(chatId, assistantMsgId, { content: fullContent || "👋", isStreaming: false })
+    } catch {
+      updateMessage(chatId, assistantMsgId, { content: "Connection error.", isStreaming: false })
+    } finally {
+      setStreaming(false)
+    }
+  }, [selectedModel, addMessage, updateMessage, setStreaming])
+
   const handleSubmit = useCallback(() => {
     if (!input.trim() || isStreaming) return
 
@@ -349,10 +419,13 @@ export function ChatInput() {
       generateMedia(chatId, userContent, "image")
     } else if (genMode === "video") {
       generateMedia(chatId, userContent, "video")
+    } else if (isConversational(userContent)) {
+      // Chitchat / praise — reply naturally without touching the IDE
+      streamReply(chatId, userContent)
     } else {
       streamChat(chatId, userContent)
     }
-  }, [input, isStreaming, currentChatId, createChat, addMessage, genMode, streamChat, generateMedia])
+  }, [input, isStreaming, currentChatId, createChat, addMessage, genMode, streamChat, generateMedia, isConversational, streamReply])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit() }
