@@ -45,6 +45,12 @@ For ALL web projects (charts, dashboards, games, animations):
 - Exception: full-stack Express apps may use separate files (they run in a container)
 - This ensures the live preview works correctly
 
+## CSS RULES (CRITICAL)
+- NEVER use @import inside a <style> tag — it breaks browser rendering
+- For Google Fonts: use a <link> tag in <head> BEFORE the <style> tag
+  Example: <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+- All @font-face declarations must be at the very top of the <style> block
+
 ## CHART.JS DATE ADAPTER (CRITICAL)
 When using Chart.js with a time scale (type: 'time'):
 - ALWAYS include the date adapter BEFORE your chart code:
@@ -97,6 +103,24 @@ function extractTitle(msg: string): string {
     .trim() || 'Project'
 }
 
+// Hoist @import rules to the top of every <style> block
+// Some models output @import after other rules, which browsers silently ignore
+function hoistCssImports(html: string): string {
+  return html.replace(/<style([^>]*)>([\s\S]*?)<\/style>/gi, (_match, attrs, body) => {
+    const imports: string[] = []
+    const rest: string[] = []
+    for (const line of body.split('\n')) {
+      if (/^\s*@import\s/i.test(line)) {
+        imports.push(line)
+      } else {
+        rest.push(line)
+      }
+    }
+    if (imports.length === 0) return `<style${attrs}>${body}</style>`
+    return `<style${attrs}>\n${imports.join('\n')}\n${rest.join('\n')}</style>`
+  })
+}
+
 export async function POST(req: NextRequest) {
   // ── Body size guard ──────────────────────────────────────────────────
   const contentLength = req.headers.get('content-length')
@@ -109,10 +133,12 @@ export async function POST(req: NextRequest) {
 
   let messages: { role: string; content: string }[]
   let currentFiles: string | undefined
+  let preferredModel: string | undefined
   try {
     const body = await req.json()
     messages = body.messages
     currentFiles = body.currentFiles
+    preferredModel = typeof body.model === 'string' ? body.model : undefined
     if (!Array.isArray(messages) || messages.length === 0) throw new Error('Invalid messages')
   } catch {
     return new Response(JSON.stringify({ error: 'Invalid request body' }), {
@@ -131,6 +157,12 @@ export async function POST(req: NextRequest) {
   const userMessage = messages[messages.length - 1]?.content ?? ''
   const projectTitle = extractTitle(userMessage)
   const encoder = new TextEncoder()
+
+  // Build model priority list: user's selection first, then fallbacks (deduped)
+  const FALLBACK_MODELS = ['glm-5-free', 'minimax-m2.5-free', 'kimi-k2.5-free', 'minimax-m2.1-free', 'big-pickle']
+  const BUILDER_MODELS = preferredModel
+    ? [preferredModel, ...FALLBACK_MODELS.filter(m => m !== preferredModel)]
+    : FALLBACK_MODELS
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -184,8 +216,7 @@ export async function POST(req: NextRequest) {
           { role: 'user', content: userMessage },
         ]
 
-        // Fallback chain: try each model until one produces output
-        const BUILDER_MODELS = ['glm-5-free', 'minimax-m2.5-free', 'kimi-k2.5-free', 'minimax-m2.1-free']
+        // Fallback chain: user's selected model first, then fallbacks
         let buildOutput = ''
 
         for (let idx = 0; idx < BUILDER_MODELS.length; idx++) {
@@ -248,6 +279,9 @@ export async function POST(req: NextRequest) {
           send('error', { message: 'All models are busy — please try again in a moment' })
           return
         }
+
+        // Post-process: hoist @import rules to top of <style> blocks
+        buildOutput = hoistCssImports(buildOutput)
 
         send('thinking', { step: 'done', text: '[ok] Build complete — preview ready' })
         send('done', { buildOutput })

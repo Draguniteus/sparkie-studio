@@ -10,7 +10,6 @@ const MODELS = [
   { id: "minimax-m2.5-free", name: "MiniMax M2.5", tag: "Free", type: "chat" },
   { id: "minimax-m2.1-free", name: "MiniMax M2.1", tag: "Free", type: "chat" },
   { id: "kimi-k2.5-free", name: "Kimi K2.5", tag: "Free", type: "chat" },
-  { id: "big-pickle", name: "Big Pickle", tag: "Free", type: "chat" },
 ]
 
 const IMAGE_MODELS = [
@@ -640,21 +639,21 @@ export function ChatInput() {
           const latest = archives[archives.length - 1]
           useAppStore.getState().setFiles([...archives.slice(0, -1), ...( latest.children ?? [])])
         }
-        // No files produced — show clean conversational response or error
+        // No files produced — show clean conversational response or helpful fallback
         if (fullBuild) {
           const finalParse = parseAIResponse(fullBuild)
           const textOnly = finalParse.text || ''
-          // Only show as chat text if it's clean conversational content (short, no code markers)
-          const hasCodeMarkers = textOnly.includes('---FILE:') || textOnly.includes('```')
-            || textOnly.includes('function ') || textOnly.includes(' => ')
-          const isCleanText = textOnly.length > 0 && textOnly.length < 1500 && !hasCodeMarkers
-          if (isCleanText) {
-            updateMessage(chatId, thinkingMsgId, { content: textOnly, isStreaming: false, model: selectedModel })
-          } else {
-            // Build produced code but no valid file markers — show clean error
+          const hasFileMarkers = fullBuild.includes('---FILE:')
+          if (textOnly.length > 0 && !hasFileMarkers) {
+            // Model responded conversationally (e.g. clarification, error) — show as chat
+            updateMessage(chatId, thinkingMsgId, { content: textOnly.slice(0, 2000), isStreaming: false, model: selectedModel })
+          } else if (hasFileMarkers) {
+            // Had markers but parser found no files — genuine parse failure
             updateMessage(chatId, thinkingMsgId, { content: lastThinkingText, isStreaming: false })
             if (buildMsgId) updateMessage(chatId, buildMsgId, { content: '⚠️ Build output was malformed — try rephrasing your request or use a more specific description.', isStreaming: false })
             return
+          } else {
+            updateMessage(chatId, thinkingMsgId, { content: lastThinkingText, isStreaming: false })
           }
         } else {
           updateMessage(chatId, thinkingMsgId, { content: lastThinkingText, isStreaming: false })
