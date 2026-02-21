@@ -4,26 +4,6 @@ export const runtime = 'edge'
 
 const OPENCODE_BASE = 'https://opencode.ai/zen/v1'
 
-// ── System prompts ────────────────────────────────────────────────────────────
-
-const EXPLORER_SYSTEM = `You are a fast creative explorer. When given a build request, respond with ONLY 4-6 concise bullet points covering:
-- Best approach / architecture pattern for this type of project
-- Key libraries or APIs to use (CDN links if web)
-- Important UX / visual considerations
-- Any common pitfalls to avoid
-
-Be direct and specific. No code, no explanations — bullets only. Max 120 words total.`
-
-const ARCHITECT_SYSTEM = `You are a senior software architect. Given a build request and exploration notes, write a brief implementation spec.
-
-Output ONLY:
-1. File list (e.g. index.html — single file with inline CSS+JS)
-2. Core data structures or state (2-3 lines max)
-3. Key functions/components to implement (3-5 items)
-4. Rendering or update loop approach (1-2 lines)
-
-No prose, no code blocks. Max 150 words. Be precise — this feeds directly into a code generator.`
-
 const BUILDER_SYSTEM = `You are Sparkie, an expert AI coding agent inside Sparkie Studio. Build ANYTHING the user asks for.
 
 ## OUTPUT FORMAT
@@ -82,8 +62,6 @@ When using Chart.js with a time scale (type: 'time'):
 - Interactive projects: make controls obvious
 - Animations: smooth 60fps`
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
 async function callOpenCodeStream(
   model: string,
   messages: { role: string; content: string }[],
@@ -102,32 +80,6 @@ async function callOpenCodeStream(
   })
   if (!res.ok) throw new Error(`OpenCode ${res.status}`)
   return res.body!
-}
-
-// Non-streaming call with hard timeout — returns text or null on failure/timeout
-async function callOpenCodeBlocking(
-  model: string,
-  messages: { role: string; content: string }[],
-  apiKey: string,
-  timeoutMs: number
-): Promise<string | null> {
-  try {
-    const res = await fetch(`${OPENCODE_BASE}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-        'User-Agent': 'SparkieStudio/2.0',
-      },
-      body: JSON.stringify({ model, messages, stream: false, temperature: 0.7, max_tokens: 512 }),
-      signal: AbortSignal.timeout(timeoutMs),
-    })
-    if (!res.ok) return null
-    const json = await res.json()
-    return json.choices?.[0]?.message?.content?.trim() ?? null
-  } catch {
-    return null
-  }
 }
 
 function sseEvent(event: string, data: object): string {
@@ -164,8 +116,6 @@ function hoistCssImports(html: string): string {
   })
 }
 
-// ── Main handler ──────────────────────────────────────────────────────────────
-
 export async function POST(req: NextRequest) {
   const contentLength = req.headers.get('content-length')
   if (contentLength && parseInt(contentLength) > MAX_BODY_BYTES) {
@@ -201,10 +151,11 @@ export async function POST(req: NextRequest) {
   const projectTitle = extractTitle(userMessage)
   const encoder = new TextEncoder()
 
-  // 3-stage pipeline runs on new builds only (no currentFiles)
-  // Fix/modify requests skip straight to builder with selected model
-  const isNewBuild = !currentFiles
-  const USE_PIPELINE = isNewBuild
+  // Build model list: user's selection first, then fallbacks (deduped)
+  const FALLBACK_MODELS = ['minimax-m2.5-free', 'glm-5-free', 'kimi-k2.5-free', 'minimax-m2.1-free', 'big-pickle']
+  const BUILDER_MODELS = preferredModel
+    ? [preferredModel, ...FALLBACK_MODELS.filter(m => m !== preferredModel)]
+    : FALLBACK_MODELS
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -213,7 +164,7 @@ export async function POST(req: NextRequest) {
       }
 
       try {
-        // ── OPTIONAL: Tavily web search ──────────────────────────────────
+        // ── Optional: Tavily web search ──────────────────────────────────
         let searchContext = ''
         const needsSearch = tavilyKey && /real.?time|live (price|data|feed|stock)|today.s|current (price|weather|news)/i.test(userMessage)
         if (needsSearch) {
@@ -237,54 +188,10 @@ export async function POST(req: NextRequest) {
           } catch { /* non-fatal */ }
         }
 
-        let explorationNotes = ''
-        let architectureSpec = ''
-
-        if (USE_PIPELINE) {
-          // ── STAGE 1: Kimi K2.5 — Explore ────────────────────────────────
-          send('thinking', { step: 'explore', text: '[🔍] Exploring with Kimi...' })
-          const exploreMessages = [
-            { role: 'system', content: EXPLORER_SYSTEM },
-            ...(searchContext ? [
-              { role: 'user' as const, content: `Research context:\n${searchContext}` },
-              { role: 'assistant' as const, content: 'Got it.' },
-            ] : []),
-            { role: 'user', content: userMessage },
-          ]
-          const exploration = await callOpenCodeBlocking('kimi-k2.5-free', exploreMessages, apiKey, 18000)
-          if (exploration) {
-            explorationNotes = exploration
-            send('thinking', { step: 'explore_done', text: `[🔍] Exploration done` })
-          } else {
-            send('thinking', { step: 'explore_skip', text: '[🔍] Kimi timed out — skipping explore' })
-          }
-
-          // ── STAGE 2: GLM-5 — Architect ───────────────────────────────────
-          send('thinking', { step: 'architect', text: '[🏗️] Architecting with GLM-5...' })
-          const architectMessages = [
-            { role: 'system', content: ARCHITECT_SYSTEM },
-            { role: 'user', content: `Build request: ${userMessage}${explorationNotes ? `\n\nExploration notes:\n${explorationNotes}` : ''}` },
-          ]
-          const architecture = await callOpenCodeBlocking('glm-5-free', architectMessages, apiKey, 20000)
-          if (architecture) {
-            architectureSpec = architecture
-            send('thinking', { step: 'architect_done', text: `[🏗️] Architecture spec ready` })
-          } else {
-            send('thinking', { step: 'architect_skip', text: '[🏗️] GLM-5 timed out — skipping architect' })
-          }
-        }
-
-        // ── STAGE 3: MiniMax M2.5 — Build (streaming) ────────────────────
-        send('thinking', { step: 'build', text: `[⚡] Building ${projectTitle} with M2.5...` })
+        // ── Build ────────────────────────────────────────────────────────
+        send('thinking', { step: 'build', text: `[+] Building ${projectTitle}...` })
 
         const chatHistory = currentFiles ? messages.slice(0, -1) : []
-
-        // Inject pipeline context into builder if available
-        const pipelineContext = [
-          explorationNotes ? `## Exploration Notes (from Kimi K2.5)\n${explorationNotes}` : '',
-          architectureSpec ? `## Architecture Spec (from GLM-5)\n${architectureSpec}` : '',
-        ].filter(Boolean).join('\n\n')
-
         const builderMessages = [
           { role: 'system', content: BUILDER_SYSTEM },
           ...chatHistory,
@@ -292,21 +199,12 @@ export async function POST(req: NextRequest) {
             { role: 'user' as const, content: `Web research context:\n${searchContext}` },
             { role: 'assistant' as const, content: 'Got it, I will use this context.' },
           ] : []),
-          ...(pipelineContext ? [
-            { role: 'user' as const, content: `Pre-build analysis:\n${pipelineContext}` },
-            { role: 'assistant' as const, content: 'Understood. I will use this to guide the implementation.' },
-          ] : []),
           ...(currentFiles ? [
             { role: 'user' as const, content: `Current workspace files:\n${currentFiles}` },
             { role: 'assistant' as const, content: 'Understood. I will update these files.' },
           ] : []),
           { role: 'user', content: userMessage },
         ]
-
-        // Builder: M2.5 first for new builds, user-selected first for fix requests, fallbacks for both
-        const BUILDER_PRIMARY = USE_PIPELINE ? 'minimax-m2.5-free' : (preferredModel ?? 'minimax-m2.5-free')
-        const FALLBACK_MODELS = ['minimax-m2.5-free', 'glm-5-free', 'kimi-k2.5-free', 'minimax-m2.1-free', 'big-pickle']
-        const BUILDER_MODELS = [BUILDER_PRIMARY, ...FALLBACK_MODELS.filter(m => m !== BUILDER_PRIMARY)]
 
         let buildOutput = ''
 
