@@ -16,6 +16,7 @@ export interface Chat {
   title: string
   messages: Message[]
   createdAt: Date
+  files: FileNode[]  // per-chat workspace — source of truth
 }
 
 export interface FileNode {
@@ -82,6 +83,7 @@ interface AppState {
   deleteFile: (id: string) => void
   setActiveFile: (id: string | null) => void
   setFiles: (files: FileNode[]) => void
+  saveChatFiles: (chatId: string, files: FileNode[]) => void
   openIDE: () => void
   toggleIDE: () => void
   setIdeTab: (tab: IDETab) => void
@@ -169,7 +171,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   createChat: () => {
     const id = crypto.randomUUID()
     set((s) => ({
-      chats: [...s.chats, { id, title: 'New Chat', messages: [], createdAt: new Date() }],
+      chats: [...s.chats, { id, title: 'New Chat', messages: [], createdAt: new Date(), files: [] }],
       currentChatId: id,
       messages: [],
       // Reset IDE completely for a fresh session
@@ -187,7 +189,20 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   setCurrentChat: (id) => {
     const chat = get().chats.find((c) => c.id === id)
-    set({ currentChatId: id, messages: chat?.messages ?? [] })
+    // Restore this chat's full workspace — files, messages, and reset IDE runtime state
+    set({
+      currentChatId: id,
+      messages: chat?.messages ?? [],
+      files: chat?.files ?? [],
+      activeFileId: null,
+      liveCode: '',
+      liveCodeFiles: [],
+      isExecuting: false,
+      isStreaming: false,
+      ideTab: 'process',
+      containerStatus: 'idle',
+      previewUrl: null,
+    })
   },
   deleteChat: (id) => set((s) => ({ chats: s.chats.filter((c) => c.id !== id), currentChatId: null, messages: [] })),
 
@@ -215,6 +230,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   deleteFile: (id) => set((s) => ({ files: s.files.filter((f) => f.id !== id) })),
   setActiveFile: (id) => set({ activeFileId: id }),
   setFiles: (files) => set({ files }),
+  saveChatFiles: (chatId, files) => set((s) => ({
+    chats: s.chats.map((c) => c.id === chatId ? { ...c, files } : c),
+  })),
   openIDE: () => set({ ideOpen: true }),
   toggleIDE: () => set((s) => ({ ideOpen: !s.ideOpen })),
   setIdeTab: (tab) => set({ ideTab: tab }),

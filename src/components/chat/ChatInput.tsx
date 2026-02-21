@@ -38,7 +38,7 @@ export function ChatInput() {
     openIDE, setExecuting, setActiveFile, setIDETab, ideOpen,
     clearLiveCode, appendLiveCode, addLiveCodeFile,
     addWorklogEntry, updateWorklogEntry,
-    setContainerStatus, setPreviewUrl,
+    setContainerStatus, setPreviewUrl, saveChatFiles,
   } = useAppStore()
 
   // Upsert a file with a potentially nested path (e.g. "public/index.html")
@@ -111,6 +111,30 @@ export function ChatInput() {
     const apiMessages = chat.messages
       .filter((m) => m.type !== "image" && m.type !== "video")
       .map((m) => ({ role: m.role, content: m.content }))
+
+    // ── Inject current workspace context for fix/modify requests ──────────────
+    // If there are active files, append them as a system context message so the
+    // AI can do proper targeted edits rather than starting from scratch.
+    const isArchivedNodeCheck = (f: import('@/store/appStore').FileNode) =>
+      f.type === 'folder' && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?-\d{4}$/.test(f.name)
+    const activeFilesForContext = useAppStore.getState().files.filter(f => !isArchivedNodeCheck(f))
+    if (activeFilesForContext.length > 0) {
+      const fileContext = activeFilesForContext
+        .filter(f => f.type === 'file' && f.content)
+        .map(f => `---FILE: ${f.name}---\n${f.content}\n---END FILE---`)
+        .join('\n\n')
+      if (fileContext) {
+        apiMessages.push({
+          role: 'user' as const,
+          content: `[CURRENT WORKSPACE — these are the files currently in the IDE. When asked to fix or modify, update these exact files and return them complete with ---FILE:--- markers]\n\n${fileContext}`,
+        })
+        apiMessages.push({
+          role: 'assistant' as const,
+          content: `Understood. I have the current workspace loaded. I'll make targeted fixes and return the complete updated file(s).`,
+        })
+      }
+    }
+    // ── End workspace context ──────────────────────────────────────────────────
 
     // ── Archive FIRST — before any state resets that could race with setFiles ──
     // Read files synchronously right now, before any async state changes.
@@ -313,8 +337,10 @@ export function ChatInput() {
       // Stop executing — IDEPanel will swap from LiveCodeView to Preview
       setStreaming(false)
       setExecuting(false)
+      // Persist current workspace back to this chat so switching chats restores it
+      saveChatFiles(chatId, useAppStore.getState().files)
     }
-  }, [selectedModel, addMessage, updateMessage, setStreaming, setExecuting, openIDE, setIDETab, ideOpen, upsertFile, setActiveFile, clearLiveCode, appendLiveCode, addLiveCodeFile, addWorklogEntry, updateWorklogEntry, setContainerStatus, setPreviewUrl])
+  }, [selectedModel, addMessage, updateMessage, setStreaming, setExecuting, openIDE, setIDETab, ideOpen, upsertFile, setActiveFile, clearLiveCode, appendLiveCode, addLiveCodeFile, addWorklogEntry, updateWorklogEntry, setContainerStatus, setPreviewUrl, saveChatFiles])
 
   const generateMedia = useCallback(async (chatId: string, prompt: string, mediaType: "image" | "video") => {
     const model = mediaType === "video" ? selectedVideoModel : selectedImageModel
