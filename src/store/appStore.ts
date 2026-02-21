@@ -54,7 +54,8 @@ interface AppState {
   isLoading: boolean
   isStreaming: boolean
   selectedModel: string
-  addMessage: (chatIdOrMsg: string | Message, msg?: Partial<Message>) => string
+  // Two overloads: (chatId, partial) for chat-scoped, or (message) for legacy
+  addMessage: (chatIdOrMsg: string | Omit<Message, 'id'>, msg?: Partial<Message>) => string
   appendToMessage: (id: string, content: string) => void
   updateMessage: (chatIdOrId: string, idOrPatch: string | Partial<Message>, patch?: Partial<Message>) => void
   clearMessages: () => void
@@ -113,6 +114,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   addMessage: (chatIdOrMsg, msgPartial) => {
     const id = crypto.randomUUID()
     if (typeof chatIdOrMsg === 'string') {
+      // Scoped to a specific chat
       const msg: Message = { id, role: 'user', content: '', ...msgPartial }
       set((s) => ({
         messages: [...s.messages, msg],
@@ -121,14 +123,21 @@ export const useAppStore = create<AppState>((set, get) => ({
         ),
       }))
     } else {
-      const msg: Message = { id, ...(chatIdOrMsg as Message) }
+      // chatIdOrMsg is Omit<Message, 'id'> — add id and push
+      const msg: Message = { id, ...chatIdOrMsg }
       set((s) => ({ messages: [...s.messages, msg] }))
     }
     return id
   },
 
   appendToMessage: (id, content) =>
-    set((s) => ({ messages: s.messages.map((m) => m.id === id ? { ...m, content: m.content + content } : m) })),
+    set((s) => ({
+      messages: s.messages.map((m) => m.id === id ? { ...m, content: m.content + content } : m),
+      chats: s.chats.map((c) => ({
+        ...c,
+        messages: c.messages.map((m) => m.id === id ? { ...m, content: m.content + content } : m),
+      })),
+    })),
 
   updateMessage: (chatIdOrId, idOrPatch, patch) => {
     if (patch !== undefined) {
@@ -143,7 +152,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       }))
     } else {
       const p = idOrPatch as Partial<Message>
-      set((s) => ({ messages: s.messages.map((m) => m.id === chatIdOrId ? { ...m, ...p } : m) }))
+      set((s) => ({
+        messages: s.messages.map((m) => m.id === chatIdOrId ? { ...m, ...p } : m),
+        chats: s.chats.map((c) => ({
+          ...c,
+          messages: c.messages.map((m) => m.id === chatIdOrId ? { ...m, ...p } : m),
+        })),
+      }))
     }
   },
 
@@ -153,7 +168,11 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   createChat: () => {
     const id = crypto.randomUUID()
-    set((s) => ({ chats: [...s.chats, { id, title: 'New Chat', messages: [], createdAt: new Date() }], currentChatId: id, messages: [] }))
+    set((s) => ({
+      chats: [...s.chats, { id, title: 'New Chat', messages: [], createdAt: new Date() }],
+      currentChatId: id,
+      messages: [],
+    }))
     return id
   },
   setCurrentChat: (id) => {
@@ -202,7 +221,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((s) => ({ worklog: [...s.worklog, { ...entry, id, timestamp: new Date() }] }))
     return id
   },
-  updateWorklogEntry: (id, patch) => set((s) => ({ worklog: s.worklog.map((e) => e.id === id ? { ...e, ...patch } : e) })),
+  updateWorklogEntry: (id, patch) =>
+    set((s) => ({ worklog: s.worklog.map((e) => e.id === id ? { ...e, ...patch } : e) })),
   clearWorklog: () => set({ worklog: [] }),
 
   containerStatus: 'idle',
