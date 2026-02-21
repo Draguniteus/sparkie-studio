@@ -4,7 +4,7 @@ import { useState } from "react"
 import { useAppStore, FileNode } from "@/store/appStore"
 import { getFileSize } from "@/lib/fileParser"
 import {
-  File, Folder, FolderOpen, Plus, Trash2, Download, ChevronRight, ChevronDown,
+  File, Folder, FolderOpen, Plus, Trash2, Download, ChevronRight, ChevronDown, Archive,
   FileCode, FileText, FileImage, FileJson,
 } from "lucide-react"
 
@@ -27,7 +27,8 @@ function FileItem({ file, depth }: FileItemProps) {
   const [expanded, setExpanded] = useState(true)
   const { activeFileId, setActiveFile, deleteFile } = useAppStore()
   const isActive = activeFileId === file.id
-  const isFolder = file.type === "folder"
+  const isFolder = file.type === "folder" || file.type === "archive"
+  const isArchive = file.type === "archive"
 
   const downloadFile = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -43,16 +44,16 @@ function FileItem({ file, depth }: FileItemProps) {
   return (
     <div>
       <div
-        className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer group text-xs transition-colors ${
+        className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md ${isArchive ? "opacity-35 cursor-default" : "cursor-pointer"} group text-xs transition-colors ${
           isActive ? "bg-honey-500/10 text-text-primary" : "text-text-secondary hover:bg-hive-hover"
         }`}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
-        onClick={() => isFolder ? setExpanded(!expanded) : setActiveFile(file.id)}
+        onClick={() => isFolder ? (isArchive ? null : setExpanded(!expanded)) : setActiveFile(file.id)}
       >
         {isFolder ? (
           <>
             {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-            {expanded ? <FolderOpen size={14} className="text-honey-500/70" /> : <Folder size={14} className="text-honey-500/70" />}
+            {isArchive ? <Archive size={14} className="text-text-muted/50" /> : expanded ? <FolderOpen size={14} className="text-honey-500/70" /> : <Folder size={14} className="text-honey-500/70" />}
           </>
         ) : (
           <>{getFileIcon(file.name)}</>

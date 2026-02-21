@@ -49,8 +49,7 @@ export function ChatInput() {
 
     if (parts.length === 1) {
       // Flat file — only search non-archive top-level nodes
-      const isArchivedNode = (f: import('@/store/appStore').FileNode) =>
-        f.type === 'folder' && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?-\d{4}$/.test(f.name)
+      const isArchivedNode = (f: import('@/store/appStore').FileNode) => f.type === 'archive'
       const fresh = useAppStore.getState()
       const existing = fresh.files.find(f => f.type === 'file' && f.name === parts[0] && !isArchivedNode(f))
       if (existing) {
@@ -61,8 +60,7 @@ export function ChatInput() {
     }
 
     // Nested path — build/update tree (exclude archive folders from merge target)
-    const isArchivedNode = (f: import('@/store/appStore').FileNode) =>
-      f.type === 'folder' && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?-\d{4}$/.test(f.name)
+    const isArchivedNode = (f: import('@/store/appStore').FileNode) => f.type === 'archive'
     const setFiles = store.setFiles
     const archiveNodes = store.files.filter(isArchivedNode)
     const currentFiles = store.files.filter(f => !isArchivedNode(f))
@@ -115,9 +113,7 @@ export function ChatInput() {
     // ── Inject current workspace context for fix/modify requests ──────────────
     // If there are active files, append them as a system context message so the
     // AI can do proper targeted edits rather than starting from scratch.
-    const isArchivedNodeCheck = (f: import('@/store/appStore').FileNode) =>
-      f.type === 'folder' && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?-\d{4}$/.test(f.name)
-    const activeFilesForContext = useAppStore.getState().files.filter(f => !isArchivedNodeCheck(f))
+    const activeFilesForContext = useAppStore.getState().files.filter(f => f.type !== 'archive')
     if (activeFilesForContext.length > 0) {
       const fileContext = activeFilesForContext
         .filter(f => f.type === 'file' && f.content)
@@ -139,8 +135,7 @@ export function ChatInput() {
     // ── Archive FIRST — before any state resets that could race with setFiles ──
     // Read files synchronously right now, before any async state changes.
     const currentFiles = useAppStore.getState().files
-    const isArchived = (f: import('@/store/appStore').FileNode) =>
-      f.type === 'folder' && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?-\d{4}$/.test(f.name)
+    const isArchived = (f: import('@/store/appStore').FileNode) => f.type === 'archive'
     const activeFiles = currentFiles.filter(f => !isArchived(f))
     const existingArchives = currentFiles.filter(isArchived)
 
@@ -173,7 +168,7 @@ export function ChatInput() {
       const archiveFolder: import('@/store/appStore').FileNode = {
         id: crypto.randomUUID(),
         name: archiveName,
-        type: 'folder',
+        type: 'archive',
         content: '',
         children: activeFiles.map(f => deepCloneWithNewIds(f)),
       }
@@ -261,8 +256,7 @@ export function ChatInput() {
 
             // Clear old non-archive files on first file creation
             if (filesCreated === 0) {
-              const isArchivedNode = (f: import('@/store/appStore').FileNode) =>
-                f.type === 'folder' && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?-\d{4}$/.test(f.name)
+              const isArchivedNode = (f: import('@/store/appStore').FileNode) => f.type === 'archive'
               const oldFiles = useAppStore.getState().files.filter(f => !isArchivedNode(f))
               oldFiles.forEach(f => useAppStore.getState().deleteFile(f.id))
             }
@@ -290,8 +284,7 @@ export function ChatInput() {
         if (!createdFileNames.has(file.name)) {
           createdFileNames.add(file.name)
           if (filesCreated === 0) {
-            const isArchivedNode = (f: import('@/store/appStore').FileNode) =>
-              f.type === 'folder' && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?-\d{4}$/.test(f.name)
+            const isArchivedNode = (f: import('@/store/appStore').FileNode) => f.type === 'archive'
             const oldFiles = useAppStore.getState().files.filter(f => !isArchivedNode(f))
             oldFiles.forEach(f => useAppStore.getState().deleteFile(f.id))
           }
@@ -315,9 +308,7 @@ export function ChatInput() {
         // AI responded with text only (no file blocks) — restore the most recent archive back
         // to the active workspace so the preview doesn't go blank
         const currentState = useAppStore.getState()
-        const isArchivedNode = (f: import('@/store/appStore').FileNode) =>
-          f.type === 'folder' && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?-\d{4}$/.test(f.name)
-        const archives = currentState.files.filter(isArchivedNode)
+        const archives = currentState.files.filter(f => f.type === 'archive')
         if (archives.length > 0) {
           // Pop the most recent archive back out as active files
           const latest = archives[archives.length - 1]

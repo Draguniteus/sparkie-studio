@@ -23,7 +23,7 @@ export interface FileNode {
   id: string
   name: string
   content: string
-  type: 'file' | 'folder'
+  type: 'file' | 'folder' | 'archive'  // archive = versioned snapshot, never shown as editable
   language?: string
   children?: FileNode[]
 }
