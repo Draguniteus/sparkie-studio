@@ -28,6 +28,17 @@ export interface FileNode {
   children?: FileNode[]
 }
 
+export interface Asset {
+  id: string
+  name: string
+  language: string
+  content: string
+  chatId: string
+  chatTitle: string
+  createdAt: Date
+  fileId: string  // references FileNode id
+}
+
 export type WorklogEntry = {
   id: string
   type: 'thinking' | 'action' | 'result' | 'error' | 'code'
@@ -96,6 +107,10 @@ interface AppState {
   addWorklogEntry: (entry: Omit<WorklogEntry, 'id' | 'timestamp'>) => string
   updateWorklogEntry: (id: string, patch: Partial<WorklogEntry>) => void
   clearWorklog: () => void
+
+  assets: Asset[]
+  addAsset: (asset: Omit<Asset, 'id' | 'createdAt'>) => void
+  clearAssets: () => void
   containerStatus: ContainerStatus
   previewUrl: string | null
   terminalOutput: string
@@ -242,6 +257,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   addLiveCodeFile: (name) =>
     set((s) => ({ liveCodeFiles: s.liveCodeFiles.includes(name) ? s.liveCodeFiles : [...s.liveCodeFiles, name] })),
   clearLiveCode: () => set({ liveCode: '', liveCodeFiles: [] }),
+
+  assets: [],
+  addAsset: (asset) => {
+    const id = crypto.randomUUID()
+    set((s) => ({ assets: [...s.assets, { ...asset, id, createdAt: new Date() }] }))
+  },
+  clearAssets: () => set({ assets: [] }),
 
   worklog: [],
   addWorklogEntry: (entry) => {

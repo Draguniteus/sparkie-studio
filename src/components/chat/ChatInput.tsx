@@ -1,9 +1,9 @@
 "use client"
 
-import { useState, useRef, useCallback } from "react"
+import { useState, useRef, useCallback, useEffect } from "react"
 import { useAppStore } from "@/store/appStore"
 import { parseAIResponse, getLanguageFromFilename } from "@/lib/fileParser"
-import { Paperclip, ArrowUp, Sparkles, ChevronDown, Image as ImageIcon, Video } from "lucide-react"
+import { Paperclip, ArrowUp, Sparkles, ChevronDown, Image as ImageIcon, Video, Mic, MicOff } from "lucide-react"
 
 const MODELS = [
   { id: "minimax-m2.5-free", name: "MiniMax M2.5", tag: "Free", type: "chat" },
@@ -32,13 +32,17 @@ export function ChatInput() {
   const [selectedImageModel, setSelectedImageModel] = useState("flux")
   const [selectedVideoModel, setSelectedVideoModel] = useState("seedance")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [isRecording, setIsRecording] = useState(false)
+  const [isTranscribing, setIsTranscribing] = useState(false)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
   const {
     selectedModel, setSelectedModel, createChat, addMessage,
     updateMessage, currentChatId, isStreaming, setStreaming,
     openIDE, setExecuting, setActiveFile, setIDETab, ideOpen,
     clearLiveCode, appendLiveCode, addLiveCodeFile,
     addWorklogEntry, updateWorklogEntry,
-    setContainerStatus, setPreviewUrl, saveChatFiles,
+    setContainerStatus, setPreviewUrl, saveChatFiles, addAsset,
   } = useAppStore()
 
   // Upsert a file with a potentially nested path (e.g. "public/index.html")
@@ -453,7 +457,227 @@ export function ChatInput() {
     }
   }, [selectedModel, addMessage, updateMessage, setStreaming])
 
-  const handleSubmit = useCallback(() => {
+  // ── streamAgent: Planner → Builder → Reviewer with inline thinking ────────
+  const streamAgent = useCallback(async (chatId: string, userContent: string) => {
+    // Archive existing workspace (same logic as streamChat)
+    const currentFilesForCtx = useAppStore.getState().files.filter(f => f.type !== 'archive')
+    const currentFiles_archive = useAppStore.getState().files
+    const isArchv = (f: import('@/store/appStore').FileNode) => f.type === 'archive'
+    const activeFiles_pre = currentFiles_archive.filter(f => !isArchv(f))
+    const existingArchives_pre = currentFiles_archive.filter(isArchv)
+
+    if (activeFiles_pre.length > 0) {
+      const allUserMsgs = (useAppStore.getState().chats.find(c => c.id === chatId)?.messages ?? []).filter(m => m.role === 'user')
+      const prevMsg = allUserMsgs.slice().reverse().find(m => m.content.trim().split(/\s+/).length > 4)
+      const nameSource = prevMsg?.content || activeFiles_pre[0]?.name || 'project'
+      const folderName = nameSource.replace(/[^a-zA-Z0-9 ]/g, '').trim().split(/\s+/).slice(0, 5).join('-').toLowerCase() || 'project'
+      const now = new Date()
+      const archiveName = `${folderName}-${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`
+      const deepClone = (node: import('@/store/appStore').FileNode): import('@/store/appStore').FileNode => ({
+        ...node, id: crypto.randomUUID(), children: node.children?.map(deepClone),
+      })
+      useAppStore.getState().setFiles([...existingArchives_pre, {
+        id: crypto.randomUUID(), name: archiveName, type: 'archive', content: '',
+        children: activeFiles_pre.map(deepClone),
+      }])
+    } else {
+      useAppStore.getState().setFiles([])
+    }
+
+    // Build API messages with file context
+    const chat = useAppStore.getState().chats.find(c => c.id === chatId)
+    const apiMessages = (chat?.messages ?? [])
+      .filter(m => m.type !== 'image' && m.type !== 'video')
+      .map(m => ({ role: m.role, content: m.content }))
+
+    // File context for fix requests
+    const activeForCtx = currentFilesForCtx.filter(f => f.type === 'file' && f.content)
+    const fileContext = activeForCtx.map(f => `---FILE: ${f.name}---\n${f.content}\n---END FILE---`).join('\n\n')
+    const currentFilesPayload = fileContext || undefined
+
+    // Add thinking message (will be updated live)
+    const thinkingMsgId = addMessage(chatId, {
+      role: 'assistant', content: '⚡ Initializing agent...', model: 'Agent Loop', isStreaming: true, type: 'text'
+    })
+
+    // Add build output message (starts empty, streams into)
+    const buildMsgId = addMessage(chatId, {
+      role: 'assistant', content: '', model: selectedModel, isStreaming: true, type: 'text'
+    })
+
+    setStreaming(true)
+    setExecuting(true)
+    clearLiveCode()
+    setContainerStatus('idle')
+    setPreviewUrl(null)
+    if (!ideOpen) openIDE()
+    setIDETab('process')
+
+    try {
+      const response = await fetch('/api/agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: [...apiMessages, { role: 'user', content: userContent }], currentFiles: currentFilesPayload }),
+      })
+
+      if (!response.ok) {
+        updateMessage(chatId, thinkingMsgId, { content: 'Agent error — try again', isStreaming: false })
+        updateMessage(chatId, buildMsgId, { content: '', isStreaming: false })
+        return
+      }
+
+      const reader = response.body?.getReader()
+      const decoder = new TextDecoder()
+      if (!reader) return
+
+      let buffer = ''
+      let fullBuild = ''
+      let filesCreated = 0
+      const createdFileNames = new Set<string>()
+      let lastThinkingText = '⚡ Initializing agent...'
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed.startsWith('data: ')) continue
+          const data = trimmed.slice(6)
+          if (data === '[DONE]') continue
+          try {
+            const parsed = JSON.parse(data)
+            if (parsed.event === 'thinking') {
+              lastThinkingText = parsed.text
+              updateMessage(chatId, thinkingMsgId, { content: lastThinkingText, isStreaming: true })
+            } else if (parsed.event === 'delta' && parsed.content) {
+              fullBuild += parsed.content
+              appendLiveCode(parsed.content)
+              // Parse files incrementally
+              const partialParse = parseAIResponse(fullBuild)
+              for (const file of partialParse.files) {
+                if (!createdFileNames.has(file.name)) {
+                  createdFileNames.add(file.name)
+                  if (filesCreated === 0) {
+                    const oldActive = useAppStore.getState().files.filter(f => f.type !== 'archive')
+                    oldActive.forEach(f => useAppStore.getState().deleteFile(f.id))
+                  }
+                  const fileId = upsertFile(file.name, file.content, getLanguageFromFilename(file.name))
+                  if (filesCreated === 0) setActiveFile(fileId)
+                  addLiveCodeFile(file.name)
+                  // Track in assets
+                  const chatTitle = useAppStore.getState().chats.find(c => c.id === chatId)?.title || 'New Chat'
+                  addAsset({ name: file.name, language: getLanguageFromFilename(file.name), content: file.content, chatId, chatTitle, fileId })
+                  filesCreated++
+                } else {
+                  const existing = useAppStore.getState().files.find(f => f.name === file.name && f.type !== 'archive')
+                  if (existing && existing.content !== file.content) {
+                    useAppStore.getState().updateFileContent(existing.id, file.content)
+                  }
+                }
+              }
+            } else if (parsed.event === 'done') {
+              // Final parse pass
+              const finalParse = parseAIResponse(fullBuild)
+              for (const file of finalParse.files) {
+                if (!createdFileNames.has(file.name)) {
+                  createdFileNames.add(file.name)
+                  const fileId = upsertFile(file.name, file.content, getLanguageFromFilename(file.name))
+                  if (filesCreated === 0) setActiveFile(fileId)
+                  addLiveCodeFile(file.name)
+                  const chatTitle = useAppStore.getState().chats.find(c => c.id === chatId)?.title || 'New Chat'
+                  addAsset({ name: file.name, language: getLanguageFromFilename(file.name), content: file.content, chatId, chatTitle, fileId })
+                  filesCreated++
+                } else {
+                  const existing = useAppStore.getState().files.find(f => f.name === file.name && f.type !== 'archive')
+                  if (existing && existing.content !== file.content) {
+                    useAppStore.getState().updateFileContent(existing.id, file.content)
+                  }
+                }
+              }
+            } else if (parsed.event === 'error') {
+              updateMessage(chatId, thinkingMsgId, { content: `❌ ${parsed.message}`, isStreaming: false })
+            }
+          } catch { /* skip */ }
+        }
+      }
+
+      // Finalize messages
+      updateMessage(chatId, thinkingMsgId, { content: lastThinkingText, isStreaming: false })
+
+      if (filesCreated > 0) {
+        const finalParse = parseAIResponse(fullBuild)
+        const description = finalParse.text || `✨ Built ${filesCreated} file(s). Check the preview →`
+        updateMessage(chatId, buildMsgId, { content: description, isStreaming: false })
+      } else {
+        // No files — restore archive and show text response
+        const currentState = useAppStore.getState()
+        const archives = currentState.files.filter(f => f.type === 'archive')
+        if (archives.length > 0) {
+          const latest = archives[archives.length - 1]
+          useAppStore.getState().setFiles([...archives.slice(0, -1), ...( latest.children ?? [])])
+        }
+        updateMessage(chatId, buildMsgId, { content: fullBuild || 'No output.', isStreaming: false })
+      }
+
+    } catch (err) {
+      updateMessage(chatId, thinkingMsgId, { content: '❌ Connection error', isStreaming: false })
+      updateMessage(chatId, buildMsgId, { content: 'Try again.', isStreaming: false })
+    } finally {
+      setStreaming(false)
+      setExecuting(false)
+      saveChatFiles(chatId, useAppStore.getState().files)
+    }
+  }, [selectedModel, addMessage, updateMessage, setStreaming, setExecuting, openIDE, setIDETab, ideOpen, upsertFile, setActiveFile, clearLiveCode, appendLiveCode, addLiveCodeFile, addWorklogEntry, updateWorklogEntry, setContainerStatus, setPreviewUrl, saveChatFiles, addAsset])
+
+  // ── Voice recording ───────────────────────────────────────────────────────
+  const toggleRecording = useCallback(async () => {
+    if (isRecording) {
+      // Stop recording
+      mediaRecorderRef.current?.stop()
+      setIsRecording(false)
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+          ? 'audio/webm;codecs=opus'
+          : MediaRecorder.isTypeSupported('audio/webm')
+          ? 'audio/webm'
+          : 'audio/mp4'
+        const mr = new MediaRecorder(stream, { mimeType })
+        audioChunksRef.current = []
+        mr.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data) }
+        mr.onstop = async () => {
+          stream.getTracks().forEach(t => t.stop())
+          setIsTranscribing(true)
+          try {
+            const audioBlob = new Blob(audioChunksRef.current, { type: mimeType })
+            const res = await fetch('/api/transcribe', {
+              method: 'POST',
+              headers: { 'Content-Type': mimeType },
+              body: audioBlob,
+            })
+            if (res.ok) {
+              const { transcript } = await res.json()
+              if (transcript?.trim()) setInput(prev => prev ? prev + ' ' + transcript : transcript)
+            }
+          } catch { /* silent fail */ } finally {
+            setIsTranscribing(false)
+          }
+        }
+        mr.start()
+        mediaRecorderRef.current = mr
+        setIsRecording(true)
+      } catch {
+        alert('Microphone access denied. Please allow microphone access to use voice input.')
+      }
+    }
+  }, [isRecording])
+
+  const handleSubmit = useCallback(() => {  const handleSubmit = useCallback(() => {
     if (!input.trim() || isStreaming) return
 
     let chatId = currentChatId
@@ -473,9 +697,9 @@ export function ChatInput() {
       // Chitchat / praise — reply naturally without touching the IDE
       streamReply(chatId, userContent)
     } else {
-      streamChat(chatId, userContent)
+      streamAgent(chatId, userContent)
     }
-  }, [input, isStreaming, currentChatId, createChat, addMessage, genMode, streamChat, generateMedia, isConversational, streamReply])
+  }, [input, isStreaming, currentChatId, createChat, addMessage, genMode, streamAgent, generateMedia, isConversational, streamReply])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit() }
@@ -565,6 +789,20 @@ export function ChatInput() {
               )}
             </div>
           </div>
+          <button
+            onClick={toggleRecording}
+            disabled={isTranscribing}
+            className={`p-1.5 rounded-md transition-colors mr-1 ${
+              isRecording
+                ? 'bg-red-500/20 text-red-400 animate-pulse'
+                : isTranscribing
+                ? 'bg-honey-500/10 text-honey-500/50 cursor-wait'
+                : 'hover:bg-hive-hover text-text-muted hover:text-text-secondary'
+            }`}
+            title={isRecording ? 'Stop recording' : isTranscribing ? 'Transcribing...' : 'Voice input'}
+          >
+            {isRecording ? <MicOff size={15} /> : <Mic size={15} />}
+          </button>
           <button
             onClick={handleSubmit} disabled={!input.trim() || isStreaming}
             className={`p-2 rounded-lg transition-all ${

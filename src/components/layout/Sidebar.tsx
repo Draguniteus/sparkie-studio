@@ -54,7 +54,7 @@ export function Sidebar() {
       {/* New Chat Button */}
       <div className="p-3">
         <button
-          onClick={() => createChat()}
+          onClick={() => { createChat(); setActiveTab('chat') }}
           className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg bg-honey-500/10 border border-honey-500/20 text-honey-500 hover:bg-honey-500/20 transition-all text-sm font-medium"
         >
           <Plus size={16} />
@@ -94,7 +94,7 @@ export function Sidebar() {
           chats.map((chat) => (
             <div
               key={chat.id}
-              onClick={() => setCurrentChat(chat.id)}
+              onClick={() => { setCurrentChat(chat.id); setActiveTab('chat') }}
               className={`group flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer mb-0.5 transition-colors ${
                 currentChatId === chat.id
                   ? 'bg-honey-500/10 text-honey-500'
