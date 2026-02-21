@@ -495,6 +495,7 @@ export function ChatInput() {
     const apiMessages = (chat?.messages ?? [])
       .filter(m => m.type !== 'image' && m.type !== 'video')
       .map(m => ({ role: m.role, content: m.content }))
+      .slice(0, -1) // exclude last message — it's the user msg just added; appended manually below
 
     // File context for fix requests
     const activeForCtx = currentFilesForCtx.filter(f => f.type === 'file' && f.content)
@@ -532,7 +533,7 @@ export function ChatInput() {
       const response = await fetch('/api/agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: [...apiMessages, { role: 'user', content: userContent }], currentFiles: currentFilesPayload }),
+        body: JSON.stringify({ messages: [...apiMessages, { role: 'user', content: userContent }], currentFiles: currentFilesPayload, model: selectedModel }),
         signal: agentAbortRef.current.signal,
       })
 
