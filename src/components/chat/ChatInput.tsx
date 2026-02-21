@@ -503,10 +503,16 @@ export function ChatInput() {
       role: 'assistant', content: '⚡ Initializing agent...', model: 'Agent Loop', isStreaming: true, type: 'text'
     })
 
-    // Add build output message (starts empty, streams into)
-    const buildMsgId = addMessage(chatId, {
-      role: 'assistant', content: '', model: selectedModel, isStreaming: true, type: 'text'
-    })
+    // buildMsgId is created lazily on first builder delta (avoids double-bubble during planning)
+    let buildMsgId: string | null = null
+    const ensureBuildMsg = () => {
+      if (!buildMsgId) {
+        buildMsgId = addMessage(chatId, {
+          role: 'assistant', content: '', model: selectedModel, isStreaming: true, type: 'text'
+        })
+      }
+      return buildMsgId
+    }
 
     setStreaming(true)
     setExecuting(true)
@@ -559,6 +565,8 @@ export function ChatInput() {
             } else if (parsed.event === 'delta' && parsed.content) {
               fullBuild += parsed.content
               appendLiveCode(parsed.content)
+              // Create build message bubble on first delta (lazy — avoids double-bubble during planning)
+              ensureBuildMsg()
               // Parse files incrementally
               const partialParse = parseAIResponse(fullBuild)
               for (const file of partialParse.files) {
@@ -603,6 +611,7 @@ export function ChatInput() {
               }
             } else if (parsed.event === 'error') {
               updateMessage(chatId, thinkingMsgId, { content: `❌ ${parsed.message}`, isStreaming: false })
+              if (buildMsgId) updateMessage(chatId, buildMsgId, { content: '', isStreaming: false })
             }
           } catch { /* skip */ }
         }
@@ -612,9 +621,10 @@ export function ChatInput() {
       updateMessage(chatId, thinkingMsgId, { content: lastThinkingText, isStreaming: false })
 
       if (filesCreated > 0) {
-        const finalParse = parseAIResponse(fullBuild)
-        const description = finalParse.text || `✨ Built ${filesCreated} file(s). Check the preview →`
-        updateMessage(chatId, buildMsgId, { content: description, isStreaming: false })
+        // Show clean description — NEVER raw code in the chat bubble
+        const fileNames = Array.from(createdFileNames).join(', ')
+        const description = `✨ Built ${fileNames} — preview ready →`
+        if (buildMsgId) updateMessage(chatId, buildMsgId, { content: description, isStreaming: false })
       } else {
         // No files — restore archive and show text response
         const currentState = useAppStore.getState()
@@ -623,19 +633,23 @@ export function ChatInput() {
           const latest = archives[archives.length - 1]
           useAppStore.getState().setFiles([...archives.slice(0, -1), ...( latest.children ?? [])])
         }
-        // Text-only response — show in thinking slot, hide empty build message
+        // Text-only response — show in thinking slot only, no second bubble
         if (fullBuild) {
-          updateMessage(chatId, thinkingMsgId, { content: fullBuild, isStreaming: false, model: selectedModel })
-          updateMessage(chatId, buildMsgId, { content: '', isStreaming: false })
+          const finalParse = parseAIResponse(fullBuild)
+          const textOnly = finalParse.text || fullBuild
+          // Only show text if it's actually readable content (not raw code blocks)
+          const isReadable = !textOnly.includes('---FILE:') && !textOnly.includes('```') && textOnly.length < 2000
+          updateMessage(chatId, thinkingMsgId, { content: isReadable ? textOnly : lastThinkingText, isStreaming: false, model: selectedModel })
         } else {
           updateMessage(chatId, thinkingMsgId, { content: lastThinkingText, isStreaming: false })
-          updateMessage(chatId, buildMsgId, { content: '', isStreaming: false })
         }
+        // Hide build bubble entirely if no files
+        if (buildMsgId) updateMessage(chatId, buildMsgId, { content: '', isStreaming: false })
       }
 
     } catch (err) {
       updateMessage(chatId, thinkingMsgId, { content: '❌ Connection error', isStreaming: false })
-      updateMessage(chatId, buildMsgId, { content: 'Try again.', isStreaming: false })
+      if (buildMsgId) updateMessage(chatId, buildMsgId, { content: 'Try again.', isStreaming: false })
     } finally {
       setStreaming(false)
       setExecuting(false)

@@ -12,7 +12,7 @@ import { Download, ChevronLeft, ChevronRight } from "lucide-react"
 
 export function IDEPanelInner() {
   const {
-    ideOpen, ideTab, isExecuting, files,
+    ideOpen, ideTab, isExecuting, liveCode, files,
     setIdeTab, containerStatus,
   } = useAppStore()
   const { runProject } = useWebContainer()
@@ -86,7 +86,7 @@ export function IDEPanelInner() {
       <div className="flex-1 overflow-hidden">
         {ideTab === 'process' && (
           <div className="h-full">
-            {isExecuting ? <LiveCodeView /> : <Preview />}
+            {(isExecuting || liveCode.length > 0) ? <LiveCodeView /> : <Preview />}
           </div>
         )}
 
