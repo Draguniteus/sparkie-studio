@@ -191,7 +191,7 @@ export async function POST(req: NextRequest) {
         // ── Build ────────────────────────────────────────────────────────
         send('thinking', { step: 'build', text: `[+] Building ${projectTitle}...` })
 
-        const chatHistory = currentFiles ? messages.slice(0, -1) : []
+        const chatHistory = messages.slice(0, -1) // always include history
         const builderMessages = [
           { role: 'system', content: BUILDER_SYSTEM },
           ...chatHistory,

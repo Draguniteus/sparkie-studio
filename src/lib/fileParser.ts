@@ -74,6 +74,27 @@ export function parseAIResponse(raw: string): ParseResult {
     text = raw.replace(/```[^\n]*\n[\s\S]*?```/g, '').trim()
   }
 
+
+  // Fallback C: raw HTML/code content without any markers or fences
+  // If no files found but content looks like HTML, JS, or code — auto-wrap it
+  if (files.length === 0 && raw.trim().length > 50) {
+    const trimmed = raw.trim()
+    const looksLikeHTML = trimmed.startsWith('<') || /<!DOCTYPE|<html|<head|<body/i.test(trimmed)
+    const looksLikeJS = /function |const |let |var |=>|class /m.test(trimmed)
+    const looksLikeCSS = /\{[\s\S]*?:[\s\S]*?;/m.test(trimmed) && !looksLikeHTML
+
+    if (looksLikeHTML) {
+      files.push({ name: 'index.html', content: trimmed })
+      text = ''
+    } else if (looksLikeCSS) {
+      files.push({ name: 'styles.css', content: trimmed })
+      text = ''
+    } else if (looksLikeJS) {
+      files.push({ name: 'script.js', content: trimmed })
+      text = ''
+    }
+  }
+
   return { text, files }
 }
 
