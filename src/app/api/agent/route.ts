@@ -185,7 +185,7 @@ export async function POST(req: NextRequest) {
         ]
 
         // Fallback chain: try each model until one produces output
-        const BUILDER_MODELS = ['glm-5-free', 'minimax-m2.5-free', 'big-pickle']
+        const BUILDER_MODELS = ['glm-5-free', 'minimax-m2.5-free', 'kimi-k2.5-free', 'minimax-m2.1-free']
         let buildOutput = ''
 
         for (let idx = 0; idx < BUILDER_MODELS.length; idx++) {
