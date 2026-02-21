@@ -48,10 +48,11 @@ export function ChatInput() {
     const store = useAppStore.getState()
 
     if (parts.length === 1) {
-      // Flat file — read FRESH state each time (avoids stale closures when
-      // multiple files are upserted sequentially in the same streaming batch)
+      // Flat file — only search non-archive top-level nodes
+      const isArchivedNode = (f: import('@/store/appStore').FileNode) =>
+        f.type === 'folder' && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?-\d{4}$/.test(f.name)
       const fresh = useAppStore.getState()
-      const existing = fresh.files.find(f => f.type === 'file' && f.name === parts[0])
+      const existing = fresh.files.find(f => f.type === 'file' && f.name === parts[0] && !isArchivedNode(f))
       if (existing) {
         fresh.updateFileContent(existing.id, content)
         return existing.id
@@ -59,9 +60,12 @@ export function ChatInput() {
       return fresh.addFile({ name: parts[0], type: 'file', content, language })
     }
 
-    // Nested path — build/update tree
+    // Nested path — build/update tree (exclude archive folders from merge target)
+    const isArchivedNode = (f: import('@/store/appStore').FileNode) =>
+      f.type === 'folder' && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?-\d{4}$/.test(f.name)
     const setFiles = store.setFiles
-    const currentFiles = [...store.files]
+    const archiveNodes = store.files.filter(isArchivedNode)
+    const currentFiles = store.files.filter(f => !isArchivedNode(f))
 
     function upsertInTree(nodes: import('@/store/appStore').FileNode[], pathParts: string[], fileContent: string, lang?: string): [import('@/store/appStore').FileNode[], string] {
       const [head, ...rest] = pathParts
@@ -96,7 +100,7 @@ export function ChatInput() {
     }
 
     const [newTree, leafId] = upsertInTree(currentFiles, parts, content, language)
-    setFiles(newTree)
+    setFiles([...archiveNodes, ...newTree])
     return leafId
   }, [])
 
@@ -121,7 +125,7 @@ export function ChatInput() {
       // The NEW userContent (current submit) is NOT yet in the messages store,
       // so look backwards through messages for the last user message with >4 words
       // (skipping short conversational messages like "good job", "thanks", etc.)
-      const allUserMsgs = useAppStore.getState().messages.filter(m => m.role === 'user')
+      const allUserMsgs = (useAppStore.getState().chats.find(c => c.id === chatId)?.messages ?? []).filter(m => m.role === 'user')
       const prevCodingMsg = allUserMsgs.slice().reverse().find(m => m.content.trim().split(/\s+/).length > 4)
       const nameSource = prevCodingMsg?.content || activeFiles[0]?.name || 'project'
       const folderName = nameSource
@@ -231,9 +235,11 @@ export function ChatInput() {
           if (!createdFileNames.has(file.name)) {
             createdFileNames.add(file.name)
 
-            // Clear old files on first file creation
+            // Clear old non-archive files on first file creation
             if (filesCreated === 0) {
-              const oldFiles = useAppStore.getState().files
+              const isArchivedNode = (f: import('@/store/appStore').FileNode) =>
+                f.type === 'folder' && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?-\d{4}$/.test(f.name)
+              const oldFiles = useAppStore.getState().files.filter(f => !isArchivedNode(f))
               oldFiles.forEach(f => useAppStore.getState().deleteFile(f.id))
             }
 
@@ -260,7 +266,9 @@ export function ChatInput() {
         if (!createdFileNames.has(file.name)) {
           createdFileNames.add(file.name)
           if (filesCreated === 0) {
-            const oldFiles = useAppStore.getState().files
+            const isArchivedNode = (f: import('@/store/appStore').FileNode) =>
+              f.type === 'folder' && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?-\d{4}$/.test(f.name)
+            const oldFiles = useAppStore.getState().files.filter(f => !isArchivedNode(f))
             oldFiles.forEach(f => useAppStore.getState().deleteFile(f.id))
           }
           const fileId = upsertFile(file.name, file.content, getLanguageFromFilename(file.name))
