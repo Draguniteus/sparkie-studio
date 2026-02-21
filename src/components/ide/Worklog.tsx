@@ -4,8 +4,9 @@ import { useEffect, useRef } from "react"
 import { useAppStore, WorklogEntry } from "@/store/appStore"
 import { Brain, Zap, CheckCircle, AlertCircle, Code, Loader2 } from "lucide-react"
 
-function formatTime(ts: number) {
-  return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+function formatTime(ts: Date | number) {
+  const d = ts instanceof Date ? ts : new Date(ts)
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
 }
 
 const ICONS: Record<WorklogEntry["type"], typeof Brain> = {
@@ -72,21 +73,21 @@ export function Worklog({ compact = false }: WorklogProps) {
                   </span>
                 )}
               </div>
-              {entry.content && (
-                entry.type === "code" && !compact ? (
-                  <pre className="text-[11px] text-text-secondary font-mono bg-hive-elevated rounded p-2 overflow-x-auto whitespace-pre-wrap break-all mt-1 max-h-[300px] overflow-y-auto leading-relaxed">
-                    {entry.content}
-                  </pre>
-                ) : (
-                  <p className={`text-xs text-text-secondary leading-relaxed whitespace-pre-wrap ${compact ? "" : "mt-0.5"}`}>
-                    {compact && entry.content.length > 80 ? entry.content.slice(0, 80) + "..." : entry.content}
-                  </p>
-                )
-              )}
+              <p className={`${compact ? "text-[10px]" : "text-xs"} text-text-secondary mt-0.5 ${
+                compact ? "truncate" : "break-words whitespace-pre-wrap"
+              }`}>
+                {compact && entry.content.length > 80 ? entry.content.slice(0, 80) + "…" : entry.content}
+              </p>
             </div>
           </div>
         )
       })}
+      {isExecuting && worklog.length === 0 && (
+        <div className="flex gap-2 p-2.5">
+          <Loader2 size={14} className="animate-spin text-honey-500 shrink-0 mt-0.5" />
+          <span className="text-xs text-text-muted">Sparkie is thinking…</span>
+        </div>
+      )}
       <div ref={bottomRef} />
     </div>
   )
