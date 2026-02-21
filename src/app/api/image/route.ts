@@ -4,7 +4,7 @@ export const runtime = 'edge'
 
 const IMAGE_MODELS = new Set(['flux', 'flux-realism', 'flux-anime', 'flux-3d', 'turbo', 'gptimage'])
 const VIDEO_MODELS = new Set(['seedance', 'seedance-pro', 'veo', 'wan', 'ltx-2'])
-const ALL_MODELS = new Set([...IMAGE_MODELS, ...VIDEO_MODELS])
+const ALL_MODELS = new Set(Array.from(IMAGE_MODELS).concat(Array.from(VIDEO_MODELS)))
 
 const MAX_PROMPT_LENGTH = 500
 const ALLOWED_DIMS = [256, 512, 768, 1024, 1280, 1536]
