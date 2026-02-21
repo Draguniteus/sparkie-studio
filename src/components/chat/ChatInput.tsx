@@ -390,19 +390,22 @@ export function ChatInput() {
   // Detect conversational/non-coding messages that shouldn't trigger the IDE
   const isConversational = useCallback((text: string): boolean => {
     const t = text.trim().toLowerCase()
-    // Very short messages (≤4 words) that are praise, acknowledgements, or greetings
     const words = t.split(/\s+/).filter(Boolean)
-    if (words.length > 8) return false
+    // Hard cap: long messages are always coding tasks
+    if (words.length > 12) return false
+    // Exact-match short patterns
     const conversationalPatterns = [
       /^(ok|okay|alright|sure|got it|nice|cool|great|awesome|perfect|sounds good|makes sense)[\.!?]?$/,
       /^(thanks?|thank you|ty|thx|cheers|appreciate it)[\.!?\s]*$/,
       /^(excellent|amazing|fantastic|wonderful|brilliant|good job|well done|love it|beautiful|gorgeous)[\.!?\s]*\w*[\.!?]?$/,
-      /^(hello|hi|hey|yo|sup|howdy)[\.!?,\s]*\w*[\.!?]?$/,
       /^(yes|no|nope|yep|yup|nah|maybe|sure thing)[\.!?]?$/,
       /^(lol|haha|hehe|nice one|lmao|😂|🔥|💯|👍|❤️)[\.!?\s]*$/,
       /^(wow|omg|oh|ah|oh wow|oh nice|oh great)[\.!?\s]*\w*[\.!?]?$/,
     ]
-    return conversationalPatterns.some(p => p.test(t))
+    if (conversationalPatterns.some(p => p.test(t))) return true
+    // Greetings — allow longer variants like "hey there testing can you hear me"
+    if (/^(hello|hi+|hey|yo|sup|howdy)/.test(t) && !t.includes('build') && !t.includes('creat') && !t.includes('make') && !t.includes('fix') && !t.includes('add') && !t.includes('code') && !t.includes('write') && !t.includes('app') && !t.includes('game')) return true
+    return false
   }, [])
 
   // Lightweight chat-only reply (no IDE, no file generation)
@@ -620,7 +623,14 @@ export function ChatInput() {
           const latest = archives[archives.length - 1]
           useAppStore.getState().setFiles([...archives.slice(0, -1), ...( latest.children ?? [])])
         }
-        updateMessage(chatId, buildMsgId, { content: fullBuild || 'No output.', isStreaming: false })
+        // Text-only response — show in thinking slot, hide empty build message
+        if (fullBuild) {
+          updateMessage(chatId, thinkingMsgId, { content: fullBuild, isStreaming: false, model: selectedModel })
+          updateMessage(chatId, buildMsgId, { content: '', isStreaming: false })
+        } else {
+          updateMessage(chatId, thinkingMsgId, { content: lastThinkingText, isStreaming: false })
+          updateMessage(chatId, buildMsgId, { content: '', isStreaming: false })
+        }
       }
 
     } catch (err) {

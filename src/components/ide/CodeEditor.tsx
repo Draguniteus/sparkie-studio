@@ -64,7 +64,7 @@ export function CodeEditor() {
       <div className="flex-1 relative overflow-hidden">
         <div className="absolute left-0 top-0 bottom-0 w-10 bg-hive-700 border-r border-hive-border overflow-hidden select-none">
           <div className="pt-3 px-1">
-            {(activeFile.content || "").split("\\n").map((_, i) => (
+            {(activeFile.content || "").split("\n").map((_, i) => (
               <div key={i} className="text-[11px] text-text-muted text-right pr-2 leading-[20px] font-mono">{i + 1}</div>
             ))}
           </div>
@@ -81,7 +81,7 @@ export function CodeEditor() {
       {/* Status bar */}
       <div className="flex items-center justify-between h-6 px-3 bg-hive-700 border-t border-hive-border text-[10px] text-text-muted shrink-0">
         <span>{activeFile.language || "plaintext"}</span>
-        <span>{(activeFile.content || "").split("\\n").length} lines</span>
+        <span>{(activeFile.content || "").split("\n").length} lines</span>
       </div>
     </div>
   )
