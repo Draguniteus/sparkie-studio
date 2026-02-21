@@ -4,6 +4,7 @@ import { useCallback, useRef } from 'react'
 import { useAppStore, FileNode } from '@/store/appStore'
 
 type WCInstance = import('@webcontainer/api').WebContainer
+type WCTree = Record<string, unknown>
 
 let globalWC: WCInstance | null = null
 let bootPromise: Promise<WCInstance> | null = null
@@ -20,13 +21,40 @@ async function getContainer(): Promise<WCInstance> {
   return bootPromise
 }
 
-function buildFileTree(files: FileNode[]): Record<string, unknown> {
-  const tree: Record<string, unknown> = {}
+/**
+ * Recursively builds WebContainer FileSystemTree from Zustand FileNode[].
+ * Handles both:
+ *  - FileNode with type='folder' + children[] (tree structure)
+ *  - FileNode with name containing '/' e.g. "public/index.html" (flat paths)
+ */
+function buildFileTree(files: FileNode[]): WCTree {
+  const tree: WCTree = {}
+
+  function insertPath(segments: string[], content: string, node: WCTree) {
+    const [head, ...rest] = segments
+    if (rest.length === 0) {
+      // leaf file
+      node[head] = { file: { contents: content } }
+    } else {
+      // intermediate directory
+      if (!node[head] || typeof node[head] !== 'object' || !('directory' in (node[head] as object))) {
+        node[head] = { directory: {} }
+      }
+      insertPath(rest, content, (node[head] as { directory: WCTree }).directory)
+    }
+  }
+
   for (const f of files) {
     if (f.type === 'folder') {
       tree[f.name] = { directory: buildFileTree(f.children ?? []) }
     } else {
-      tree[f.name] = { file: { contents: f.content } }
+      // Split on '/' to handle paths like "public/index.html" or "src/App.tsx"
+      const segments = f.name.split('/').filter(Boolean)
+      if (segments.length === 1) {
+        tree[f.name] = { file: { contents: f.content } }
+      } else {
+        insertPath(segments, f.content, tree)
+      }
     }
   }
   return tree
@@ -40,7 +68,7 @@ export function useWebContainer() {
   const devProcessRef = useRef<{ kill: () => void } | null>(null)
 
   const runProject = useCallback(async (projectFiles: FileNode[]): Promise<boolean> => {
-    const hasPkg = projectFiles.some(f => f.name === 'package.json')
+    const hasPkg = projectFiles.some(f => f.name === 'package.json' || f.name.endsWith('/package.json'))
     if (!hasPkg) return false
 
     devProcessRef.current?.kill()
@@ -48,44 +76,60 @@ export function useWebContainer() {
     clearTerminalOutput()
     setContainerStatus('booting')
     setPreviewUrl(null)
-    appendTerminalOutput('\u26a1 Booting WebContainer\u2026\r\n')
+    appendTerminalOutput('⚡ Booting WebContainer…
+')
 
     let wc: WCInstance
     try { wc = await getContainer() }
     catch (e) {
       setContainerStatus('error')
-      appendTerminalOutput(`\r\n\ud83d\udd34 Failed to boot: ${e}\r\n`)
+      appendTerminalOutput(`
+🔴 Failed to boot: ${e}
+`)
       return false
     }
 
     setContainerStatus('mounting')
-    appendTerminalOutput('\ud83d\udcc1 Mounting files\u2026\r\n')
-    try { await wc.mount(buildFileTree(projectFiles) as Parameters<typeof wc.mount>[0]) }
-    catch (e) {
+    appendTerminalOutput('📁 Mounting files…
+')
+    try {
+      const fileTree = buildFileTree(projectFiles)
+      await wc.mount(fileTree as Parameters<typeof wc.mount>[0])
+    } catch (e) {
       setContainerStatus('error')
-      appendTerminalOutput(`\r\n\ud83d\udd34 Mount failed: ${e}\r\n`)
+      appendTerminalOutput(`
+🔴 Mount failed: ${e}
+`)
       return false
     }
 
     setContainerStatus('installing')
-    appendTerminalOutput('\r\n\ud83d\udce6 npm install\r\n')
+    appendTerminalOutput('
+📦 npm install
+')
     try {
       const install = await wc.spawn('npm', ['install'])
       install.output.pipeTo(new WritableStream({ write(chunk) { appendTerminalOutput(chunk) } }))
       const code = await install.exit
       if (code !== 0) {
         setContainerStatus('error')
-        appendTerminalOutput(`\r\n\ud83d\udd34 npm install failed (exit ${code})\r\n`)
+        appendTerminalOutput(`
+🔴 npm install failed (exit ${code})
+`)
         return false
       }
     } catch (e) {
       setContainerStatus('error')
-      appendTerminalOutput(`\r\n\ud83d\udd34 Install error: ${e}\r\n`)
+      appendTerminalOutput(`
+🔴 Install error: ${e}
+`)
       return false
     }
 
     setContainerStatus('starting')
-    appendTerminalOutput('\r\n\ud83d\ude80 npm run dev\r\n')
+    appendTerminalOutput('
+🚀 npm run dev
+')
     try {
       const dev = await wc.spawn('npm', ['run', 'dev'])
       devProcessRef.current = { kill: () => dev.kill() }
@@ -93,11 +137,15 @@ export function useWebContainer() {
       wc.on('server-ready', (_port: number, url: string) => {
         setContainerStatus('ready')
         setPreviewUrl(url)
-        appendTerminalOutput(`\r\n\ud83d\udfe2 Server ready \u2192 ${url}\r\n`)
+        appendTerminalOutput(`
+🟢 Server ready → ${url}
+`)
       })
     } catch (e) {
       setContainerStatus('error')
-      appendTerminalOutput(`\r\n\ud83d\udd34 Dev server error: ${e}\r\n`)
+      appendTerminalOutput(`
+🔴 Dev server error: ${e}
+`)
       return false
     }
     return true
