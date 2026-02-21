@@ -127,6 +127,9 @@ function sseEvent(event: string, data: object): string {
   return `data: ${JSON.stringify({ event, ...data })}\n\n`
 }
 
+// SSE keepalive comment — keeps connection alive through proxies without affecting client parser
+const SSE_KEEPALIVE = ': keepalive\n\n'
+
 // Max request body 50KB — prevents edge OOM on malicious payloads
 const MAX_BODY_BYTES = 50 * 1024
 // Streaming timeout 60s — edge functions must not hang indefinitely
@@ -175,20 +178,25 @@ export async function POST(req: NextRequest) {
 
       try {
         // ── STEP 1: PLANNER ──────────────────────────────────────────────
-        send('thinking', { step: 'plan', text: '⚡ Planning structure...' })
+        send('thinking', { step: 'plan', text: '[~] Planning structure...' })
 
         const plannerMessages = [
           { role: 'system', content: PLANNER_SYSTEM },
           { role: 'user', content: userMessage }
         ]
 
-        // Planner has a 20s timeout — if it times out, degrade gracefully with a stub plan
+        // Planner has a 20s timeout — send keepalives so proxy doesn't drop the connection
         let planRaw: string
+        const planKeepaliveInterval = setInterval(() => {
+          controller.enqueue(encoder.encode(SSE_KEEPALIVE))
+        }, 3000)
         try {
           planRaw = await callOpenCode('glm-5-free', plannerMessages, apiKey)
+          clearInterval(planKeepaliveInterval)
         } catch (planErr: unknown) {
+          clearInterval(planKeepaliveInterval)
           const isTimeout = planErr instanceof Error && planErr.message.includes('timed out')
-          send('thinking', { step: 'plan_done', text: isTimeout ? '⚡ Planner timed out — building directly' : '⚡ Planner unavailable — building directly' })
+          send('thinking', { step: 'plan_done', text: isTimeout ? '[~] Planner timed out — building directly' : '[~] Planner unavailable — building directly' })
           // Stub plan: build with just the user message and no search
           planRaw = JSON.stringify({ title: 'App', files: [], searchQuery: null, context: '' })
         }
@@ -201,12 +209,12 @@ export async function POST(req: NextRequest) {
           plan = { title: 'Project', files: [], approach: userMessage, needsWebSearch: false, searchQuery: '' }
         }
 
-        send('thinking', { step: 'plan_done', text: `⚡ Plan ready — ${plan.files.length > 0 ? plan.files.join(', ') : 'analyzing request'}` })
+        send('thinking', { step: 'plan_done', text: `[~] Plan ready — ${plan.files.length > 0 ? plan.files.join(', ') : 'analyzing request'}` })
 
         // ── STEP 2: WEB SEARCH (if needed) ───────────────────────────────
         let searchContext = ''
         if (plan.needsWebSearch && tavilyKey && plan.searchQuery) {
-          send('thinking', { step: 'search', text: `🔍 Searching: ${plan.searchQuery}` })
+          send('thinking', { step: 'search', text: `[>] Searching: ${plan.searchQuery}` })
           try {
             const tavilyRes = await fetch('https://api.tavily.com/search', {
               method: 'POST',
@@ -219,15 +227,15 @@ export async function POST(req: NextRequest) {
               searchContext = results.map((r: {title: string; content: string; url: string}) =>
                 `[${r.title}]\n${r.content}\n${r.url}`
               ).join('\n\n')
-              send('thinking', { step: 'search_done', text: `🔍 Found ${results.length} sources` })
+              send('thinking', { step: 'search_done', text: `[>] Found ${results.length} sources` })
             }
           } catch {
-            send('thinking', { step: 'search_skip', text: '🔍 Search unavailable — building from knowledge' })
+            send('thinking', { step: 'search_skip', text: '[>] Search unavailable — building from knowledge' })
           }
         }
 
         // ── STEP 3: BUILDER (streaming) ───────────────────────────────────
-        send('thinking', { step: 'build', text: `🔨 Building ${plan.title}...` })
+        send('thinking', { step: 'build', text: `[+] Building ${plan.title}...` })
 
         const builderContext = [
           plan.approach ? `Approach: ${plan.approach}` : '',
@@ -253,13 +261,13 @@ export async function POST(req: NextRequest) {
         ]
 
         // Builder model fallback chain — if primary model returns empty output, try next
-        const BUILDER_MODELS = ['minimax-m2.5-free', 'glm-5-free', 'big-pickle']
+        const BUILDER_MODELS = ['glm-5-free', 'minimax-m2.5-free', 'big-pickle']
         let buildOutput = ''
 
         for (let modelIdx = 0; modelIdx < BUILDER_MODELS.length; modelIdx++) {
           const builderModel = BUILDER_MODELS[modelIdx]
           if (modelIdx > 0) {
-            send('thinking', { step: 'build_retry', text: `🔄 Retrying with ${builderModel}...` })
+            send('thinking', { step: 'build_retry', text: `[~] Retrying with ${builderModel}...` })
           }
 
           const streamAbort = new AbortController()
@@ -276,6 +284,7 @@ export async function POST(req: NextRequest) {
               const { done, value } = await reader.read()
               if (done) break
               const chunk = decoder.decode(value, { stream: true })
+              let chunkHadContent = false
               for (const line of chunk.split('\n')) {
                 if (line.startsWith('data: ') && line !== 'data: [DONE]') {
                   try {
@@ -284,10 +293,15 @@ export async function POST(req: NextRequest) {
                     if (delta) {
                       modelOutput += delta
                       buildOutput += delta
+                      chunkHadContent = true
                       send('delta', { content: delta })
                     }
                   } catch { /* skip */ }
                 }
+              }
+              // Keepalive ping — prevents Cloudflare from dropping idle SSE connections
+              if (!chunkHadContent) {
+                controller.enqueue(encoder.encode(SSE_KEEPALIVE))
               }
             }
 
@@ -296,7 +310,7 @@ export async function POST(req: NextRequest) {
             clearTimeout(streamTimer)
             if (streamErr instanceof Error && streamErr.name === 'AbortError') {
               // Timeout — try next model
-              send('thinking', { step: 'build_timeout', text: `⏱ ${builderModel} timed out — trying next...` })
+              send('thinking', { step: 'build_timeout', text: `[t] ${builderModel} timed out — trying next...` })
               continue
             }
             send('error', { message: 'Stream error' })
@@ -308,18 +322,18 @@ export async function POST(req: NextRequest) {
 
           // Empty output — try next model
           if (modelIdx < BUILDER_MODELS.length - 1) {
-            send('thinking', { step: 'build_empty', text: `⚠️ ${builderModel} returned no output — trying next model...` })
+            send('thinking', { step: 'build_empty', text: `[!] ${builderModel} returned no output — trying next model...` })
           }
         }
 
         // If still empty after all models, surface a clean error
         if (buildOutput.trim().length === 0) {
-          send('error', { message: '⚠️ All builder models returned empty output — please try again in a moment' })
+          send('error', { message: '[!] All builder models returned empty output — please try again in a moment' })
           return
         }
 
         // ── STEP 4: DONE ─────────────────────────────────────────────────
-        send('thinking', { step: 'review_done', text: '✅ Build complete — preview ready' })
+        send('thinking', { step: 'review_done', text: '[ok] Build complete — preview ready' })
         send('done', { buildOutput })
 
       } catch (err) {
