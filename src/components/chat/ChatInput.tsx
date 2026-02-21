@@ -38,6 +38,7 @@ export function ChatInput() {
     openIDE, setExecuting, addFile, setActiveFile, setIDETab, ideOpen,
     clearLiveCode, appendLiveCode, addLiveCodeFile,
     addWorklogEntry, updateWorklogEntry,
+    setContainerStatus, setPreviewUrl, setFiles,
   } = useAppStore()
 
   const streamChat = useCallback(async (chatId: string, userContent: string) => {
@@ -56,6 +57,10 @@ export function ChatInput() {
     setStreaming(true)
     setExecuting(true)
     clearLiveCode()
+    // Reset WebContainer state so the new task gets a fresh Preview
+    setContainerStatus('idle')
+    setPreviewUrl(null)
+    setFiles([])
 
     // Open IDE to Current Process — will show LiveCodeView since isExecuting=true
     if (!ideOpen) openIDE()
@@ -189,7 +194,7 @@ export function ChatInput() {
       setStreaming(false)
       setExecuting(false)
     }
-  }, [selectedModel, addMessage, updateMessage, setStreaming, setExecuting, openIDE, setIDETab, ideOpen, addFile, setActiveFile, clearLiveCode, appendLiveCode, addLiveCodeFile, addWorklogEntry, updateWorklogEntry])
+  }, [selectedModel, addMessage, updateMessage, setStreaming, setExecuting, openIDE, setIDETab, ideOpen, addFile, setActiveFile, clearLiveCode, appendLiveCode, addLiveCodeFile, addWorklogEntry, updateWorklogEntry, setContainerStatus, setPreviewUrl, setFiles])
 
   const generateMedia = useCallback(async (chatId: string, prompt: string, mediaType: "image" | "video") => {
     const model = mediaType === "video" ? selectedVideoModel : selectedImageModel
