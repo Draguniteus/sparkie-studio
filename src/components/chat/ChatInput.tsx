@@ -677,7 +677,7 @@ export function ChatInput() {
     }
   }, [isRecording])
 
-  const handleSubmit = useCallback(() => {  const handleSubmit = useCallback(() => {
+  const handleSubmit = useCallback(() => {
     if (!input.trim() || isStreaming) return
 
     let chatId = currentChatId

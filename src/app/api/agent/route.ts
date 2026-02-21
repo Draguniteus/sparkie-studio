@@ -66,36 +66,36 @@ Server must listen on process.env.PORT || 3000
 - Animations: smooth 60fps`
 
 async function callOpenCode(model: string, messages: {role: string, content: string}[], apiKey: string): Promise<string> {
-  const res = await fetch(\`\${OPENCODE_BASE}/chat/completions\`, {
+  const res = await fetch(`${OPENCODE_BASE}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': \`Bearer \${apiKey}\`,
+      'Authorization': `Bearer ${apiKey}`,
       'User-Agent': 'SparkieStudio/2.0',
     },
     body: JSON.stringify({ model, messages, stream: false, temperature: 0.7, max_tokens: 8192 }),
   })
-  if (!res.ok) throw new Error(\`OpenCode \${res.status}\`)
+  if (!res.ok) throw new Error(`OpenCode ${res.status}`)
   const data = await res.json()
   return data.choices?.[0]?.message?.content ?? ''
 }
 
 async function callOpenCodeStream(model: string, messages: {role: string, content: string}[], apiKey: string): Promise<ReadableStream> {
-  const res = await fetch(\`\${OPENCODE_BASE}/chat/completions\`, {
+  const res = await fetch(`${OPENCODE_BASE}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': \`Bearer \${apiKey}\`,
+      'Authorization': `Bearer ${apiKey}`,
       'User-Agent': 'SparkieStudio/2.0',
     },
     body: JSON.stringify({ model, messages, stream: true, temperature: 0.7, max_tokens: 16384 }),
   })
-  if (!res.ok) throw new Error(\`OpenCode \${res.status}\`)
+  if (!res.ok) throw new Error(`OpenCode ${res.status}`)
   return res.body!
 }
 
 function sseEvent(event: string, data: object): string {
-  return \`data: \${JSON.stringify({ event, ...data })}\n\n\`
+  return `data: ${JSON.stringify({ event, ...data })}\n\n`
 }
 
 export async function POST(req: NextRequest) {
@@ -137,25 +137,25 @@ export async function POST(req: NextRequest) {
           plan = { title: 'Project', files: [], approach: userMessage, needsWebSearch: false, searchQuery: '' }
         }
 
-        send('thinking', { step: 'plan_done', text: \`⚡ Plan ready — \${plan.files.length > 0 ? plan.files.join(', ') : 'analyzing request'}\` })
+        send('thinking', { step: 'plan_done', text: `⚡ Plan ready — ${plan.files.length > 0 ? plan.files.join(', ') : 'analyzing request'}` })
 
         // ── STEP 2: WEB SEARCH (if needed) ───────────────────────────────
         let searchContext = ''
         if (plan.needsWebSearch && tavilyKey && plan.searchQuery) {
-          send('thinking', { step: 'search', text: \`🔍 Searching: \${plan.searchQuery}\` })
+          send('thinking', { step: 'search', text: `🔍 Searching: ${plan.searchQuery}` })
           try {
             const tavilyRes = await fetch('https://api.tavily.com/search', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Authorization': \`Bearer \${tavilyKey}\` },
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${tavilyKey}` },
               body: JSON.stringify({ query: plan.searchQuery, max_results: 3, search_depth: 'basic' }),
             })
             if (tavilyRes.ok) {
               const tavilyData = await tavilyRes.json()
               const results = tavilyData.results?.slice(0, 3) ?? []
               searchContext = results.map((r: {title: string; content: string; url: string}) =>
-                \`[\${r.title}]\n\${r.content}\n\${r.url}\`
+                `[${r.title}]\n${r.content}\n${r.url}`
               ).join('\n\n')
-              send('thinking', { step: 'search_done', text: \`🔍 Found \${results.length} sources\` })
+              send('thinking', { step: 'search_done', text: `🔍 Found ${results.length} sources` })
             }
           } catch {
             send('thinking', { step: 'search_skip', text: '🔍 Search unavailable — building from knowledge' })
@@ -163,13 +163,13 @@ export async function POST(req: NextRequest) {
         }
 
         // ── STEP 3: BUILDER (streaming) ───────────────────────────────────
-        send('thinking', { step: 'build', text: \`🔨 Building \${plan.title}...\` })
+        send('thinking', { step: 'build', text: `🔨 Building ${plan.title}...` })
 
         const builderContext = [
-          plan.approach ? \`Approach: \${plan.approach}\` : '',
-          plan.files.length > 0 ? \`Files to create: \${plan.files.join(', ')}\` : '',
-          searchContext ? \`\nWeb research:\n\${searchContext}\` : '',
-          currentFiles ? \`\nCurrent workspace (update these, don't rewrite from scratch if fixing):\n\${currentFiles}\` : '',
+          plan.approach ? `Approach: ${plan.approach}` : '',
+          plan.files.length > 0 ? `Files to create: ${plan.files.join(', ')}` : '',
+          searchContext ? `\nWeb research:\n${searchContext}` : '',
+          currentFiles ? `\nCurrent workspace (update these, don't rewrite from scratch if fixing):\n${currentFiles}` : '',
         ].filter(Boolean).join('\n')
 
         const builderMessages = [
@@ -177,7 +177,7 @@ export async function POST(req: NextRequest) {
           ...messages.slice(0, -1),
           ...(builderContext ? [{
             role: 'user' as const,
-            content: \`[BUILD PLAN]\n\${builderContext}\`
+            content: `[BUILD PLAN]\n${builderContext}`
           }, {
             role: 'assistant' as const,
             content: 'Understood. Building now.'
@@ -214,7 +214,7 @@ export async function POST(req: NextRequest) {
 
         const reviewerMessages = [
           { role: 'system', content: REVIEWER_SYSTEM },
-          { role: 'user', content: \`Review this code output:\n\n\${buildOutput}\` }
+          { role: 'user', content: `Review this code output:\n\n${buildOutput}` }
         ]
 
         const review = await callOpenCode('big-pickle', reviewerMessages, apiKey)

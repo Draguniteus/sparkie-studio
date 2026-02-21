@@ -12,14 +12,14 @@ export async function POST(req: NextRequest) {
     const res = await fetch('https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true', {
       method: 'POST',
       headers: {
-        'Authorization': \`Token \${deepgramKey}\`,
+        'Authorization': `Token ${deepgramKey}`,
         'Content-Type': req.headers.get('content-type') ?? 'audio/webm',
       },
       body: audioBuffer,
     })
     if (!res.ok) {
       const err = await res.text()
-      return new Response(JSON.stringify({ error: \`Deepgram error: \${res.status}\` }), { status: 500 })
+      return new Response(JSON.stringify({ error: `Deepgram error: ${res.status}` }), { status: 500 })
     }
     const data = await res.json()
     const transcript = data?.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? ''
