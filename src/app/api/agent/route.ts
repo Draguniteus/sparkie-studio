@@ -138,7 +138,6 @@ export async function POST(req: NextRequest) {
 
         const plannerMessages = [
           { role: 'system', content: PLANNER_SYSTEM },
-          ...messages.slice(0, -1),
           { role: 'user', content: userMessage }
         ]
 
@@ -187,9 +186,12 @@ export async function POST(req: NextRequest) {
           currentFiles ? `\nCurrent workspace (update these, don't rewrite from scratch if fixing):\n${currentFiles}` : '',
         ].filter(Boolean).join('\n')
 
+        // For fix requests (currentFiles present), include chat history for context
+        // For new builds, only use last message + build plan (reduces tokens + latency)
+        const chatHistory = currentFiles ? messages.slice(0, -1) : []
         const builderMessages = [
           { role: 'system', content: BUILDER_SYSTEM },
-          ...messages.slice(0, -1),
+          ...chatHistory,
           ...(builderContext ? [{
             role: 'user' as const,
             content: `[BUILD PLAN]\n${builderContext}`
@@ -224,29 +226,11 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        // ── STEP 4: REVIEWER ─────────────────────────────────────────────
-        send('thinking', { step: 'review', text: '✅ Reviewing for bugs...' })
-
-        const reviewerMessages = [
-          { role: 'system', content: REVIEWER_SYSTEM },
-          { role: 'user', content: `Review this code output:\n\n${buildOutput}` }
-        ]
-
-        const review = await callOpenCode('big-pickle', reviewerMessages, apiKey)
-
-        if (review.startsWith('LGTM')) {
-          send('thinking', { step: 'review_done', text: '✅ Review passed — no critical bugs found' })
-        } else if (review.startsWith('ISSUES_FOUND')) {
-          send('thinking', { step: 'review_fixing', text: '🔧 Reviewer found issues — patching...' })
-          // Stream the fixed version from reviewer
-          const fixLines = review.split('\n').slice(1) // skip ISSUES_FOUND line
-          const fixedContent = fixLines.join('\n').trim()
-          if (fixedContent.includes('---FILE:')) {
-            send('delta', { content: '\n' + fixedContent })
-          }
-          send('thinking', { step: 'review_done', text: '✅ Issues fixed — ready' })
-        }
-
+        // ── STEP 4: DONE ─────────────────────────────────────────────────
+        // Reviewer removed — blocking review was adding 5-8s latency and corrupting output
+        // (reviewer fix was appended to builder output instead of replacing it)
+        // Builder quality is enforced via BUILDER_SYSTEM prompt instead.
+        send('thinking', { step: 'review_done', text: '✅ Build complete — preview ready' })
         send('done', { buildOutput })
 
       } catch (err) {

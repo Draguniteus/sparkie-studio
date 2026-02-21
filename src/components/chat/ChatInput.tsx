@@ -633,13 +633,22 @@ export function ChatInput() {
           const latest = archives[archives.length - 1]
           useAppStore.getState().setFiles([...archives.slice(0, -1), ...( latest.children ?? [])])
         }
-        // Text-only response — show in thinking slot only, no second bubble
+        // No files produced — show clean conversational response or error
         if (fullBuild) {
           const finalParse = parseAIResponse(fullBuild)
-          const textOnly = finalParse.text || fullBuild
-          // Only show text if it's actually readable content (not raw code blocks)
-          const isReadable = !textOnly.includes('---FILE:') && !textOnly.includes('```') && textOnly.length < 2000
-          updateMessage(chatId, thinkingMsgId, { content: isReadable ? textOnly : lastThinkingText, isStreaming: false, model: selectedModel })
+          const textOnly = finalParse.text || ''
+          // Only show as chat text if it's clean conversational content (short, no code markers)
+          const hasCodeMarkers = textOnly.includes('---FILE:') || textOnly.includes('```')
+            || textOnly.includes('function ') || textOnly.includes(' => ')
+          const isCleanText = textOnly.length > 0 && textOnly.length < 1500 && !hasCodeMarkers
+          if (isCleanText) {
+            updateMessage(chatId, thinkingMsgId, { content: textOnly, isStreaming: false, model: selectedModel })
+          } else {
+            // Build produced code but no valid file markers — show clean error
+            updateMessage(chatId, thinkingMsgId, { content: lastThinkingText, isStreaming: false })
+            if (buildMsgId) updateMessage(chatId, buildMsgId, { content: '⚠️ Build output was malformed — try rephrasing your request or use a more specific description.', isStreaming: false })
+            return
+          }
         } else {
           updateMessage(chatId, thinkingMsgId, { content: lastThinkingText, isStreaming: false })
         }
