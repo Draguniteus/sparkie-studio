@@ -252,41 +252,69 @@ export async function POST(req: NextRequest) {
           { role: 'user', content: userMessage }
         ]
 
-        // Stream with timeout — abort if model stalls
-        const streamAbort = new AbortController()
-        const streamTimer = setTimeout(() => streamAbort.abort(), STREAM_TIMEOUT_MS)
+        // Builder model fallback chain — if primary model returns empty output, try next
+        const BUILDER_MODELS = ['minimax-m2.5-free', 'glm-5-free', 'big-pickle']
         let buildOutput = ''
-        try {
-          const buildStream = await callOpenCodeStream('minimax-m2.5-free', builderMessages, apiKey, streamAbort.signal)
-          const reader = buildStream.getReader()
-          const decoder = new TextDecoder()
 
-          // while loop MUST be inside the try — so AbortError on reader.read() is caught
-          while (true) {
-            const { done, value } = await reader.read()
-            if (done) break
-            const chunk = decoder.decode(value, { stream: true })
-            for (const line of chunk.split('\n')) {
-              if (line.startsWith('data: ') && line !== 'data: [DONE]') {
-                try {
-                  const parsed = JSON.parse(line.slice(6))
-                  const delta = parsed.choices?.[0]?.delta?.content
-                  if (delta) {
-                    buildOutput += delta
-                    send('delta', { content: delta })
-                  }
-                } catch { /* skip */ }
-              }
-            }
+        for (let modelIdx = 0; modelIdx < BUILDER_MODELS.length; modelIdx++) {
+          const builderModel = BUILDER_MODELS[modelIdx]
+          if (modelIdx > 0) {
+            send('thinking', { step: 'build_retry', text: `🔄 Retrying with ${builderModel}...` })
           }
 
-          clearTimeout(streamTimer)
-        } catch (streamErr: unknown) {
-          clearTimeout(streamTimer)
-          const msg = streamErr instanceof Error && streamErr.name === 'AbortError'
-            ? '⏱ Build timed out — try a shorter or simpler prompt'
-            : 'Stream error'
-          send('error', { message: msg })
+          const streamAbort = new AbortController()
+          const streamTimer = setTimeout(() => streamAbort.abort(), STREAM_TIMEOUT_MS)
+          let modelOutput = ''
+
+          try {
+            const buildStream = await callOpenCodeStream(builderModel, builderMessages, apiKey, streamAbort.signal)
+            const reader = buildStream.getReader()
+            const decoder = new TextDecoder()
+
+            // while loop MUST be inside the try — so AbortError on reader.read() is caught
+            while (true) {
+              const { done, value } = await reader.read()
+              if (done) break
+              const chunk = decoder.decode(value, { stream: true })
+              for (const line of chunk.split('\n')) {
+                if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+                  try {
+                    const parsed = JSON.parse(line.slice(6))
+                    const delta = parsed.choices?.[0]?.delta?.content
+                    if (delta) {
+                      modelOutput += delta
+                      buildOutput += delta
+                      send('delta', { content: delta })
+                    }
+                  } catch { /* skip */ }
+                }
+              }
+            }
+
+            clearTimeout(streamTimer)
+          } catch (streamErr: unknown) {
+            clearTimeout(streamTimer)
+            if (streamErr instanceof Error && streamErr.name === 'AbortError') {
+              // Timeout — try next model
+              send('thinking', { step: 'build_timeout', text: `⏱ ${builderModel} timed out — trying next...` })
+              continue
+            }
+            send('error', { message: 'Stream error' })
+            return
+          }
+
+          // If model produced content, we're done — don't try fallbacks
+          if (modelOutput.trim().length > 0) break
+
+          // Empty output — try next model
+          if (modelIdx < BUILDER_MODELS.length - 1) {
+            send('thinking', { step: 'build_empty', text: `⚠️ ${builderModel} returned no output — trying next model...` })
+          }
+        }
+
+        // If still empty after all models, surface a clean error
+        if (buildOutput.trim().length === 0) {
+          send('error', { message: '⚠️ All builder models returned empty output — please try again in a moment' })
           return
         }
 
