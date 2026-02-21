@@ -504,8 +504,8 @@ export function ChatInput() {
     })
 
     // buildMsgId is created lazily on first builder delta (avoids double-bubble during planning)
-    let buildMsgId: string | null = null
-    const ensureBuildMsg = () => {
+    let buildMsgId = ''
+    const ensureBuildMsg = (): string => {
       if (!buildMsgId) {
         buildMsgId = addMessage(chatId, {
           role: 'assistant', content: '', model: selectedModel, isStreaming: true, type: 'text'
