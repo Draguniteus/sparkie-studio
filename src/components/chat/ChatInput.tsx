@@ -10,6 +10,7 @@ const MODELS = [
   { id: "minimax-m2.5-free", name: "MiniMax M2.5", tag: "Free", type: "chat" },
   { id: "minimax-m2.1-free", name: "MiniMax M2.1", tag: "Free", type: "chat" },
   { id: "kimi-k2.5-free", name: "Kimi K2.5", tag: "Free", type: "chat" },
+  { id: "big-pickle", name: "Big Pickle", tag: "Free", type: "chat" },
 ]
 
 const IMAGE_MODELS = [

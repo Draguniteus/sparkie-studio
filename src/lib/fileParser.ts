@@ -1,7 +1,8 @@
 /**
  * Parse AI response to extract file blocks.
  * Format: ---FILE: filename.ext---\n(content)\n---END FILE---
- * Fallback: ```lang\n(content)\n```
+ * Fallback 1: ---FILE: filename.ext--- ... next marker or EOF (for models that omit ---END FILE---)
+ * Fallback 2: ```lang\n(content)\n```
  */
 
 export interface ParsedFile {
@@ -18,10 +19,10 @@ export function parseAIResponse(raw: string): ParseResult {
   const files: ParsedFile[] = []
   let text = raw
 
-  // Primary: ---FILE: name--- ... ---END FILE---
-  const fileRegex = /---FILE:\s*(.+?)\s*---\n([\s\S]*?)---END FILE---/g
+  // Primary: strict ---FILE: name--- ... ---END FILE---
+  const strictRegex = /---FILE:\s*(.+?)\s*---\n([\s\S]*?)---END FILE---/g
   let match: RegExpExecArray | null
-  while ((match = fileRegex.exec(raw)) !== null) {
+  while ((match = strictRegex.exec(raw)) !== null) {
     files.push({ name: match[1].trim(), content: match[2].trimEnd() })
   }
 
@@ -30,7 +31,24 @@ export function parseAIResponse(raw: string): ParseResult {
     return { text, files }
   }
 
-  // Fallback: fenced code blocks — try to extract filename from comment or language
+  // Fallback A: ---FILE: name--- without ---END FILE--- (some models omit the closing marker)
+  // Match content up to next ---FILE: marker or end of string
+  const looseRegex = /---FILE:\s*(.+?)\s*---\n([\s\S]*?)(?=---FILE:|$)/g
+  const looseMatches: Array<{ name: string; content: string }> = []
+  while ((match = looseRegex.exec(raw)) !== null) {
+    const content = match[2].trimEnd()
+    if (content.length > 0) {
+      looseMatches.push({ name: match[1].trim(), content })
+    }
+  }
+
+  if (looseMatches.length > 0) {
+    for (const f of looseMatches) files.push(f)
+    text = raw.replace(/---FILE:\s*.+?\s*---\n[\s\S]*?(?=---FILE:|$)/g, '').trim()
+    return { text, files }
+  }
+
+  // Fallback B: fenced code blocks — try to extract filename from comment or language
   const codeBlockRegex = /```([^\n]*)\n([\s\S]*?)```/g
   let cbMatch: RegExpExecArray | null
   let fileIndex = 0
