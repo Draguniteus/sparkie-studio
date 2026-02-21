@@ -280,6 +280,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   terminalOutput: '',
   setContainerStatus: (s) => set({ containerStatus: s }),
   setPreviewUrl: (url) => set({ previewUrl: url }),
-  appendTerminalOutput: (text) => set((s) => ({ terminalOutput: s.terminalOutput + text })),
+  appendTerminalOutput: (text) => set((s) => {
+    const combined = s.terminalOutput + text
+    // Cap at 100KB — prevents unbounded memory growth in long sessions
+    const trimmed = combined.length > 100_000 ? combined.slice(-100_000) : combined
+    return { terminalOutput: trimmed }
+  }),
   clearTerminalOutput: () => set({ terminalOutput: '' }),
 }))

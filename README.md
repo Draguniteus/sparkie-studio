@@ -1,139 +1,64 @@
-# 🐝 Sparkie Studio V2
+# Sparkie Studio
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Version-2.0.0-FFC30B.svg" alt="Version">
-  <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
-  <img src="https://img.shields.io/badge/Framework-Next.js_14-black.svg" alt="Next.js">
-  <img src="https://img.shields.io/badge/Theme-Queen_Bee-FFC30B.svg" alt="Theme">
-</p>
+> AI-powered coding environment — Polleneer's native agent. Build anything with a multi-model agent loop, live IDE, real-time preview, and WebContainers.
 
-<p align="center">
-  <strong>Polleneer's native AI workspace — Chat, Code, Create.</strong>
-</p>
+## Stack
 
-<p align="center">
-  Like Grok is to X/Twitter, Sparkie is to Polleneer.
-</p>
+- **Framework**: Next.js 14 (App Router, Edge Runtime)
+- **UI**: Tailwind CSS + Zustand state management
+- **AI Models**: OpenCode Zen gateway (GLM-5 Planner · MiniMax M2.5 Builder)
+- **Media**: Pollinations.ai (image/video generation)
+- **Voice**: Deepgram Nova-2 (speech-to-text)
+- **Search**: Tavily (web context injection)
+- **Deploy**: DigitalOcean App Platform
 
----
+## Features
 
-## ✨ Features
+- **Agent Loop**: GLM-5 plans structure → MiniMax M2.5 builds with streaming → live code view
+- **Live Preview**: Self-contained HTML/CSS/JS renders instantly in sandboxed iframe
+- **WebContainers**: Full Node.js runtime for Express/Vite/Next.js projects
+- **File IDE**: File explorer, Monaco-style editor, syntax highlighting, download
+- **Assets Gallery**: Date-grouped catalogue of all generated files across sessions
+- **Voice Input**: Hold mic button, speak, Deepgram transcribes to prompt
+- **Web Search**: Tavily injects live docs/context mid-build when needed
 
-### 💬 AI Chat
-- **Multi-model support** — DeepSeek V3, Llama 3.3, Qwen 2.5, Gemini, Mistral (free tier)
-- **Streaming responses** — Real-time token-by-token output
-- **Model selector** — Switch models per conversation
-- **Markdown & code highlighting** — Beautiful formatted responses
-- **File attachments** — Drag and drop images, docs, code files
-
-### 💻 Live IDE Panel
-- **Monaco Editor** — VS Code's engine in the browser
-- **File Explorer** — Create, edit, rename, delete files
-- **Real-time Preview** — See output instantly
-- **Current Process** — Watch Sparkie work in real-time
-- **Download** — Export files, folders, or entire projects as ZIP
-
-### 🎨 Image Generation
-- **Pollinations AI** — Free image generation
-- **Gallery** — Browse and manage generated images
-- **Download** — Save images locally
-
-### 🔍 Research & Analysis
-- **Web search** — Tavily-powered research
-- **Document analysis** — Upload and analyze files
-- **Data visualization** — Charts and graphs in the IDE
-
----
-
-## 🚀 Quick Start
-
-### Development
+## Development
 
 ```bash
-# Clone
-git clone https://github.com/Draguniteus/sparkie-studio.git
-cd sparkie-studio
-
-# Install dependencies
 npm install
-
-# Start dev server
+cp .env.example .env.local   # fill in your API keys
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000)
+## Environment Variables
 
-### Environment Variables
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `OPENCODE_API_KEY` | ✅ | OpenCode Zen gateway key |
+| `TAVILY_API_KEY` | Optional | Enables web search in agent loop |
+| `DEEPGRAM_API_KEY` | Optional | Enables voice input |
+| `POLLINATIONS_API_KEY` | Optional | Unlocks higher rate limits |
 
-Create a `.env.local` file:
-
-```env
-OPENROUTER_API_KEY=your_openrouter_key
-TAVILY_API_KEY=your_tavily_key
-DEEPGRAM_API_KEY=your_deepgram_key
-```
-
----
-
-## 🎨 Queen Bee Theme
-
-| Element | Color | Hex |
-|---------|-------|-----|
-| Primary Gold | Honey Gold | `#FFC30B` |
-| Gold Light | Bright Gold | `#FFD700` |
-| Gold Dark | Deep Gold | `#E5A800` |
-| Background | Deep Black | `#1A1A1A` |
-| Surface | Dark Gray | `#252525` |
-| Elevated | Medium Gray | `#2D2D2D` |
-
----
-
-## 🏗️ Tech Stack
-
-| Category | Technology |
-|----------|-----------|
-| **Framework** | Next.js 14 (App Router) |
-| **UI** | Tailwind CSS |
-| **State** | Zustand |
-| **Code Editor** | Monaco Editor |
-| **Icons** | Lucide React |
-| **Fonts** | Inter, JetBrains Mono |
-| **LLM Gateway** | OpenRouter (free models) |
-| **Deploy** | DigitalOcean App Platform |
-
----
-
-## 📁 Project Structure
+## Architecture
 
 ```
-sparkie-studio/
-├── src/
-│   ├── app/
-│   │   ├── globals.css          # Queen Bee theme + Tailwind
-│   │   ├── layout.tsx           # Root layout
-│   │   └── page.tsx             # Main app shell
-│   ├── components/
-│   │   ├── layout/
-│   │   │   ├── Sidebar.tsx      # Left nav + chat history
-│   │   │   ├── MainPanel.tsx    # Center workspace
-│   │   │   └── IDEPanel.tsx     # Right IDE panel
-│   │   └── chat/
-│   │       ├── WelcomeView.tsx  # Landing/home view
-│   │       ├── ChatView.tsx     # Active chat view
-│   │       ├── ChatInput.tsx    # Input with model selector
-│   │       └── MessageBubble.tsx # Message rendering
-│   └── store/
-│       └── appStore.ts          # Zustand global state
-├── package.json
-├── tailwind.config.ts
-├── tsconfig.json
-└── next.config.mjs
+User prompt
+  └─ /api/agent (Edge)
+       ├─ GLM-5 Planner         → build plan JSON
+       ├─ [Tavily search]        → context (optional)
+       └─ MiniMax M2.5 Builder  → streaming ---FILE:--- blocks
+            └─ fileParser.ts    → splits into FileNode[]
+                 └─ Preview.tsx → live iframe render
 ```
 
----
+## Security
 
-## 📝 License
+- API keys never exposed to client (all LLM calls server-side via Edge routes)
+- Image proxy validates model + sanitizes params (no SSRF)
+- Audio upload capped at 10 MB
+- Request bodies capped at 50 KB
+- Streaming builds time out after 60s
 
-MIT License — Built with ❤️ by the Polleneer Team
+## License
 
-🐝 Queen Bee Edition 🐝
+MIT

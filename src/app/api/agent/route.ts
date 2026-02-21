@@ -95,7 +95,7 @@ async function callOpenCode(model: string, messages: {role: string, content: str
   return data.choices?.[0]?.message?.content ?? ''
 }
 
-async function callOpenCodeStream(model: string, messages: {role: string, content: string}[], apiKey: string): Promise<ReadableStream> {
+async function callOpenCodeStream(model: string, messages: {role: string, content: string}[], apiKey: string, signal?: AbortSignal): Promise<ReadableStream> {
   const res = await fetch(`${OPENCODE_BASE}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -104,6 +104,7 @@ async function callOpenCodeStream(model: string, messages: {role: string, conten
       'User-Agent': 'SparkieStudio/2.0',
     },
     body: JSON.stringify({ model, messages, stream: true, temperature: 0.7, max_tokens: 16384 }),
+    signal,
   })
   if (!res.ok) throw new Error(`OpenCode ${res.status}`)
   return res.body!
@@ -113,8 +114,35 @@ function sseEvent(event: string, data: object): string {
   return `data: ${JSON.stringify({ event, ...data })}\n\n`
 }
 
+// Max request body 50KB — prevents edge OOM on malicious payloads
+const MAX_BODY_BYTES = 50 * 1024
+// Streaming timeout 60s — edge functions must not hang indefinitely
+const STREAM_TIMEOUT_MS = 60_000
+
 export async function POST(req: NextRequest) {
-  const { messages, currentFiles } = await req.json()
+  // ── Body size guard ────────────────────────────────────────────────
+  const contentLength = req.headers.get('content-length')
+  if (contentLength && parseInt(contentLength) > MAX_BODY_BYTES) {
+    return new Response(JSON.stringify({ error: 'Payload too large' }), {
+      status: 413,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
+  let messages: {role: string; content: string}[]
+  let currentFiles: string | undefined
+  try {
+    const body = await req.json()
+    messages = body.messages
+    currentFiles = body.currentFiles
+    if (!Array.isArray(messages) || messages.length === 0) throw new Error('Invalid messages')
+  } catch {
+    return new Response(JSON.stringify({ error: 'Invalid request body' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
   const apiKey = process.env.OPENCODE_API_KEY
   const tavilyKey = process.env.TAVILY_API_KEY
 
@@ -202,10 +230,14 @@ export async function POST(req: NextRequest) {
           { role: 'user', content: userMessage }
         ]
 
-        const buildStream = await callOpenCodeStream('minimax-m2.5-free', builderMessages, apiKey)
-        const reader = buildStream.getReader()
-        const decoder = new TextDecoder()
+        // Stream with timeout — abort if model stalls
+        const streamAbort = new AbortController()
+        const streamTimer = setTimeout(() => streamAbort.abort(), STREAM_TIMEOUT_MS)
         let buildOutput = ''
+        try {
+          const buildStream = await callOpenCodeStream('minimax-m2.5-free', builderMessages, apiKey, streamAbort.signal)
+          const reader = buildStream.getReader()
+          const decoder = new TextDecoder()
 
         while (true) {
           const { done, value } = await reader.read()
@@ -226,10 +258,17 @@ export async function POST(req: NextRequest) {
           }
         }
 
+          clearTimeout(streamTimer)
+        } catch (streamErr: unknown) {
+          clearTimeout(streamTimer)
+          const msg = streamErr instanceof Error && streamErr.name === 'AbortError'
+            ? 'Build timed out — try a simpler prompt'
+            : 'Stream error'
+          send('error', { message: msg })
+          return
+        }
+
         // ── STEP 4: DONE ─────────────────────────────────────────────────
-        // Reviewer removed — blocking review was adding 5-8s latency and corrupting output
-        // (reviewer fix was appended to builder output instead of replacing it)
-        // Builder quality is enforced via BUILDER_SYSTEM prompt instead.
         send('thinking', { step: 'review_done', text: '✅ Build complete — preview ready' })
         send('done', { buildOutput })
 

@@ -32,6 +32,7 @@ export function ChatInput() {
   const [selectedImageModel, setSelectedImageModel] = useState("flux")
   const [selectedVideoModel, setSelectedVideoModel] = useState("seedance")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const agentAbortRef = useRef<AbortController | null>(null)
   const [isRecording, setIsRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -523,10 +524,14 @@ export function ChatInput() {
     setIDETab('process')
 
     try {
+      // Cancel any in-flight agent request before starting a new one
+      agentAbortRef.current?.abort()
+      agentAbortRef.current = new AbortController()
       const response = await fetch('/api/agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: [...apiMessages, { role: 'user', content: userContent }], currentFiles: currentFilesPayload }),
+        signal: agentAbortRef.current.signal,
       })
 
       if (!response.ok) {
@@ -656,7 +661,9 @@ export function ChatInput() {
         if (buildMsgId) updateMessage(chatId, buildMsgId, { content: '', isStreaming: false })
       }
 
-    } catch (err) {
+    } catch (err: unknown) {
+      // Ignore abort errors (user navigated away or sent a new message)
+      if (err instanceof Error && err.name === 'AbortError') return
       updateMessage(chatId, thinkingMsgId, { content: '❌ Connection error', isStreaming: false })
       if (buildMsgId) updateMessage(chatId, buildMsgId, { content: 'Try again.', isStreaming: false })
     } finally {
@@ -665,6 +672,13 @@ export function ChatInput() {
       saveChatFiles(chatId, useAppStore.getState().files)
     }
   }, [selectedModel, addMessage, updateMessage, setStreaming, setExecuting, openIDE, setIDETab, ideOpen, upsertFile, setActiveFile, clearLiveCode, appendLiveCode, addLiveCodeFile, addWorklogEntry, updateWorklogEntry, setContainerStatus, setPreviewUrl, saveChatFiles, addAsset])
+
+  // ── Abort cleanup on unmount ──────────────────────────────────────────────
+  useEffect(() => {
+    return () => {
+      agentAbortRef.current?.abort()
+    }
+  }, [])
 
   // ── Voice recording ───────────────────────────────────────────────────────
   const toggleRecording = useCallback(async () => {
