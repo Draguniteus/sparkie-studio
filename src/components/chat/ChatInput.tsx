@@ -288,6 +288,19 @@ export function ChatInput() {
         const description = finalParse.text || `✨ Created ${filesCreated} file(s). Check the preview →`
         updateMessage(chatId, assistantMsgId, { content: description, isStreaming: false })
       } else {
+        // AI responded with text only (no file blocks) — restore the most recent archive back
+        // to the active workspace so the preview doesn't go blank
+        const currentState = useAppStore.getState()
+        const isArchivedNode = (f: import('@/store/appStore').FileNode) =>
+          f.type === 'folder' && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?-\d{4}$/.test(f.name)
+        const archives = currentState.files.filter(isArchivedNode)
+        if (archives.length > 0) {
+          // Pop the most recent archive back out as active files
+          const latest = archives[archives.length - 1]
+          const olderArchives = archives.slice(0, -1)
+          const restored = latest.children ?? []
+          useAppStore.getState().setFiles([...olderArchives, ...restored])
+        }
         updateMessage(chatId, assistantMsgId, {
           content: fullContent || "The model used all tokens for reasoning. Try a simpler prompt.",
           isStreaming: false,

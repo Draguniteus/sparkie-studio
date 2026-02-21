@@ -172,6 +172,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       chats: [...s.chats, { id, title: 'New Chat', messages: [], createdAt: new Date() }],
       currentChatId: id,
       messages: [],
+      // Reset IDE completely for a fresh session
+      files: [],
+      activeFileId: null,
+      liveCode: '',
+      liveCodeFiles: [],
+      isExecuting: false,
+      isStreaming: false,
+      ideTab: 'process',
+      containerStatus: 'idle',
+      previewUrl: null,
     }))
     return id
   },

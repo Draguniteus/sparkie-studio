@@ -51,14 +51,14 @@ export function Sidebar() {
         </button>
       </div>
 
-      {/* New Task Button */}
+      {/* New Chat Button */}
       <div className="p-3">
         <button
           onClick={() => createChat()}
           className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg bg-honey-500/10 border border-honey-500/20 text-honey-500 hover:bg-honey-500/20 transition-all text-sm font-medium"
         >
           <Plus size={16} />
-          New Task
+          New Chat
         </button>
       </div>
 
