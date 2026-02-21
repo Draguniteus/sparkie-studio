@@ -62,6 +62,28 @@ function FileItem({ file, depth }: FileItemProps) {
           <span className="text-[10px] text-text-muted shrink-0">{getFileSize(file.content)}</span>
         )}
         <div className="opacity-0 group-hover:opacity-100 flex gap-0.5 shrink-0">
+          {isFolder && file.children && file.children.length > 0 && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                const allFiles: FileNode[] = []
+                const collect = (nodes: FileNode[]) => nodes.forEach(n => n.type === 'folder' ? collect(n.children ?? []) : allFiles.push(n))
+                collect(file.children!)
+                allFiles.forEach(f => {
+                  if (!f.content) return
+                  const blob = new Blob([f.content], { type: 'text/plain' })
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url; a.download = f.name; a.click()
+                  URL.revokeObjectURL(url)
+                })
+              }}
+              className="p-0.5 rounded hover:bg-hive-hover text-text-muted hover:text-honey-500"
+              title={`Download all files in ${file.name}`}
+            >
+              <Download size={11} />
+            </button>
+          )}
           {!isFolder && (
             <button onClick={downloadFile} className="p-0.5 rounded hover:bg-hive-hover text-text-muted hover:text-text-secondary">
               <Download size={11} />

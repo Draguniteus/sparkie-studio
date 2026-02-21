@@ -38,7 +38,7 @@ export function ChatInput() {
     openIDE, setExecuting, addFile, setActiveFile, setIDETab, ideOpen,
     clearLiveCode, appendLiveCode, addLiveCodeFile,
     addWorklogEntry, updateWorklogEntry,
-    setContainerStatus, setPreviewUrl, setFiles,
+    setContainerStatus, setPreviewUrl,
   } = useAppStore()
 
   const streamChat = useCallback(async (chatId: string, userContent: string) => {
@@ -60,7 +60,38 @@ export function ChatInput() {
     // Reset WebContainer state so the new task gets a fresh Preview
     setContainerStatus('idle')
     setPreviewUrl(null)
-    setFiles([])
+
+    // Archive current files into a named project folder before clearing
+    const currentFiles = useAppStore.getState().files
+    const activeFiles = currentFiles.filter(f => f.type === 'file' && !f.name.startsWith('__archive'))
+    if (activeFiles.length > 0) {
+      // Derive folder name from last user message (truncated, slug-safe)
+      const lastMsg = useAppStore.getState().messages
+        .filter(m => m.role === 'user').slice(-2, -1)[0]?.content || 'project'
+      const folderName = lastMsg
+        .replace(/[^a-zA-Z0-9 ]/g, '')
+        .trim()
+        .split(' ')
+        .slice(0, 5)
+        .join('-')
+        .toLowerCase() || 'project'
+      const timestamp = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }).replace(':', '')
+      const archiveName = `${folderName}-${timestamp}`
+
+      const archiveFolder = {
+        id: crypto.randomUUID(),
+        name: archiveName,
+        type: 'folder' as const,
+        content: '',
+        children: activeFiles.map(f => ({ ...f, id: crypto.randomUUID() })),
+      }
+
+      // Keep existing archive folders, replace active files with fresh workspace
+      const existingArchives = currentFiles.filter(f => f.type === 'folder')
+      useAppStore.getState().setFiles([...existingArchives, archiveFolder])
+    } else {
+      useAppStore.getState().setFiles([])
+    }
 
     // Open IDE to Current Process — will show LiveCodeView since isExecuting=true
     if (!ideOpen) openIDE()
@@ -194,7 +225,7 @@ export function ChatInput() {
       setStreaming(false)
       setExecuting(false)
     }
-  }, [selectedModel, addMessage, updateMessage, setStreaming, setExecuting, openIDE, setIDETab, ideOpen, addFile, setActiveFile, clearLiveCode, appendLiveCode, addLiveCodeFile, addWorklogEntry, updateWorklogEntry, setContainerStatus, setPreviewUrl, setFiles])
+  }, [selectedModel, addMessage, updateMessage, setStreaming, setExecuting, openIDE, setIDETab, ideOpen, addFile, setActiveFile, clearLiveCode, appendLiveCode, addLiveCodeFile, addWorklogEntry, updateWorklogEntry, setContainerStatus, setPreviewUrl])
 
   const generateMedia = useCallback(async (chatId: string, prompt: string, mediaType: "image" | "video") => {
     const model = mediaType === "video" ? selectedVideoModel : selectedImageModel
