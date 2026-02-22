@@ -39,14 +39,30 @@ Only generate code or project files when the user EXPLICITLY asks you to build, 
 
 export async function POST(req: NextRequest) {
   try {
-    const { messages, model } = await req.json()
+    const { messages, model, userProfile } = await req.json()
     const apiKey = process.env.OPENCODE_API_KEY
     if (!apiKey) {
       return new Response(JSON.stringify({ error: 'OPENCODE_API_KEY not configured' }), {
         status: 500, headers: { 'Content-Type': 'application/json' },
       })
     }
-    const fullMessages = [{ role: 'system', content: SYSTEM_PROMPT }, ...messages]
+
+    // Build system prompt — inject user profile if available
+    let systemContent = SYSTEM_PROMPT
+    if (userProfile?.name) {
+      systemContent += `\n\n## USER CONTEXT\n`
+      systemContent += `Name: ${userProfile.name}\n`
+      if (userProfile.role)       systemContent += `Role: ${userProfile.role}\n`
+      if (userProfile.goals)      systemContent += `Building: ${userProfile.goals}\n`
+      if (userProfile.style)      systemContent += `Style: ${userProfile.style}\n`
+      if (userProfile.experience) systemContent += `Experience: ${userProfile.experience}\n`
+      systemContent += `Address them by name. Tailor your tone to their experience level.`
+    }
+
+    // Keep last 12 messages for context (trim to prevent token bloat)
+    const recentMessages = messages.slice(-12)
+
+    const fullMessages = [{ role: 'system', content: systemContent }, ...recentMessages]
     const response = await fetch(`${OPENCODE_BASE}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -54,7 +70,7 @@ export async function POST(req: NextRequest) {
         'Authorization': `Bearer ${apiKey}`,
         'User-Agent': 'SparkieStudio/2.0',
       },
-      body: JSON.stringify({ model, messages: fullMessages, stream: true, temperature: 0.7, max_tokens: 16384 }),
+      body: JSON.stringify({ model, messages: fullMessages, stream: true, temperature: 0.7, max_tokens: 8192 }),
     })
     if (!response.ok) {
       const err = await response.text()
