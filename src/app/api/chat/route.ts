@@ -59,10 +59,78 @@ export async function POST(req: NextRequest) {
       systemContent += `Address them by name. Tailor your tone to their experience level.`
     }
 
+    // Extract latest user message for Tavily classifier
+    const userMessage = messages[messages.length - 1]?.content ?? ''
+
+    // ── Smart Tavily: self-assess before answering ─────────────────────────────
+    const tavilyKey = process.env.TAVILY_API_KEY
+    let searchContext = ''
+    if (tavilyKey && apiKey && userMessage) {
+      let shouldSearch = false
+      try {
+        const scRes = await fetch(`${OPENCODE_BASE}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+            'User-Agent': 'SparkieStudio/2.0',
+          },
+          body: JSON.stringify({
+            model: 'minimax-m2.5-free',
+            messages: [
+              {
+                role: 'system',
+                content: `You are a strict classifier. Respond with ONLY one word: "search" or "skip".
+
+"search" = requires real-time or up-to-date information: current events, live prices, latest news, recent releases, sports scores, weather, trending topics, recent research, anything with "now", "today", "latest", "current", "recent", specific people/companies with evolving situations.
+
+"skip" = answerable from training knowledge: math, definitions, explanations, history, logic, opinions, creative writing, coding help, anything stable over time.
+
+When in doubt, respond "search".`,
+              },
+              { role: 'user', content: userMessage.slice(0, 300) },
+            ],
+            stream: false,
+            temperature: 0,
+            max_tokens: 5,
+          }),
+          signal: AbortSignal.timeout(6000),
+        })
+        if (scRes.ok) {
+          const scData = await scRes.json()
+          const verdict = scData.choices?.[0]?.message?.content?.trim().toLowerCase() ?? 'skip'
+          shouldSearch = verdict.startsWith('search')
+        }
+      } catch { /* non-fatal */ }
+
+      if (shouldSearch) {
+        try {
+          const tRes = await fetch('https://api.tavily.com/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${tavilyKey}` },
+            body: JSON.stringify({ query: userMessage.slice(0, 200), max_results: 3, search_depth: 'basic' }),
+            signal: AbortSignal.timeout(8000),
+          })
+          if (tRes.ok) {
+            const td = await tRes.json()
+            const results = td.results?.slice(0, 3) ?? []
+            searchContext = results.map((r: { title: string; content: string; url: string }) =>
+              `[${r.title}]\n${r.content}\n${r.url}`
+            ).join('\n\n')
+          }
+        } catch { /* non-fatal */ }
+      }
+    }
+
     // Keep last 12 messages for context (trim to prevent token bloat)
     const recentMessages = messages.slice(-12)
 
-    const fullMessages = [{ role: 'system', content: systemContent }, ...recentMessages]
+    // Inject search context as system addendum if available
+    const enrichedSystem = searchContext
+      ? systemContent + `\n\n## LIVE WEB CONTEXT (use this to answer the user's question):\n${searchContext}`
+      : systemContent
+
+    const fullMessages = [{ role: 'system', content: enrichedSystem }, ...recentMessages]
     const response = await fetch(`${OPENCODE_BASE}/chat/completions`, {
       method: 'POST',
       headers: {
