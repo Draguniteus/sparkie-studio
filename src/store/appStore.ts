@@ -28,6 +28,27 @@ export interface FileNode {
   children?: FileNode[]
 }
 
+/** Recursively find a FileNode by id anywhere in the tree */
+export function findNodeById(nodes: FileNode[], id: string): FileNode | undefined {
+  for (const node of nodes) {
+    if (node.id === id) return node
+    if (node.children?.length) {
+      const found = findNodeById(node.children, id)
+      if (found) return found
+    }
+  }
+  return undefined
+}
+
+/** Flatten a FileNode tree into leaf file nodes only (excludes folders/archives) */
+export function flattenFileTree(nodes: FileNode[]): FileNode[] {
+  return nodes.flatMap(n =>
+    n.type === 'folder' || n.type === 'archive'
+      ? flattenFileTree(n.children ?? [])
+      : [n]
+  )
+}
+
 export interface Asset {
   id: string
   name: string
