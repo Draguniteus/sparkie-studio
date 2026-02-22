@@ -25,6 +25,15 @@ const VIDEO_MODELS = [
   { id: "seedance", name: "Seedance", tag: "Free", desc: "BytePlus text-to-video" },
 ]
 
+const PROMPT_TEMPLATES = [
+  { label: "Landing page", prompt: "Build a stunning landing page with hero section, features grid, and CTA. Dark theme, honey gold accents, plain CSS.", icon: "🌐" },
+  { label: "REST API", prompt: "Build a full Express.js REST API with CRUD endpoints, input validation, and proper error handling. Include package.json.", icon: "⚡" },
+  { label: "Dashboard", prompt: "Build an analytics dashboard with charts, stat cards, and a sidebar. Dark theme with honey gold data visualizations.", icon: "📊" },
+  { label: "Todo app", prompt: "Build a beautiful todo app with add, complete, delete, and filter by status. Dark theme, smooth animations, plain CSS.", icon: "✅" },
+  { label: "Auth UI", prompt: "Build a sign in / sign up UI with form validation, password strength meter, and animated transitions. Dark theme.", icon: "🔐" },
+  { label: "Chat UI", prompt: "Build a chat interface with message bubbles, timestamps, typing indicator, and smooth animations. Dark theme.", icon: "💬" },
+]
+
 type GenMode = "chat" | "image" | "video"
 
 export function ChatInput() {
@@ -531,7 +540,7 @@ export function ChatInput() {
       const response = await fetch('/api/agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: [...apiMessages, { role: 'user', content: userContent }], currentFiles: currentFilesPayload, model: selectedModel }),
+        body: JSON.stringify({ messages: [...apiMessages, { role: 'user', content: userContent }], currentFiles: currentFilesPayload, model: selectedModel, userProfile: useAppStore.getState().userProfile }),
         signal: agentAbortRef.current.signal,
       })
 
@@ -766,8 +775,25 @@ export function ChatInput() {
     video: "Describe the video you want to generate...",
   }
 
+  const messages_count = useAppStore(s => s.messages).length
+  const showTemplates = messages_count === 0 && input === "" && genMode === "chat"
+
   return (
     <div className="relative">
+      {showTemplates && (
+        <div className="mb-3 flex flex-wrap gap-2">
+          {PROMPT_TEMPLATES.map(t => (
+            <button
+              key={t.label}
+              onClick={() => setInput(t.prompt)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-hive-700 border border-hive-border text-xs text-text-secondary hover:border-honey-500/50 hover:text-honey-400 transition-all"
+            >
+              <span>{t.icon}</span>
+              <span>{t.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
       <div className="rounded-2xl bg-hive-surface border border-hive-border focus-within:border-honey-500/40 transition-colors">
         <textarea
           ref={textareaRef} value={input} onChange={handleInput} onKeyDown={handleKeyDown}
