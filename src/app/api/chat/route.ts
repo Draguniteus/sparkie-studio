@@ -35,8 +35,7 @@ Only generate code or project files when the user EXPLICITLY asks you to build, 
 - Self-contained HTML: inline ALL CSS in <style> tags, inline ALL JavaScript in <script> tags
 - Dark theme: #0a0a0a background, #FFC30B honey gold accents
 - Production quality — functional, visually impressive
-\``
-
+`
 
 export async function POST(req: NextRequest) {
   try {
