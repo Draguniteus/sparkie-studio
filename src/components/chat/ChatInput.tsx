@@ -55,6 +55,7 @@ export function ChatInput() {
     clearLiveCode, appendLiveCode, addLiveCodeFile,
     addWorklogEntry, updateWorklogEntry,
     setContainerStatus, setPreviewUrl, saveChatFiles, addAsset,
+    setLastMode,
   } = useAppStore()
 
   // Upsert a file with a potentially nested path (e.g. "public/index.html")
@@ -214,10 +215,11 @@ export function ChatInput() {
     setIDETab("process")
 
     try {
+      const userProfile = useAppStore.getState().userProfile
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: apiMessages, model: selectedModel }),
+        body: JSON.stringify({ messages: apiMessages, model: selectedModel, userProfile }),
       })
 
       if (!response.ok) {
@@ -401,9 +403,18 @@ export function ChatInput() {
     const t = text.trim().toLowerCase()
     const words = t.split(/\s+/).filter(Boolean)
 
+    // Explicit mode overrides — highest priority
+    if (/\b(cancel|stop building|just chat|forget it)\b/.test(t)) return true
+
     // Build/code intent → always route to agent regardless of length
     const BUILD_KEYWORDS = /\b(build|create|make|write|generate|code|implement|deploy|refactor|debug|fix|update|add|remove|delete|install|run|start|test the app|test it)\b/
     if (BUILD_KEYWORDS.test(t)) return false
+
+    // Code-paste + question → explain, don't rebuild
+    if ((text.includes('```') || text.includes('<code>')) && /\?/.test(t)) return true
+
+    // "improve this" / "make it better" without active build context → chat
+    if (/^(improve|make it|make this|what about|how about|could you|can you make)\b/.test(t) && !BUILD_KEYWORDS.test(t)) return true
 
     // Very short messages (≤3 words) — almost always conversational
     if (words.length <= 3) return true
@@ -440,10 +451,11 @@ export function ChatInput() {
     const assistantMsgId = addMessage(chatId, { role: "assistant", content: "", model: selectedModel, isStreaming: true })
     setStreaming(true)
     try {
+      const userProfile = useAppStore.getState().userProfile
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: apiMessages, model: selectedModel }),
+        body: JSON.stringify({ messages: apiMessages, model: selectedModel, userProfile }),
       })
       if (!response.ok) {
         updateMessage(chatId, assistantMsgId, { content: "Something went wrong.", isStreaming: false })
@@ -759,11 +771,23 @@ export function ChatInput() {
       generateMedia(chatId, userContent, "image")
     } else if (genMode === "video") {
       generateMedia(chatId, userContent, "video")
-    } else if (isConversational(userContent)) {
-      // Chitchat / praise — reply naturally without touching the IDE
-      streamReply(chatId, userContent)
     } else {
-      streamAgent(chatId, userContent)
+      const t = userContent.toLowerCase().trim()
+      const lastMode = useAppStore.getState().lastMode
+
+      // "continue / keep going / next step" — respect what Sparkie was just doing
+      const isContinue = /^(continue|keep going|next step|go on|proceed|carry on|keep it up|and then|what's next|next)\b/.test(t)
+      if (isContinue && lastMode === 'build') {
+        setLastMode('build')
+        streamAgent(chatId, userContent)
+      } else if (isConversational(userContent)) {
+        // Chitchat / praise — reply naturally without touching the IDE
+        setLastMode('chat')
+        streamReply(chatId, userContent)
+      } else {
+        setLastMode('build')
+        streamAgent(chatId, userContent)
+      }
     }
   }, [input, isStreaming, currentChatId, createChat, addMessage, genMode, streamAgent, generateMedia, isConversational, streamReply])
 
