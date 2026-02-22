@@ -48,6 +48,16 @@ export function flattenFileTree(nodes: FileNode[]): FileNode[] {
       : [n]
   )
 }
+export interface UserProfile {
+  name: string            // what to call the user
+  role: string            // e.g. "indie developer", "designer", "student"
+  goals: string           // what they're building / main use case
+  style: string           // coding style preference: "commented", "minimal", "production"
+  experience: string      // "beginner" | "intermediate" | "expert"
+  completedAt: string     // ISO timestamp of when onboarding was completed
+}
+
+
 
 export interface Asset {
   id: string
@@ -139,6 +149,13 @@ interface AppState {
   setPreviewUrl: (url: string | null) => void
   appendTerminalOutput: (text: string) => void
   clearTerminalOutput: () => void
+
+  // User memory profile
+  userProfile: UserProfile | null
+  onboardingDone: boolean
+  setUserProfile: (profile: UserProfile) => void
+  updateUserProfile: (patch: Partial<UserProfile>) => void
+  dismissOnboarding: () => void
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -308,4 +325,35 @@ export const useAppStore = create<AppState>((set, get) => ({
     return { terminalOutput: trimmed }
   }),
   clearTerminalOutput: () => set({ terminalOutput: '' }),
+
+  // User memory profile — persisted to localStorage
+  userProfile: (() => {
+    if (typeof window === 'undefined') return null
+    try {
+      const stored = localStorage.getItem('sparkie_user_profile')
+      return stored ? JSON.parse(stored) as UserProfile : null
+    } catch { return null }
+  })(),
+  onboardingDone: (() => {
+    if (typeof window === 'undefined') return false
+    return localStorage.getItem('sparkie_onboarding_done') === 'true'
+  })(),
+  setUserProfile: (profile) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('sparkie_user_profile', JSON.stringify(profile))
+      localStorage.setItem('sparkie_onboarding_done', 'true')
+    }
+    set({ userProfile: profile, onboardingDone: true })
+  },
+  updateUserProfile: (patch) => set((s) => {
+    const updated = s.userProfile ? { ...s.userProfile, ...patch } : null
+    if (updated && typeof window !== 'undefined') {
+      localStorage.setItem('sparkie_user_profile', JSON.stringify(updated))
+    }
+    return { userProfile: updated }
+  }),
+  dismissOnboarding: () => {
+    if (typeof window !== 'undefined') localStorage.setItem('sparkie_onboarding_done', 'true')
+    set({ onboardingDone: true })
+  },
 }))
