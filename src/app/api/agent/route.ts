@@ -75,7 +75,7 @@ async function callOpenCodeStream(
       'Authorization': `Bearer ${apiKey}`,
       'User-Agent': 'SparkieStudio/2.0',
     },
-    body: JSON.stringify({ model, messages, stream: true, temperature: 0.7, max_tokens: 16384 }),
+    body: JSON.stringify({ model, messages, stream: true, temperature: 0.7, max_tokens: 8192 }),
     signal,
   })
   if (!res.ok) throw new Error(`OpenCode ${res.status}`)
@@ -88,7 +88,7 @@ function sseEvent(event: string, data: object): string {
 
 const SSE_KEEPALIVE = ': keepalive\n\n'
 const MAX_BODY_BYTES = 50 * 1024
-const STREAM_TIMEOUT_MS = 85_000
+const STREAM_TIMEOUT_MS = 45_000
 
 function extractTitle(msg: string): string {
   return msg
@@ -217,6 +217,7 @@ export async function POST(req: NextRequest) {
           const abortCtrl = new AbortController()
           const timer = setTimeout(() => abortCtrl.abort(), STREAM_TIMEOUT_MS)
           let modelOutput = ''
+          let lineBuffer = ''  // SSE line buffer — accumulates partial lines across chunks
 
           try {
             const buildStream = await callOpenCodeStream(model, builderMessages, apiKey, abortCtrl.signal)
@@ -226,9 +227,11 @@ export async function POST(req: NextRequest) {
             while (true) {
               const { done, value } = await reader.read()
               if (done) break
-              const chunk = decoder.decode(value, { stream: true })
+              lineBuffer += decoder.decode(value, { stream: true })
+              const lines = lineBuffer.split('\n')
+              lineBuffer = lines.pop() ?? ''  // save incomplete last line for next chunk
               let hadContent = false
-              for (const line of chunk.split('\n')) {
+              for (const line of lines) {
                 if (!line.startsWith('data: ') || line === 'data: [DONE]') continue
                 try {
                   const parsed = JSON.parse(line.slice(6))
