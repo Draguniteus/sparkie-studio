@@ -156,6 +156,8 @@ interface AppState {
   setUserProfile: (profile: UserProfile) => void
   updateUserProfile: (patch: Partial<UserProfile>) => void
   dismissOnboarding: () => void
+  lastMode: 'chat' | 'build'
+  setLastMode: (mode: 'chat' | 'build') => void
   hydrateFromStorage: () => void
 }
 
@@ -166,6 +168,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   isLoading: false,
   isStreaming: false,
   selectedModel: 'minimax-m2.5-free',
+  lastMode: 'chat' as const,
 
   addMessage: (chatIdOrMsg, msgPartial) => {
     const id = crypto.randomUUID()
@@ -221,6 +224,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   clearMessages: () => set({ messages: [] }),
   setSelectedModel: (model) => set({ selectedModel: model }),
   setStreaming: (v) => set({ isStreaming: v }),
+  setLastMode: (mode) => set({ lastMode: mode }),
 
   createChat: () => {
     const id = crypto.randomUUID()
