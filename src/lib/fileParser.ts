@@ -1,6 +1,10 @@
 /**
  * Parse AI response to extract file blocks.
  * Supports multiple output formats from different models.
+ *
+ * Auto-wrapping rule:
+ * If ALL parsed file names share no common root folder (i.e., they are flat like
+ * "package.json", "src/App.jsx"), they are wrapped in a sanitized projectName folder.
  */
 
 export interface ParsedFile {
@@ -13,7 +17,57 @@ export interface ParseResult {
   files: ParsedFile[]
 }
 
-export function parseAIResponse(raw: string): ParseResult {
+/**
+ * Derive a safe folder name from the chat title or prompt.
+ * e.g. "Build me a task manager app" → "task-manager"
+ *      "New Chat" → "project"
+ */
+export function deriveProjectName(chatTitle: string): string {
+  if (!chatTitle || chatTitle.trim() === '' || chatTitle.toLowerCase() === 'new chat') {
+    return 'project'
+  }
+  return chatTitle
+    .toLowerCase()
+    .replace(/build (me )?a?n? ?/i, '')   // strip "build me a", "build a"
+    .replace(/app|application|website|site|game|tool|dashboard/gi, (m) => m) // keep meaningful keywords
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')          // non-alphanum → dash
+    .replace(/^-+|-+$/g, '')             // trim leading/trailing dashes
+    .slice(0, 32)                         // max 32 chars
+    || 'project'
+}
+
+/**
+ * Wrap flat files (no shared root folder) inside a named project folder.
+ * If files already share a single root like "taskmanager/..." leave them as-is.
+ */
+function wrapInProjectFolder(files: ParsedFile[], projectName: string): ParsedFile[] {
+  if (files.length === 0) return files
+
+  // Get root segments of each file path
+  const roots = files.map(f => {
+    const parts = f.name.replace(/\\/g, '/').split('/')
+    return parts.length > 1 ? parts[0] : null
+  })
+
+  // If every file already has a common root folder → already wrapped, leave alone
+  const nonNullRoots = roots.filter(Boolean)
+  if (nonNullRoots.length === files.length) {
+    const firstRoot = nonNullRoots[0]
+    if (nonNullRoots.every(r => r === firstRoot)) {
+      return files // already wrapped in a folder
+    }
+  }
+
+  // Otherwise wrap all files under projectName/
+  const safe = projectName || 'project'
+  return files.map(f => ({
+    ...f,
+    name: `${safe}/${f.name}`
+  }))
+}
+
+export function parseAIResponse(raw: string, projectName?: string): ParseResult {
   const files: ParsedFile[] = []
 
   // Normalize line endings
@@ -30,7 +84,7 @@ export function parseAIResponse(raw: string): ParseResult {
   }
   if (files.length > 0) {
     const text = normalized.replace(/---FILE:\s*[^\n-][^\n]*\s*---\s*\n[\s\S]*?---END FILE---/g, '').trim()
-    return { text, files }
+    return { text, files: wrapInProjectFolder(files, projectName || 'project') }
   }
 
   // ── Fallback A: ---FILE: without ---END FILE--- ───────────────────────────
@@ -45,7 +99,7 @@ export function parseAIResponse(raw: string): ParseResult {
   if (looseMatches.length > 0) {
     for (const f of looseMatches) files.push(f)
     const text = normalized.replace(/---FILE:\s*[^\n-][^\n]*\s*---\s*\n[\s\S]*?(?=---FILE:|$)/g, '').trim()
-    return { text, files }
+    return { text, files: wrapInProjectFolder(files, projectName || 'project') }
   }
 
   // ── Fallback B: fenced code blocks ───────────────────────────────────────
@@ -67,72 +121,50 @@ export function parseAIResponse(raw: string): ParseResult {
   }
   if (files.length > 0) {
     const text = normalized.replace(/```[^\n]*\n[\s\S]*?```/g, '').trim()
-    return { text, files }
+    return { text, files: wrapInProjectFolder(files, projectName || 'project') }
   }
 
   // ── Fallback C: raw HTML/JS/CSS (no markers at all) ──────────────────────
   // ONLY fires when there are zero ---FILE:--- markers in the output
-  // If markers exist but didn't parse, do NOT blindly wrap to avoid garbled previews
   const hasAnyFileMarker = /---FILE:/i.test(normalized)
   if (!hasAnyFileMarker && normalized.trim().length > 50) {
     const trimmed = normalized.trim()
-    const looksLikeHTML = /<!DOCTYPE|<html|<head|<body/i.test(trimmed) || (trimmed.startsWith('<') && trimmed.includes('>'))
-    const looksLikeJS = /^(function |const |let |var |class |import |export )/m.test(trimmed)
-    const looksLikeCSS = /^[.#a-zA-Z][\s\S]*?\{[\s\S]*?:[\s\S]*?;/m.test(trimmed) && !looksLikeHTML
+    const looksLikeHTML = /<html|<!DOCTYPE/i.test(trimmed)
+    const looksLikeJS = /^(const|let|var|function|import|export|class)\b/.test(trimmed)
+    const looksLikeCSS = /^[\s\S]*?\{[\s\S]*?\}/.test(trimmed) && !looksLikeHTML && !looksLikeJS
 
-    if (looksLikeHTML) {
-      files.push({ name: 'index.html', content: trimmed })
-      return { text: '', files }
-    } else if (looksLikeCSS) {
-      files.push({ name: 'styles.css', content: trimmed })
-      return { text: '', files }
-    } else if (looksLikeJS) {
-      files.push({ name: 'script.js', content: trimmed })
-      return { text: '', files }
+    let fallbackName = 'index.html'
+    if (looksLikeJS && !looksLikeHTML) fallbackName = 'index.js'
+    else if (looksLikeCSS) fallbackName = 'styles.css'
+
+    const wrappedName = projectName ? `${projectName}/${fallbackName}` : fallbackName
+    return {
+      text: '',
+      files: [{ name: wrappedName, content: trimmed }]
     }
   }
 
-  return { text: normalized, files }
+  return { text: normalized.trim(), files: [] }
 }
 
 function inferFilename(lang: string, content: string, index: number): string {
   const suffix = index > 0 ? `${index}` : ''
   const l = lang.toLowerCase()
-  if (l === 'html' || content.includes('<!DOCTYPE') || content.includes('<html')) return `index${suffix}.html`
-  if (l === 'css' || l === 'scss' || l === 'sass') return `styles${suffix}.${l}`
-  if (l === 'javascript' || l === 'js') return `script${suffix}.js`
+  if (l === 'html' || content.includes('</html>') || content.includes('<body')) return `index${suffix}.html`
+  if (l === 'css' || l === 'scss') return `styles${suffix}.${l}`
   if (l === 'typescript' || l === 'ts') return `script${suffix}.ts`
-  if (l === 'jsx') return `app${suffix}.jsx`
-  if (l === 'tsx') return `app${suffix}.tsx`
-  if (l === 'svg' || content.includes('<svg')) return `image${suffix}.svg`
-  if (l === 'python' || l === 'py') return `main${suffix}.py`
-  if (l === 'rust' || l === 'rs') return `main${suffix}.rs`
-  if (l === 'go' || l === 'golang') return `main${suffix}.go`
-  if (l === 'c') return `main${suffix}.c`
-  if (l === 'cpp' || l === 'c++' || l === 'cxx') return `main${suffix}.cpp`
-  if (l === 'java') return `Main${suffix}.java`
-  if (l === 'kotlin' || l === 'kt') return `Main${suffix}.kt`
-  if (l === 'swift') return `main${suffix}.swift`
-  if (l === 'ruby' || l === 'rb') return `main${suffix}.rb`
-  if (l === 'php') return `index${suffix}.php`
-  if (l === 'csharp' || l === 'cs' || l === 'c#') return `Program${suffix}.cs`
+  if (l === 'tsx') return `component${suffix}.tsx`
+  if (l === 'jsx') return `component${suffix}.jsx`
+  if (l === 'javascript' || l === 'js') return `script${suffix}.js`
   if (l === 'json') return `data${suffix}.json`
-  if (l === 'yaml' || l === 'yml') return `config${suffix}.yaml`
-  if (l === 'toml') return `config${suffix}.toml`
-  if (l === 'xml') return `data${suffix}.xml`
-  if (l === 'csv') return `data${suffix}.csv`
+  if (l === 'python' || l === 'py') return `script${suffix}.py`
+  if (l === 'bash' || l === 'sh') return `script${suffix}.sh`
   if (l === 'sql') return `query${suffix}.sql`
-  if (l === 'graphql' || l === 'gql') return `schema${suffix}.graphql`
-  if (l === 'markdown' || l === 'md') return `readme${suffix}.md`
-  if (l === 'mdx') return `page${suffix}.mdx`
-  if (l === 'bash' || l === 'sh' || l === 'shell' || l === 'zsh') return `script${suffix}.sh`
-  if (l === 'powershell' || l === 'ps1') return `script${suffix}.ps1`
-  const ext = l || 'txt'
-  return `file${suffix}.${ext}`
+  return `file${suffix}.txt`
 }
 
-export function getLanguageFromFilename(name: string): string {
-  const ext = name.split('.').pop()?.toLowerCase() || ''
+export function getLanguageFromFilename(filename: string): string {
+  const ext = filename.split('.').pop()?.toLowerCase() || ''
   const map: Record<string, string> = {
     ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
     json: 'json', md: 'markdown', mdx: 'markdown', css: 'css', scss: 'scss', sass: 'scss',
