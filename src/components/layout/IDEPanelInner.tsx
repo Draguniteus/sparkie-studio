@@ -31,6 +31,16 @@ export function IDEPanelInner() {
     if (files.length === 0) hasTriedWC.current = false
   }, [files, isExecuting, containerStatus, runProject, setIdeTab])
 
+  // Listen for BuildCard "Open Preview" button → switch to process tab
+  useEffect(() => {
+    const handler = () => {
+      setIdeTab('process')
+      // If IDE is closed this won't fire (ideOpen check), but setIdeTab is harmless
+    }
+    window.addEventListener('sparkie:open-preview', handler)
+    return () => window.removeEventListener('sparkie:open-preview', handler)
+  }, [setIdeTab])
+
   const downloadAll = () => {
     files.forEach(f => {
       const blob = new Blob([f.content], { type: 'text/plain' })
