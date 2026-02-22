@@ -59,6 +59,9 @@ export interface UserProfile {
 
 
 
+export type AssetType = 'website' | 'document' | 'image' | 'audio' | 'video' | 'excel' | 'ppt' | 'other'
+export type AssetSource = 'agent' | 'user'
+
 export interface Asset {
   id: string
   name: string
@@ -68,6 +71,8 @@ export interface Asset {
   chatTitle: string
   createdAt: Date
   fileId: string  // references FileNode id
+  assetType: AssetType   // for category filter
+  source: AssetSource    // 'agent' | 'user'
 }
 
 export type WorklogEntry = {
@@ -304,7 +309,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   assets: [],
   addAsset: (asset) => {
     const id = crypto.randomUUID()
-    set((s) => ({ assets: [...s.assets, { ...asset, id, createdAt: new Date() }] }))
+    set((s) => ({ assets: [...s.assets, { assetType: 'other', source: 'agent', ...asset, id, createdAt: new Date() }] }))
   },
   clearAssets: () => set({ assets: [] }),
 
