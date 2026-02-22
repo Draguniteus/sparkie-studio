@@ -575,9 +575,13 @@ export function ChatInput() {
     ]
     const ackText = ACK_PHRASES[Math.floor(Math.random() * ACK_PHRASES.length)]
 
-    // Add thinking message (will be updated live)
+    // ACK message — permanent friendly message, becomes wrap-up at the end
+    const ackMsgId = addMessage(chatId, {
+      role: 'assistant', content: ackText, model: 'Agent Loop', isStreaming: false, type: 'text'
+    })
+    // Thinking message — shows live planning/building steps; hidden at finalize
     const thinkingMsgId = addMessage(chatId, {
-      role: 'assistant', content: ackText, model: 'Agent Loop', isStreaming: true, type: 'text'
+      role: 'assistant', content: '', model: 'Agent Loop', isStreaming: true, type: 'text'
     })
 
     // buildMsgId is created lazily on first builder delta (avoids double-bubble during planning)
@@ -611,7 +615,7 @@ export function ChatInput() {
       })
 
       if (!response.ok) {
-        updateMessage(chatId, thinkingMsgId, { content: 'Agent error — try again', isStreaming: false })
+        updateMessage(chatId, ackMsgId, { content: 'Agent error — try again', isStreaming: false })
         updateMessage(chatId, buildMsgId, { content: '', isStreaming: false })
         return
       }
@@ -687,15 +691,15 @@ export function ChatInput() {
                 }
               }
             } else if (parsed.event === 'error') {
-              updateMessage(chatId, thinkingMsgId, { content: `❌ ${parsed.message}`, isStreaming: false })
+              updateMessage(chatId, ackMsgId, { content: `❌ ${parsed.message}`, isStreaming: false })
               if (buildMsgId) updateMessage(chatId, buildMsgId, { content: '', isStreaming: false })
             }
           } catch { /* skip */ }
         }
       }
 
-      // Finalize messages
-      updateMessage(chatId, thinkingMsgId, { content: lastThinkingText, isStreaming: false })
+      // Finalize messages — hide the planning/thinking status bubble
+      updateMessage(chatId, thinkingMsgId, { content: '', isStreaming: false })
 
       if (filesCreated > 0) {
         // Show clean description — NEVER raw code in the chat bubble
@@ -712,7 +716,7 @@ export function ChatInput() {
           `There it is! Let me know how it looks and what you'd like to change 🐝`,
         ]
         const wrapText = WRAP_PHRASES[Math.floor(Math.random() * WRAP_PHRASES.length)]
-        addMessage(chatId, { role: 'assistant', content: wrapText, model: selectedModel, isStreaming: false, type: 'text' })
+        updateMessage(chatId, ackMsgId, { content: wrapText, isStreaming: false })
       } else {
         // No files — restore archive and show text response
         const currentState = useAppStore.getState()
@@ -728,7 +732,7 @@ export function ChatInput() {
           const hasFileMarkers = fullBuild.includes('---FILE:')
           if (textOnly.length > 0 && !hasFileMarkers) {
             // Model responded conversationally (e.g. clarification, error) — show as chat
-            updateMessage(chatId, thinkingMsgId, { content: textOnly.slice(0, 2000), isStreaming: false, model: selectedModel })
+            updateMessage(chatId, ackMsgId, { content: textOnly.slice(0, 2000), isStreaming: false, model: selectedModel })
           } else if (hasFileMarkers) {
             // Had markers but parser found no files — genuine parse failure
             updateMessage(chatId, thinkingMsgId, { content: lastThinkingText, isStreaming: false })
@@ -747,7 +751,7 @@ export function ChatInput() {
     } catch (err: unknown) {
       // Ignore abort errors (user navigated away or sent a new message)
       if (err instanceof Error && err.name === 'AbortError') return
-      updateMessage(chatId, thinkingMsgId, { content: '❌ Connection error', isStreaming: false })
+      updateMessage(chatId, ackMsgId, { content: '❌ Connection error', isStreaming: false })
       if (buildMsgId) updateMessage(chatId, buildMsgId, { content: 'Try again.', isStreaming: false })
     } finally {
       setStreaming(false)
