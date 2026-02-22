@@ -1,14 +1,23 @@
 import { create } from 'zustand'
 
+export interface BuildCardData {
+  title: string           // derived project name (e.g. "ai-tools-directory")
+  files: string[]         // list of created file names
+  fileCount: number       // total files created
+  languages: string[]     // unique languages (e.g. ['html', 'css', 'javascript'])
+  isEdit: boolean         // was this an edit or a fresh build
+}
+
 export interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
-  type?: 'text' | 'image' | 'video'
+  type?: 'text' | 'image' | 'video' | 'build_card'
   imageUrl?: string
   imagePrompt?: string
   model?: string
   isStreaming?: boolean
+  buildCard?: BuildCardData  // only present when type === 'build_card'
 }
 
 export interface Chat {
