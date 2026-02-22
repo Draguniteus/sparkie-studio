@@ -210,6 +210,7 @@ export async function POST(req: NextRequest) {
         for (let idx = 0; idx < BUILDER_MODELS.length; idx++) {
           const model = BUILDER_MODELS[idx]
           if (idx > 0) {
+            buildOutput = ''  // reset: each model should output the COMPLETE file
             send('thinking', { step: 'build_retry', text: `[~] Retrying with ${model}...` })
           }
 
@@ -217,15 +218,18 @@ export async function POST(req: NextRequest) {
           let modelOutput = ''
           let lineBuffer = ''  // SSE line buffer — accumulates partial lines across chunks
           let timedOutWithContent = false
+          let firstTokenReceived = false
 
-          // Inactivity timeout: resets on every chunk received.
-          // Fires only when the model has gone SILENT (no data) for INACTIVITY_MS.
-          // This allows slow-but-streaming models to finish without switching.
-          const INACTIVITY_MS = 25_000
-          let inactivityTimer = setTimeout(() => abortCtrl.abort(), INACTIVITY_MS)
+          // Two-phase timeout:
+          // Phase 1 (before first token): generous 90s wait — models can be slow to start
+          // Phase 2 (after first token): 30s inactivity — if model goes silent mid-stream, give up
+          const FIRST_TOKEN_MS = 90_000
+          const INACTIVITY_MS = 30_000
+          let inactivityTimer = setTimeout(() => abortCtrl.abort(), FIRST_TOKEN_MS)
           const resetInactivity = () => {
             clearTimeout(inactivityTimer)
-            inactivityTimer = setTimeout(() => abortCtrl.abort(), INACTIVITY_MS)
+            const ms = firstTokenReceived ? INACTIVITY_MS : FIRST_TOKEN_MS
+            inactivityTimer = setTimeout(() => abortCtrl.abort(), ms)
           }
 
           try {
@@ -247,6 +251,10 @@ export async function POST(req: NextRequest) {
                   const parsed = JSON.parse(line.slice(6))
                   const delta = parsed.choices?.[0]?.delta?.content
                   if (delta) {
+                    if (!firstTokenReceived) {
+                      firstTokenReceived = true
+                      resetInactivity()  // switch to shorter inactivity window now
+                    }
                     modelOutput += delta
                     buildOutput += delta
                     hadContent = true
