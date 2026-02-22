@@ -15,6 +15,7 @@ export interface ParsedFile {
 export interface ParseResult {
   text: string
   files: ParsedFile[]
+  folders?: string[]  // explicit ---FOLDER:--- declarations from agent
 }
 
 /**
@@ -70,8 +71,19 @@ function wrapInProjectFolder(files: ParsedFile[], projectName: string): ParsedFi
 export function parseAIResponse(raw: string, projectName?: string): ParseResult {
   const files: ParsedFile[] = []
 
+  // Extract ---FOLDER:--- markers (explicit folder declarations from agent)
+  const folderRegex = /---FOLDER:\s*([^\n-][^\n]*)\s*---/g
+  const folders: string[] = []
+  let folderMatch: RegExpExecArray | null
+  while ((folderMatch = folderRegex.exec(raw)) !== null) {
+    const folderPath = folderMatch[1].trim().replace(/^\/+|\/+$/g, '')  // normalize
+    if (folderPath) folders.push(folderPath)
+  }
+  // Strip ---FOLDER:--- markers from raw before further parsing
+  const rawWithoutFolders = raw.replace(/---FOLDER:\s*[^\n-][^\n]*\s*---\n?/g, '')
+
   // Normalize line endings
-  const normalized = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  const normalized = rawWithoutFolders.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
 
   // ── Primary: ---FILE: name--- ... ---END FILE--- ──────────────────────────
   const strictRegex = /---FILE:\s*([^\n-][^\n]*)\s*---\s*\n([\s\S]*?)---END FILE---/g
@@ -84,7 +96,7 @@ export function parseAIResponse(raw: string, projectName?: string): ParseResult 
   }
   if (files.length > 0) {
     const text = normalized.replace(/---FILE:\s*[^\n-][^\n]*\s*---\s*\n[\s\S]*?---END FILE---/g, '').trim()
-    return { text, files: wrapInProjectFolder(files, projectName || 'project') }
+    return { text, files: wrapInProjectFolder(files, projectName || 'project'), folders }
   }
 
   // ── Fallback A: ---FILE: without ---END FILE--- ───────────────────────────
@@ -99,7 +111,7 @@ export function parseAIResponse(raw: string, projectName?: string): ParseResult 
   if (looseMatches.length > 0) {
     for (const f of looseMatches) files.push(f)
     const text = normalized.replace(/---FILE:\s*[^\n-][^\n]*\s*---\s*\n[\s\S]*?(?=---FILE:|$)/g, '').trim()
-    return { text, files: wrapInProjectFolder(files, projectName || 'project') }
+    return { text, files: wrapInProjectFolder(files, projectName || 'project'), folders }
   }
 
   // ── Fallback B: fenced code blocks ───────────────────────────────────────
@@ -121,7 +133,7 @@ export function parseAIResponse(raw: string, projectName?: string): ParseResult 
   }
   if (files.length > 0) {
     const text = normalized.replace(/```[^\n]*\n[\s\S]*?```/g, '').trim()
-    return { text, files: wrapInProjectFolder(files, projectName || 'project') }
+    return { text, files: wrapInProjectFolder(files, projectName || 'project'), folders }
   }
 
   // ── Fallback C: raw HTML/JS/CSS (no markers at all) ──────────────────────
@@ -140,11 +152,12 @@ export function parseAIResponse(raw: string, projectName?: string): ParseResult 
     const wrappedName = projectName ? `${projectName}/${fallbackName}` : fallbackName
     return {
       text: '',
-      files: [{ name: wrappedName, content: trimmed }]
+      files: [{ name: wrappedName, content: trimmed }],
+      folders
     }
   }
 
-  return { text: normalized.trim(), files: [] }
+  return { text: normalized.trim(), files: [], folders }
 }
 
 function inferFilename(lang: string, content: string, index: number): string {
