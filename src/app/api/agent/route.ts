@@ -75,7 +75,8 @@ async function callOpenCodeStream(
   model: string,
   messages: { role: string; content: string }[],
   apiKey: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  temperature = 0.7
 ): Promise<ReadableStream> {
   const res = await fetch(`${OPENCODE_BASE}/chat/completions`, {
     method: 'POST',
@@ -84,7 +85,7 @@ async function callOpenCodeStream(
       'Authorization': `Bearer ${apiKey}`,
       'User-Agent': 'SparkieStudio/2.0',
     },
-    body: JSON.stringify({ model, messages, stream: true, temperature: 0.7, max_tokens: 8192 }),
+    body: JSON.stringify({ model, messages, stream: true, temperature, max_tokens: 8192 }),
     signal,
   })
   if (!res.ok) throw new Error(`OpenCode ${res.status}`)
@@ -299,7 +300,7 @@ Address them by name (${userProfile.name}) when relevant. Tailor complexity to t
           }
 
           try {
-            const buildStream = await callOpenCodeStream(model, builderMessages, apiKey, abortCtrl.signal)
+            const buildStream = await callOpenCodeStream(model, builderMessages, apiKey, abortCtrl.signal, currentFiles ? 0.2 : 0.7)
             const reader = buildStream.getReader()
             const decoder = new TextDecoder()
 
