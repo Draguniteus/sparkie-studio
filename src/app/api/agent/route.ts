@@ -65,6 +65,17 @@ When using Chart.js with a time scale (type: 'time'):
 - OR use type: 'linear' scale instead of type: 'time' (simpler, no adapter needed)
 - NEVER use type: 'time' without the adapter — it throws "This method is not implemented"
 
+## SELF-CONTAINED OUTPUT RULE (DEPLOY-READY APPS)
+When the user requests a data-driven web app (directory, listing, dashboard, catalogue, portfolio, tool collection) AND mentions deploying, publishing, going live, or GitHub Pages:
+- Output a SINGLE self-contained index.html file — ONE file, nothing else
+- Embed ALL data directly as a JavaScript const array inside a <script> tag in the HTML
+- NO package.json, NO Express, NO SQLite, NO Node.js server, NO backend files
+- NO separate .js or .css files — everything inline inside index.html
+- Load any libraries (Chart.js, Fuse.js, etc.) via CDN <script> tags only
+- The file must render perfectly when opened directly in a browser with NO server
+- Fetch external APIs only from the browser side (Clearbit logos, public CDNs, etc.)
+This produces a file that works on GitHub Pages, Netlify Drop, or any static host instantly.
+
 ## QUALITY STANDARDS
 - Production-quality, visually impressive, fully functional
 - Dark theme: #0a0a0a background, #FFC30B honey gold accents
@@ -125,6 +136,11 @@ function hoistCssImports(html: string): string {
   })
 }
 
+// Pre-flight: detect "deploy live" + data-driven intent → force self-contained output
+const DEPLOY_INTENT_RE = /\b(deploy|publish|go live|github pages|netlify|static host)\b/i
+const DATA_DRIVEN_RE = /\b(directory|listing|catalogue|catalog|dashboard|dataset|\d{3,}[\s-]*(tools?|items?|entries|records|products?))\b/i
+const SELF_CONTAINED_PREFIX = '[STATIC DEPLOY REQUEST — output a SINGLE self-contained index.html with all data embedded as inline JavaScript arrays. NO package.json, NO Express, NO server files. The file must work when opened directly in a browser with no server running.]\n\n'
+
 export async function POST(req: NextRequest) {
   const contentLength = req.headers.get('content-length')
   if (contentLength && parseInt(contentLength) > MAX_BODY_BYTES) {
@@ -161,6 +177,15 @@ export async function POST(req: NextRequest) {
   const userMessage = messages[messages.length - 1]?.content ?? ''
   const projectTitle = extractTitle(userMessage)
   const encoder = new TextEncoder()
+
+  // Pre-flight: if this is a new build (no currentFiles) with deploy+data-driven intent,
+  // prepend the static constraint so the model outputs a single self-contained index.html
+  const isStaticDeployRequest = !currentFiles
+    && DEPLOY_INTENT_RE.test(userMessage)
+    && DATA_DRIVEN_RE.test(userMessage)
+  const effectiveUserMessage = isStaticDeployRequest
+    ? SELF_CONTAINED_PREFIX + userMessage
+    : userMessage
 
   // Build model list: user's selection first, then fallbacks (deduped)
   const FALLBACK_MODELS = ['minimax-m2.5-free', 'glm-5-free', 'kimi-k2.5-free', 'minimax-m2.1-free', 'big-pickle']
@@ -249,13 +274,7 @@ When in doubt, respond "search". Only respond "skip" when you are highly confide
 
         // Personalize system prompt with user memory profile
         const personalizedSystem = userProfile
-          ? `${BUILDER_SYSTEM}
-
-## USER PROFILE
-You are working with ${userProfile.name}, a ${userProfile.experience}-level ${userProfile.role}.
-Their main goal: ${userProfile.goals}.
-Code style preference: ${userProfile.style === 'commented' ? 'add helpful comments explaining key parts' : userProfile.style === 'production' ? 'include error handling, input validation, and production-ready patterns' : 'clean, minimal code without excessive comments'}.
-Address them by name (${userProfile.name}) when relevant. Tailor complexity to their experience level.`
+          ? `${BUILDER_SYSTEM}\n\n## USER PROFILE\nYou are working with ${userProfile.name}, a ${userProfile.experience}-level ${userProfile.role}.\nTheir main goal: ${userProfile.goals}.\nCode style preference: ${userProfile.style === 'commented' ? 'add helpful comments explaining key parts' : userProfile.style === 'production' ? 'include error handling, input validation, and production-ready patterns' : 'clean, minimal code without excessive comments'}.\nAddress them by name (${userProfile.name}) when relevant. Tailor complexity to their experience level.`
           : BUILDER_SYSTEM
 
         const builderMessages = [
@@ -269,7 +288,7 @@ Address them by name (${userProfile.name}) when relevant. Tailor complexity to t
             { role: 'user' as const, content: `Current workspace files:\n${currentFiles}` },
             { role: 'assistant' as const, content: 'Understood. I will update these files.' },
           ] : []),
-          { role: 'user', content: userMessage },
+          { role: 'user', content: effectiveUserMessage },
         ]
 
         let buildOutput = ''
