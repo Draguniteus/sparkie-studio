@@ -412,7 +412,8 @@ export function ChatInput() {
     const BUILD_KEYWORDS = /^(build|create|make|write|generate|implement|deploy|refactor|debug|fix|install)\b/
     const BUILD_PHRASE = /\b(build me|build a|create a|make a|make me|write a|write me|generate a|implement a|fix the|fix my|debug the|debug this|install the|deploy the|refactor the|refactor my|test the app|test it)\b/
     // Edit/modify commands — always build mode (user is modifying an existing project)
-    const EDIT_PHRASE = /\b(change the|change it|switch the|switch it to|turn the|turn it|replace the|update the|update it|set the|add a|remove the|delete the|rename the)\b/
+    // Catches: "change the X", "can we change", "can you change", "please change", "make it X", etc.
+    const EDIT_PHRASE = /\b(change|switch it|turn it|replace the|update the|update it|set the|add a|remove the|delete the|rename the|make it|make the|recolor|restyle|resize|adjust the|tweak the|modify the)\b/
     if (BUILD_KEYWORDS.test(t) || BUILD_PHRASE.test(t) || EDIT_PHRASE.test(t)) return false
 
     // Code-paste + question → explanation request
@@ -515,7 +516,7 @@ export function ChatInput() {
   // ── streamAgent: Planner → Builder → Reviewer with inline thinking ────────
   const streamAgent = useCallback(async (chatId: string, userContent: string) => {
     // Detect edit intent — if user is modifying an existing project, skip archive
-    const EDIT_INTENT_RE = /\b(change|switch|turn|replace|make it|update|set .* to|add a|remove the|delete the|rename|adjust|tweak|modify|recolor|resize|restyle)\b/i
+    const EDIT_INTENT_RE = /\b(change|switch|turn|replace|make it|make the|update|set .* to|add a|remove the|delete the|rename|adjust|tweak|modify|recolor|resize|restyle|redo|fix the|fix it)\b/i
     const currentFilesForCtx = useAppStore.getState().files.filter(f => f.type !== 'archive')
     const isEditRequest = EDIT_INTENT_RE.test(userContent) && currentFilesForCtx.filter(f => f.type === 'file').length > 0
 
@@ -831,7 +832,8 @@ export function ChatInput() {
       // If workspace has active files, check for edit intent first
       // (classifier might miss "change the yellow to green" as a build command)
       const activeFiles = useAppStore.getState().files.filter(f => f.type !== 'archive' && f.type === 'file')
-      const EDIT_INTENT = /\b(change|switch|turn|replace|make it|update|set .* to|add a|remove the|delete the|rename|adjust|tweak|modify|recolor|resize|restyle)\b/i
+      // Broad intent: catches "can we change X", "could you update", "please make the X", "it didnt update", etc.
+      const EDIT_INTENT = /\b(change|switch|turn|replace|make it|make the|update|set .* to|add a|remove the|delete the|rename|adjust|tweak|modify|recolor|resize|restyle|redo|fix the|fix it)\b/i
       if (activeFiles.length > 0 && EDIT_INTENT.test(userContent)) {
         setLastMode('build')
         streamAgent(chatId, userContent)
