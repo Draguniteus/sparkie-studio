@@ -171,28 +171,68 @@ export async function POST(req: NextRequest) {
       }
 
       try {
-        // ── Optional: Tavily web search ──────────────────────────────────
+        // ── Smart Tavily: LLM self-assessment ─────────────────────────────
         let searchContext = ''
-        const needsSearch = tavilyKey && /real.?time|live (price|data|feed|stock)|today.s|current (price|weather|news)/i.test(userMessage)
-        if (needsSearch) {
-          send('thinking', { step: 'search', text: '[>] Fetching live data...' })
+        if (tavilyKey && apiKey) {
+          // Ask the model: does this question need real-time/web data?
+          // Fails safe to false (no search) on any error.
+          let shouldSearch = false
           try {
-            const sq = userMessage.slice(0, 200)
-            const tRes = await fetch('https://api.tavily.com/search', {
+            const searchClassifyRes = await fetch(`${OPENCODE_BASE}/chat/completions`, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${tavilyKey}` },
-              body: JSON.stringify({ query: sq, max_results: 3, search_depth: 'basic' }),
-              signal: AbortSignal.timeout(8000),
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`,
+                'User-Agent': 'SparkieStudio/2.0',
+              },
+              body: JSON.stringify({
+                model: 'minimax-m2.5-free',
+                messages: [
+                  {
+                    role: 'system',
+                    content: `You are a strict classifier. Respond with ONLY one word: "search" or "skip".
+
+"search" = the user is asking about something that requires real-time, current, or up-to-date information that may not be in your training data. Examples: current events, live prices, latest news, recent product releases, sports scores, weather, trending topics, who won an election, what happened today, latest version of a library, recent research papers, anything with "now", "today", "latest", "current", "recent", "this week", "2025", specific people/companies with evolving situations.
+
+"skip" = the question can be fully answered from training knowledge. Examples: math, coding help, definitions, explanations, history (before training cutoff), logic, opinions, creative writing, how-to guides, general programming concepts, anything that doesn't change over time.
+
+When in doubt, respond "search". Only respond "skip" when you are highly confident no live data is needed.`,
+                  },
+                  { role: 'user', content: userMessage.slice(0, 300) },
+                ],
+                stream: false,
+                temperature: 0,
+                max_tokens: 5,
+              }),
+              signal: AbortSignal.timeout(6000),
             })
-            if (tRes.ok) {
-              const td = await tRes.json()
-              const results = td.results?.slice(0, 3) ?? []
-              searchContext = results.map((r: { title: string; content: string; url: string }) =>
-                `[${r.title}]\n${r.content}\n${r.url}`
-              ).join('\n\n')
-              send('thinking', { step: 'search_done', text: `[>] Got ${results.length} sources` })
+            if (searchClassifyRes.ok) {
+              const scData = await searchClassifyRes.json()
+              const verdict = scData.choices?.[0]?.message?.content?.trim().toLowerCase() ?? 'skip'
+              shouldSearch = verdict.startsWith('search')
             }
-          } catch { /* non-fatal */ }
+          } catch { /* non-fatal — skip search */ }
+
+          if (shouldSearch) {
+            send('thinking', { step: 'search', text: '[>] Fetching live data...' })
+            try {
+              const sq = userMessage.slice(0, 200)
+              const tRes = await fetch('https://api.tavily.com/search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${tavilyKey}` },
+                body: JSON.stringify({ query: sq, max_results: 3, search_depth: 'basic' }),
+                signal: AbortSignal.timeout(8000),
+              })
+              if (tRes.ok) {
+                const td = await tRes.json()
+                const results = td.results?.slice(0, 3) ?? []
+                searchContext = results.map((r: { title: string; content: string; url: string }) =>
+                  `[${r.title}]\n${r.content}\n${r.url}`
+                ).join('\n\n')
+                send('thinking', { step: 'search_done', text: `[>] Got ${results.length} sources` })
+              }
+            } catch { /* non-fatal */ }
+          }
         }
 
         // ── Build ────────────────────────────────────────────────────────
