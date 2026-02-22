@@ -1,8 +1,6 @@
 /**
  * Parse AI response to extract file blocks.
- * Format: ---FILE: filename.ext---\n(content)\n---END FILE---
- * Fallback 1: ---FILE: filename.ext--- ... next marker or EOF (for models that omit ---END FILE---)
- * Fallback 2: ```lang\n(content)\n```
+ * Supports multiple output formats from different models.
  */
 
 export interface ParsedFile {
@@ -17,92 +15,89 @@ export interface ParseResult {
 
 export function parseAIResponse(raw: string): ParseResult {
   const files: ParsedFile[] = []
-  let text = raw
 
-  // Primary: strict ---FILE: name--- ... ---END FILE---
-  const strictRegex = /---FILE:\s*(.+?)\s*---\n([\s\S]*?)---END FILE---/g
+  // Normalize line endings
+  const normalized = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+
+  // ── Primary: ---FILE: name--- ... ---END FILE--- ──────────────────────────
+  const strictRegex = /---FILE:\s*([^\n-][^\n]*)\s*---\s*\n([\s\S]*?)---END FILE---/g
   let match: RegExpExecArray | null
-  while ((match = strictRegex.exec(raw)) !== null) {
-    files.push({ name: match[1].trim(), content: match[2].trimEnd() })
+  while ((match = strictRegex.exec(normalized)) !== null) {
+    const content = match[2].trimEnd()
+    if (content.length > 0) {
+      files.push({ name: match[1].trim(), content })
+    }
   }
-
   if (files.length > 0) {
-    text = raw.replace(/---FILE:\s*.+?\s*---\n[\s\S]*?---END FILE---/g, '').trim()
+    const text = normalized.replace(/---FILE:\s*[^\n-][^\n]*\s*---\s*\n[\s\S]*?---END FILE---/g, '').trim()
     return { text, files }
   }
 
-  // Fallback A: ---FILE: name--- without ---END FILE--- (some models omit the closing marker)
-  // Match content up to next ---FILE: marker or end of string
-  const looseRegex = /---FILE:\s*(.+?)\s*---\n([\s\S]*?)(?=---FILE:|$)/g
+  // ── Fallback A: ---FILE: without ---END FILE--- ───────────────────────────
+  const looseRegex = /---FILE:\s*([^\n-][^\n]*)\s*---\s*\n([\s\S]*?)(?=---FILE:|$)/g
   const looseMatches: Array<{ name: string; content: string }> = []
-  while ((match = looseRegex.exec(raw)) !== null) {
+  while ((match = looseRegex.exec(normalized)) !== null) {
     const content = match[2].trimEnd()
     if (content.length > 0) {
       looseMatches.push({ name: match[1].trim(), content })
     }
   }
-
   if (looseMatches.length > 0) {
     for (const f of looseMatches) files.push(f)
-    text = raw.replace(/---FILE:\s*.+?\s*---\n[\s\S]*?(?=---FILE:|$)/g, '').trim()
+    const text = normalized.replace(/---FILE:\s*[^\n-][^\n]*\s*---\s*\n[\s\S]*?(?=---FILE:|$)/g, '').trim()
     return { text, files }
   }
 
-  // Fallback B: fenced code blocks — try to extract filename from comment or language
+  // ── Fallback B: fenced code blocks ───────────────────────────────────────
   const codeBlockRegex = /```([^\n]*)\n([\s\S]*?)```/g
   let cbMatch: RegExpExecArray | null
   let fileIndex = 0
-
-  while ((cbMatch = codeBlockRegex.exec(raw)) !== null) {
+  while ((cbMatch = codeBlockRegex.exec(normalized)) !== null) {
     const langStr = cbMatch[1].trim()
     const content = cbMatch[2].trimEnd()
     if (!content) continue
-
-    // Check if langStr is actually a filename (contains a dot)
     let name: string
     if (langStr.includes('.')) {
       name = langStr
     } else {
       name = inferFilename(langStr, content, fileIndex)
     }
-
     files.push({ name, content })
     fileIndex++
   }
-
   if (files.length > 0) {
-    text = raw.replace(/```[^\n]*\n[\s\S]*?```/g, '').trim()
+    const text = normalized.replace(/```[^\n]*\n[\s\S]*?```/g, '').trim()
+    return { text, files }
   }
 
-
-  // Fallback C: raw HTML/code content without any markers or fences
-  // If no files found but content looks like HTML, JS, or code — auto-wrap it
-  if (files.length === 0 && raw.trim().length > 50) {
-    const trimmed = raw.trim()
-    const looksLikeHTML = trimmed.startsWith('<') || /<!DOCTYPE|<html|<head|<body/i.test(trimmed)
-    const looksLikeJS = /function |const |let |var |=>|class /m.test(trimmed)
-    const looksLikeCSS = /\{[\s\S]*?:[\s\S]*?;/m.test(trimmed) && !looksLikeHTML
+  // ── Fallback C: raw HTML/JS/CSS (no markers at all) ──────────────────────
+  // ONLY fires when there are zero ---FILE:--- markers in the output
+  // If markers exist but didn't parse, do NOT blindly wrap to avoid garbled previews
+  const hasAnyFileMarker = /---FILE:/i.test(normalized)
+  if (!hasAnyFileMarker && normalized.trim().length > 50) {
+    const trimmed = normalized.trim()
+    const looksLikeHTML = /<!DOCTYPE|<html|<head|<body/i.test(trimmed) || (trimmed.startsWith('<') && trimmed.includes('>'))
+    const looksLikeJS = /^(function |const |let |var |class |import |export )/m.test(trimmed)
+    const looksLikeCSS = /^[.#a-zA-Z][\s\S]*?\{[\s\S]*?:[\s\S]*?;/m.test(trimmed) && !looksLikeHTML
 
     if (looksLikeHTML) {
       files.push({ name: 'index.html', content: trimmed })
-      text = ''
+      return { text: '', files }
     } else if (looksLikeCSS) {
       files.push({ name: 'styles.css', content: trimmed })
-      text = ''
+      return { text: '', files }
     } else if (looksLikeJS) {
       files.push({ name: 'script.js', content: trimmed })
-      text = ''
+      return { text: '', files }
     }
   }
 
-  return { text, files }
+  return { text: normalized, files }
 }
 
 function inferFilename(lang: string, content: string, index: number): string {
   const suffix = index > 0 ? `${index}` : ''
   const l = lang.toLowerCase()
-
-  // Web
   if (l === 'html' || content.includes('<!DOCTYPE') || content.includes('<html')) return `index${suffix}.html`
   if (l === 'css' || l === 'scss' || l === 'sass') return `styles${suffix}.${l}`
   if (l === 'javascript' || l === 'js') return `script${suffix}.js`
@@ -110,8 +105,6 @@ function inferFilename(lang: string, content: string, index: number): string {
   if (l === 'jsx') return `app${suffix}.jsx`
   if (l === 'tsx') return `app${suffix}.tsx`
   if (l === 'svg' || content.includes('<svg')) return `image${suffix}.svg`
-
-  // Systems
   if (l === 'python' || l === 'py') return `main${suffix}.py`
   if (l === 'rust' || l === 'rs') return `main${suffix}.rs`
   if (l === 'go' || l === 'golang') return `main${suffix}.go`
@@ -123,8 +116,6 @@ function inferFilename(lang: string, content: string, index: number): string {
   if (l === 'ruby' || l === 'rb') return `main${suffix}.rb`
   if (l === 'php') return `index${suffix}.php`
   if (l === 'csharp' || l === 'cs' || l === 'c#') return `Program${suffix}.cs`
-
-  // Data / Config
   if (l === 'json') return `data${suffix}.json`
   if (l === 'yaml' || l === 'yml') return `config${suffix}.yaml`
   if (l === 'toml') return `config${suffix}.toml`
@@ -132,16 +123,10 @@ function inferFilename(lang: string, content: string, index: number): string {
   if (l === 'csv') return `data${suffix}.csv`
   if (l === 'sql') return `query${suffix}.sql`
   if (l === 'graphql' || l === 'gql') return `schema${suffix}.graphql`
-
-  // Markup / Docs
   if (l === 'markdown' || l === 'md') return `readme${suffix}.md`
   if (l === 'mdx') return `page${suffix}.mdx`
-
-  // Shell
   if (l === 'bash' || l === 'sh' || l === 'shell' || l === 'zsh') return `script${suffix}.sh`
   if (l === 'powershell' || l === 'ps1') return `script${suffix}.ps1`
-
-  // Default
   const ext = l || 'txt'
   return `file${suffix}.${ext}`
 }
