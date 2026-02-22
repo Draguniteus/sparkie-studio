@@ -411,7 +411,9 @@ export function ChatInput() {
     // Build/code intent — high-confidence signals
     const BUILD_KEYWORDS = /^(build|create|make|write|generate|implement|deploy|refactor|debug|fix|install)\b/
     const BUILD_PHRASE = /\b(build me|build a|create a|make a|make me|write a|write me|generate a|implement a|fix the|fix my|debug the|debug this|install the|deploy the|refactor the|refactor my|test the app|test it)\b/
-    if (BUILD_KEYWORDS.test(t) || BUILD_PHRASE.test(t)) return false
+    // Edit/modify commands — always build mode (user is modifying an existing project)
+    const EDIT_PHRASE = /\b(change the|change it|switch the|switch it to|turn the|turn it|replace the|update the|update it|set the|add a|remove the|delete the|rename the)\b/
+    if (BUILD_KEYWORDS.test(t) || BUILD_PHRASE.test(t) || EDIT_PHRASE.test(t)) return false
 
     // Code-paste + question → explanation request
     if ((text.includes('```') || text.includes('<code>')) && /\?/.test(t)) return true
@@ -512,30 +514,37 @@ export function ChatInput() {
 
   // ── streamAgent: Planner → Builder → Reviewer with inline thinking ────────
   const streamAgent = useCallback(async (chatId: string, userContent: string) => {
-    // Archive existing workspace (same logic as streamChat)
+    // Detect edit intent — if user is modifying an existing project, skip archive
+    const EDIT_INTENT_RE = /\b(change|switch|turn|replace|make it|update|set .* to|add a|remove the|delete the|rename|adjust|tweak|modify|recolor|resize|restyle)\b/i
     const currentFilesForCtx = useAppStore.getState().files.filter(f => f.type !== 'archive')
-    const currentFiles_archive = useAppStore.getState().files
-    const isArchv = (f: import('@/store/appStore').FileNode) => f.type === 'archive'
-    const activeFiles_pre = currentFiles_archive.filter(f => !isArchv(f))
-    const existingArchives_pre = currentFiles_archive.filter(isArchv)
+    const isEditRequest = EDIT_INTENT_RE.test(userContent) && currentFilesForCtx.filter(f => f.type === 'file').length > 0
 
-    if (activeFiles_pre.length > 0) {
-      const allUserMsgs = (useAppStore.getState().chats.find(c => c.id === chatId)?.messages ?? []).filter(m => m.role === 'user')
-      const prevMsg = allUserMsgs.slice().reverse().find(m => m.content.trim().split(/\s+/).length > 4)
-      const nameSource = prevMsg?.content || activeFiles_pre[0]?.name || 'project'
-      const folderName = nameSource.replace(/[^a-zA-Z0-9 ]/g, '').trim().split(/\s+/).slice(0, 5).join('-').toLowerCase() || 'project'
-      const now = new Date()
-      const archiveName = `${folderName}-${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`
-      const deepClone = (node: import('@/store/appStore').FileNode): import('@/store/appStore').FileNode => ({
-        ...node, id: crypto.randomUUID(), children: node.children?.map(deepClone),
-      })
-      useAppStore.getState().setFiles([...existingArchives_pre, {
-        id: crypto.randomUUID(), name: archiveName, type: 'archive', content: '',
-        children: activeFiles_pre.map(deepClone),
-      }])
-    } else {
-      useAppStore.getState().setFiles([])
+    if (!isEditRequest) {
+      // New build — archive existing workspace
+      const currentFiles_archive = useAppStore.getState().files
+      const isArchv = (f: import('@/store/appStore').FileNode) => f.type === 'archive'
+      const activeFiles_pre = currentFiles_archive.filter(f => !isArchv(f))
+      const existingArchives_pre = currentFiles_archive.filter(isArchv)
+
+      if (activeFiles_pre.length > 0) {
+        const allUserMsgs = (useAppStore.getState().chats.find(c => c.id === chatId)?.messages ?? []).filter(m => m.role === 'user')
+        const prevMsg = allUserMsgs.slice().reverse().find(m => m.content.trim().split(/\s+/).length > 4)
+        const nameSource = prevMsg?.content || activeFiles_pre[0]?.name || 'project'
+        const folderName = nameSource.replace(/[^a-zA-Z0-9 ]/g, '').trim().split(/\s+/).slice(0, 5).join('-').toLowerCase() || 'project'
+        const now = new Date()
+        const archiveName = `${folderName}-${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`
+        const deepClone = (node: import('@/store/appStore').FileNode): import('@/store/appStore').FileNode => ({
+          ...node, id: crypto.randomUUID(), children: node.children?.map(deepClone),
+        })
+        useAppStore.getState().setFiles([...existingArchives_pre, {
+          id: crypto.randomUUID(), name: archiveName, type: 'archive', content: '',
+          children: activeFiles_pre.map(deepClone),
+        }])
+      } else {
+        useAppStore.getState().setFiles([])
+      }
     }
+    // For edit requests: keep files in place — agent will overwrite with updated versions
 
     // Build API messages with file context
     const chat = useAppStore.getState().chats.find(c => c.id === chatId)
@@ -550,9 +559,18 @@ export function ChatInput() {
     const fileContext = activeForCtx.map(f => `---FILE: ${f.name}---\n${f.content}\n---END FILE---`).join('\n\n')
     const currentFilesPayload = fileContext || undefined
 
+    // Pre-build acknowledgement — shown immediately so user isn't staring at silence
+    const ACK_PHRASES = [
+      `On it! Let me build that for you ✨`,
+      `Got it! Building that now ⚡`,
+      `On it — putting that together for you 🔥`,
+      `Sure thing! Spinning that up now ✨`,
+    ]
+    const ackText = ACK_PHRASES[Math.floor(Math.random() * ACK_PHRASES.length)]
+
     // Add thinking message (will be updated live)
     const thinkingMsgId = addMessage(chatId, {
-      role: 'assistant', content: '⚡ Initializing agent...', model: 'Agent Loop', isStreaming: true, type: 'text'
+      role: 'assistant', content: ackText, model: 'Agent Loop', isStreaming: true, type: 'text'
     })
 
     // buildMsgId is created lazily on first builder delta (avoids double-bubble during planning)
@@ -677,6 +695,17 @@ export function ChatInput() {
         const fileNames = Array.from(createdFileNames).join(', ')
         const description = `✨ Built ${fileNames} — preview ready →`
         if (buildMsgId) updateMessage(chatId, buildMsgId, { content: description, isStreaming: false })
+
+        // Natural post-build wrap-up message (like competitors do)
+        const WRAP_PHRASES = [
+          `There you go! Check the preview on the right. Let me know if you want any changes 🙌`,
+          `All done! Take a look at the preview — happy to tweak anything you'd like ✨`,
+          `Built and ready! Let me know what you think or if you want to adjust anything 🔥`,
+          `Done! Preview is live on the right. What should we change or add next?`,
+          `There it is! Let me know how it looks and what you'd like to change 🐝`,
+        ]
+        const wrapText = WRAP_PHRASES[Math.floor(Math.random() * WRAP_PHRASES.length)]
+        addMessage(chatId, { role: 'assistant', content: wrapText, model: selectedModel, isStreaming: false, type: 'text' })
       } else {
         // No files — restore archive and show text response
         const currentState = useAppStore.getState()
@@ -794,6 +823,16 @@ export function ChatInput() {
       // "continue / keep going / next step" — respect what Sparkie was just doing
       const isContinue = /^(continue|keep going|next step|go on|proceed|carry on|keep it up|and then|what's next|next)\b/.test(t)
       if (isContinue && lastMode === 'build') {
+        setLastMode('build')
+        streamAgent(chatId, userContent)
+        return
+      }
+
+      // If workspace has active files, check for edit intent first
+      // (classifier might miss "change the yellow to green" as a build command)
+      const activeFiles = useAppStore.getState().files.filter(f => f.type !== 'archive' && f.type === 'file')
+      const EDIT_INTENT = /\b(change|switch|turn|replace|make it|update|set .* to|add a|remove the|delete the|rename|adjust|tweak|modify|recolor|resize|restyle)\b/i
+      if (activeFiles.length > 0 && EDIT_INTENT.test(userContent)) {
         setLastMode('build')
         streamAgent(chatId, userContent)
         return
