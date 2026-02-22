@@ -120,22 +120,39 @@ export function Preview() {
     const anyCode  = flatFiles.find(f => f.type === "file" && f.content)
 
     if (htmlFile?.content) {
-      const base = `<style id="__sparkie">${PREVIEW_BASE_STYLES}html,body{overflow:auto;display:block}</style>`
-      // Hoist any @import rules in <style> blocks above the injected Sparkie base styles
+      // Viewport meta + base styles injected into every preview
+      const base = `<meta name="viewport" content="width=device-width, initial-scale=1.0"><style id="__sparkie">${PREVIEW_BASE_STYLES}html,body{overflow:auto;display:block}</style>`
+
+      // Strip external @import rules (Google Fonts etc.) — WebContainers blocks external requests
+      // and raw @import text outside <style> tags renders as visible body text
+      const stripExternalImports = (css: string) =>
+        css.replace(/@import\s+url\s*\(\s*['"]?https?:\/\/[^)'"]+['"]?\s*\)\s*[^;]*;?/gi, '')
+          .replace(/@import\s+['"]https?:\/\/[^'"]+['"]\s*[^;]*;?/gi, '')
+
+      // Hoist any @import rules in <style> blocks — keep local ones, strip external
       const hoistedHtml = htmlFile.content.replace(/<style([^>]*)>([\s\S]*?)<\/style>/gi, (_match, attrs, css) => {
-        const imports = (css.match(/@import[^;]+;/g) || []).join('\n')
+        const localImports = (css.match(/@import[^;]+;/g) || [])
+          .filter(r => !/https?:\/\//i.test(r))
+          .join('\n')
         const rest = css.replace(/@import[^;]+;/g, '').trimStart()
-        return imports ? `${imports}\n<style${attrs}>${rest}</style>` : _match
+        // Wrap hoisted imports in their own <style> block so they're never bare text
+        return localImports
+          ? `<style>${localImports}</style><style${attrs}>${rest}</style>`
+          : `<style${attrs}>${rest}</style>`
       })
-      let html = hoistedHtml.includes("<head>") ? hoistedHtml.replace("<head>",`<head>${base}`) : base + hoistedHtml
+
+      let html = hoistedHtml.includes("<head>")
+        ? hoistedHtml.replace("<head>", `<head>${base}`)
+        : `<!DOCTYPE html><html><head>${base}</head><body>${hoistedHtml}</body></html>`
+
       if (cssFile?.content) {
-        // Hoist @import rules before other declarations to satisfy CSS spec
-        const importRules = (cssFile.content.match(/@import[^;]+;/g) || []).join('\n')
-        const restCss = cssFile.content.replace(/@import[^;]+;/g, '').trim()
+        const cleanCss = stripExternalImports(cssFile.content)
+        const importRules = (cleanCss.match(/@import[^;]+;/g) || []).join('\n')
+        const restCss = cleanCss.replace(/@import[^;]+;/g, '').trim()
         const orderedCss = importRules ? `${importRules}\n${restCss}` : restCss
-        html = html.replace("</head>",`<style>${orderedCss}</style></head>`)
+        html = html.replace("</head>", `<style>${orderedCss}</style></head>`)
       }
-      if (jsFile?.content)  html = html.replace("</body>",`<script>${jsFile.content}<\/script></body>`)
+      if (jsFile?.content) html = html.replace("</body>", `<script>${jsFile.content}<\/script></body>`)
       return { previewHtml: html, previewType: "html" }
     }
     if (tsxFile?.content) return { previewHtml: buildReactHtml(tsxFile.content, cssFile?.content), previewType: "react" }
