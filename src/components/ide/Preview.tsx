@@ -132,7 +132,7 @@ export function Preview() {
       // Hoist any @import rules in <style> blocks — keep local ones, strip external
       const hoistedHtml = htmlFile.content.replace(/<style([^>]*)>([\s\S]*?)<\/style>/gi, (_match, attrs, css) => {
         const localImports = (css.match(/@import[^;]+;/g) || [])
-          .filter(r => !/https?:\/\//i.test(r))
+          .filter((r: string) => !/https?:\/\//i.test(r))
           .join('\n')
         const rest = css.replace(/@import[^;]+;/g, '').trimStart()
         // Wrap hoisted imports in their own <style> block so they're never bare text
