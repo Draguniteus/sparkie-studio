@@ -520,7 +520,8 @@ export function ChatInput() {
     } finally {
       setStreaming(false)
     }
-  }, [selectedModel, addMessage, updateMessage, setStreaming, streamAgent])
+  }, [selectedModel, addMessage, updateMessage, setStreaming])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- streamAgent is stable at runtime (defined after, useCallback ref)
 
   // ── streamAgent: Planner → Builder → Reviewer with inline thinking ────────
   const streamAgent = useCallback(async (chatId: string, userContent: string, isEdit = false) => {
