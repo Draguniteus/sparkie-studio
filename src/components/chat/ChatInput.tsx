@@ -278,10 +278,8 @@ export function ChatInput() {
             addLiveCodeFile(file.name)
           } else {
             // Update existing file content as it grows
-            const existing = useAppStore.getState().files.find(f => f.name === file.name)
-            if (existing && existing.content !== file.content) {
-              useAppStore.getState().updateFileContent(existing.id, file.content)
-            }
+            // Update with complete final content (handles folder-prefixed paths)
+            upsertFile(file.name, file.content, getLanguageFromFilename(file.name))
           }
         }
       }
@@ -301,10 +299,8 @@ export function ChatInput() {
           filesCreated++
           addLiveCodeFile(file.name)
         } else {
-          const existing = useAppStore.getState().files.find(f => f.name === file.name)
-          if (existing && existing.content !== file.content) {
-            useAppStore.getState().updateFileContent(existing.id, file.content)
-          }
+          // Update with complete final content (handles folder-prefixed paths)
+          upsertFile(file.name, file.content, getLanguageFromFilename(file.name))
         }
       }
 
@@ -594,10 +590,8 @@ export function ChatInput() {
                   addAsset({ name: file.name, language: getLanguageFromFilename(file.name), content: file.content, chatId, chatTitle, fileId })
                   filesCreated++
                 } else {
-                  const existing = useAppStore.getState().files.find(f => f.name === file.name && f.type !== 'archive')
-                  if (existing && existing.content !== file.content) {
-                    useAppStore.getState().updateFileContent(existing.id, file.content)
-                  }
+                  // Update with complete final content (handles folder-prefixed paths)
+                  upsertFile(file.name, file.content, getLanguageFromFilename(file.name))
                 }
               }
             } else if (parsed.event === 'done') {
@@ -613,10 +607,8 @@ export function ChatInput() {
                   addAsset({ name: file.name, language: getLanguageFromFilename(file.name), content: file.content, chatId, chatTitle, fileId })
                   filesCreated++
                 } else {
-                  const existing = useAppStore.getState().files.find(f => f.name === file.name && f.type !== 'archive')
-                  if (existing && existing.content !== file.content) {
-                    useAppStore.getState().updateFileContent(existing.id, file.content)
-                  }
+                  // Update with complete final content (handles folder-prefixed paths)
+                  upsertFile(file.name, file.content, getLanguageFromFilename(file.name))
                 }
               }
             } else if (parsed.event === 'error') {
