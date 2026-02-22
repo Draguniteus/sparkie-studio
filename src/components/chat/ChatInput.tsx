@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react"
 import { useAppStore } from "@/store/appStore"
-import { parseAIResponse, getLanguageFromFilename } from "@/lib/fileParser"
+import { parseAIResponse, getLanguageFromFilename, deriveProjectName } from "@/lib/fileParser"
 import { Paperclip, ArrowUp, Sparkles, ChevronDown, Image as ImageIcon, Video, Mic, MicOff } from "lucide-react"
 
 const MODELS = [
@@ -112,6 +112,7 @@ export function ChatInput() {
   const streamChat = useCallback(async (chatId: string, userContent: string) => {
     const chat = useAppStore.getState().chats.find((c) => c.id === chatId)
     if (!chat) return
+    const projectName = deriveProjectName(chat?.title || 'New Chat')
 
     const apiMessages = chat.messages
       .filter((m) => m.type !== "image" && m.type !== "video")
@@ -256,7 +257,7 @@ export function ChatInput() {
         }
 
         // Incrementally detect completed file blocks
-        const partialParse = parseAIResponse(fullContent)
+        const partialParse = parseAIResponse(fullContent, projectName)
         for (const file of partialParse.files) {
           if (!createdFileNames.has(file.name)) {
             createdFileNames.add(file.name)
@@ -286,7 +287,7 @@ export function ChatInput() {
       }
 
       // Final parse
-      const finalParse = parseAIResponse(fullContent)
+      const finalParse = parseAIResponse(fullContent, projectName)
       for (const file of finalParse.files) {
         if (!createdFileNames.has(file.name)) {
           createdFileNames.add(file.name)
@@ -492,6 +493,7 @@ export function ChatInput() {
 
     // Build API messages with file context
     const chat = useAppStore.getState().chats.find(c => c.id === chatId)
+    const projectName = deriveProjectName(chat?.title || 'New Chat')
     const apiMessages = (chat?.messages ?? [])
       .filter(m => m.type !== 'image' && m.type !== 'video')
       .map(m => ({ role: m.role, content: m.content }))
@@ -576,7 +578,7 @@ export function ChatInput() {
               // Create build message bubble on first delta (lazy — avoids double-bubble during planning)
               ensureBuildMsg()
               // Parse files incrementally
-              const partialParse = parseAIResponse(fullBuild)
+              const partialParse = parseAIResponse(fullBuild, projectName)
               for (const file of partialParse.files) {
                 if (!createdFileNames.has(file.name)) {
                   createdFileNames.add(file.name)
@@ -600,7 +602,7 @@ export function ChatInput() {
               }
             } else if (parsed.event === 'done') {
               // Final parse pass
-              const finalParse = parseAIResponse(fullBuild)
+              const finalParse = parseAIResponse(fullBuild, projectName)
               for (const file of finalParse.files) {
                 if (!createdFileNames.has(file.name)) {
                   createdFileNames.add(file.name)
@@ -643,7 +645,7 @@ export function ChatInput() {
         }
         // No files produced — show clean conversational response or helpful fallback
         if (fullBuild) {
-          const finalParse = parseAIResponse(fullBuild)
+          const finalParse = parseAIResponse(fullBuild, projectName)
           const textOnly = finalParse.text || ''
           const hasFileMarkers = fullBuild.includes('---FILE:')
           if (textOnly.length > 0 && !hasFileMarkers) {
