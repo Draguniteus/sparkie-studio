@@ -130,7 +130,12 @@ export function Preview() {
           .replace(/@import\s+['"]https?:\/\/[^'"]+['"]\s*[^;]*;?/gi, '')
 
       // Hoist any @import rules in <style> blocks — keep local ones, strip external
-      const hoistedHtml = htmlFile.content.replace(/<style([^>]*)>([\s\S]*?)<\/style>/gi, (_match, attrs, css) => {
+      // Strip relative <script src> and <link stylesheet> — these 404 in srcdoc iframes
+      const stripRelativeAssets = (h: string) => h
+        .replace(/<script[^>]+src=["'][^"'#][^"']*["'][^>]*><\/script>/gi, '')
+        .replace(/<link[^>]+rel=["']stylesheet["'][^>]*>/gi, '')
+
+      const hoistedHtml = stripRelativeAssets(htmlFile.content).replace(/<style([^>]*)>([\s\S]*?)<\/style>/gi, (_match, attrs, css) => {
         const localImports = (css.match(/@import[^;]+;/g) || [])
           .filter((r: string) => !/https?:\/\//i.test(r))
           .join('\n')
@@ -240,7 +245,7 @@ export function Preview() {
       </div>
       <div className="flex-1 overflow-hidden">
         <iframe key={refreshKey} srcDoc={previewHtml} title="Preview"
-          sandbox="allow-scripts allow-modals allow-forms allow-popups"
+          sandbox="allow-scripts allow-modals allow-forms allow-popups allow-same-origin allow-downloads"
           className="w-full h-full border-0 block" />
       </div>
     </div>
