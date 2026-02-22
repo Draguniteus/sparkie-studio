@@ -514,11 +514,11 @@ export function ChatInput() {
   }, [selectedModel, addMessage, updateMessage, setStreaming])
 
   // ── streamAgent: Planner → Builder → Reviewer with inline thinking ────────
-  const streamAgent = useCallback(async (chatId: string, userContent: string) => {
+  const streamAgent = useCallback(async (chatId: string, userContent: string, isEdit = false) => {
     // Detect edit intent — if user is modifying an existing project, skip archive
     const EDIT_INTENT_RE = /\b(edit|update|upgrade|change|switch|swap|replace|rename|remove|delete|adjust|alter|amend|convert|modify|revise|refactor|rewrite|redo|refine|restyle|recolor|resize|transform|overhaul|patch|correct|improve|fix|tweak|tune|undo|revert|rollback)\b|(?:(?:can you|can u|could you|would you|would you mind|how about)\s+(?:please\s+)?(?:edit|update|upgrade|change|switch|swap|replace|rename|remove|delete|adjust|alter|amend|convert|modify|revise|refactor|rewrite|redo|refine|restyle|recolor|resize|transform|overhaul|patch|correct|improve|fix|tweak|tune|undo|revert|rollback))|\b(make it|make the|make sure|set the|set it|turn it|turn the|flip it|flip the|let's make|let's update|let's change|let's switch|instead of|it should be|switch this|switch the|update to|change to|change it)\b|\b(cahnge|chnage|upadte|updaet|swich|swithc|fiix|tweek|edti|chnge|udpate)\b/i
     const currentFilesForCtx = useAppStore.getState().files.filter(f => f.type !== 'archive')
-    const isEditRequest = EDIT_INTENT_RE.test(userContent) && currentFilesForCtx.filter(f => f.type === 'file').length > 0
+    const isEditRequest = (isEdit || EDIT_INTENT_RE.test(userContent)) && currentFilesForCtx.filter(f => f.type === 'file').length > 0
 
     if (!isEditRequest) {
       // New build — archive existing workspace
@@ -560,6 +560,12 @@ export function ChatInput() {
     const fileContext = activeForCtx.map(f => `---FILE: ${f.name}---\n${f.content}\n---END FILE---`).join('\n\n')
     const currentFilesPayload = fileContext || undefined
 
+    // For edit requests: prepend a strong signal so model outputs ---FILE:--- markers
+    // Models tend to respond conversationally to follow-up messages without this.
+    const apiUserContent = isEditRequest && currentFilesPayload
+      ? `[EDIT REQUEST — output the COMPLETE updated file(s) with ---FILE: filename--- markers. Do NOT respond conversationally. Regenerate the full file with changes applied.]\n\n${userContent}`
+      : userContent
+
     // Pre-build acknowledgement — shown immediately so user isn't staring at silence
     const ACK_PHRASES = [
       `On it! Let me build that for you ✨`,
@@ -600,7 +606,7 @@ export function ChatInput() {
       const response = await fetch('/api/agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: [...apiMessages, { role: 'user', content: userContent }], currentFiles: currentFilesPayload, model: selectedModel, userProfile: useAppStore.getState().userProfile }),
+        body: JSON.stringify({ messages: [...apiMessages, { role: 'user', content: apiUserContent }], currentFiles: currentFilesPayload, model: selectedModel, userProfile: useAppStore.getState().userProfile }),
         signal: agentAbortRef.current.signal,
       })
 
@@ -647,7 +653,7 @@ export function ChatInput() {
               for (const file of partialParse.files) {
                 if (!createdFileNames.has(file.name)) {
                   createdFileNames.add(file.name)
-                  if (filesCreated === 0) {
+                  if (filesCreated === 0 && !isEdit) {
                     const oldActive = useAppStore.getState().files.filter(f => f.type !== 'archive')
                     oldActive.forEach(f => useAppStore.getState().deleteFile(f.id))
                   }
@@ -836,7 +842,7 @@ export function ChatInput() {
       const EDIT_INTENT = /\b(edit|update|upgrade|change|switch|swap|replace|rename|remove|delete|adjust|alter|amend|convert|modify|revise|refactor|rewrite|redo|refine|restyle|recolor|resize|transform|overhaul|patch|correct|improve|fix|tweak|tune|undo|revert|rollback)\b|(?:(?:can you|can u|could you|would you|would you mind|how about)\s+(?:please\s+)?(?:edit|update|upgrade|change|switch|swap|replace|rename|remove|delete|adjust|alter|amend|convert|modify|revise|refactor|rewrite|redo|refine|restyle|recolor|resize|transform|overhaul|patch|correct|improve|fix|tweak|tune|undo|revert|rollback))|\b(make it|make the|make sure|set the|set it|turn it|turn the|flip it|flip the|let's make|let's update|let's change|let's switch|instead of|it should be|switch this|switch the|update to|change to|change it)\b|\b(cahnge|chnage|upadte|updaet|swich|swithc|fiix|tweek|edti|chnge|udpate)\b/i
       if (activeFiles.length > 0 && EDIT_INTENT.test(userContent)) {
         setLastMode('build')
-        streamAgent(chatId, userContent)
+        streamAgent(chatId, userContent, true)
         return
       }
 
