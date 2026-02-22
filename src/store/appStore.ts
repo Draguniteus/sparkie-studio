@@ -309,7 +309,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   assets: [],
   addAsset: (asset) => {
     const id = crypto.randomUUID()
-    set((s) => ({ assets: [...s.assets, { assetType: 'other', source: 'agent', ...asset, id, createdAt: new Date() }] }))
+    set((s) => ({ assets: [...s.assets, { ...asset, assetType: asset.assetType ?? 'other', source: asset.source ?? 'agent', id, createdAt: new Date() }] }))
   },
   clearAssets: () => set({ assets: [] }),
 
