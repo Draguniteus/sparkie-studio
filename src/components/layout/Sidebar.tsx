@@ -1,9 +1,10 @@
 'use client'
 
+import { useState } from 'react'
 import { useAppStore } from '@/store/appStore'
 import {
   Plus, Search, FolderOpen, Image, MessageSquare,
-  Settings, ChevronLeft, Trash2, Sparkles
+  Settings, ChevronLeft, ChevronDown, Trash2, Sparkles, Bot, Zap
 } from 'lucide-react'
 
 export function Sidebar() {
@@ -11,6 +12,7 @@ export function Sidebar() {
     sidebarOpen, toggleSidebar, chats, currentChatId,
     setCurrentChat, createChat, deleteChat, setActiveTab, activeTab
   } = useAppStore()
+  const [historyCollapsed, setHistoryCollapsed] = useState(false)
 
   if (!sidebarOpen) {
     return (
@@ -36,34 +38,34 @@ export function Sidebar() {
   return (
     <div className="w-[260px] h-full bg-hive-700 border-r border-hive-border flex flex-col shrink-0">
       {/* Header */}
-      <div className="p-3 flex items-center justify-between border-b border-hive-border">
+      <div className="h-11 flex items-center justify-between px-3 border-b border-hive-border shrink-0">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-honey-500/20 flex items-center justify-center">
-            <Sparkles size={16} className="text-honey-500" />
+          <div className="w-7 h-7 rounded-lg bg-honey-500/20 flex items-center justify-center">
+            <Sparkles size={14} className="text-honey-500" />
           </div>
-          <span className="font-semibold text-sm text-honey-500">Sparkie Studio</span>
+          <span className="font-semibold text-sm text-honey-500 tracking-tight">Sparkie Studio</span>
         </div>
         <button
           onClick={toggleSidebar}
-          className="w-7 h-7 rounded-md flex items-center justify-center hover:bg-hive-hover text-text-muted hover:text-text-secondary transition-colors"
+          className="w-6 h-6 rounded-md flex items-center justify-center hover:bg-hive-hover text-text-muted hover:text-text-secondary transition-colors"
         >
-          <ChevronLeft size={16} />
+          <ChevronLeft size={14} />
         </button>
       </div>
 
-      {/* New Chat Button */}
-      <div className="p-3">
+      {/* New Task Button */}
+      <div className="p-3 shrink-0">
         <button
           onClick={() => { createChat(); setActiveTab('chat') }}
-          className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg bg-honey-500/10 border border-honey-500/20 text-honey-500 hover:bg-honey-500/20 transition-all text-sm font-medium"
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-honey-500/10 border border-honey-500/30 text-honey-500 hover:bg-honey-500/20 transition-all text-sm font-medium"
         >
-          <Plus size={16} />
-          New Chat
+          <Plus size={15} />
+          New Task
         </button>
       </div>
 
       {/* Quick Nav */}
-      <div className="px-3 flex gap-1">
+      <div className="px-2 flex gap-0.5 shrink-0">
         {[
           { icon: Search, label: 'Search', key: 'search' as const },
           { icon: FolderOpen, label: 'Assets', key: 'assets' as const },
@@ -72,60 +74,87 @@ export function Sidebar() {
           <button
             key={key}
             onClick={() => key !== 'search' && setActiveTab(key === 'images' ? 'images' : 'assets')}
-            className="flex-1 flex flex-col items-center gap-1 py-2 rounded-lg hover:bg-hive-hover text-text-muted hover:text-text-secondary transition-colors text-[10px]"
+            className={`flex-1 flex flex-col items-center gap-1 py-2 rounded-lg transition-colors text-[10px] font-medium ${
+              activeTab === key || (key === 'assets' && activeTab === 'assets')
+                ? 'bg-honey-500/10 text-honey-500'
+                : 'hover:bg-hive-hover text-text-muted hover:text-text-secondary'
+            }`}
             title={label}
           >
-            <Icon size={16} />
+            <Icon size={15} />
             {label}
           </button>
         ))}
       </div>
 
-      {/* Chat History */}
-      <div className="flex-1 overflow-y-auto mt-2 px-2">
-        <div className="px-2 py-1.5 text-[11px] font-medium text-text-muted uppercase tracking-wider">
-          Recent
+      {/* Experts Section */}
+      <div className="px-3 mt-3 shrink-0">
+        <div className="text-[10px] font-semibold text-text-muted uppercase tracking-wider mb-1.5 px-1">
+          Experts
         </div>
-        {chats.length === 0 ? (
-          <div className="px-3 py-8 text-center text-text-muted text-xs">
-            No conversations yet.<br />Start a new task above.
+        <button className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-hive-hover transition-colors group">
+          <div className="w-7 h-7 rounded-lg bg-hive-elevated border border-hive-border flex items-center justify-center shrink-0 group-hover:border-honey-500/30 transition-colors">
+            <Bot size={14} className="text-text-muted group-hover:text-honey-500 transition-colors" />
           </div>
-        ) : (
-          chats.map((chat) => (
-            <div
-              key={chat.id}
-              onClick={() => { setCurrentChat(chat.id); setActiveTab('chat') }}
-              className={`group flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer mb-0.5 transition-colors ${
-                currentChatId === chat.id
-                  ? 'bg-honey-500/10 text-honey-500'
-                  : 'text-text-secondary hover:bg-hive-hover hover:text-text-primary'
-              }`}
-            >
-              <MessageSquare size={14} className="shrink-0" />
-              <span className="text-sm truncate flex-1">{chat.title}</span>
-              <button
-                onClick={(e) => { e.stopPropagation(); deleteChat(chat.id); }}
-                className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-hive-elevated transition-all"
-              >
-                <Trash2 size={12} className="text-text-muted hover:text-accent-error" />
-              </button>
-            </div>
-          ))
+          <span className="text-sm text-text-secondary group-hover:text-text-primary transition-colors flex-1 text-left">Explore Experts</span>
+          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-honey-500 text-black leading-tight">New</span>
+        </button>
+      </div>
+
+      {/* Task History */}
+      <div className="flex-1 overflow-y-auto mt-3 flex flex-col min-h-0">
+        <button
+          onClick={() => setHistoryCollapsed(!historyCollapsed)}
+          className="flex items-center gap-1.5 px-4 py-1.5 text-[10px] font-semibold text-text-muted uppercase tracking-wider hover:text-text-secondary transition-colors w-full text-left shrink-0"
+        >
+          Task History
+          <ChevronDown size={11} className={`ml-auto transition-transform duration-200 ${historyCollapsed ? '-rotate-90' : ''}`} />
+        </button>
+
+        {!historyCollapsed && (
+          <div className="flex-1 overflow-y-auto px-2">
+            {chats.length === 0 ? (
+              <div className="px-3 py-8 text-center text-text-muted text-xs">
+                No tasks yet.<br />Start a new task above.
+              </div>
+            ) : (
+              chats.map((chat) => (
+                <div
+                  key={chat.id}
+                  onClick={() => { setCurrentChat(chat.id); setActiveTab('chat') }}
+                  className={`group flex items-center gap-2 px-2.5 py-2 rounded-lg cursor-pointer mb-0.5 transition-colors ${
+                    currentChatId === chat.id
+                      ? 'bg-honey-500/10 text-honey-500'
+                      : 'text-text-secondary hover:bg-hive-hover hover:text-text-primary'
+                  }`}
+                >
+                  <MessageSquare size={13} className="shrink-0" />
+                  <span className="text-[13px] truncate flex-1">{chat.title}</span>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); deleteChat(chat.id) }}
+                    className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-hive-elevated transition-all"
+                  >
+                    <Trash2 size={11} className="text-text-muted hover:text-accent-error" />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
         )}
       </div>
 
       {/* User Profile */}
-      <div className="p-3 border-t border-hive-border">
+      <div className="p-3 border-t border-hive-border shrink-0">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-full bg-honey-500/20 flex items-center justify-center text-honey-500 text-xs font-bold">
+          <div className="w-8 h-8 rounded-full bg-honey-500/20 flex items-center justify-center text-honey-500 text-xs font-bold shrink-0">
             D
           </div>
           <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium truncate">Draguniteus</div>
-            <div className="text-[11px] text-text-muted">Free</div>
+            <div className="text-sm font-medium truncate text-text-primary">Draguniteus</div>
+            <div className="text-[10px] text-text-muted">Free</div>
           </div>
           <button className="p-1.5 rounded-md hover:bg-hive-hover text-text-muted hover:text-text-secondary transition-colors">
-            <Settings size={14} />
+            <Settings size={13} />
           </button>
         </div>
       </div>
