@@ -438,6 +438,10 @@ export function ChatInput() {
     // Emoji-only or emoji-dominant
     if (/^[\p{Emoji}\s!?.]+$/u.test(t)) return true
 
+    // Personal / casual status — "im doing well", "just vibing", "up late coding", "feeling tired"
+    // These pass through all filters above but clearly have no build intent
+    if (/\b(i.?m|i am|i.?ve|i.?ll|im doing|doing well|feeling|just vibing|up late|late night|having fun|been working|been busy|been coding|been thinking|so tired|so excited|so happy|pretty good|not bad|kinda|sorta|vibing|chilling|hanging|haha|lol|lmao|omg|honestly|tbh|ngl|fr fr|no cap|lowkey|highkey|deadass|slay|based|goated|bussin|sheesh)\b/.test(t) && !BUILD_KEYWORDS.test(t)) return true
+
     return false
   }, [])
 
