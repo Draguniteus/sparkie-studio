@@ -127,11 +127,13 @@ export async function POST(req: NextRequest) {
   let messages: { role: string; content: string }[]
   let currentFiles: string | undefined
   let preferredModel: string | undefined
+  let userProfile: { name: string; role: string; goals: string; style: string; experience: string } | null
   try {
     const body = await req.json()
     messages = body.messages
     currentFiles = body.currentFiles
     preferredModel = typeof body.model === 'string' ? body.model : undefined
+    userProfile = body.userProfile ?? null
     if (!Array.isArray(messages) || messages.length === 0) throw new Error('Invalid messages')
   } catch {
     return new Response(JSON.stringify({ error: 'Invalid request body' }), {
@@ -191,8 +193,20 @@ export async function POST(req: NextRequest) {
         send('thinking', { step: 'build', text: `[+] Building ${projectTitle}...` })
 
         const chatHistory = messages.slice(0, -1) // always include history
+
+        // Personalize system prompt with user memory profile
+        const personalizedSystem = userProfile
+          ? `${BUILDER_SYSTEM}
+
+## USER PROFILE
+You are working with ${userProfile.name}, a ${userProfile.experience}-level ${userProfile.role}.
+Their main goal: ${userProfile.goals}.
+Code style preference: ${userProfile.style === 'commented' ? 'add helpful comments explaining key parts' : userProfile.style === 'production' ? 'include error handling, input validation, and production-ready patterns' : 'clean, minimal code without excessive comments'}.
+Address them by name (${userProfile.name}) when relevant. Tailor complexity to their experience level.`
+          : BUILDER_SYSTEM
+
         const builderMessages = [
-          { role: 'system', content: BUILDER_SYSTEM },
+          { role: 'system', content: personalizedSystem },
           ...chatHistory,
           ...(searchContext ? [
             { role: 'user' as const, content: `Web research context:\n${searchContext}` },
