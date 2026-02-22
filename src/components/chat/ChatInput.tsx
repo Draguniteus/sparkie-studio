@@ -400,20 +400,33 @@ export function ChatInput() {
   const isConversational = useCallback((text: string): boolean => {
     const t = text.trim().toLowerCase()
     const words = t.split(/\s+/).filter(Boolean)
-    // Hard cap: long messages are always coding tasks
-    if (words.length > 12) return false
-    // Exact-match short patterns
-    const conversationalPatterns = [
-      /^(ok|okay|alright|sure|got it|nice|cool|great|awesome|perfect|sounds good|makes sense)[\.!?]?$/,
-      /^(thanks?|thank you|ty|thx|cheers|appreciate it)[\.!?\s]*$/,
-      /^(excellent|amazing|fantastic|wonderful|brilliant|good job|well done|love it|beautiful|gorgeous)[\.!?\s]*\w*[\.!?]?$/,
-      /^(yes|no|nope|yep|yup|nah|maybe|sure thing)[\.!?]?$/,
-      /^(lol|haha|hehe|nice one|lmao|😂|🔥|💯|👍|❤️)[\.!?\s]*$/,
-      /^(wow|omg|oh|ah|oh wow|oh nice|oh great)[\.!?\s]*\w*[\.!?]?$/,
-    ]
-    if (conversationalPatterns.some(p => p.test(t))) return true
-    // Greetings — allow longer variants like "hey there testing can you hear me"
-    if (/^(hello|hi+|hey|yo|sup|howdy)/.test(t) && !t.includes('build') && !t.includes('creat') && !t.includes('make') && !t.includes('fix') && !t.includes('add') && !t.includes('code') && !t.includes('write') && !t.includes('app') && !t.includes('game')) return true
+
+    // Build/code intent → always route to agent regardless of length
+    const BUILD_KEYWORDS = /\b(build|create|make|write|generate|code|implement|deploy|refactor|debug|fix|update|add|remove|delete|install|run|start|test the app|test it)\b/
+    if (BUILD_KEYWORDS.test(t)) return false
+
+    // Very short messages (≤3 words) — almost always conversational
+    if (words.length <= 3) return true
+
+    // Compliments and praise reactions (any length)
+    const PRAISE = /\b(amazing|beautiful|gorgeous|incredible|perfect|wonderful|fantastic|brilliant|excellent|outstanding|impressive|stunning|love it|love this|great job|well done|nice work|good job|nailed it|killing it|sparkie|you rock|you.?re the best|insane|fire|goat|legendary)\b/
+    if (PRAISE.test(t)) return true
+
+    // Greetings
+    if (/^(hello|hi+|hey|yo|sup|howdy|good morning|good afternoon|good evening|what.?s up|how.?s it)/.test(t)) return true
+
+    // Capability / identity questions
+    if (/\b(what can you|what do you|who are you|what are you|your capabilities|what.?s your|how are you|you there|can you help|are you|testing|check|hear me)\b/.test(t)) return true
+
+    // Explanation / concept questions (not build requests)
+    if (/^(what is|what.?s|how does|how do|why does|why is|explain|can you explain|tell me about|what does|what.?s the difference|when should|should i|is it)\b/.test(t) && !BUILD_KEYWORDS.test(t)) return true
+
+    // Thanks, acknowledgements, reactions
+    if (/^(thanks?|thank you|ty|thx|cheers|appreciate|got it|sounds good|makes sense|understood|noted|ok|okay|sure|perfect|copy that|roger|on it|let.?s go|let.?s do it|yes|no|nope|yep|yup|nah|lol|haha|hehe|lmao|omg|wow|nice|cool|awesome|dope|sick|sweet)/.test(t)) return true
+
+    // Emoji-only or emoji-dominant
+    if (/^[\p{Emoji}\s!?.]+$/u.test(t)) return true
+
     return false
   }, [])
 
