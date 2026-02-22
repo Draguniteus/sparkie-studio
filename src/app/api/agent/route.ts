@@ -38,10 +38,11 @@ Server must listen on process.env.PORT || 3000
 ## SELF-CONTAINED HTML (CRITICAL FOR PREVIEW)
 For ALL web projects (charts, dashboards, games, animations):
 - Load Chart.js, D3, Three.js, etc. via CDN <script> tags INSIDE index.html
-- Inline ALL CSS in a <style> tag — do NOT reference external .css files
-- Inline ALL JavaScript in a <script> tag — do NOT reference external .js files
+- Inline ALL CSS in a <style> tag — NEVER use <link rel="stylesheet" href="...">
+- Inline ALL JavaScript in a <script> tag — NEVER use <script src="...">
 - Exception: full-stack Express apps may use separate files (they run in a container)
 - This ensures the live preview works correctly
+- INTERACTIVE APPS (todo, games, forms): ALL JavaScript MUST be inline. Separate .js files will fail silently in the preview sandbox, breaking all interactivity. There is NO file server. Use DOMContentLoaded or place scripts at end of <body>.
 
 ## CSS RULES (CRITICAL)
 - NEVER use @import inside a <style> tag — it breaks browser rendering
