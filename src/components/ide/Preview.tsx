@@ -86,8 +86,19 @@ const STATUS_LABELS: Record<string, string> = {
   error:      "Container error",
 }
 
+// Recursively flatten a FileNode tree into leaf files only
+function flattenFiles(nodes: import("@/store/appStore").FileNode[]): import("@/store/appStore").FileNode[] {
+  return nodes.flatMap(n =>
+    n.type === "folder" || n.type === "archive"
+      ? flattenFiles(n.children ?? [])
+      : [n]
+  )
+}
+
 export function Preview() {
   const { files, containerStatus, previewUrl } = useAppStore()
+  // Always search the flat list of leaf files (handles folder-wrapped builds)
+  const flatFiles = flattenFiles(files)
   const [refreshKey, setRefreshKey] = useState(0)
   const refresh = useCallback(() => setRefreshKey(k => k + 1), [])
 
@@ -98,15 +109,15 @@ export function Preview() {
   const { previewHtml, previewType } = useMemo(() => {
     if (isWCActive) return { previewHtml: null, previewType: null }
 
-    const htmlFile = files.find(f => f.name.endsWith(".html"))
-    const cssFile  = files.find(f => f.name.endsWith(".css"))
-    const jsFile   = files.find(f => f.name.endsWith(".js") && !f.name.endsWith(".min.js"))
-    const tsxFile  = files.find(f => f.name.endsWith(".tsx") || f.name.endsWith(".jsx"))
-    const svgFile  = files.find(f => f.name.endsWith(".svg"))
-    const mdFile   = files.find(f => f.name.endsWith(".md") || f.name.endsWith(".mdx"))
-    const jsonFile = files.find(f => f.name.endsWith(".json"))
-    const pyFile   = files.find(f => f.name.endsWith(".py"))
-    const anyCode  = files.find(f => f.type === "file" && f.content)
+    const htmlFile = flatFiles.find(f => f.name.endsWith(".html"))
+    const cssFile  = flatFiles.find(f => f.name.endsWith(".css"))
+    const jsFile   = flatFiles.find(f => f.name.endsWith(".js") && !f.name.endsWith(".min.js"))
+    const tsxFile  = flatFiles.find(f => f.name.endsWith(".tsx") || f.name.endsWith(".jsx"))
+    const svgFile  = flatFiles.find(f => f.name.endsWith(".svg"))
+    const mdFile   = flatFiles.find(f => f.name.endsWith(".md") || f.name.endsWith(".mdx"))
+    const jsonFile = flatFiles.find(f => f.name.endsWith(".json"))
+    const pyFile   = flatFiles.find(f => f.name.endsWith(".py"))
+    const anyCode  = flatFiles.find(f => f.type === "file" && f.content)
 
     if (htmlFile?.content) {
       const base = `<style id="__sparkie">${PREVIEW_BASE_STYLES}html,body{overflow:auto;display:block}</style>`
