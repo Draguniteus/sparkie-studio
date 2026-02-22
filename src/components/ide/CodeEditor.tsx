@@ -1,12 +1,13 @@
 "use client"
 
 import { useCallback } from "react"
-import { useAppStore } from "@/store/appStore"
+import { useAppStore, FileNode, findNodeById, flattenFileTree } from "@/store/appStore"
 import { File, Download } from "lucide-react"
 
 export function CodeEditor() {
   const { files, activeFileId, updateFileContent, setActiveFile } = useAppStore()
-  const activeFile = files.find((f) => f.id === activeFileId)
+  // Use recursive tree search — handles files nested inside project folder
+  const activeFile = activeFileId ? findNodeById(files, activeFileId) : undefined
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -35,9 +36,9 @@ export function CodeEditor() {
 
   return (
     <div className="h-full flex flex-col">
-      {/* File tabs */}
+      {/* File tabs — flatten tree to show all files */}
       <div className="flex items-center h-8 border-b border-hive-border bg-hive-700 px-1 shrink-0">
-        {files.filter(f => f.type === "file").map((f) => (
+        {flattenFileTree(files).filter(f => f.type === "file").map((f) => (
           <button
             key={f.id}
             onClick={() => setActiveFile(f.id)}
