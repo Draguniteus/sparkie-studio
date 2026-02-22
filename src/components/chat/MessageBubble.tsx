@@ -2,12 +2,90 @@
 
 import { useState } from "react"
 import { Message } from "@/store/appStore"
-import { Sparkles, User, Copy, RefreshCw, ThumbsUp, ThumbsDown, Download, Check } from "lucide-react"
+import { Sparkles, User, Copy, RefreshCw, ThumbsUp, ThumbsDown, Download, Check, ExternalLink, FileCode, Layers, Eye } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 
 interface Props {
   message: Message
+}
+
+// File type → icon color
+function fileIconColor(name: string): string {
+  const ext = name.split('.').pop()?.toLowerCase() || ''
+  if (['html', 'htm'].includes(ext)) return 'text-orange-400'
+  if (['css', 'scss'].includes(ext)) return 'text-blue-400'
+  if (['js', 'jsx', 'ts', 'tsx'].includes(ext)) return 'text-yellow-400'
+  if (['py'].includes(ext)) return 'text-green-400'
+  if (['json'].includes(ext)) return 'text-purple-400'
+  if (['md'].includes(ext)) return 'text-gray-400'
+  return 'text-text-muted'
+}
+
+function BuildCard({ card }: { card: NonNullable<Message["buildCard"]> }) {
+  const isStaticSite = card.files.some(f => f.endsWith('.html'))
+  const isFullStack = card.files.some(f => f === 'package.json' || f.includes('server'))
+
+  return (
+    <div className="mt-1 rounded-xl border border-honey-500/20 bg-honey-500/5 overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center gap-2.5 px-4 py-3 border-b border-honey-500/15">
+        <div className="w-7 h-7 rounded-lg bg-honey-500/15 flex items-center justify-center shrink-0">
+          <Layers size={14} className="text-honey-500" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold text-text-primary truncate">{card.title || "Project"}</span>
+            <span className="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-honey-500/15 text-honey-500">
+              {card.isEdit ? "UPDATED" : "BUILT"}
+            </span>
+          </div>
+          <p className="text-xs text-text-muted mt-0.5">
+            {card.fileCount} file{card.fileCount !== 1 ? "s" : ""} · {card.languages.slice(0, 3).join(", ")}
+          </p>
+        </div>
+      </div>
+
+      {/* File list */}
+      <div className="px-4 py-2.5 space-y-1.5 max-h-32 overflow-y-auto">
+        {card.files.slice(0, 8).map((f, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <FileCode size={12} className={fileIconColor(f)} />
+            <span className="text-xs text-text-secondary font-mono truncate">{f}</span>
+          </div>
+        ))}
+        {card.files.length > 8 && (
+          <p className="text-xs text-text-muted pl-5">+{card.files.length - 8} more files</p>
+        )}
+      </div>
+
+      {/* Actions */}
+      <div className="flex items-center gap-2 px-4 py-2.5 border-t border-honey-500/10">
+        <button
+          onClick={() => {
+            // Trigger IDE preview tab focus — dispatch custom event
+            window.dispatchEvent(new CustomEvent('sparkie:open-preview'))
+          }}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-honey-500 text-black text-xs font-semibold hover:bg-honey-400 transition-colors"
+        >
+          <Eye size={11} />
+          Open Preview
+        </button>
+
+        {isStaticSite && !isFullStack && (
+          <button
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent('sparkie:open-deploy-tip'))
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-hive-border text-text-secondary text-xs hover:bg-hive-hover hover:text-text-primary transition-colors"
+          >
+            <ExternalLink size={11} />
+            Deploy to GitHub Pages
+          </button>
+        )}
+      </div>
+    </div>
+  )
 }
 
 export function MessageBubble({ message }: Props) {
@@ -22,6 +100,7 @@ export function MessageBubble({ message }: Props) {
 
   const isImage = message.type === "image" && message.imageUrl
   const isVideo = message.type === "video" && message.imageUrl
+  const isBuildCard = message.type === "build_card" && message.buildCard
 
   return (
     <div className={`flex gap-3 animate-fade-in ${isUser ? "justify-end" : ""}`}>
@@ -94,6 +173,9 @@ export function MessageBubble({ message }: Props) {
                 <p className="text-xs text-text-muted italic">{message.imagePrompt}</p>
               )}
             </div>
+          ) : isBuildCard && !message.isStreaming ? (
+            /* Build Completion Card */
+            <BuildCard card={message.buildCard!} />
           ) : (
             /* Markdown Content */
             <div className="prose prose-invert prose-sm max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_pre]:bg-hive-elevated [&_pre]:border [&_pre]:border-hive-border [&_pre]:rounded-lg [&_pre]:p-3 [&_code]:text-honey-400 [&_a]:text-honey-500 [&_a:hover]:text-honey-400 [&_strong]:text-text-primary [&_h1]:text-text-primary [&_h2]:text-text-primary [&_h3]:text-text-primary [&_ul]:text-text-secondary [&_ol]:text-text-secondary [&_li]:text-text-secondary [&_p]:text-text-secondary [&_blockquote]:border-honey-500/30 [&_blockquote]:text-text-muted [&_hr]:border-hive-border [&_table]:border-hive-border [&_th]:border-hive-border [&_td]:border-hive-border [&_th]:px-3 [&_th]:py-1.5 [&_td]:px-3 [&_td]:py-1.5 [&_thead]:bg-hive-elevated">
@@ -116,7 +198,7 @@ export function MessageBubble({ message }: Props) {
           )}
         </div>
 
-        {!isUser && !message.isStreaming && (
+        {!isUser && !message.isStreaming && !isBuildCard && (
           <div className="flex items-center gap-1 mt-1 ml-1">
             <button
               onClick={copyToClipboard}
