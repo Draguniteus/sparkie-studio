@@ -399,51 +399,62 @@ export function ChatInput() {
   }, [selectedImageModel, selectedVideoModel, addMessage, updateMessage, setStreaming, addWorklogEntry, updateWorklogEntry, openIDE, setIDETab, ideOpen])
 
   // Detect conversational/non-coding messages that shouldn't trigger the IDE
-  const isConversational = useCallback((text: string): boolean => {
+  // Fast synchronous pre-filter — catches obvious cases without a network call.
+  // Returns true (chat), false (build), or null (ambiguous → let LLM decide).
+  const quickClassify = useCallback((text: string): boolean | null => {
     const t = text.trim().toLowerCase()
     const words = t.split(/\s+/).filter(Boolean)
 
-    // Explicit mode overrides — highest priority
+    // Explicit mode overrides
     if (/\b(cancel|stop building|just chat|forget it)\b/.test(t)) return true
 
-    // Build/code intent → always route to agent regardless of length
+    // Build/code intent — high-confidence signals
     const BUILD_KEYWORDS = /\b(build|create|make|write|generate|code|implement|deploy|refactor|debug|fix|update|add|remove|delete|install|run|start|test the app|test it)\b/
     if (BUILD_KEYWORDS.test(t)) return false
 
-    // Code-paste + question → explain, don't rebuild
+    // Code-paste + question → explanation request
     if ((text.includes('```') || text.includes('<code>')) && /\?/.test(t)) return true
 
-    // "improve this" / "make it better" without active build context → chat
-    if (/^(improve|make it|make this|what about|how about|could you|can you make)\b/.test(t) && !BUILD_KEYWORDS.test(t)) return true
-
-    // Very short messages (≤3 words) — almost always conversational
+    // Very short messages (≤3 words)
     if (words.length <= 3) return true
-
-    // Compliments and praise reactions (any length)
-    const PRAISE = /\b(amazing|beautiful|gorgeous|incredible|perfect|wonderful|fantastic|brilliant|excellent|outstanding|impressive|stunning|love it|love this|great job|well done|nice work|good job|nailed it|killing it|sparkie|you rock|you.?re the best|insane|fire|goat|legendary)\b/
-    if (PRAISE.test(t)) return true
 
     // Greetings
     if (/^(hello|hi+|hey|yo|sup|howdy|good morning|good afternoon|good evening|what.?s up|how.?s it)/.test(t)) return true
 
-    // Capability / identity questions
-    if (/\b(what can you|what do you|who are you|what are you|your capabilities|what.?s your|how are you|you there|can you help|are you|testing|check|hear me)\b/.test(t)) return true
-
-    // Explanation / concept questions (not build requests)
-    if (/^(what is|what.?s|how does|how do|why does|why is|explain|can you explain|tell me about|what does|what.?s the difference|when should|should i|is it)\b/.test(t) && !BUILD_KEYWORDS.test(t)) return true
-
-    // Thanks, acknowledgements, reactions
-    if (/^(thanks?|thank you|ty|thx|cheers|appreciate|got it|sounds good|makes sense|understood|noted|ok|okay|sure|perfect|copy that|roger|on it|let.?s go|let.?s do it|yes|no|nope|yep|yup|nah|lol|haha|hehe|lmao|omg|wow|nice|cool|awesome|dope|sick|sweet)/.test(t)) return true
-
     // Emoji-only or emoji-dominant
     if (/^[\p{Emoji}\s!?.]+$/u.test(t)) return true
 
-    // Personal / casual status — "im doing well", "just vibing", "up late coding", "feeling tired"
-    // These pass through all filters above but clearly have no build intent
-    if (/\b(i.?m|i am|i.?ve|i.?ll|im doing|doing well|feeling|just vibing|up late|late night|having fun|been working|been busy|been coding|been thinking|so tired|so excited|so happy|pretty good|not bad|kinda|sorta|vibing|chilling|hanging|haha|lol|lmao|omg|honestly|tbh|ngl|fr fr|no cap|lowkey|highkey|deadass|slay|based|goated|bussin|sheesh)\b/.test(t) && !BUILD_KEYWORDS.test(t)) return true
+    // Thanks, acknowledgements
+    if (/^(thanks?|thank you|ty|thx|cheers|appreciate|got it|sounds good|makes sense|understood|noted|ok|okay|sure|perfect|copy that|roger|on it|let.?s go|yes|no|nope|yep|yup|nah|lol|haha|lmao|omg|wow|nice|cool|awesome|dope|sick|sweet)/.test(t)) return true
 
-    return false
+    // Ambiguous — escalate to LLM classifier
+    return null
   }, [])
+
+  // LLM-powered intent classifier — called only for ambiguous messages
+  const classifyIntent = useCallback(async (text: string): Promise<'chat' | 'build'> => {
+    const quick = quickClassify(text)
+    if (quick !== null) return quick ? 'chat' : 'build'
+
+    try {
+      const res = await fetch('/api/classify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text }),
+      })
+      if (!res.ok) return 'chat'
+      const { mode } = await res.json()
+      return mode === 'build' ? 'build' : 'chat'
+    } catch {
+      return 'chat' // Fail safe: default to chat
+    }
+  }, [quickClassify])
+
+  // Keep isConversational as a thin sync wrapper (used in isContinue check path)
+  const isConversational = useCallback((text: string): boolean => {
+    const q = quickClassify(text)
+    return q !== false
+  }, [quickClassify])
 
   // Lightweight chat-only reply (no IDE, no file generation)
   const streamReply = useCallback(async (chatId: string, userContent: string) => {
@@ -759,7 +770,7 @@ export function ChatInput() {
     }
   }, [isRecording])
 
-  const handleSubmit = useCallback(() => {
+  const handleSubmit = useCallback(async () => {
     if (!input.trim() || isStreaming) return
 
     let chatId = currentChatId
@@ -784,8 +795,12 @@ export function ChatInput() {
       if (isContinue && lastMode === 'build') {
         setLastMode('build')
         streamAgent(chatId, userContent)
-      } else if (isConversational(userContent)) {
-        // Chitchat / praise — reply naturally without touching the IDE
+        return
+      }
+
+      // Use LLM classifier for ambiguous messages; fast sync path for obvious ones
+      const intent = await classifyIntent(userContent)
+      if (intent === 'chat') {
         setLastMode('chat')
         streamReply(chatId, userContent)
       } else {
@@ -793,7 +808,7 @@ export function ChatInput() {
         streamAgent(chatId, userContent)
       }
     }
-  }, [input, isStreaming, currentChatId, createChat, addMessage, genMode, streamAgent, generateMedia, isConversational, streamReply])
+  }, [input, isStreaming, currentChatId, createChat, addMessage, genMode, streamAgent, generateMedia, classifyIntent, streamReply])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit() }
