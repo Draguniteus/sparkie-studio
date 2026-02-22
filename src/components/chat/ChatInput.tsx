@@ -505,13 +505,22 @@ export function ChatInput() {
           } catch { /* skip */ }
         }
       }
+      // Detect if the chat model responded with build-redirect intent
+      // (e.g. misrouted build request: "I'll build that..." but no build fired)
+      const BUILD_REDIRECT_RE = /\b(i'll build|let me build|i'll create|let me create|i'll make|building that|creating that|spinning up|on it[!,]|here's the|here you go|i've built|i've created|i've made)\b/i
+      if (fullContent && BUILD_REDIRECT_RE.test(fullContent) && !fullContent.includes('```') && fullContent.length < 400) {
+        // Model responded with a build-redirect but no actual code — re-route to agent
+        updateMessage(chatId, assistantMsgId, { content: '', isStreaming: false })
+        streamAgent(chatId, userContent)
+        return
+      }
       updateMessage(chatId, assistantMsgId, { content: fullContent || "👋", isStreaming: false })
     } catch {
       updateMessage(chatId, assistantMsgId, { content: "Connection error.", isStreaming: false })
     } finally {
       setStreaming(false)
     }
-  }, [selectedModel, addMessage, updateMessage, setStreaming])
+  }, [selectedModel, addMessage, updateMessage, setStreaming, streamAgent])
 
   // ── streamAgent: Planner → Builder → Reviewer with inline thinking ────────
   const streamAgent = useCallback(async (chatId: string, userContent: string, isEdit = false) => {
@@ -652,8 +661,12 @@ export function ChatInput() {
               appendLiveCode(parsed.content)
               // Create build message bubble on first delta (lazy — avoids double-bubble during planning)
               ensureBuildMsg()
-              // Parse files incrementally
+              // Parse files incrementally (folders + files)
               const partialParse = parseAIResponse(fullBuild, projectName)
+              // Create explicit folder nodes from ---FOLDER:--- markers
+              for (const folder of (partialParse.folders ?? [])) {
+                upsertFile(`${folder}/.gitkeep`, '', 'plaintext')
+              }
               for (const file of partialParse.files) {
                 if (!createdFileNames.has(file.name)) {
                   createdFileNames.add(file.name)
@@ -674,8 +687,11 @@ export function ChatInput() {
                 }
               }
             } else if (parsed.event === 'done') {
-              // Final parse pass
+              // Final parse pass (folders + files)
               const finalParse = parseAIResponse(fullBuild, projectName)
+              for (const folder of (finalParse.folders ?? [])) {
+                upsertFile(`${folder}/.gitkeep`, '', 'plaintext')
+              }
               for (const file of finalParse.files) {
                 if (!createdFileNames.has(file.name)) {
                   createdFileNames.add(file.name)
