@@ -77,6 +77,85 @@ function buildReactHtml(jsx: string, css?: string): string {
   </script></body></html>`
 }
 
+// ── Runtime error overlay script (injected into every srcdoc) ────────────────
+const ERROR_OVERLAY_SCRIPT = `<script>
+(function() {
+  function showError(msg, src, line, col) {
+    var existing = document.getElementById('__sparkie_err');
+    if (existing) existing.remove();
+    var overlay = document.createElement('div');
+    overlay.id = '__sparkie_err';
+    overlay.style.cssText = [
+      'position:fixed','top:0','left:0','right:0','bottom:0',
+      'background:rgba(10,10,10,0.92)','z-index:999999',
+      'display:flex','align-items:center','justify-content:center',
+      'font-family:ui-monospace,monospace','padding:24px','box-sizing:border-box'
+    ].join(';');
+    overlay.innerHTML = '<div style=\"max-width:560px;width:100%\">'
+      + '<div style=\"display:flex;align-items:center;gap:10px;margin-bottom:12px\">'
+      + '<span style=\"font-size:18px\">⚠️</span>'
+      + '<span style=\"color:#FFC30B;font-size:13px;font-weight:700;letter-spacing:0.05em\">RUNTIME ERROR</span>'
+      + '</div>'
+      + '<div style=\"background:#1a1a1a;border:1px solid #FFC30B33;border-radius:8px;padding:16px\">'
+      + '<p style=\"color:#ef4444;font-size:12px;margin:0 0 8px;word-break:break-all\">' + String(msg).replace(/</g,'&lt;') + '</p>'
+      + (line ? '<p style=\"color:#6b7280;font-size:11px;margin:0\">Line ' + line + (col ? ':' + col : '') + '</p>' : '')
+      + '</div>'
+      + '<p style=\"color:#4b5563;font-size:11px;margin:12px 0 0;text-align:center\">Fix the code and rebuild to dismiss</p>'
+      + '</div>';
+    document.body.appendChild(overlay);
+  }
+  window.onerror = function(msg, src, line, col, err) {
+    showError(err ? err.message : msg, src, line, col);
+    return true;
+  };
+  window.addEventListener('unhandledrejection', function(e) {
+    showError(e.reason ? (e.reason.message || e.reason) : 'Unhandled promise rejection', null, null, null);
+  });
+})();
+<\/script>`
+
+// ── React Error Boundary — catches render errors in Preview ──────────────────
+import React from 'react'
+
+interface EBState { hasError: boolean; errorMsg: string }
+class PreviewErrorBoundary extends React.Component<{ children: React.ReactNode }, EBState> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props)
+    this.state = { hasError: false, errorMsg: '' }
+  }
+  static getDerivedStateFromError(error: Error): EBState {
+    return { hasError: true, errorMsg: error.message || 'Unknown render error' }
+  }
+  componentDidCatch(error: Error) {
+    console.error('[Sparkie Preview Error]', error)
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="h-full flex flex-col items-center justify-center bg-[#0a0a0a] p-8">
+          <div className="max-w-md w-full">
+            <div className="flex items-center gap-3 mb-4">
+              <span className="text-lg">⚠️</span>
+              <span className="text-honey-500 text-sm font-bold tracking-wide">RENDER ERROR</span>
+            </div>
+            <div className="bg-hive-elevated border border-honey-500/20 rounded-xl p-4 mb-4">
+              <p className="text-red-400 text-xs font-mono break-all">{this.state.errorMsg}</p>
+            </div>
+            <p className="text-text-muted text-xs text-center">Fix the code and rebuild to dismiss</p>
+            <button
+              onClick={() => this.setState({ hasError: false, errorMsg: '' })}
+              className="mt-4 w-full py-2 rounded-lg border border-hive-border text-text-secondary text-xs hover:bg-hive-hover transition-colors"
+            >
+              Retry Preview
+            </button>
+          </div>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
 // Container status display
 const STATUS_LABELS: Record<string, string> = {
   booting:    "Booting WebContainer…",
@@ -146,9 +225,15 @@ export function Preview() {
           : `<style${attrs}>${rest}</style>`
       })
 
+      const errorOverlay = `${ERROR_OVERLAY_SCRIPT}`
+      const errorOverlay = `${ERROR_OVERLAY_SCRIPT}`
       let html = hoistedHtml.includes("<head>")
         ? hoistedHtml.replace("<head>", `<head>${base}`)
         : `<!DOCTYPE html><html><head>${base}</head><body>${hoistedHtml}</body></html>`
+      // Inject runtime error overlay before </head>
+      html = html.replace('</head>', `${errorOverlay}</head>`)
+      // Inject runtime error overlay before </head>
+      html = html.replace('</head>', `${errorOverlay}</head>`)
 
       if (cssFile?.content) {
         const cleanCss = stripExternalImports(cssFile.content)
@@ -244,9 +329,11 @@ export function Preview() {
         </button>
       </div>
       <div className="flex-1 overflow-hidden">
-        <iframe key={refreshKey} srcDoc={previewHtml} title="Preview"
-          sandbox="allow-scripts allow-modals allow-forms allow-popups allow-same-origin allow-downloads"
-          className="w-full h-full border-0 block" />
+        <PreviewErrorBoundary>
+          <iframe key={refreshKey} srcDoc={previewHtml} title="Preview"
+            sandbox="allow-scripts allow-modals allow-forms allow-popups allow-same-origin allow-downloads"
+            className="w-full h-full border-0 block" />
+        </PreviewErrorBoundary>
       </div>
     </div>
   )
