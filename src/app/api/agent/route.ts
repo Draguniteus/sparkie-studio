@@ -88,7 +88,6 @@ function sseEvent(event: string, data: object): string {
 
 const SSE_KEEPALIVE = ': keepalive\n\n'
 const MAX_BODY_BYTES = 50 * 1024
-const STREAM_TIMEOUT_MS = 45_000
 
 function extractTitle(msg: string): string {
   return msg
@@ -215,9 +214,19 @@ export async function POST(req: NextRequest) {
           }
 
           const abortCtrl = new AbortController()
-          const timer = setTimeout(() => abortCtrl.abort(), STREAM_TIMEOUT_MS)
           let modelOutput = ''
           let lineBuffer = ''  // SSE line buffer — accumulates partial lines across chunks
+          let timedOutWithContent = false
+
+          // Inactivity timeout: resets on every chunk received.
+          // Fires only when the model has gone SILENT (no data) for INACTIVITY_MS.
+          // This allows slow-but-streaming models to finish without switching.
+          const INACTIVITY_MS = 25_000
+          let inactivityTimer = setTimeout(() => abortCtrl.abort(), INACTIVITY_MS)
+          const resetInactivity = () => {
+            clearTimeout(inactivityTimer)
+            inactivityTimer = setTimeout(() => abortCtrl.abort(), INACTIVITY_MS)
+          }
 
           try {
             const buildStream = await callOpenCodeStream(model, builderMessages, apiKey, abortCtrl.signal)
@@ -227,6 +236,7 @@ export async function POST(req: NextRequest) {
             while (true) {
               const { done, value } = await reader.read()
               if (done) break
+              resetInactivity()  // model sent data — reset inactivity window
               lineBuffer += decoder.decode(value, { stream: true })
               const lines = lineBuffer.split('\n')
               lineBuffer = lines.pop() ?? ''  // save incomplete last line for next chunk
@@ -249,15 +259,23 @@ export async function POST(req: NextRequest) {
               }
             }
 
-            clearTimeout(timer)
+            clearTimeout(inactivityTimer)
           } catch (err: unknown) {
-            clearTimeout(timer)
+            clearTimeout(inactivityTimer)
             if (err instanceof Error && err.name === 'AbortError') {
-              send('thinking', { step: 'build_timeout', text: `[t] ${model} timed out — trying next...` })
-              continue
+              if (modelOutput.trim().length > 0) {
+                // Model was actively generating but went silent — use what we have
+                timedOutWithContent = true
+                send('thinking', { step: 'build_timeout', text: `[t] ${model} went silent — using generated content...` })
+              } else {
+                // Model never started — try next fallback
+                send('thinking', { step: 'build_timeout', text: `[t] ${model} timed out — trying next...` })
+                continue
+              }
+            } else {
+              send('error', { message: 'Stream error — please try again' })
+              return
             }
-            send('error', { message: 'Stream error — please try again' })
-            return
           }
 
           if (modelOutput.trim().length > 0) break
