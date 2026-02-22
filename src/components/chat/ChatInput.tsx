@@ -749,6 +749,24 @@ export function ChatInput() {
         ]
         const wrapText = WRAP_PHRASES[Math.floor(Math.random() * WRAP_PHRASES.length)]
         updateMessage(chatId, ackMsgId, { content: wrapText, isStreaming: false })
+
+        // Build completion card — shows files created, languages, quick actions
+        const createdFilesList = Array.from(createdFileNames)
+        const uniqueLangs = [...new Set(createdFilesList.map(f => getLanguageFromFilename(f)).filter(l => l !== 'plaintext'))]
+        addMessage(chatId, {
+          role: 'assistant',
+          content: '',
+          type: 'build_card',
+          model: selectedModel,
+          isStreaming: false,
+          buildCard: {
+            title: projectName || 'project',
+            files: createdFilesList,
+            fileCount: filesCreated,
+            languages: uniqueLangs,
+            isEdit,
+          },
+        })
       } else {
         // No files — restore archive and show text response
         const currentState = useAppStore.getState()
