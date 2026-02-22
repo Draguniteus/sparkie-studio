@@ -156,6 +156,7 @@ interface AppState {
   setUserProfile: (profile: UserProfile) => void
   updateUserProfile: (patch: Partial<UserProfile>) => void
   dismissOnboarding: () => void
+  hydrateFromStorage: () => void
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -326,34 +327,30 @@ export const useAppStore = create<AppState>((set, get) => ({
   }),
   clearTerminalOutput: () => set({ terminalOutput: '' }),
 
-  // User memory profile — persisted to localStorage
-  userProfile: (() => {
-    if (typeof window === 'undefined') return null
-    try {
-      const stored = localStorage.getItem('sparkie_user_profile')
-      return stored ? JSON.parse(stored) as UserProfile : null
-    } catch { return null }
-  })(),
-  onboardingDone: (() => {
-    if (typeof window === 'undefined') return false
-    return localStorage.getItem('sparkie_onboarding_done') === 'true'
-  })(),
+  // User memory profile — SSR-safe: always start null/false, hydrate client-side via useEffect
+  userProfile: null,
+  onboardingDone: false,
   setUserProfile: (profile) => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('sparkie_user_profile', JSON.stringify(profile))
-      localStorage.setItem('sparkie_onboarding_done', 'true')
-    }
+    try { localStorage.setItem('sparkie_user_profile', JSON.stringify(profile)) } catch {}
+    try { localStorage.setItem('sparkie_onboarding_done', 'true') } catch {}
     set({ userProfile: profile, onboardingDone: true })
   },
   updateUserProfile: (patch) => set((s) => {
     const updated = s.userProfile ? { ...s.userProfile, ...patch } : null
-    if (updated && typeof window !== 'undefined') {
-      localStorage.setItem('sparkie_user_profile', JSON.stringify(updated))
-    }
+    try { if (updated) localStorage.setItem('sparkie_user_profile', JSON.stringify(updated)) } catch {}
     return { userProfile: updated }
   }),
   dismissOnboarding: () => {
-    if (typeof window !== 'undefined') localStorage.setItem('sparkie_onboarding_done', 'true')
+    try { localStorage.setItem('sparkie_onboarding_done', 'true') } catch {}
     set({ onboardingDone: true })
+  },
+  hydrateFromStorage: () => {
+    // Call this from useEffect (client-side only) to load persisted state after mount
+    try {
+      const profileRaw = localStorage.getItem('sparkie_user_profile')
+      const done = localStorage.getItem('sparkie_onboarding_done') === 'true'
+      const profile = profileRaw ? JSON.parse(profileRaw) as UserProfile : null
+      if (profile || done) set({ userProfile: profile, onboardingDone: done })
+    } catch {}
   },
 }))
