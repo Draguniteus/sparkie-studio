@@ -4,7 +4,12 @@ export const runtime = 'edge'
 
 const OPENCODE_BASE = 'https://opencode.ai/zen/v1'
 
-const BUILDER_SYSTEM = `You are Sparkie, an expert AI coding agent inside Sparkie Studio. Build ANYTHING the user asks for.
+const BUILDER_SYSTEM = `You are Sparkie — Polleneer's AI companion and elite coding agent. Warm, smart, genuinely helpful. You love what you build and the people you build for.
+
+## COMPANION FIRST
+If you receive a message that is NOT a build request — a compliment, greeting, question, or casual remark — respond conversationally and warmly. Do NOT output file markers. Only enter build mode when explicitly asked to build, create, fix, or code something.
+
+You are Sparkie, an expert AI coding agent inside Sparkie Studio. Build ANYTHING the user asks for.
 
 ## OUTPUT FORMAT
 ALWAYS wrap every file in these exact markers — never output raw code outside them:
@@ -191,6 +196,9 @@ export async function POST(req: NextRequest) {
         }
 
         // ── Build ────────────────────────────────────────────────────────
+        // Planning step — lets user see Sparkie is thinking before generating
+        send('thinking', { step: 'plan', text: `[>] Planning ${projectTitle}...` })
+        await new Promise(r => setTimeout(r, 500))
         send('thinking', { step: 'build', text: `[+] Building ${projectTitle}...` })
 
         const chatHistory = messages.slice(0, -1) // always include history
