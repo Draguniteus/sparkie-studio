@@ -5,6 +5,21 @@ import { useAppStore } from "@/store/appStore"
 import { parseAIResponse, getLanguageFromFilename, deriveProjectName } from "@/lib/fileParser"
 import { Paperclip, ArrowUp, Sparkles, ChevronDown, Image as ImageIcon, Video, Mic, MicOff } from "lucide-react"
 
+// ── Asset type detection helper (for AssetsTab categories) ─────────────────
+function detectAssetTypeFromName(name: string): import('@/store/appStore').AssetType {
+  const ext = name.split('.').pop()?.toLowerCase() || ''
+  if (['html', 'htm'].includes(ext)) return 'website'
+  if (['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp', 'ico', 'bmp'].includes(ext)) return 'image'
+  if (['mp3', 'wav', 'ogg', 'aac', 'flac', 'm4a'].includes(ext)) return 'audio'
+  if (['mp4', 'webm', 'mov', 'avi', 'mkv'].includes(ext)) return 'video'
+  if (['xlsx', 'xls', 'csv'].includes(ext)) return 'excel'
+  if (['pptx', 'ppt'].includes(ext)) return 'ppt'
+  if (['pdf', 'doc', 'docx', 'txt', 'md'].includes(ext)) return 'document'
+  if (['js', 'ts', 'jsx', 'tsx', 'py', 'css', 'json'].includes(ext)) return 'website'
+  return 'other'
+}
+
+
 const MODELS = [
   { id: "glm-5-free", name: "GLM 5", tag: "Free", type: "chat" },
   { id: "minimax-m2.5-free", name: "MiniMax M2.5", tag: "Free", type: "chat" },
@@ -680,7 +695,7 @@ export function ChatInput() {
                   addLiveCodeFile(file.name)
                   // Track in assets
                   const chatTitle = useAppStore.getState().chats.find(c => c.id === chatId)?.title || 'New Chat'
-                  addAsset({ name: file.name, language: getLanguageFromFilename(file.name), content: file.content, chatId, chatTitle, fileId })
+                  addAsset({ name: file.name, language: getLanguageFromFilename(file.name), content: file.content, chatId, chatTitle, fileId, assetType: detectAssetTypeFromName(file.name), source: 'agent' as const })
                   filesCreated++
                 } else {
                   // Update with complete final content (handles folder-prefixed paths)
@@ -700,7 +715,7 @@ export function ChatInput() {
                   if (filesCreated === 0) setActiveFile(fileId)
                   addLiveCodeFile(file.name)
                   const chatTitle = useAppStore.getState().chats.find(c => c.id === chatId)?.title || 'New Chat'
-                  addAsset({ name: file.name, language: getLanguageFromFilename(file.name), content: file.content, chatId, chatTitle, fileId })
+                  addAsset({ name: file.name, language: getLanguageFromFilename(file.name), content: file.content, chatId, chatTitle, fileId, assetType: detectAssetTypeFromName(file.name), source: 'agent' as const })
                   filesCreated++
                 } else {
                   // Update with complete final content (handles folder-prefixed paths)
