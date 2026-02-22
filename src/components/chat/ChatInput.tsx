@@ -409,8 +409,9 @@ export function ChatInput() {
     if (/\b(cancel|stop building|just chat|forget it)\b/.test(t)) return true
 
     // Build/code intent — high-confidence signals
-    const BUILD_KEYWORDS = /\b(build|create|make|write|generate|code|implement|deploy|refactor|debug|fix|update|add|remove|delete|install|run|start|test the app|test it)\b/
-    if (BUILD_KEYWORDS.test(t)) return false
+    const BUILD_KEYWORDS = /^(build|create|make|write|generate|implement|deploy|refactor|debug|fix|install)\b/
+    const BUILD_PHRASE = /\b(build me|build a|create a|make a|make me|write a|write me|generate a|implement a|fix the|fix my|debug the|debug this|install the|deploy the|refactor the|refactor my|test the app|test it)\b/
+    if (BUILD_KEYWORDS.test(t) || BUILD_PHRASE.test(t)) return false
 
     // Code-paste + question → explanation request
     if ((text.includes('```') || text.includes('<code>')) && /\?/.test(t)) return true
