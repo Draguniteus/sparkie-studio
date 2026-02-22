@@ -12,7 +12,13 @@ const MAX_IDE_FRACTION = 0.75
 const DEFAULT_IDE_WIDTH = 520
 
 export default function Home() {
-  const { ideOpen, onboardingDone } = useAppStore()
+  const { ideOpen, onboardingDone, hydrateFromStorage } = useAppStore()
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    hydrateFromStorage()  // hydrate localStorage → store after mount (SSR-safe)
+    setMounted(true)
+  }, [hydrateFromStorage])
   const [ideWidth, setIdeWidth] = useState(DEFAULT_IDE_WIDTH)
   const [isDragging, setIsDragging] = useState(false)
 
@@ -58,7 +64,7 @@ export default function Home() {
 
   return (
     <div ref={containerRef} className="flex h-screen w-screen overflow-hidden bg-hive-600">
-      {!onboardingDone && <OnboardingModal />}
+      {mounted && !onboardingDone && <OnboardingModal />}
       {/* Drag overlay — captures all mouse events during drag so nothing underneath interferes */}
       {isDragging && (
         <div className="fixed inset-0 z-[9999] cursor-col-resize" />
