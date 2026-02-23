@@ -24,7 +24,7 @@ function getFileIcon(name: string) {
 interface FileItemProps { file: FileNode; depth: number }
 
 function FileItem({ file, depth }: FileItemProps) {
-  const [expanded, setExpanded] = useState(true)
+  const [expanded, setExpanded] = useState(false)
   const [isRenaming, setIsRenaming] = useState(false)
   const [renameValue, setRenameValue] = useState(file.name)
   const renameInputRef = useRef<HTMLInputElement>(null)
