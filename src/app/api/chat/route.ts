@@ -37,6 +37,10 @@ Only generate code or project files when the user EXPLICITLY asks you to build, 
 - Production quality — functional, visually impressive
 `
 
+// ── Fast keyword pre-check — always search without LLM classifier ──────────────
+// Catches obvious live-data queries instantly, no model call needed.
+const ALWAYS_SEARCH_RE = /\b(weather|forecast|temperature|rain|snow|humidity|wind speed|uv index|air quality|aqi|pollen|hurricane|storm|tornado|flood|wildfire)\b|\b(news|headline|breaking|trending|viral|latest|recent|today|tonight|this week|this month|right now|current(ly)?|live (price|rate|score|feed|data)|stock (price|market)|crypto|bitcoin|btc|eth|ethereum|nft|commodity|inflation|interest rate|mortgage rate|gas price|oil price|gdp|unemployment|job report)\b|\b(who (won|is winning|is leading|is ahead)|score|scoreline|standings|leaderboard|tournament|match result|game result|election result|poll result|exit poll)\b|\b(what.s (happening|going on|the latest|new|changed)|any updates? on|update on|status of|release date|launch date|out yet|available yet|version \d|v\d\.\d)\b/i
+
 export async function POST(req: NextRequest) {
   try {
     const { messages, model, userProfile } = await req.json()
@@ -62,46 +66,53 @@ export async function POST(req: NextRequest) {
     // Extract latest user message for Tavily classifier
     const userMessage = messages[messages.length - 1]?.content ?? ''
 
-    // ── Smart Tavily: self-assess before answering ─────────────────────────────
+    // ── Smart Tavily: keyword fast-path + LLM self-assessment fallback ─────────
     const tavilyKey = process.env.TAVILY_API_KEY
     let searchContext = ''
     if (tavilyKey && apiKey && userMessage) {
       let shouldSearch = false
-      try {
-        const scRes = await fetch(`${OPENCODE_BASE}/chat/completions`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
-            'User-Agent': 'SparkieStudio/2.0',
-          },
-          body: JSON.stringify({
-            model: 'minimax-m2.5-free',
-            messages: [
-              {
-                role: 'system',
-                content: `You are a strict classifier. Respond with ONLY one word: "search" or "skip".
+
+      // 1. Fast keyword check — if it obviously needs live data, skip the LLM call
+      if (ALWAYS_SEARCH_RE.test(userMessage)) {
+        shouldSearch = true
+      } else {
+        // 2. LLM classifier for ambiguous queries
+        try {
+          const scRes = await fetch(`${OPENCODE_BASE}/chat/completions`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${apiKey}`,
+              'User-Agent': 'SparkieStudio/2.0',
+            },
+            body: JSON.stringify({
+              model: 'minimax-m2.5-free',
+              messages: [
+                {
+                  role: 'system',
+                  content: `You are a strict classifier. Respond with ONLY one word: "search" or "skip".
 
 "search" = requires real-time or up-to-date information: current events, live prices, latest news, recent releases, sports scores, weather, trending topics, recent research, anything with "now", "today", "latest", "current", "recent", specific people/companies with evolving situations.
 
 "skip" = answerable from training knowledge: math, definitions, explanations, history, logic, opinions, creative writing, coding help, anything stable over time.
 
 When in doubt, respond "search".`,
-              },
-              { role: 'user', content: userMessage.slice(0, 300) },
-            ],
-            stream: false,
-            temperature: 0,
-            max_tokens: 5,
-          }),
-          signal: AbortSignal.timeout(6000),
-        })
-        if (scRes.ok) {
-          const scData = await scRes.json()
-          const verdict = scData.choices?.[0]?.message?.content?.trim().toLowerCase() ?? 'skip'
-          shouldSearch = verdict.startsWith('search')
-        }
-      } catch { /* non-fatal */ }
+                },
+                { role: 'user', content: userMessage.slice(0, 300) },
+              ],
+              stream: false,
+              temperature: 0,
+              max_tokens: 5,
+            }),
+            signal: AbortSignal.timeout(6000),
+          })
+          if (scRes.ok) {
+            const scData = await scRes.json()
+            const verdict = scData.choices?.[0]?.message?.content?.trim().toLowerCase() ?? 'skip'
+            shouldSearch = verdict.startsWith('search')
+          }
+        } catch { /* non-fatal — defaults to skip */ }
+      }
 
       if (shouldSearch) {
         try {
