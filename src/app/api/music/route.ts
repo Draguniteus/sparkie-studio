@@ -1,6 +1,8 @@
 import { NextRequest } from 'next/server'
 
-export const runtime = 'edge'
+// Node.js runtime needed for long-running music generation (up to 2 min)
+export const runtime = 'nodejs'
+export const maxDuration = 150
 
 const MINIMAX_BASE = 'https://api.minimaxi.chat/v1'
 
@@ -54,7 +56,7 @@ export async function POST(req: NextRequest) {
           format: 'mp3',
         },
       }),
-      signal: AbortSignal.timeout(120_000), // music gen can take up to 2min
+      // 2 min timeout via nodejs maxDuration
     })
 
     if (!res.ok) {
