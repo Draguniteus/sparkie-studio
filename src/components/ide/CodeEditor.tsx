@@ -2,12 +2,21 @@
 
 import { useCallback } from "react"
 import { useAppStore, FileNode, findNodeById, flattenFileTree } from "@/store/appStore"
-import { File, Download } from "lucide-react"
+import { useE2B } from "@/hooks/useE2B"
+import { File, Download, Play, Square, RotateCcw } from "lucide-react"
+
+// Languages that can be executed via E2B
+const RUNNABLE_LANGUAGES = new Set(["python", "javascript", "typescript", "js", "ts", "py"])
+
+function isRunnable(language?: string): boolean {
+  return !!language && RUNNABLE_LANGUAGES.has(language.toLowerCase())
+}
 
 export function CodeEditor() {
   const { files, activeFileId, updateFileContent, setActiveFile } = useAppStore()
-  // Use recursive tree search — handles files nested inside project folder
+  const { runCode, cancel, resetSession, status } = useE2B()
   const activeFile = activeFileId ? findNodeById(files, activeFileId) : undefined
+  const isRunning = status === "running"
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -25,6 +34,16 @@ export function CodeEditor() {
     URL.revokeObjectURL(url)
   }
 
+  const handleRun = () => {
+    if (!activeFile?.content) return
+    const lang = activeFile.language?.toLowerCase() ?? "python"
+    const normalizedLang =
+      lang === "py" ? "python" :
+      lang === "js" ? "javascript" :
+      lang === "ts" ? "typescript" : lang
+    runCode(activeFile.content, normalizedLang)
+  }
+
   if (!activeFile) {
     return (
       <div className="h-full flex flex-col items-center justify-center text-text-muted p-8">
@@ -34,9 +53,11 @@ export function CodeEditor() {
     )
   }
 
+  const canRun = isRunnable(activeFile.language)
+
   return (
     <div className="h-full flex flex-col">
-      {/* File tabs — flatten tree to show all files */}
+      {/* File tabs */}
       <div className="flex items-center h-8 border-b border-hive-border bg-hive-700 px-1 shrink-0">
         {flattenFileTree(files).filter(f => f.type === "file").map((f) => (
           <button
@@ -53,12 +74,44 @@ export function CodeEditor() {
         ))}
       </div>
 
-      {/* File header with download */}
+      {/* File header */}
       <div className="flex items-center justify-between h-7 px-3 bg-hive-700/50 border-b border-hive-border shrink-0">
         <span className="text-[11px] text-text-secondary">{activeFile.name}</span>
-        <button onClick={downloadFile} className="p-0.5 rounded hover:bg-hive-hover text-text-muted hover:text-text-secondary">
-          <Download size={12} />
-        </button>
+        <div className="flex items-center gap-1">
+          {canRun && (
+            <button
+              onClick={resetSession}
+              title="Reset sandbox (fresh environment)"
+              className="p-0.5 rounded hover:bg-hive-hover text-text-muted hover:text-honey-500 transition-colors"
+            >
+              <RotateCcw size={11} />
+            </button>
+          )}
+          {canRun && (
+            isRunning ? (
+              <button
+                onClick={cancel}
+                title="Stop execution"
+                className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors"
+              >
+                <Square size={9} />
+                Stop
+              </button>
+            ) : (
+              <button
+                onClick={handleRun}
+                title="Run with E2B sandbox"
+                className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-honey-500/10 text-honey-500 border border-honey-500/20 hover:bg-honey-500/20 transition-colors"
+              >
+                <Play size={9} className="fill-honey-500" />
+                Run
+              </button>
+            )
+          )}
+          <button onClick={downloadFile} className="p-0.5 rounded hover:bg-hive-hover text-text-muted hover:text-text-secondary">
+            <Download size={12} />
+          </button>
+        </div>
       </div>
 
       {/* Editor area */}
@@ -81,7 +134,21 @@ export function CodeEditor() {
 
       {/* Status bar */}
       <div className="flex items-center justify-between h-6 px-3 bg-hive-700 border-t border-hive-border text-[10px] text-text-muted shrink-0">
-        <span>{activeFile.language || "plaintext"}</span>
+        <div className="flex items-center gap-2">
+          <span>{activeFile.language || "plaintext"}</span>
+          {isRunning && (
+            <span className="text-honey-500 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-honey-500 animate-pulse inline-block" />
+              Running…
+            </span>
+          )}
+          {status === "done" && !isRunning && (
+            <span className="text-[#22c55e]">✓ Done</span>
+          )}
+          {status === "error" && !isRunning && (
+            <span className="text-[#ef4444]">✗ Error</span>
+          )}
+        </div>
         <span>{(activeFile.content || "").split("\n").length} lines</span>
       </div>
     </div>
