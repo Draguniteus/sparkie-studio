@@ -51,11 +51,6 @@ function isMediaUrl(content: string): boolean {
   return content.startsWith('http://') || content.startsWith('https://') || content.startsWith('/api/')
 }
 
-// Helper: detect media URL — handles both absolute (https://) and relative (/api/image?) paths
-function isMediaUrl(content: string): boolean {
-  return content.startsWith('http://') || content.startsWith('https://') || content.startsWith('/api/')
-}
-
 function AssetThumbnail({ name, content, type }: { name: string; content: string; type: AssetType }) {
   const ext = name.split(".").pop()?.toLowerCase() || ""
 
