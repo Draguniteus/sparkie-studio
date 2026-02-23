@@ -12,7 +12,7 @@ export interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
-  type?: 'text' | 'image' | 'video' | 'build_card'
+  type?: 'text' | 'image' | 'video' | 'build_card' | 'music' | 'speech'
   imageUrl?: string
   imagePrompt?: string
   model?: string
