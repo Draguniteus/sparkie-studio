@@ -1,11 +1,11 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useRef, useEffect } from "react"
 import { useAppStore, FileNode } from "@/store/appStore"
 import { getFileSize } from "@/lib/fileParser"
 import {
   File, Folder, FolderOpen, Plus, Trash2, Download, ChevronRight, ChevronDown, Archive,
-  FileCode, FileText, FileImage, FileJson,
+  FileCode, FileText, FileImage, FileJson, Pencil,
 } from "lucide-react"
 
 function getFileIcon(name: string) {
@@ -25,10 +25,35 @@ interface FileItemProps { file: FileNode; depth: number }
 
 function FileItem({ file, depth }: FileItemProps) {
   const [expanded, setExpanded] = useState(true)
-  const { activeFileId, setActiveFile, deleteFile } = useAppStore()
+  const [isRenaming, setIsRenaming] = useState(false)
+  const [renameValue, setRenameValue] = useState(file.name)
+  const renameInputRef = useRef<HTMLInputElement>(null)
+  const { activeFileId, setActiveFile, deleteFile, renameFile } = useAppStore()
   const isActive = activeFileId === file.id
   const isFolder = file.type === "folder" || file.type === "archive"
   const isArchive = file.type === "archive"
+
+  useEffect(() => {
+    if (isRenaming) {
+      renameInputRef.current?.focus()
+      renameInputRef.current?.select()
+    }
+  }, [isRenaming])
+
+  const startRename = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (isArchive) return
+    setRenameValue(file.name)
+    setIsRenaming(true)
+  }
+
+  const commitRename = () => {
+    const trimmed = renameValue.trim()
+    if (trimmed && trimmed !== file.name) {
+      renameFile(file.id, trimmed)
+    }
+    setIsRenaming(false)
+  }
 
   const downloadFile = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -48,7 +73,11 @@ function FileItem({ file, depth }: FileItemProps) {
           isActive ? "bg-honey-500/10 text-text-primary" : "text-text-secondary hover:bg-hive-hover"
         }`}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
-        onClick={() => isFolder ? (isArchive ? null : setExpanded(!expanded)) : setActiveFile(file.id)}
+        onClick={() => {
+          if (isRenaming) return
+          isFolder ? (isArchive ? null : setExpanded(!expanded)) : setActiveFile(file.id)
+        }}
+        onDoubleClick={startRename}
       >
         {isFolder ? (
           <>
@@ -58,45 +87,76 @@ function FileItem({ file, depth }: FileItemProps) {
         ) : (
           <>{getFileIcon(file.name)}</>
         )}
-        <span className="truncate flex-1">{file.name}</span>
-        {!isFolder && file.content && (
+
+        {isRenaming ? (
+          <input
+            ref={renameInputRef}
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            onBlur={commitRename}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); commitRename() }
+              if (e.key === "Escape") { setIsRenaming(false); setRenameValue(file.name) }
+              e.stopPropagation()
+            }}
+            onClick={(e) => e.stopPropagation()}
+            className="flex-1 min-w-0 px-1 py-0 rounded bg-hive-elevated border border-honey-500/50 text-xs text-text-primary focus:outline-none"
+          />
+        ) : (
+          <span className="truncate flex-1">{file.name}</span>
+        )}
+
+        {!isFolder && file.content && !isRenaming && (
           <span className="text-[10px] text-text-muted shrink-0">{getFileSize(file.content)}</span>
         )}
-        <div className="opacity-0 group-hover:opacity-100 flex gap-0.5 shrink-0">
-          {isFolder && file.children && file.children.length > 0 && (
+
+        {!isRenaming && (
+          <div className="opacity-0 group-hover:opacity-100 flex gap-0.5 shrink-0">
+            {isFolder && file.children && file.children.length > 0 && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  const allFiles: FileNode[] = []
+                  const collect = (nodes: FileNode[]) => nodes.forEach(n => n.type === "folder" ? collect(n.children ?? []) : allFiles.push(n))
+                  collect(file.children!)
+                  allFiles.forEach(f => {
+                    if (!f.content) return
+                    const blob = new Blob([f.content], { type: "text/plain" })
+                    const url = URL.createObjectURL(blob)
+                    const a = document.createElement("a")
+                    a.href = url; a.download = f.name; a.click()
+                    URL.revokeObjectURL(url)
+                  })
+                }}
+                className="p-0.5 rounded hover:bg-hive-hover text-text-muted hover:text-honey-500"
+                title={`Download all files in ${file.name}`}
+              >
+                <Download size={11} />
+              </button>
+            )}
+            {!isFolder && !isArchive && (
+              <button
+                onClick={startRename}
+                className="p-0.5 rounded hover:bg-hive-hover text-text-muted hover:text-honey-500"
+                title="Rename"
+              >
+                <Pencil size={11} />
+              </button>
+            )}
+            {!isFolder && (
+              <button onClick={downloadFile} className="p-0.5 rounded hover:bg-hive-hover text-text-muted hover:text-text-secondary">
+                <Download size={11} />
+              </button>
+            )}
             <button
-              onClick={(e) => {
-                e.stopPropagation()
-                const allFiles: FileNode[] = []
-                const collect = (nodes: FileNode[]) => nodes.forEach(n => n.type === 'folder' ? collect(n.children ?? []) : allFiles.push(n))
-                collect(file.children!)
-                allFiles.forEach(f => {
-                  if (!f.content) return
-                  const blob = new Blob([f.content], { type: 'text/plain' })
-                  const url = URL.createObjectURL(blob)
-                  const a = document.createElement('a')
-                  a.href = url; a.download = f.name; a.click()
-                  URL.revokeObjectURL(url)
-                })
-              }}
-              className="p-0.5 rounded hover:bg-hive-hover text-text-muted hover:text-honey-500"
-              title={`Download all files in ${file.name}`}
+              onClick={(e) => { e.stopPropagation(); deleteFile(file.id) }}
+              className="p-0.5 rounded hover:bg-red-500/20 text-text-muted hover:text-red-400"
+              title="Delete"
             >
-              <Download size={11} />
+              <Trash2 size={11} />
             </button>
-          )}
-          {!isFolder && (
-            <button onClick={downloadFile} className="p-0.5 rounded hover:bg-hive-hover text-text-muted hover:text-text-secondary">
-              <Download size={11} />
-            </button>
-          )}
-          <button
-            onClick={(e) => { e.stopPropagation(); deleteFile(file.id) }}
-            className="p-0.5 rounded hover:bg-red-500/20 text-text-muted hover:text-red-400"
-          >
-            <Trash2 size={11} />
-          </button>
-        </div>
+          </div>
+        )}
       </div>
       {isFolder && expanded && file.children?.map((child) => (
         <FileItem key={child.id} file={child} depth={depth + 1} />
@@ -117,7 +177,7 @@ export function FileExplorer() {
   }
 
   const collectFiles = (nodes: FileNode[]): FileNode[] => {
-    return nodes.flatMap(n => n.type === 'folder' ? collectFiles(n.children ?? []) : [n])
+    return nodes.flatMap(n => n.type === "folder" ? collectFiles(n.children ?? []) : [n])
   }
 
   const downloadAll = () => {
