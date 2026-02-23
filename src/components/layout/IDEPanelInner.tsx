@@ -109,7 +109,7 @@ export function IDEPanelInner() {
             )}
             <div className="flex-1 overflow-hidden flex flex-col">
               <button onClick={() => setShowExplorer(v => !v)}
-                className="absolute top-1 left-0 p-0.5 bg-hive-700 border border-hive-border rounded-r text-text-muted hover:text-text-secondary z-10 transition-colors">
+                className={`absolute top-1 p-0.5 bg-hive-700 border border-hive-border rounded-r text-text-muted hover:text-text-secondary z-10 transition-all ${showExplorer ? 'left-48' : 'left-0'}`}>
                 {showExplorer ? <ChevronLeft size={12}/> : <ChevronRight size={12}/>}
               </button>
               <CodeEditor />

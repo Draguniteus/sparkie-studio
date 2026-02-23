@@ -74,7 +74,30 @@ function AssetThumbnail({ name, content, type }: { name: string; content: string
         </div>
       )
     }
-    // Binary images would need blob URLs — show icon for now
+    // URL-based images (Pollinations PNG/JPG) — render directly
+    if (content.startsWith("http://") || content.startsWith("https://")) {
+      return (
+        <div className="w-full h-full flex items-center justify-center bg-hive-elevated rounded-t-lg overflow-hidden">
+          <img src={content} alt={name} className="w-full h-full object-cover" loading="lazy" />
+        </div>
+      )
+    }
+  }
+
+  if (type === "video") {
+    // URL-based video (Pollinations) — show video thumbnail
+    if (content.startsWith("http://") || content.startsWith("https://")) {
+      return (
+        <div className="w-full h-full flex items-center justify-center bg-hive-elevated rounded-t-lg overflow-hidden relative">
+          <video src={content} className="w-full h-full object-cover" muted preload="metadata" />
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-full bg-black/60 flex items-center justify-center">
+              <Video size={14} className="text-white ml-0.5" />
+            </div>
+          </div>
+        </div>
+      )
+    }
   }
 
   // Default: colored icon placeholder
@@ -163,9 +186,14 @@ export function AssetsTab() {
         win.document.write(content)
         win.document.close()
       }
-    } else if (type === "image" && ext === "svg") {
-      const dataUri = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(content)}`
-      window.open(dataUri, "_blank")
+    } else if (type === "image" || type === "video") {
+      // URL-based (Pollinations) — open directly
+      if (content.startsWith("http://") || content.startsWith("https://")) {
+        window.open(content, "_blank")
+      } else if (ext === "svg") {
+        const dataUri = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(content)}`
+        window.open(dataUri, "_blank")
+      }
     } else {
       const blob = new Blob([content], { type: "text/plain" })
       const url = URL.createObjectURL(blob)
@@ -341,11 +369,28 @@ function PreviewContent({ preview }: { preview: PreviewModal }) {
     )
   }
 
-  if (type === "image" && ext === "svg") {
-    const dataUri = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(content)}`
+  if (type === "image") {
+    if (ext === "svg") {
+      const dataUri = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(content)}`
+      return (
+        <div className="w-full h-full flex items-center justify-center bg-hive-elevated p-8">
+          <img src={dataUri} alt={name} className="max-w-full max-h-full object-contain" />
+        </div>
+      )
+    }
+    if (content.startsWith("http://") || content.startsWith("https://")) {
+      return (
+        <div className="w-full h-full flex items-center justify-center bg-hive-elevated p-8">
+          <img src={content} alt={name} className="max-w-full max-h-full object-contain rounded-lg" />
+        </div>
+      )
+    }
+  }
+
+  if (type === "video" && content.startsWith("http")) {
     return (
-      <div className="w-full h-full flex items-center justify-center bg-hive-elevated p-8">
-        <img src={dataUri} alt={name} className="max-w-full max-h-full object-contain" />
+      <div className="w-full h-full flex items-center justify-center bg-black">
+        <video src={content} controls className="max-w-full max-h-full rounded-lg" />
       </div>
     )
   }

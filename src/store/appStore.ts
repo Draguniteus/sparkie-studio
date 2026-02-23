@@ -155,6 +155,7 @@ interface AppState {
 
   assets: Asset[]
   addAsset: (asset: Omit<Asset, 'id' | 'createdAt'>) => void
+  updateAsset: (fileId: string, content: string) => void
   clearAssets: () => void
   containerStatus: ContainerStatus
   previewUrl: string | null
@@ -319,6 +320,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   addAsset: (asset) => {
     const id = crypto.randomUUID()
     set((s) => ({ assets: [...s.assets, { ...asset, assetType: asset.assetType ?? 'other', source: asset.source ?? 'agent', id, createdAt: new Date() }] }))
+  },
+  updateAsset: (fileId, content) => {
+    set((s) => ({
+      assets: s.assets.map(a => a.fileId === fileId ? { ...a, content } : a)
+    }))
   },
   clearAssets: () => set({ assets: [] }),
 

@@ -69,7 +69,7 @@ export function ChatInput() {
     openIDE, setExecuting, setActiveFile, setIDETab, ideOpen,
     clearLiveCode, appendLiveCode, addLiveCodeFile,
     addWorklogEntry, updateWorklogEntry,
-    setContainerStatus, setPreviewUrl, saveChatFiles, addAsset,
+    setContainerStatus, setPreviewUrl, saveChatFiles, addAsset, updateAsset,
     setLastMode,
   } = useAppStore()
 
@@ -403,6 +403,20 @@ export function ChatInput() {
       updateMessage(chatId, assistantMsgId, {
         content: prompt, imageUrl: data.url, imagePrompt: prompt, isStreaming: false, type: mediaType, model: model,
       })
+      // Register in Assets tab so generated media appears in the Assets grid
+      const mediaChatTitle = useAppStore.getState().chats.find(c => c.id === chatId)?.title || 'New Chat'
+      const mediaExt = mediaType === 'video' ? 'mp4' : 'png'
+      const safePrompt = prompt.slice(0, 40).replace(/[^a-z0-9 ]/gi, '').trim().replace(/\s+/g, '-') || mediaType
+      addAsset({
+        name: `${safePrompt}.${mediaExt}`,
+        language: '',
+        content: data.url,
+        chatId,
+        chatTitle: mediaChatTitle,
+        fileId: assistantMsgId,
+        assetType: mediaType as import('@/store/appStore').AssetType,
+        source: 'agent' as const,
+      })
       updateWorklogEntry(logId, { status: "done", duration: Date.now() - startTime })
     } catch (error) {
       console.error(`${mediaType} gen error:`, error)
@@ -719,7 +733,9 @@ export function ChatInput() {
                   filesCreated++
                 } else {
                   // Update with complete final content (handles folder-prefixed paths)
-                  upsertFile(file.name, file.content, getLanguageFromFilename(file.name))
+                  const updatedFileId = upsertFile(file.name, file.content, getLanguageFromFilename(file.name))
+                  // Sync asset store so preview/Open button get the final HTML
+                  updateAsset(updatedFileId, file.content)
                 }
               }
             } else if (parsed.event === 'error') {
@@ -832,7 +848,7 @@ export function ChatInput() {
       setExecuting(false)
       saveChatFiles(chatId, useAppStore.getState().files)
     }
-  }, [selectedModel, addMessage, updateMessage, setStreaming, setExecuting, openIDE, setIDETab, ideOpen, upsertFile, setActiveFile, clearLiveCode, appendLiveCode, addLiveCodeFile, addWorklogEntry, updateWorklogEntry, setContainerStatus, setPreviewUrl, saveChatFiles, addAsset])
+  }, [selectedModel, addMessage, updateMessage, setStreaming, setExecuting, openIDE, setIDETab, ideOpen, upsertFile, setActiveFile, clearLiveCode, appendLiveCode, addLiveCodeFile, addWorklogEntry, updateWorklogEntry, setContainerStatus, setPreviewUrl, saveChatFiles, addAsset, updateAsset])
 
   // ── Abort cleanup on unmount ──────────────────────────────────────────────
   useEffect(() => {
