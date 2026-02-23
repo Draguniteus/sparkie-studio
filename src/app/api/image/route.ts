@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
     if (MINIMAX_IMAGE_MODELS.has(safeModel)) {
       const apiKey = process.env.MINIMAX_API_KEY
       if (!apiKey) return NextResponse.json({ error: 'MINIMAX_API_KEY not configured' }, { status: 500 })
-      const mmRes = await fetch('https://api.minimaxi.chat/v1/image_generation', {
+      const mmRes = await fetch('https://api.minimax.io/v1/image_generation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
         body: JSON.stringify({ model: 'image-01', prompt: safePrompt }),
@@ -62,12 +62,12 @@ export async function POST(req: NextRequest) {
       if (!apiKey) return NextResponse.json({ error: 'MINIMAX_API_KEY not configured' }, { status: 500 })
 
       const modelNameMap: Record<string, string> = {
-        'hailuo-2.3-fast': 'video-01-hailuo-2.3-fast',
-        'hailuo-2.3': 'video-01-hailuo-2.3',
-        'hailuo-02': 'video-01',
+        'hailuo-2.3-fast': 'MiniMax-Hailuo-2.3',
+        'hailuo-2.3':      'MiniMax-Hailuo-2.3',
+        'hailuo-02':       'MiniMax-Hailuo-02',
       }
-      const mmModel = modelNameMap[safeModel] || 'video-01'
-      const submitRes = await fetch('https://api.minimaxi.chat/v1/video_generation', {
+      const mmModel = modelNameMap[safeModel] || 'T2V-01'
+      const submitRes = await fetch('https://api.minimax.io/v1/video_generation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
         body: JSON.stringify({ model: mmModel, prompt: safePrompt }),
@@ -81,14 +81,14 @@ export async function POST(req: NextRequest) {
       for (let i = 0; i < 18; i++) {
         await sleep(5000)
         try {
-          const pollRes = await fetch(`https://api.minimaxi.chat/v1/query/video_generation?task_id=${taskId}`, {
+          const pollRes = await fetch(`https://api.minimax.io/v1/query/video_generation?task_id=${taskId}`, {
             headers: { 'Authorization': `Bearer ${apiKey}` },
           })
           if (!pollRes.ok) continue
           const pollData = await pollRes.json()
           if (pollData?.status === 'Success') {
             const url = pollData?.video_url || (pollData?.file_id
-              ? `https://api.minimaxi.chat/v1/files/retrieve?file_id=${pollData.file_id}`
+              ? `https://api.minimax.io/v1/files/retrieve?file_id=${pollData.file_id}`
               : null)
             if (url) return NextResponse.json({ url, prompt: safePrompt, model: safeModel, type: 'video' })
           }
