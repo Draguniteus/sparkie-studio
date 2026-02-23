@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react"
 import { useAppStore } from "@/store/appStore"
 import { parseAIResponse, getLanguageFromFilename, deriveProjectName } from "@/lib/fileParser"
-import { Paperclip, ArrowUp, Sparkles, ChevronDown, Image as ImageIcon, Video, Mic, MicOff } from "lucide-react"
+import { Paperclip, ArrowUp, Sparkles, ChevronDown, Image as ImageIcon, Video, Music, Mic, MicOff } from "lucide-react"
 
 // ── Asset type detection helper (for AssetsTab categories) ─────────────────
 function detectAssetTypeFromName(name: string): import('@/store/appStore').AssetType {
@@ -34,11 +34,21 @@ const IMAGE_MODELS = [
   { id: "klein", name: "Klein 4B", tag: "Free", desc: "FLUX.2 fast" },
   { id: "klein-large", name: "Klein 9B", tag: "Free", desc: "FLUX.2 high quality" },
   { id: "gptimage", name: "GPT Image", tag: "Free", desc: "OpenAI image gen" },
+  { id: "image-01", name: "MiniMax Image", tag: "Paid", desc: "$0.0035/image — high quality" },
 ]
 
 const VIDEO_MODELS = [
   { id: "seedance", name: "Seedance", tag: "Free", desc: "BytePlus text-to-video" },
+  { id: "hailuo-2.3-fast", name: "Hailuo 2.3 Fast", tag: "Paid", desc: "$0.19 / 768P 6s video" },
+  { id: "hailuo-2.3", name: "Hailuo 2.3", tag: "Paid", desc: "$0.28 / 768P 6s video" },
+  { id: "hailuo-02", name: "Hailuo 02", tag: "Paid", desc: "$0.10 / 512P 6s video" },
 ]
+
+const MUSIC_MODELS = [
+  { id: "music-01", name: "Music-2.5", tag: "Paid", desc: "$0.15 / 5 min — high quality" },
+  { id: "music-01-lite", name: "Music-2.0", tag: "Paid", desc: "$0.03 / 5 min — fast" },
+]
+
 
 const PROMPT_TEMPLATES = [
   { label: "Landing page", prompt: "Build a stunning landing page with hero section, features grid, and CTA. Dark theme, honey gold accents, plain CSS.", icon: "🌐" },
@@ -49,7 +59,7 @@ const PROMPT_TEMPLATES = [
   { label: "Chat UI", prompt: "Build a chat interface with message bubbles, timestamps, typing indicator, and smooth animations. Dark theme.", icon: "💬" },
 ]
 
-type GenMode = "chat" | "image" | "video"
+type GenMode = "chat" | "image" | "video" | "music"
 
 export function ChatInput() {
   const [input, setInput] = useState("")
@@ -57,6 +67,7 @@ export function ChatInput() {
   const [genMode, setGenMode] = useState<GenMode>("chat")
   const [selectedImageModel, setSelectedImageModel] = useState("flux")
   const [selectedVideoModel, setSelectedVideoModel] = useState("seedance")
+  const [selectedMusicModel, setSelectedMusicModel] = useState("music-01")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const agentAbortRef = useRef<AbortController | null>(null)
   const [isRecording, setIsRecording] = useState(false)
@@ -363,9 +374,9 @@ export function ChatInput() {
     }
   }, [selectedModel, addMessage, updateMessage, setStreaming, setExecuting, openIDE, setIDETab, ideOpen, upsertFile, setActiveFile, clearLiveCode, appendLiveCode, addLiveCodeFile, addWorklogEntry, updateWorklogEntry, setContainerStatus, setPreviewUrl, saveChatFiles])
 
-  const generateMedia = useCallback(async (chatId: string, prompt: string, mediaType: "image" | "video") => {
-    const model = mediaType === "video" ? selectedVideoModel : selectedImageModel
-    const emoji = mediaType === "video" ? "\ud83c\udfac" : "\ud83c\udfa8"
+  const generateMedia = useCallback(async (chatId: string, prompt: string, mediaType: "image" | "video" | "music") => {
+    const model = mediaType === "video" ? selectedVideoModel : mediaType === "music" ? selectedMusicModel : selectedImageModel
+    const emoji = mediaType === "video" ? "\ud83c\udfac" : mediaType === "music" ? "\ud83c\udfb5" : "\ud83c\udfa8"
 
     const assistantMsgId = addMessage(chatId, {
       role: "assistant", content: `${emoji} Generating ${mediaType}...`, isStreaming: true, type: mediaType,
@@ -382,7 +393,8 @@ export function ChatInput() {
       const body: Record<string, unknown> = { prompt, model }
       if (mediaType === "video") body.duration = 4
 
-      const response = await fetch("/api/image", {
+      const endpoint = mediaType === "music" ? "/api/music" : "/api/image"
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -405,7 +417,8 @@ export function ChatInput() {
       })
       // Register in Assets tab so generated media appears in the Assets grid
       const mediaChatTitle = useAppStore.getState().chats.find(c => c.id === chatId)?.title || 'New Chat'
-      const mediaExt = mediaType === 'video' ? 'mp4' : 'png'
+      const mediaExt = mediaType === 'video' ? 'mp4' : mediaType === 'music' ? 'mp3' : 'png'
+      const mediaAssetType = mediaType === 'music' ? 'audio' : mediaType
       const safePrompt = prompt.slice(0, 40).replace(/[^a-z0-9 ]/gi, '').trim().replace(/\s+/g, '-') || mediaType
       addAsset({
         name: `${safePrompt}.${mediaExt}`,
@@ -414,7 +427,7 @@ export function ChatInput() {
         chatId,
         chatTitle: mediaChatTitle,
         fileId: assistantMsgId,
-        assetType: mediaType as import('@/store/appStore').AssetType,
+        assetType: mediaAssetType as import('@/store/appStore').AssetType,
         source: 'agent' as const,
       })
       updateWorklogEntry(logId, { status: "done", duration: Date.now() - startTime })
@@ -425,7 +438,7 @@ export function ChatInput() {
     } finally {
       setStreaming(false)
     }
-  }, [selectedImageModel, selectedVideoModel, addMessage, updateMessage, setStreaming, addWorklogEntry, updateWorklogEntry, openIDE, setIDETab, ideOpen])
+  }, [selectedImageModel, selectedVideoModel, selectedMusicModel, addMessage, updateMessage, setStreaming, addWorklogEntry, updateWorklogEntry, openIDE, setIDETab, ideOpen])
 
   // Detect conversational/non-coding messages that shouldn't trigger the IDE
   // Fast synchronous pre-filter — catches obvious cases without a network call.
@@ -917,6 +930,8 @@ export function ChatInput() {
       generateMedia(chatId, userContent, "image")
     } else if (genMode === "video") {
       generateMedia(chatId, userContent, "video")
+    } else if (genMode === "music") {
+      generateMedia(chatId, userContent, "music")
     } else {
       const t = userContent.toLowerCase().trim()
       const lastMode = useAppStore.getState().lastMode
@@ -963,8 +978,8 @@ export function ChatInput() {
     el.style.height = Math.min(el.scrollHeight, 200) + "px"
   }
 
-  const activeModels = genMode === "image" ? IMAGE_MODELS : genMode === "video" ? VIDEO_MODELS : MODELS
-  const activeModelId = genMode === "image" ? selectedImageModel : genMode === "video" ? selectedVideoModel : selectedModel
+  const activeModels = genMode === "image" ? IMAGE_MODELS : genMode === "video" ? VIDEO_MODELS : genMode === "music" ? MUSIC_MODELS : MODELS
+  const activeModelId = genMode === "image" ? selectedImageModel : genMode === "video" ? selectedVideoModel : genMode === "music" ? selectedMusicModel : selectedModel
   const activeModelName = activeModels.find(m => m.id === activeModelId)?.name || activeModels[0].name
 
   const placeholders: Record<GenMode, string> = {
@@ -1017,6 +1032,13 @@ export function ChatInput() {
             >
               <Video size={15} />
             </button>
+            <button
+              onClick={() => setGenMode(genMode === "music" ? "chat" : "music")}
+              className={`p-1.5 rounded-md transition-colors ${genMode === "music" ? "bg-honey-500/15 text-honey-500" : "hover:bg-hive-hover text-text-muted hover:text-text-secondary"}`}
+              title={genMode === "music" ? "Switch to chat" : "Music generation"}
+            >
+              <Music size={15} />
+            </button>
 
             <div className="relative">
               <button
@@ -1035,6 +1057,7 @@ export function ChatInput() {
                       onClick={() => {
                         if (genMode === "image") setSelectedImageModel(model.id)
                         else if (genMode === "video") setSelectedVideoModel(model.id)
+                        else if (genMode === "music") setSelectedMusicModel(model.id)
                         else setSelectedModel(model.id)
                         setShowModels(false)
                       }}
