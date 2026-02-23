@@ -47,7 +47,7 @@ const VIDEO_MODELS = [
 const MUSIC_MODELS = [
   { id: "music-01", name: "Music-2.5", tag: "Paid", desc: "$0.15 / 5 min — high quality" },
   { id: "music-01-lite", name: "Music-2.0", tag: "Paid", desc: "$0.03 / 5 min — fast" },
-  { id: "ace-step-free", name: "ACE-Step 1.5", tag: "Free", desc: "Coming soon — unlimited $0 music", disabled: true },
+  { id: "ace-step-free", name: "ACE-Step 1.5", tag: "Free", desc: "Unlimited free music — no credits" },
 ]
 
 const LYRICS_MODELS = [
@@ -391,7 +391,7 @@ export function ChatInput() {
     const emoji = mediaType === "video" ? "\ud83c\udfac" : mediaType === "music" ? "\ud83c\udfb5" : mediaType === "lyrics" ? "\u270d\ufe0f" : mediaType === "speech" ? "\ud83c\udfa4" : "\ud83c\udfa8"
 
     const assistantMsgId = addMessage(chatId, {
-      role: "assistant", content: `${emoji} Generating ${mediaType}...`, isStreaming: true, type: mediaType,
+      role: "assistant", content: `${emoji} Generating ${mediaType}...`, isStreaming: true, type: (mediaType === "lyrics" ? "text" : mediaType) as "text" | "image" | "video" | "music" | "speech",
     })
 
     setStreaming(true)
