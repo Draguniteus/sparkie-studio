@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-export const runtime = 'edge'
+// Node.js runtime needed for: setTimeout polling (Hailuo), longer timeouts
+export const runtime = 'nodejs'
+export const maxDuration = 120 // seconds
 
 const POLLINATIONS_IMAGE_MODELS = new Set(['flux', 'flux-realism', 'flux-anime', 'flux-3d', 'turbo', 'gptimage', 'klein', 'klein-large', 'zimage'])
 const POLLINATIONS_VIDEO_MODELS = new Set(['seedance', 'seedance-pro', 'veo', 'wan', 'ltx-2'])
@@ -20,6 +22,10 @@ function clampDim(v: string | null, fallback: number): number {
   const n = parseInt(v ?? String(fallback))
   if (isNaN(n)) return fallback
   return ALLOWED_DIMS.reduce((a, b) => Math.abs(b - n) < Math.abs(a - n) ? b : a)
+}
+
+function sleep(ms: number) {
+  return new Promise<void>(resolve => setTimeout(resolve, ms))
 }
 
 // POST: initiate generation, return proxy URL or direct URL for MiniMax
@@ -42,11 +48,9 @@ export async function POST(req: NextRequest) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
         body: JSON.stringify({ model: 'image-01', prompt: safePrompt }),
-        signal: AbortSignal.timeout(60_000),
       })
       if (!mmRes.ok) return NextResponse.json({ error: `MiniMax ${mmRes.status}` }, { status: mmRes.status })
       const mmData = await mmRes.json()
-      // MiniMax returns data.data.image_urls[] or data.data.images[{url}]
       const url = mmData?.data?.image_urls?.[0] || mmData?.data?.images?.[0]?.url
       if (!url) return NextResponse.json({ error: 'No image URL returned' }, { status: 500 })
       return NextResponse.json({ url, prompt: safePrompt, model: safeModel, type: 'image' })
@@ -57,7 +61,6 @@ export async function POST(req: NextRequest) {
       const apiKey = process.env.MINIMAX_API_KEY
       if (!apiKey) return NextResponse.json({ error: 'MINIMAX_API_KEY not configured' }, { status: 500 })
 
-      // MiniMax video gen is async — submit task, poll for result
       const modelNameMap: Record<string, string> = {
         'hailuo-2.3-fast': 'video-01-hailuo-2.3-fast',
         'hailuo-2.3': 'video-01-hailuo-2.3',
@@ -68,30 +71,31 @@ export async function POST(req: NextRequest) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
         body: JSON.stringify({ model: mmModel, prompt: safePrompt }),
-        signal: AbortSignal.timeout(30_000),
       })
       if (!submitRes.ok) return NextResponse.json({ error: `MiniMax ${submitRes.status}` }, { status: submitRes.status })
       const submitData = await submitRes.json()
       const taskId = submitData?.task_id
       if (!taskId) return NextResponse.json({ error: 'No task_id returned' }, { status: 500 })
 
-      // Poll for result (max 90s)
+      // Poll for result (max 90s, 18 × 5s intervals)
       for (let i = 0; i < 18; i++) {
-        await new Promise(r => setTimeout(r, 5000))
-        const pollRes = await fetch(`https://api.minimaxi.chat/v1/query/video_generation?task_id=${taskId}`, {
-          headers: { 'Authorization': `Bearer ${apiKey}` },
-          signal: AbortSignal.timeout(15_000),
-        })
-        if (!pollRes.ok) continue
-        const pollData = await pollRes.json()
-        const status = pollData?.status
-        if (status === 'Success') {
-          const url = pollData?.file_id
-            ? `https://api.minimaxi.chat/v1/files/retrieve?file_id=${pollData.file_id}`
-            : pollData?.video_url
-          if (url) return NextResponse.json({ url, prompt: safePrompt, model: safeModel, type: 'video' })
-        }
-        if (status === 'Fail') return NextResponse.json({ error: 'MiniMax video generation failed' }, { status: 500 })
+        await sleep(5000)
+        try {
+          const pollRes = await fetch(`https://api.minimaxi.chat/v1/query/video_generation?task_id=${taskId}`, {
+            headers: { 'Authorization': `Bearer ${apiKey}` },
+          })
+          if (!pollRes.ok) continue
+          const pollData = await pollRes.json()
+          if (pollData?.status === 'Success') {
+            const url = pollData?.video_url || (pollData?.file_id
+              ? `https://api.minimaxi.chat/v1/files/retrieve?file_id=${pollData.file_id}`
+              : null)
+            if (url) return NextResponse.json({ url, prompt: safePrompt, model: safeModel, type: 'video' })
+          }
+          if (pollData?.status === 'Fail') {
+            return NextResponse.json({ error: 'MiniMax video generation failed' }, { status: 500 })
+          }
+        } catch { continue }
       }
       return NextResponse.json({ error: 'Video generation timed out' }, { status: 504 })
     }
@@ -119,7 +123,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// GET: proxy binary from Pollinations (MiniMax requests are handled entirely in POST)
+// GET: proxy binary from Pollinations
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url)
@@ -132,8 +136,10 @@ export async function GET(req: NextRequest) {
 
     if (!prompt) return new Response('Missing prompt', { status: 400 })
 
-    // Only Pollinations models go through GET proxy
-    const pollinationsModels = new Set([...Array.from(POLLINATIONS_IMAGE_MODELS), ...Array.from(POLLINATIONS_VIDEO_MODELS)])
+    const pollinationsModels = new Set([
+      ...Array.from(POLLINATIONS_IMAGE_MODELS),
+      ...Array.from(POLLINATIONS_VIDEO_MODELS),
+    ])
     const safeModel = pollinationsModels.has(model) ? model : 'flux'
     const safeWidth = clampDim(width, 1024)
     const safeHeight = clampDim(height, 1024)
