@@ -98,25 +98,25 @@ NEVER use CSS gradients or placeholder boxes where an image should be. ALWAYS us
 
 **1. Pollinations.ai — AI-generated imagery (FIRST CHOICE for any described scene)**
 Use when: hero shots, mood/vibe imagery, specific scenes ("cliffside at sunset", "grilled salmon on black slate", "cozy restaurant interior")
-URL pattern: `https://image.pollinations.ai/prompt/{encoded_prompt}?width=1280&height=720&nologo=true`
+URL pattern: \`https://image.pollinations.ai/prompt/{encoded_prompt}?width=1280&height=720&nologo=true\`
 How: encodeURIComponent() the description in your head, make it vivid and specific.
 Examples:
-  - Hero: `https://image.pollinations.ai/prompt/elegant%20seafood%20restaurant%20interior%20golden%20lighting%20ocean%20view%20evening?width=1920&height=1080&nologo=true`
-  - Food: `https://image.pollinations.ai/prompt/fresh%20grilled%20salmon%20fillet%20lemon%20herbs%20black%20slate%20plate%20restaurant?width=800&height=600&nologo=true`
-  - Mood: `https://image.pollinations.ai/prompt/luxury%20hotel%20lobby%20marble%20floors%20warm%20lighting%20modern?width=1280&height=720&nologo=true`
+  - Hero: \`https://image.pollinations.ai/prompt/elegant%20seafood%20restaurant%20interior%20golden%20lighting%20ocean%20view%20evening?width=1920&height=1080&nologo=true\`
+  - Food: \`https://image.pollinations.ai/prompt/fresh%20grilled%20salmon%20fillet%20lemon%20herbs%20black%20slate%20plate%20restaurant?width=800&height=600&nologo=true\`
+  - Mood: \`https://image.pollinations.ai/prompt/luxury%20hotel%20lobby%20marble%20floors%20warm%20lighting%20modern?width=1280&height=720&nologo=true\`
 
 **2. Unsplash Source — real photography (SECOND CHOICE for realistic keyword-matched photos)**
 Use when: product shots, people, real food, architectural photography, nature scenes
-URL pattern: `https://source.unsplash.com/{width}x{height}/?{comma,separated,keywords}`
+URL pattern: \`https://source.unsplash.com/{width}x{height}/?{comma,separated,keywords}\`
 Examples:
-  - `https://source.unsplash.com/1280x720/?seafood,restaurant,food`
-  - `https://source.unsplash.com/800x600/?sushi,japanese,cuisine`
-  - `https://source.unsplash.com/1920x1080/?beach,ocean,sunset`
+  - \`https://source.unsplash.com/1280x720/?seafood,restaurant,food\`
+  - \`https://source.unsplash.com/800x600/?sushi,japanese,cuisine\`
+  - \`https://source.unsplash.com/1920x1080/?beach,ocean,sunset\`
 Note: images are non-deterministic (refreshing may change the image) — this is acceptable.
 
 **3. Picsum — abstract filler (LAST RESORT for pure UI scaffolding only)**
 Use when: abstract background textures, generic filler where subject doesn't matter
-URL pattern: `https://picsum.photos/{width}/{height}`
+URL pattern: \`https://picsum.photos/{width}/{height}\`
 NEVER use for food, products, people, or any subject-specific imagery.
 
 ### USE CASE ROUTING — required for every build:
@@ -165,7 +165,7 @@ NEVER use for food, products, people, or any subject-specific imagery.
 
 **Dashboard / admin / data app:**
 - NO decorative images — charts and data are the content
-- Avatar placeholders only: `https://picsum.photos/40/40?random={id}` or `https://ui-avatars.com/api/?name={name}&background=FFC30B&color=0a0a0a`
+- Avatar placeholders only: \`https://picsum.photos/40/40?random={id}\` or \`https://ui-avatars.com/api/?name={name}&background=FFC30B&color=0a0a0a\`
 
 **Gym / fitness / wellness:**
 - Hero: Pollinations ("modern gym interior equipment golden lighting dark aesthetic motivational")
@@ -179,12 +179,12 @@ NEVER use for food, products, people, or any subject-specific imagery.
 
 ### IMPLEMENTATION RULES:
 - Build Pollinations URLs BEFORE writing CSS — know your image URLs first, then style around them.
-- For CSS background-image: `background-image: url('https://image.pollinations.ai/...')`; add `background-size: cover; background-position: center;`
-- For <img> tags: always include `loading="lazy"` and a descriptive `alt` attribute.
+- For CSS background-image: \`background-image: url('https://image.pollinations.ai/...')\`; add \`background-size: cover; background-position: center;\`
+- For <img> tags: always include \`loading="lazy"\` and a descriptive \`alt\` attribute.
 - Size images correctly: hero = 1920x1080 or 1280x720. Cards/thumbnails = 800x600 or 600x400. Avatars = 150x150.
 - When a grid has multiple items (menu, products, rooms), give EACH item its OWN unique Pollinations prompt — never reuse the same URL.
 - For Queen Bee theme builds: append "dark background gold accents dramatic lighting" to Pollinations prompts.
-- Always add `onerror="this.src='https://picsum.photos/800/600'"` as fallback on <img> tags using Pollinations.
+- Always add \`onerror="this.src='https://picsum.photos/800/600'"\` as fallback on <img> tags using Pollinations.
 
 ## QUALITY STANDARDS
 - Production-quality, visually impressive, fully functional
