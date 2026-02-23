@@ -84,7 +84,7 @@ async function generateAceMusic(prompt: string, lyrics?: string): Promise<string
       'Authorization': `Bearer ${ACE_MUSIC_API_KEY}`,
     },
     body: JSON.stringify({ prompt, lyrics: lyrics || '', duration: 30 }),
-    signal: AbortSignal.timeout(30000),
+    signal: AbortSignal.timeout(60000),
   })
 
   if (!taskRes.ok) {
