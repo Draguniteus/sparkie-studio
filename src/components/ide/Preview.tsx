@@ -226,12 +226,9 @@ export function Preview() {
       })
 
       const errorOverlay = `${ERROR_OVERLAY_SCRIPT}`
-      const errorOverlay = `${ERROR_OVERLAY_SCRIPT}`
       let html = hoistedHtml.includes("<head>")
         ? hoistedHtml.replace("<head>", `<head>${base}`)
         : `<!DOCTYPE html><html><head>${base}</head><body>${hoistedHtml}</body></html>`
-      // Inject runtime error overlay before </head>
-      html = html.replace('</head>', `${errorOverlay}</head>`)
       // Inject runtime error overlay before </head>
       html = html.replace('</head>', `${errorOverlay}</head>`)
 
