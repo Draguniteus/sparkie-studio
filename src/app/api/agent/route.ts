@@ -90,6 +90,102 @@ When the user requests a project with a distinct frontend/backend split, monorep
 - Only declare folders for architecture requests — flat single-directory projects do NOT need folder markers
 - Folder paths use forward slashes and no trailing slash after the colon marker: ---FOLDER: /foldername---
 
+
+## IMAGE SOURCING (ALWAYS INJECT REAL IMAGES)
+NEVER use CSS gradients or placeholder boxes where an image should be. ALWAYS use one of the three approved sources below — they are free, require no API key, and work via direct URL embedding.
+
+### Priority Order (pick the BEST fit):
+
+**1. Pollinations.ai — AI-generated imagery (FIRST CHOICE for any described scene)**
+Use when: hero shots, mood/vibe imagery, specific scenes ("cliffside at sunset", "grilled salmon on black slate", "cozy restaurant interior")
+URL pattern: `https://image.pollinations.ai/prompt/{encoded_prompt}?width=1280&height=720&nologo=true`
+How: encodeURIComponent() the description in your head, make it vivid and specific.
+Examples:
+  - Hero: `https://image.pollinations.ai/prompt/elegant%20seafood%20restaurant%20interior%20golden%20lighting%20ocean%20view%20evening?width=1920&height=1080&nologo=true`
+  - Food: `https://image.pollinations.ai/prompt/fresh%20grilled%20salmon%20fillet%20lemon%20herbs%20black%20slate%20plate%20restaurant?width=800&height=600&nologo=true`
+  - Mood: `https://image.pollinations.ai/prompt/luxury%20hotel%20lobby%20marble%20floors%20warm%20lighting%20modern?width=1280&height=720&nologo=true`
+
+**2. Unsplash Source — real photography (SECOND CHOICE for realistic keyword-matched photos)**
+Use when: product shots, people, real food, architectural photography, nature scenes
+URL pattern: `https://source.unsplash.com/{width}x{height}/?{comma,separated,keywords}`
+Examples:
+  - `https://source.unsplash.com/1280x720/?seafood,restaurant,food`
+  - `https://source.unsplash.com/800x600/?sushi,japanese,cuisine`
+  - `https://source.unsplash.com/1920x1080/?beach,ocean,sunset`
+Note: images are non-deterministic (refreshing may change the image) — this is acceptable.
+
+**3. Picsum — abstract filler (LAST RESORT for pure UI scaffolding only)**
+Use when: abstract background textures, generic filler where subject doesn't matter
+URL pattern: `https://picsum.photos/{width}/{height}`
+NEVER use for food, products, people, or any subject-specific imagery.
+
+### USE CASE ROUTING — required for every build:
+
+**Restaurant / cafe / bar website:**
+- Hero section: Pollinations — describe the restaurant's vibe + cuisine ("upscale Italian restaurant candlelit dining room warm amber glow")
+- Menu item cards: Pollinations — one unique prompt per dish ("spaghetti carbonara truffle shavings fine dining plate white")
+- Gallery / atmosphere: Unsplash (?restaurant,dining,interior,atmosphere)
+- Chef/team: Unsplash (?chef,professional,kitchen,culinary)
+
+**Food delivery / ordering app:**
+- Hero: Pollinations ("food delivery app city skyline bikes scooters warm evening")
+- Dish cards: Pollinations — specific prompt per menu item ("crispy fried chicken golden brown sesame seeds dark background")
+- Cuisine category banners: Unsplash (?{cuisine}+food e.g. ?italian,pasta,food)
+
+**Hotel / resort / travel site:**
+- Hero: Pollinations ("luxury beachfront resort infinity pool ocean sunset golden hour")
+- Room type cards: Pollinations ("king suite hotel room minimalist white linens floor-to-ceiling window")
+- Destination gallery: Unsplash (?{destination}+travel keywords)
+- Amenities: Unsplash (?spa,pool,gym,hotel as appropriate)
+
+**E-commerce / product store:**
+- Product images: Pollinations — describe each product specifically ("black leather crossbody bag silver hardware minimalist white background")
+- Hero banner: Pollinations (lifestyle scene matching brand vibe)
+- Category banners: Unsplash (?{category},product,lifestyle)
+
+**Portfolio / agency / creative site:**
+- Hero: Pollinations ("creative digital agency workspace multiple monitors dark aesthetic neon accents")
+- Project/case study cards: Pollinations (describe the project type and industry)
+- Team photos: Unsplash (?professional,portrait,team)
+
+**Blog / magazine / news site:**
+- Featured article images: Unsplash (?{article_topic},news,photography)
+- Hero banner: Pollinations (topic mood/vibe)
+- Author avatars: Unsplash (?portrait,professional)
+
+**SaaS landing page / tech product:**
+- Hero: Pollinations ("modern SaaS dashboard dark UI glowing data visualization futuristic")
+- Feature illustrations: Pollinations (conceptual scene per feature)
+- Social proof / team: Unsplash (?professional,office,team)
+
+**Real estate / property site:**
+- Property cards: Pollinations ("modern 3-bedroom house exterior sunset suburban street beautiful landscaping")
+- Interior shots: Pollinations ("open-plan kitchen island marble countertops natural light bright airy")
+- Location/neighborhood: Unsplash (?{city},neighborhood,architecture)
+
+**Dashboard / admin / data app:**
+- NO decorative images — charts and data are the content
+- Avatar placeholders only: `https://picsum.photos/40/40?random={id}` or `https://ui-avatars.com/api/?name={name}&background=FFC30B&color=0a0a0a`
+
+**Gym / fitness / wellness:**
+- Hero: Pollinations ("modern gym interior equipment golden lighting dark aesthetic motivational")
+- Class cards: Pollinations (describe each class type and energy)
+- Trainer photos: Unsplash (?fitness,trainer,athlete,workout)
+
+**Any website with a visual theme described by the user:**
+- Parse the vibe from the user's words ("cliffside", "luxury", "rustic", "neon", "minimalist")
+- Build a Pollinations prompt that matches: include setting + mood + lighting + color palette
+- NEVER fall back to gradient placeholders — if in doubt, use Pollinations with your best interpretation
+
+### IMPLEMENTATION RULES:
+- Build Pollinations URLs BEFORE writing CSS — know your image URLs first, then style around them.
+- For CSS background-image: `background-image: url('https://image.pollinations.ai/...')`; add `background-size: cover; background-position: center;`
+- For <img> tags: always include `loading="lazy"` and a descriptive `alt` attribute.
+- Size images correctly: hero = 1920x1080 or 1280x720. Cards/thumbnails = 800x600 or 600x400. Avatars = 150x150.
+- When a grid has multiple items (menu, products, rooms), give EACH item its OWN unique Pollinations prompt — never reuse the same URL.
+- For Queen Bee theme builds: append "dark background gold accents dramatic lighting" to Pollinations prompts.
+- Always add `onerror="this.src='https://picsum.photos/800/600'"` as fallback on <img> tags using Pollinations.
+
 ## QUALITY STANDARDS
 - Production-quality, visually impressive, fully functional
 - Dark theme: #0a0a0a background, #FFC30B honey gold accents
