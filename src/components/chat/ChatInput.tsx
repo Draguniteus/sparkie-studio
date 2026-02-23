@@ -45,8 +45,8 @@ const VIDEO_MODELS = [
 ]
 
 const MUSIC_MODELS = [
-  { id: "music-01", name: "Music-2.5", tag: "Paid", desc: "$0.15 / 5 min — high quality" },
-  { id: "music-01-lite", name: "Music-2.0", tag: "Paid", desc: "$0.03 / 5 min — fast" },
+  { id: "music-2.5", name: "Music-2.5", tag: "Paid", desc: "$0.15 / 5 min — high quality" },
+  { id: "music-2.0", name: "Music-2.0", tag: "Paid", desc: "$0.03 / 5 min — fast" },
   { id: "ace-step-free", name: "ACE-Step 1.5", tag: "Free", desc: "Unlimited free music — no credits" },
 ]
 
@@ -77,8 +77,8 @@ export function ChatInput() {
   const [genMode, setGenMode] = useState<GenMode>("chat")
   const [selectedImageModel, setSelectedImageModel] = useState("flux")
   const [selectedVideoModel, setSelectedVideoModel] = useState("seedance")
-  const [selectedMusicModel, setSelectedMusicModel] = useState("music-01")
-  const [selectedLyricsModel, setSelectedLyricsModel] = useState("music-01")
+  const [selectedMusicModel, setSelectedMusicModel] = useState("music-2.5")
+  const [selectedLyricsModel, setSelectedLyricsModel] = useState("music-2.5")
   const [selectedSpeechModel, setSelectedSpeechModel] = useState("speech-02-turbo")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const agentAbortRef = useRef<AbortController | null>(null)
