@@ -15,7 +15,7 @@ function detectAssetType(name: string, language: string): AssetType {
   if (["xlsx", "xls", "csv"].includes(ext)) return "excel"
   if (["pptx", "ppt"].includes(ext)) return "ppt"
   if (["pdf", "doc", "docx", "txt", "md"].includes(ext)) return "document"
-  if (["js", "ts", "jsx", "tsx", "py", "css", "json"].includes(ext)) return "website"
+  if (["js", "ts", "jsx", "tsx", "py", "css", "json"].includes(ext)) return "code"
   return "other"
 }
 
@@ -51,6 +51,14 @@ function isMediaUrl(content: string): boolean {
   return content.startsWith('http://') || content.startsWith('https://') || content.startsWith('/api/')
 }
 
+// Source code files belong in Files tab only — never surface in Assets
+const SOURCE_FILE_EXTS = new Set(["js","ts","jsx","tsx","css","scss","json","py","rb","go","rs","cpp","c","h","java","php","sh","yaml","yml","toml","xml","env","lock","config","gitignore","prettierrc","eslintrc","babelrc"])
+
+function isSourceFile(name: string): boolean {
+  const ext = (name.split(".").pop() || "").toLowerCase()
+  return SOURCE_FILE_EXTS.has(ext)
+}
+
 function AssetThumbnail({ name, content, type }: { name: string; content: string; type: AssetType }) {
   const ext = name.split(".").pop()?.toLowerCase() || ""
 
@@ -74,7 +82,7 @@ function AssetThumbnail({ name, content, type }: { name: string; content: string
     if (ext === "svg") {
       const dataUri = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(content)}`
       return (
-        <div className="w-full h-full flex items-center justify-center bg-hive-elevated rounded-t-lg p-3">
+        <div className="w-full h-full flex items-center justify-center bg-[#0a0a0a] rounded-t-lg p-3 ring-1 ring-honey-500/20">
           <img src={dataUri} alt={name} className="max-w-full max-h-full object-contain" />
         </div>
       )
@@ -82,7 +90,7 @@ function AssetThumbnail({ name, content, type }: { name: string; content: string
     // URL-based images (Pollinations PNG/JPG or /api/image? proxy) — render directly
     if (isMediaUrl(content)) {
       return (
-        <div className="w-full h-full flex items-center justify-center bg-hive-elevated rounded-t-lg overflow-hidden">
+        <div className="w-full h-full flex items-center justify-center bg-[#0a0a0a] rounded-t-lg overflow-hidden ring-1 ring-honey-500/20">
           <img src={content} alt={name} className="w-full h-full object-cover" loading="lazy" />
         </div>
       )
@@ -93,8 +101,8 @@ function AssetThumbnail({ name, content, type }: { name: string; content: string
     // URL-based video (Pollinations or /api/image? proxy) — show video thumbnail
     if (isMediaUrl(content)) {
       return (
-        <div className="w-full h-full flex items-center justify-center bg-hive-elevated rounded-t-lg overflow-hidden relative">
-          <video src={content} className="w-full h-full object-cover" muted preload="metadata" />
+        <div className="w-full h-full flex items-center justify-center bg-[#0a0a0a] rounded-t-lg overflow-hidden relative ring-1 ring-blue-500/30">
+          <video src={content} className="w-full h-full object-cover" muted autoPlay loop playsInline preload="metadata" />
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="w-8 h-8 rounded-full bg-black/60 flex items-center justify-center">
               <Video size={14} className="text-white ml-0.5" />
@@ -162,6 +170,10 @@ export function AssetsTab() {
       .slice()
       .reverse()
       .filter(a => {
+        // Exclude raw source/config files (they live in Files tab)
+        if (isSourceFile(a.name)) return false
+        // Exclude AI conversational text captured as nameless doc
+        if (a.source === "agent" && a.assetType === "document" && !a.name.match(/\.(pdf|doc|docx|txt|md)$/i)) return false
         if (filterTab !== "all" && a.assetType !== filterTab) return false
         if (sourceFilter !== "all" && a.source !== sourceFilter) return false
         if (search) {
@@ -172,14 +184,26 @@ export function AssetsTab() {
       })
   }, [enriched, filterTab, sourceFilter, search])
 
-  function downloadAsset(name: string, content: string) {
-    const blob = new Blob([content], { type: "text/plain" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = name
-    a.click()
-    URL.revokeObjectURL(url)
+  async function downloadAsset(name: string, content: string) {
+    let objectUrl: string | null = null
+    try {
+      if (isMediaUrl(content)) {
+        const res = await fetch(content)
+        const blob = await res.blob()
+        objectUrl = URL.createObjectURL(blob)
+      } else {
+        const blob = new Blob([content], { type: "text/plain" })
+        objectUrl = URL.createObjectURL(blob)
+      }
+      const a = document.createElement("a")
+      a.href = objectUrl
+      a.download = name
+      a.click()
+    } catch {
+      if (isMediaUrl(content)) window.open(content, "_blank")
+    } finally {
+      if (objectUrl) setTimeout(() => URL.revokeObjectURL(objectUrl!), 1000)
+    }
   }
 
   function openInNewWindow(content: string, name: string, type: AssetType) {
