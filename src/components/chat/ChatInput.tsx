@@ -767,6 +767,30 @@ export function ChatInput() {
             isEdit,
           },
         })
+
+        // ── BRAIN.md — Sparkie's session memory ─────────────────────────────
+        // Auto-creates/updates a context block so Sparkie resumes without re-explanation
+        const brainTs = new Date().toISOString().slice(0, 16).replace('T', ' ')
+        const brainLines = [
+          '# SPARKIE BRAIN — Session Memory',
+          '<!-- Auto-generated. Do not delete — Sparkie uses this for context continuity. -->',
+          '',
+          '## Project',
+          `- **Name**: ${projectName || 'project'}`,
+          `- **Last built**: ${brainTs} UTC`,
+          `- **Action**: ${isEdit ? 'Edit/Update' : 'Fresh build'}`,
+          '',
+          '## Files',
+          ...createdFilesList.map(f => `- \`${f}\``),
+          '',
+          '## Stack',
+          ...(uniqueLangs.length > 0 ? uniqueLangs.map(l => `- ${l}`) : ['- (unknown)']),
+          '',
+          '## Context',
+          'This is the active project in this session. When the user asks to change, fix,',
+          'or extend something, assume they mean the files above unless specified otherwise.',
+        ]
+        upsertFile('BRAIN.md', brainLines.join('\n'), 'markdown')
       } else {
         // No files — restore archive and show text response
         const currentState = useAppStore.getState()
