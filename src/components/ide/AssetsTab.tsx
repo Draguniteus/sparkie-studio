@@ -15,7 +15,7 @@ function detectAssetType(name: string, language: string): AssetType {
   if (["xlsx", "xls", "csv"].includes(ext)) return "excel"
   if (["pptx", "ppt"].includes(ext)) return "ppt"
   if (["pdf", "doc", "docx", "txt", "md"].includes(ext)) return "document"
-  if (["js", "ts", "jsx", "tsx", "py", "css", "json"].includes(ext)) return "code"
+  if (["js", "ts", "jsx", "tsx", "py", "css", "json"].includes(ext)) return "other"
   return "other"
 }
 
