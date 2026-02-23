@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react"
 import { useAppStore } from "@/store/appStore"
 import { parseAIResponse, getLanguageFromFilename, deriveProjectName } from "@/lib/fileParser"
-import { Paperclip, ArrowUp, Sparkles, ChevronDown, Image as ImageIcon, Video, Music, Mic, MicOff } from "lucide-react"
+import { Paperclip, ArrowUp, Sparkles, ChevronDown, Image as ImageIcon, Video, Music, Mic, MicOff, FileText, Headphones } from "lucide-react"
 
 // ── Asset type detection helper (for AssetsTab categories) ─────────────────
 function detectAssetTypeFromName(name: string): import('@/store/appStore').AssetType {
@@ -47,6 +47,16 @@ const VIDEO_MODELS = [
 const MUSIC_MODELS = [
   { id: "music-01", name: "Music-2.5", tag: "Paid", desc: "$0.15 / 5 min — high quality" },
   { id: "music-01-lite", name: "Music-2.0", tag: "Paid", desc: "$0.03 / 5 min — fast" },
+  { id: "ace-step-free", name: "ACE-Step 1.5", tag: "Free", desc: "Coming soon — unlimited $0 music", disabled: true },
+]
+
+const LYRICS_MODELS = [
+  { id: "music-01", name: "Lyrics-2.5", tag: "Paid", desc: "AI lyrics generation" },
+]
+
+const SPEECH_MODELS = [
+  { id: "speech-02-turbo", name: "Speech Turbo", tag: "Paid", desc: "$60 / M chars — fastest" },
+  { id: "speech-02-hd", name: "Speech HD", tag: "Paid", desc: "$100 / M chars — highest quality" },
 ]
 
 
@@ -59,7 +69,7 @@ const PROMPT_TEMPLATES = [
   { label: "Chat UI", prompt: "Build a chat interface with message bubbles, timestamps, typing indicator, and smooth animations. Dark theme.", icon: "💬" },
 ]
 
-type GenMode = "chat" | "image" | "video" | "music"
+type GenMode = "chat" | "image" | "video" | "music" | "lyrics" | "speech"
 
 export function ChatInput() {
   const [input, setInput] = useState("")
@@ -68,6 +78,8 @@ export function ChatInput() {
   const [selectedImageModel, setSelectedImageModel] = useState("flux")
   const [selectedVideoModel, setSelectedVideoModel] = useState("seedance")
   const [selectedMusicModel, setSelectedMusicModel] = useState("music-01")
+  const [selectedLyricsModel, setSelectedLyricsModel] = useState("music-01")
+  const [selectedSpeechModel, setSelectedSpeechModel] = useState("speech-02-turbo")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const agentAbortRef = useRef<AbortController | null>(null)
   const [isRecording, setIsRecording] = useState(false)
@@ -374,9 +386,9 @@ export function ChatInput() {
     }
   }, [selectedModel, addMessage, updateMessage, setStreaming, setExecuting, openIDE, setIDETab, ideOpen, upsertFile, setActiveFile, clearLiveCode, appendLiveCode, addLiveCodeFile, addWorklogEntry, updateWorklogEntry, setContainerStatus, setPreviewUrl, saveChatFiles])
 
-  const generateMedia = useCallback(async (chatId: string, prompt: string, mediaType: "image" | "video" | "music") => {
-    const model = mediaType === "video" ? selectedVideoModel : mediaType === "music" ? selectedMusicModel : selectedImageModel
-    const emoji = mediaType === "video" ? "\ud83c\udfac" : mediaType === "music" ? "\ud83c\udfb5" : "\ud83c\udfa8"
+  const generateMedia = useCallback(async (chatId: string, prompt: string, mediaType: "image" | "video" | "music" | "lyrics" | "speech") => {
+    const model = mediaType === "video" ? selectedVideoModel : mediaType === "music" ? selectedMusicModel : mediaType === "lyrics" ? selectedLyricsModel : mediaType === "speech" ? selectedSpeechModel : selectedImageModel
+    const emoji = mediaType === "video" ? "\ud83c\udfac" : mediaType === "music" ? "\ud83c\udfb5" : mediaType === "lyrics" ? "\u270d\ufe0f" : mediaType === "speech" ? "\ud83c\udfa4" : "\ud83c\udfa8"
 
     const assistantMsgId = addMessage(chatId, {
       role: "assistant", content: `${emoji} Generating ${mediaType}...`, isStreaming: true, type: mediaType,
@@ -390,10 +402,10 @@ export function ChatInput() {
     const startTime = Date.now()
 
     try {
-      const body: Record<string, unknown> = { prompt, model }
+      const body: Record<string, unknown> = mediaType === "speech" ? { text: prompt, model } : { prompt, model }
       if (mediaType === "video") body.duration = 4
 
-      const endpoint = mediaType === "music" ? "/api/music" : "/api/image"
+      const endpoint = mediaType === "music" ? "/api/music" : mediaType === "lyrics" ? "/api/lyrics" : mediaType === "speech" ? "/api/speech" : "/api/image"
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -412,13 +424,19 @@ export function ChatInput() {
       }
 
       const data = await response.json()
+      const isTextResult = mediaType === "lyrics"
       updateMessage(chatId, assistantMsgId, {
-        content: prompt, imageUrl: data.url, imagePrompt: prompt, isStreaming: false, type: mediaType, model: model,
+        content: isTextResult ? (data.title ? `**${data.title}**\n\n${data.lyrics}` : data.lyrics) : prompt,
+        imageUrl: isTextResult ? undefined : data.url,
+        imagePrompt: isTextResult ? undefined : prompt,
+        isStreaming: false,
+        type: isTextResult ? "text" : mediaType,
+        model: model,
       })
       // Register in Assets tab so generated media appears in the Assets grid
       const mediaChatTitle = useAppStore.getState().chats.find(c => c.id === chatId)?.title || 'New Chat'
       const mediaExt = mediaType === 'video' ? 'mp4' : mediaType === 'music' ? 'mp3' : 'png'
-      const mediaAssetType = mediaType === 'music' ? 'audio' : mediaType
+      const mediaAssetType = (mediaType === 'music' || mediaType === 'speech') ? 'audio' : mediaType === 'lyrics' ? 'other' : mediaType
       const safePrompt = prompt.slice(0, 40).replace(/[^a-z0-9 ]/gi, '').trim().replace(/\s+/g, '-') || mediaType
       addAsset({
         name: `${safePrompt}.${mediaExt}`,
@@ -438,7 +456,7 @@ export function ChatInput() {
     } finally {
       setStreaming(false)
     }
-  }, [selectedImageModel, selectedVideoModel, selectedMusicModel, addMessage, updateMessage, setStreaming, addWorklogEntry, updateWorklogEntry, openIDE, setIDETab, ideOpen])
+  }, [selectedImageModel, selectedVideoModel, selectedMusicModel, selectedLyricsModel, selectedSpeechModel, addMessage, updateMessage, setStreaming, addWorklogEntry, updateWorklogEntry, openIDE, setIDETab, ideOpen])
 
   // Detect conversational/non-coding messages that shouldn't trigger the IDE
   // Fast synchronous pre-filter — catches obvious cases without a network call.
@@ -932,6 +950,10 @@ export function ChatInput() {
       generateMedia(chatId, userContent, "video")
     } else if (genMode === "music") {
       generateMedia(chatId, userContent, "music")
+    } else if (genMode === "lyrics") {
+      generateMedia(chatId, userContent, "lyrics")
+    } else if (genMode === "speech") {
+      generateMedia(chatId, userContent, "speech")
     } else {
       const t = userContent.toLowerCase().trim()
       const lastMode = useAppStore.getState().lastMode
@@ -978,14 +1000,17 @@ export function ChatInput() {
     el.style.height = Math.min(el.scrollHeight, 200) + "px"
   }
 
-  const activeModels = genMode === "image" ? IMAGE_MODELS : genMode === "video" ? VIDEO_MODELS : genMode === "music" ? MUSIC_MODELS : MODELS
-  const activeModelId = genMode === "image" ? selectedImageModel : genMode === "video" ? selectedVideoModel : genMode === "music" ? selectedMusicModel : selectedModel
+  const activeModels = genMode === "image" ? IMAGE_MODELS : genMode === "video" ? VIDEO_MODELS : genMode === "music" ? MUSIC_MODELS : genMode === "lyrics" ? LYRICS_MODELS : genMode === "speech" ? SPEECH_MODELS : MODELS
+  const activeModelId = genMode === "image" ? selectedImageModel : genMode === "video" ? selectedVideoModel : genMode === "music" ? selectedMusicModel : genMode === "lyrics" ? selectedLyricsModel : genMode === "speech" ? selectedSpeechModel : selectedModel
   const activeModelName = activeModels.find(m => m.id === activeModelId)?.name || activeModels[0].name
 
   const placeholders: Record<GenMode, string> = {
     chat: "Enter your task and submit to Sparkie...",
     image: "Describe the image you want to generate...",
     video: "Describe the video you want to generate...",
+    music: "Describe the music you want to generate...",
+    lyrics: "Describe the song — genre, mood, theme, story...",
+    speech: "Enter the text you want to convert to speech...",
   }
 
   const messages_count = useAppStore(s => s.messages).length
@@ -1040,6 +1065,22 @@ export function ChatInput() {
               <Music size={15} />
             </button>
 
+            <button
+              onClick={() => setGenMode(genMode === "lyrics" ? "chat" : "lyrics")}
+              className={`p-1.5 rounded-md transition-colors ${genMode === "lyrics" ? "bg-honey-500/15 text-honey-500" : "hover:bg-hive-hover text-text-muted hover:text-text-secondary"}`}
+              title={genMode === "lyrics" ? "Switch to chat" : "Lyrics generation"}
+            >
+              <FileText size={15} />
+            </button>
+
+            <button
+              onClick={() => setGenMode(genMode === "speech" ? "chat" : "speech")}
+              className={`p-1.5 rounded-md transition-colors ${genMode === "speech" ? "bg-honey-500/15 text-honey-500" : "hover:bg-hive-hover text-text-muted hover:text-text-secondary"}`}
+              title={genMode === "speech" ? "Switch to chat" : "Text to speech"}
+            >
+              <Headphones size={15} />
+            </button>
+
             <div className="relative">
               <button
                 onClick={() => setShowModels(!showModels)}
@@ -1058,6 +1099,8 @@ export function ChatInput() {
                         if (genMode === "image") setSelectedImageModel(model.id)
                         else if (genMode === "video") setSelectedVideoModel(model.id)
                         else if (genMode === "music") setSelectedMusicModel(model.id)
+                        else if (genMode === "lyrics") setSelectedLyricsModel(model.id)
+                        else if (genMode === "speech") setSelectedSpeechModel(model.id)
                         else setSelectedModel(model.id)
                         setShowModels(false)
                       }}
