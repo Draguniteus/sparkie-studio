@@ -6,6 +6,7 @@ import { MainPanel } from '@/components/layout/MainPanel'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { useAppStore } from '@/store/appStore'
 import { OnboardingModal } from '@/components/OnboardingModal'
+import { SettingsModal } from '@/components/layout/SettingsModal'
 
 const MIN_IDE_WIDTH = 280
 const MAX_IDE_FRACTION = 0.75
