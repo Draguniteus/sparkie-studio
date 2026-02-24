@@ -1,12 +1,12 @@
 'use client'
 
 import React, { useState } from 'react'
-import { X, User, Brain, Key, Sliders, CreditCard, AlertTriangle, ChevronRight } from 'lucide-react'
+import { type LucideIcon, X, User, Brain, Key, Sliders, CreditCard, AlertTriangle, ChevronRight } from 'lucide-react'
 import { useAppStore } from '@/store/appStore'
 
 type SettingsTab = 'account' | 'persona' | 'api-keys' | 'preferences' | 'billing' | 'danger'
 
-const NAV: { id: SettingsTab; icon: React.ComponentType<{ size?: number; className?: string }>; label: string; desc: string }[] = [
+const NAV: { id: SettingsTab; icon: LucideIcon; label: string; desc: string }[] = [
   { id: 'account',     icon: User,          label: 'Account',         desc: 'Name, email, avatar' },
   { id: 'persona',     icon: Brain,         label: 'Sparkie Persona',  desc: 'How Sparkie talks to you' },
   { id: 'api-keys',    icon: Key,           label: 'API Keys',         desc: 'Your own model keys' },
