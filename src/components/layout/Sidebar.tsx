@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useAppStore } from '@/store/appStore'
 import {
   Plus, Search, FolderOpen, Image, MessageSquare,
-  Settings, ChevronLeft, ChevronDown, Trash2, Sparkles, Bot, Zap
+  Settings, ChevronLeft, ChevronDown, Trash2, Sparkles, Bot, Zap, Radio
 } from 'lucide-react'
 
 export function Sidebar() {
@@ -69,12 +69,13 @@ export function Sidebar() {
           { icon: Search, label: 'Search', key: 'search' as const },
           { icon: FolderOpen, label: 'Assets', key: 'assets' as const },
           { icon: Image, label: 'Gallery', key: 'images' as const },
+          { icon: Radio, label: 'Radio', key: 'radio' as const },
         ].map(({ icon: Icon, label, key }) => (
           <button
             key={key}
-            onClick={() => key !== 'search' && setActiveTab(key === 'images' ? 'images' : 'assets')}
+            onClick={() => key !== 'search' && setActiveTab(key === 'images' ? 'images' : key === 'radio' ? 'radio' : 'assets')}
             className={`flex-1 flex flex-col items-center gap-1 py-2 rounded-lg transition-colors text-[10px] font-medium ${
-              activeTab === key || (key === 'assets' && activeTab === 'assets')
+              activeTab === key || (key === 'assets' && activeTab === 'assets') || (key === 'radio' && activeTab === 'radio')
                 ? 'bg-honey-500/10 text-honey-500'
                 : 'hover:bg-hive-hover text-text-muted hover:text-text-secondary'
             }`}

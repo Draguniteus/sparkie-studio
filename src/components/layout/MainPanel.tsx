@@ -4,6 +4,7 @@ import { useAppStore } from '@/store/appStore'
 import { ChatView } from '@/components/chat/ChatView'
 import { WelcomeView } from '@/components/chat/WelcomeView'
 import { AssetsTab } from '@/components/ide/AssetsTab'
+import { RadioPlayer } from '@/components/ide/RadioPlayer'
 
 export function MainPanel() {
   const { currentChatId, activeTab } = useAppStore()
@@ -18,6 +19,14 @@ export function MainPanel() {
         <div className="flex-1 overflow-hidden">
           <AssetsTab />
         </div>
+      </div>
+    )
+  }
+
+  if (activeTab === 'radio') {
+    return (
+      <div className="flex-1 flex flex-col min-w-0 h-full bg-hive-600">
+        <RadioPlayer />
       </div>
     )
   }

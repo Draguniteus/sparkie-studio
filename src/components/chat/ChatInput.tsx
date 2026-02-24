@@ -3,7 +3,8 @@
 import { useState, useRef, useCallback, useEffect } from "react"
 import { useAppStore } from "@/store/appStore"
 import { parseAIResponse, getLanguageFromFilename, deriveProjectName } from "@/lib/fileParser"
-import { Paperclip, ArrowUp, Sparkles, ChevronDown, Image as ImageIcon, Video, Music, Mic, MicOff, FileText, Headphones } from "lucide-react"
+import { Paperclip, ArrowUp, Sparkles, ChevronDown, Image as ImageIcon, Video, Music, Mic, MicOff, FileText, Headphones, Phone } from "lucide-react"
+import { VoiceChat } from "@/components/chat/VoiceChat"
 
 // ── Asset type detection helper (for AssetsTab categories) ─────────────────
 function detectAssetTypeFromName(name: string): import('@/store/appStore').AssetType {
@@ -84,6 +85,7 @@ export function ChatInput() {
   const agentAbortRef = useRef<AbortController | null>(null)
   const [isRecording, setIsRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
+  const [isVoiceChatOpen, setIsVoiceChatOpen] = useState(false)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const {
@@ -935,6 +937,67 @@ export function ChatInput() {
     }
   }, [isRecording])
 
+  // ── Voice chat: STT → AI → TTS loop ─────────────────────────────────────────
+  const sendMessageFromVoice = useCallback(async (userText: string): Promise<string> => {
+    let chatId = currentChatId
+    if (!chatId) chatId = createChat()
+
+    addMessage(chatId, { role: "user", content: userText })
+
+    // Call chat/AI directly and collect the full text reply
+    return new Promise<string>((resolve) => {
+      (async () => {
+        try {
+          const res = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              messages: [{ role: 'user', content: userText }],
+              model: selectedModel,
+            }),
+          })
+
+          if (!res.ok || !res.body) {
+            resolve("Sorry, I couldn't generate a response right now.")
+            return
+          }
+
+          const reader = res.body.getReader()
+          const decoder = new TextDecoder()
+          let fullText = ''
+          const msgId = addMessage(chatId!, { role: 'assistant', content: '', isStreaming: true })
+
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            const chunk = decoder.decode(value)
+            // Parse SSE data lines
+            const lines = chunk.split('\n')
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                const data = line.slice(6).trim()
+                if (data === '[DONE]') continue
+                try {
+                  const parsed = JSON.parse(data)
+                  const delta = parsed?.choices?.[0]?.delta?.content || parsed?.delta?.text || ''
+                  if (delta) {
+                    fullText += delta
+                    updateMessage(chatId!, msgId, { content: fullText })
+                  }
+                } catch {}
+              }
+            }
+          }
+
+          updateMessage(chatId!, msgId, { content: fullText, isStreaming: false })
+          resolve(fullText || "Done!")
+        } catch {
+          resolve("Sorry, something went wrong.")
+        }
+      })()
+    })
+  }, [currentChatId, createChat, addMessage, updateMessage, selectedModel])
+
   const handleSubmit = useCallback(async () => {
     if (!input.trim() || isStreaming) return
 
@@ -1127,6 +1190,13 @@ export function ChatInput() {
             </div>
           </div>
           <button
+            onClick={() => setIsVoiceChatOpen(true)}
+            className="p-1.5 rounded-md transition-colors mr-1 hover:bg-hive-hover text-text-muted hover:text-honey-500"
+            title="Voice chat"
+          >
+            <Phone size={15} />
+          </button>
+          <button
             onClick={toggleRecording}
             disabled={isTranscribing}
             className={`p-1.5 rounded-md transition-colors mr-1 ${
@@ -1153,5 +1223,13 @@ export function ChatInput() {
         </div>
       </div>
     </div>
+
+    {/* Voice Chat overlay */}
+    <VoiceChat
+      isActive={isVoiceChatOpen}
+      onClose={() => setIsVoiceChatOpen(false)}
+      onSendMessage={sendMessageFromVoice}
+      voiceId="Wise_Woman"
+    />
   )
 }

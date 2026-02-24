@@ -8,6 +8,11 @@ export const maxDuration = 300
 // Body: { model, prompt, lyrics, audio_setting }  ← lyrics is REQUIRED by MiniMax
 // Response: { data: { audio: "<hex>", status: 2 }, base_resp: { status_code: 0 } }
 // audio field is HEX-encoded → Buffer.from(hex, 'hex').toString('base64')
+//
+// ⚠️  CRITICAL: Section tags MUST be Title Case with spaces:
+//   [Intro] [Verse] [Pre Chorus] [Chorus] [Bridge] [Outro] [Interlude] [Post Chorus]
+//   [Transition] [Break] [Hook] [Build Up] [Inst] [Solo]
+//   Lowercase tags like [verse] or numbered tags like [Verse 1] → silent/invalid MP3
 
 // ACE Music (api.acemusic.ai)
 // POST /release_task → { task_id }
@@ -34,8 +39,8 @@ async function sleep(ms: number) {
  * The user pastes one big text that looks like:
  *   Song Title: "..."
  *   Style / Vibe: ... (used as MiniMax `prompt`)
- *   [Verse 1] ...
- *   [Pre-Chorus] ...
+ *   [Verse] ...
+ *   [Pre Chorus] ...
  *   [Chorus] ...
  *   ... (this whole structured block becomes MiniMax `lyrics`)
  *
@@ -45,8 +50,8 @@ async function sleep(ms: number) {
 function parseMusicPrompt(raw: string): { stylePrompt: string; lyrics: string } {
   const text = raw.trim()
 
-  // Find first lyric structure tag: [Verse, [Pre-Chorus, [Chorus, [Bridge, [Outro, [Intro
-  const lyricsTagRe = /\[(Verse|Pre-Chorus|Chorus|Bridge|Outro|Intro|Final Chorus|Hook)/i
+  // Find first lyric structure tag — match common formats users write
+  const lyricsTagRe = /\[\s*(Verse|Pre.?Chorus|Chorus|Bridge|Outro|Intro|Hook|Interlude|Post.?Chorus|Transition|Break|Build.?Up|Inst|Solo)/i
   const tagMatch = lyricsTagRe.exec(text)
 
   if (tagMatch && tagMatch.index > 0) {
@@ -62,7 +67,6 @@ function parseMusicPrompt(raw: string): { stylePrompt: string; lyrics: string } 
       .trim()
 
     // If style part is too long, MiniMax prompt should be short & punchy — take last paragraph
-    // (usually the concise style summary at the bottom of the user's prompt)
     const styleLines = stylePart.split('\n').filter(l => l.trim())
     const stylePrompt = styleLines.length > 6
       ? styleLines.slice(-4).join(' ').trim()
@@ -76,28 +80,40 @@ function parseMusicPrompt(raw: string): { stylePrompt: string; lyrics: string } 
 }
 
 /**
- * Normalize section tags to MiniMax-compatible lowercase format.
- * MiniMax expects: [verse], [chorus], [bridge], [outro], [intro], [pre-chorus]
- * Users write: [Verse 1], [Pre-Chorus], [Final Chorus – bigger, layered vocals], etc.
- * Non-standard tags and trailing descriptors (after em-dash/parenthesis) are stripped.
+ * Normalize section tags to MiniMax-compatible Title Case format with spaces.
+ * ⚠️  MiniMax requires EXACTLY: [Intro], [Verse], [Pre Chorus], [Chorus], [Bridge],
+ *   [Outro], [Interlude], [Post Chorus], [Transition], [Break], [Hook], [Build Up], [Inst], [Solo]
+ * Numbered variants ([Verse 1], [Chorus 2]) are stripped to base tag.
+ * Lowercase or wrong-format tags cause silent/invalid MP3.
  */
 function normalizeLyricsTags(lyrics: string): string {
   return lyrics.replace(/\[([^\]]+)\]/g, (_, inner) => {
     const s = inner.trim().toLowerCase()
-    if (/\bverse\b/.test(s))       return '[verse]'
-    if (/\bpre.?chorus\b/.test(s)) return '[pre-chorus]'
-    if (/\bchorus\b/.test(s))      return '[chorus]'
-    if (/\bbridge\b/.test(s))      return '[bridge]'
-    if (/\boutro\b/.test(s))       return '[outro]'
-    if (/\bintro\b/.test(s))       return '[intro]'
-    if (/\bhook\b/.test(s))        return '[chorus]'
-    // Unknown: strip em-dash/paren suffix, lowercase
-    return `[${s.replace(/\s*[–—\-\(].*$/, '').trim()}]`
+    // Match and normalize to exact MiniMax Title Case + space format
+    if (/\bverse\b/.test(s))                           return '[Verse]'
+    if (/\bpre[\s\-]?chorus\b/.test(s))               return '[Pre Chorus]'
+    if (/\bpost[\s\-]?chorus\b/.test(s))              return '[Post Chorus]'
+    if (/\bchorus\b/.test(s))                          return '[Chorus]'
+    if (/\bbridge\b/.test(s))                          return '[Bridge]'
+    if (/\boutro\b/.test(s))                           return '[Outro]'
+    if (/\bintro\b/.test(s))                           return '[Intro]'
+    if (/\bhook\b/.test(s))                            return '[Hook]'
+    if (/\binterlude\b/.test(s))                       return '[Interlude]'
+    if (/\btransition\b/.test(s))                      return '[Transition]'
+    if (/\bbreak\b/.test(s))                           return '[Break]'
+    if (/\bbuild[\s\-]?up\b/.test(s))                 return '[Build Up]'
+    if (/\binst\b|\binstrumental\b/.test(s))          return '[Inst]'
+    if (/\bsolo\b/.test(s))                            return '[Solo]'
+    // Unknown tag — strip number suffixes, em-dashes, parens, then Title Case
+    const cleaned = s
+      .replace(/\s*[–—\-\(].*$/, '')
+      .replace(/\s+\d+$/, '')
+      .trim()
+    return '[' + cleaned.charAt(0).toUpperCase() + cleaned.slice(1) + ']'
   })
 }
 
 async function generateAceMusic(prompt: string, lyrics?: string): Promise<string> {
-  // ACE Music submit — bump timeout to 30s for cold GPU starts
   const taskRes = await fetch(`${ACE_MUSIC_BASE}/release_task`, {
     method: 'POST',
     headers: {
@@ -105,7 +121,7 @@ async function generateAceMusic(prompt: string, lyrics?: string): Promise<string
       'Authorization': `Bearer ${ACE_MUSIC_API_KEY}`,
     },
     body: JSON.stringify({ prompt, lyrics: lyrics || '', duration: 30 }),
-    signal: AbortSignal.timeout(300000), // 5 min – ACE GPU cold starts can take 2-3 min
+    signal: AbortSignal.timeout(300000),
   })
 
   if (!taskRes.ok) {
@@ -158,7 +174,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json()
     rawPrompt = body.prompt
     model = body.model || 'music-2.5'
-    explicitLyrics = body.lyrics  // may be undefined — frontend doesn't send this field
+    explicitLyrics = body.lyrics
     if (!rawPrompt) throw new Error('Missing prompt')
   } catch {
     return new Response(JSON.stringify({ error: 'Invalid request body' }), {
@@ -201,7 +217,7 @@ export async function POST(req: NextRequest) {
   const requestBody = {
     model: minimaxModel,
     prompt: finalPrompt,
-    lyrics: finalLyrics,   // required — cannot be empty
+    lyrics: finalLyrics,
     audio_setting: {
       sample_rate: 44100,
       bitrate: 256000,
