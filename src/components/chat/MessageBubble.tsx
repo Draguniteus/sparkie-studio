@@ -172,11 +172,15 @@ export function MessageBubble({ message }: Props) {
                   </a>
                 </div>
                 <audio
-                  src={message.imageUrl}
-                  controls
-                  className="w-full"
-                  style={{ height: 40, colorScheme: "dark" }}
-                />
+                   src={
+                     message.imageUrl?.startsWith('https://')
+                       ? `/api/music/proxy?url=${encodeURIComponent(message.imageUrl)}`
+                       : message.imageUrl
+                   }
+                   controls
+                   className="w-full"
+                   style={{ height: 40, colorScheme: "dark" }}
+                 />
               </div>
             </div>
           ) : isImage && !message.isStreaming ? (
