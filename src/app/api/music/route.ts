@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server'
 
 export const runtime = 'nodejs'
-export const maxDuration = 150
+export const maxDuration = 300
 
 // MiniMax Music Generation (synchronous)
 // POST https://api.minimax.io/v1/music_generation
@@ -84,7 +84,7 @@ async function generateAceMusic(prompt: string, lyrics?: string): Promise<string
       'Authorization': `Bearer ${ACE_MUSIC_API_KEY}`,
     },
     body: JSON.stringify({ prompt, lyrics: lyrics || '', duration: 30 }),
-    signal: AbortSignal.timeout(60000),
+    signal: AbortSignal.timeout(300000), // 5 min – ACE GPU cold starts can take 2-3 min
   })
 
   if (!taskRes.ok) {
@@ -96,8 +96,8 @@ async function generateAceMusic(prompt: string, lyrics?: string): Promise<string
   const taskId = taskData.task_id || taskData.id
   if (!taskId) throw new Error('ACE Music: no task_id returned')
 
-  // Poll for result (up to 2 min, every 5s)
-  for (let i = 0; i < 24; i++) {
+  // Poll for result (up to ~3.5 min, every 5s)
+  for (let i = 0; i < 40; i++) {
     await sleep(5000)
     try {
       const pollRes = await fetch(`${ACE_MUSIC_BASE}/query_result?task_id=${taskId}`, {
