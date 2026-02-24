@@ -21,7 +21,7 @@ export const maxDuration = 300
 
 const MINIMAX_BASE = 'https://api.minimax.io/v1'
 const ACE_MUSIC_BASE = 'https://api.acemusic.ai'
-const ACE_MUSIC_API_KEY = 'd33f8bc6767445a98b608dbf56710d26'
+const ACE_MUSIC_API_KEY = process.env.ACE_MUSIC_API_KEY || ''
 
 const MINIMAX_MODEL_MAP: Record<string, string> = {
   'music-2.5':     'music-2.5',
@@ -189,6 +189,11 @@ export async function POST(req: NextRequest) {
 
   // ── ACE-Step: return taskId immediately, frontend polls ──────────────────
   if (model === 'ace-step-free') {
+    if (!ACE_MUSIC_API_KEY) {
+      return new Response(JSON.stringify({ error: 'ACE_MUSIC_API_KEY not configured. Get a free key at acemusic.ai/playground/api-key and add it to your environment.' }), {
+        status: 500, headers: { 'Content-Type': 'application/json' },
+      })
+    }
     const { stylePrompt, lyrics } = parseMusicPrompt(rawPrompt)
 
     let taskId: string | null = null
