@@ -48,7 +48,7 @@ function getTypeColor(type: AssetType): string {
 
 // Helper: detect media URL — handles both absolute (https://) and relative (/api/image?) paths
 function isMediaUrl(content: string): boolean {
-  return content.startsWith('http://') || content.startsWith('https://') || content.startsWith('/api/')
+  return content.startsWith('http://') || content.startsWith('https://') || content.startsWith('/api/') || content.startsWith('data:')
 }
 
 // Source code files belong in Files tab only — never surface in Assets
@@ -111,6 +111,29 @@ function AssetThumbnail({ name, content, type }: { name: string; content: string
         </div>
       )
     }
+  }
+
+  // Audio — mini player card
+  if (type === "audio") {
+    return (
+      <div className="w-full h-full flex flex-col items-center justify-center gap-3 rounded-t-lg bg-gradient-to-b from-pink-500/10 to-pink-500/5 ring-1 ring-pink-500/20 px-3">
+        <div className="w-10 h-10 rounded-xl bg-pink-500/15 flex items-center justify-center">
+          <Music size={20} className="text-pink-400" />
+        </div>
+        <p className="text-[10px] text-pink-400/80 font-medium text-center truncate w-full px-2">
+          {name.split("/").pop()?.replace(/\.mp3$/, "") || "Audio"}
+        </p>
+        {isMediaUrl(content) && (
+          <audio
+            src={content}
+            controls
+            className="w-full"
+            style={{ height: 32, colorScheme: "dark" }}
+            onClick={e => e.stopPropagation()}
+          />
+        )}
+      </div>
+    )
   }
 
   // Default: colored icon placeholder
@@ -223,6 +246,8 @@ export function AssetsTab() {
         const dataUri = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(content)}`
         window.open(dataUri, "_blank")
       }
+    } else if (type === "audio") {
+      if (isMediaUrl(content)) window.open(content, "_blank")
     } else {
       const blob = new Blob([content], { type: "text/plain" })
       const url = URL.createObjectURL(blob)
@@ -420,6 +445,19 @@ function PreviewContent({ preview }: { preview: PreviewModal }) {
     return (
       <div className="w-full h-full flex items-center justify-center bg-black">
         <video src={content} controls className="max-w-full max-h-full rounded-lg" />
+      </div>
+    )
+  }
+
+  // Audio player
+  if (type === "audio" && isMediaUrl(content)) {
+    return (
+      <div className="w-full h-full flex flex-col items-center justify-center gap-4 bg-hive-elevated p-8">
+        <div className="w-16 h-16 rounded-2xl bg-pink-500/15 flex items-center justify-center">
+          <Music size={32} className="text-pink-400" />
+        </div>
+        <p className="text-sm font-medium text-text-primary text-center max-w-md">{name.split("/").pop()?.replace(/\.mp3$/, "")}</p>
+        <audio src={content} controls autoPlay className="w-full max-w-md" style={{ colorScheme: "dark" }} />
       </div>
     )
   }
