@@ -255,7 +255,7 @@ export async function POST(req: NextRequest) {
     })
   }
 
-  // ── MiniMax models ───────────────────────────────────────────────────────
+  // ── MiniMax models — SSE streaming to bypass DO 100s gateway idle timeout ──
   const apiKey = process.env.MINIMAX_API_KEY
   if (!apiKey) {
     return new Response(JSON.stringify({ error: 'MINIMAX_API_KEY not configured' }), {
@@ -272,93 +272,85 @@ export async function POST(req: NextRequest) {
     model: minimaxModel,
     prompt: finalPrompt,
     lyrics: finalLyrics,
-    // Both music-2.0 and music-2.5 support output_format:'url' (per MiniMax docs).
-    // URL output returns a tiny CDN link vs a massive hex-encoded audio payload.
-    // Hex payload routinely exceeds DO's 60s gateway limit during transfer — URL avoids this entirely.
     output_format: 'url',
     audio_setting: { sample_rate: 44100, bitrate: 256000, format: 'mp3' },
   }
 
-  // Two attempts: MiniMax can be slow under load, one retry gives it a second chance
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    try {
-      const res = await fetch(`${MINIMAX_BASE}/music_generation`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify(requestBody),
-        // 95s — safely under DO App Platform's hard 100s gateway limit (confirmed)
-        signal: AbortSignal.timeout(95000),
-      })
+  // SSE stream: keeps the DO gateway connection alive with periodic keepalive comments
+  // while MiniMax generates (can take 60–120s for full songs).
+  // DO's 100s "gateway timeout" is an idle timeout — active streaming resets it.
+  const stream = new ReadableStream({
+    async start(controller) {
+      const enc = new TextEncoder()
+      const send = (data: string) => controller.enqueue(enc.encode(data))
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
-        // Don't retry on client errors (4xx)
-        if (res.status < 500) {
-          return new Response(
-            JSON.stringify({ error: err.message || err.base_resp?.status_msg || err.error || `MiniMax error ${res.status}` }),
-            { status: res.status, headers: { 'Content-Type': 'application/json' } }
-          )
-        }
-        if (attempt < 2) { await sleep(2000); continue }
-        return new Response(
-          JSON.stringify({ error: err.message || err.base_resp?.status_msg || err.error || `MiniMax error ${res.status}` }),
-          { status: res.status, headers: { 'Content-Type': 'application/json' } }
-        )
-      }
+      // Keepalive timer: send SSE comment every 15s to prevent idle timeout
+      const keepaliveInterval = setInterval(() => {
+        try { send(': keepalive\n\n') } catch { /* stream closed */ }
+      }, 15000)
 
-      const data = await res.json()
-      if (data?.base_resp?.status_code !== 0) {
-        const errMsg = data.base_resp?.status_msg || 'MiniMax API error'
-        if (attempt < 2) { await sleep(2000); continue }
-        return new Response(
-          JSON.stringify({ error: errMsg }),
-          { status: 500, headers: { 'Content-Type': 'application/json' } }
-        )
-      }
-
-      const audioUrl = data?.data?.audio_url
-      if (!audioUrl) {
-        // Fallback: some model versions return hex audio instead of URL
-        const hexAudio = data?.data?.audio
-        if (hexAudio) {
-          const audioBase64 = Buffer.from(hexAudio, 'hex').toString('base64')
-          return new Response(
-            JSON.stringify({ url: `data:audio/mp3;base64,${audioBase64}`, model: minimaxModel }),
-            { status: 200, headers: { 'Content-Type': 'application/json' } }
-          )
-        }
-        if (attempt < 2) { await sleep(2000); continue }
-        return new Response(
-          JSON.stringify({ error: 'No audio from MiniMax. Verify API key has music credits.' }),
-          { status: 500, headers: { 'Content-Type': 'application/json' } }
-        )
-      }
-
-      return new Response(
-        JSON.stringify({ url: audioUrl, model: minimaxModel }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } }
-      )
-    } catch (err) {
-      const isTimeout = err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError')
-      if (isTimeout) {
-        // Don't retry timeouts — each retry wastes 95s of API credits and still hits DO's 100s limit.
-        return new Response(JSON.stringify({ error: 'Music generation timed out (MiniMax took >95s). Try a shorter prompt or fewer lyrics.' }), {
-          status: 504, headers: { 'Content-Type': 'application/json' },
+      try {
+        // Fire MiniMax request — NO AbortSignal timeout, let it run as long as needed
+        const res = await fetch(`${MINIMAX_BASE}/music_generation`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify(requestBody),
         })
-      }
-      const msg = err instanceof Error ? err.message : 'Music generation failed'
-      if (attempt < 2) { await sleep(2000); continue }
-      return new Response(JSON.stringify({ error: msg }), {
-        status: 500, headers: { 'Content-Type': 'application/json' },
-      })
-    }
-  }
 
-  // Should not reach here
-  return new Response(JSON.stringify({ error: 'Music generation failed after retries' }), {
-    status: 500, headers: { 'Content-Type': 'application/json' },
+        clearInterval(keepaliveInterval)
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
+          send(`data: ${JSON.stringify({ error: err.message || err.base_resp?.status_msg || err.error || `MiniMax error ${res.status}` })}\n\n`)
+          controller.close()
+          return
+        }
+
+        const data = await res.json()
+
+        if (data?.base_resp?.status_code !== 0) {
+          send(`data: ${JSON.stringify({ error: data.base_resp?.status_msg || 'MiniMax API error' })}\n\n`)
+          controller.close()
+          return
+        }
+
+        const audioUrl = data?.data?.audio_url
+        if (!audioUrl) {
+          // Fallback: decode hex audio
+          const hexAudio = data?.data?.audio
+          if (hexAudio) {
+            const audioBase64 = Buffer.from(hexAudio, 'hex').toString('base64')
+            send(`data: ${JSON.stringify({ url: `data:audio/mp3;base64,${audioBase64}`, model: minimaxModel })}\n\n`)
+            controller.close()
+            return
+          }
+          send(`data: ${JSON.stringify({ error: 'No audio from MiniMax. Verify API key has music credits.' })}\n\n`)
+          controller.close()
+          return
+        }
+
+        send(`data: ${JSON.stringify({ url: audioUrl, model: minimaxModel })}\n\n`)
+        controller.close()
+      } catch (err) {
+        clearInterval(keepaliveInterval)
+        const msg = err instanceof Error ? err.message : 'MiniMax generation failed'
+        try { send(`data: ${JSON.stringify({ error: msg })}\n\n`) } catch { /* ignore */ }
+        controller.close()
+      }
+    }
   })
+
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no', // Disable nginx buffering (important for DO)
+    },
+  })
+
 }
