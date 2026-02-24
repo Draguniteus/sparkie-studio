@@ -1,89 +1,113 @@
-J3VzZSBjbGllbnQnCgppbXBvcnQgUmVhY3QsIHsgdXNlRWZmZWN0LCB1c2VS
-ZWYsIHVzZVN0YXRlIH0gZnJvbSAncmVhY3QnCmltcG9ydCB7IElERVBhbmVs
-IH0gZnJvbSAnQC9jb21wb25lbnRzL2xheW91dC9JREVQYW5lbCcKaW1wb3J0
-IHsgTWFpblBhbmVsIH0gZnJvbSAnQC9jb21wb25lbnRzL2xheW91dC9NYWlu
-UGFuZWwnCmltcG9ydCB7IFNpZGViYXIgfSBmcm9tICdAL2NvbXBvbmVudHMv
-bGF5b3V0L1NpZGViYXInCmltcG9ydCB7IHVzZUFwcFN0b3JlIH0gZnJvbSAn
-QC9zdG9yZS9hcHBTdG9yZScKaW1wb3J0IHsgT25ib2FyZGluZ01vZGFsIH0g
-ZnJvbSAnQC9jb21wb25lbnRzL09uYm9hcmRpbmdNb2RhbCcKaW1wb3J0IHsg
-U2V0dGluZ3NNb2RhbCB9IGZyb20gJ0AvY29tcG9uZW50cy9sYXlvdXQvU2V0
-dGluZ3NNb2RhbCcKCmNvbnN0IE1JTl9JREVfV0lEVEggPSAyODAKY29uc3Qg
-TUFYX0lERV9GUkFDVElPTiA9IDAuNzUKY29uc3QgREVGQVVMVF9JREVfV0lE
-VEggPSA1MjAKCmV4cG9ydCBkZWZhdWx0IGZ1bmN0aW9uIEhvbWUoKSB7CiAg
-Y29uc3QgeyBpZGVPcGVuLCBvbmJvYXJkaW5nRG9uZSwgaHlkcmF0ZUZyb21T
-dG9yYWdlIH0gPSB1c2VBcHBTdG9yZSgpCiAgY29uc3QgW21vdW50ZWQsIHNl
-dE1vdW50ZWRdID0gdXNlU3RhdGUoZmFsc2UpCgogIHVzZUVmZmVjdCgoKSA9
-PiB7CiAgICBoeWRyYXRlRnJvbVN0b3JhZ2UoKSAgLy8gaHlkcmF0ZSBsb2Nh
-bFN0b3JhZ2Ug4oaSIHN0b3JlIGFmdGVyIG1vdW50IChTU1Itc2FmZSkKICAg
-IHNldE1vdW50ZWQodHJ1ZSkKICB9LCBbaHlkcmF0ZUZyb21TdG9yYWdlXSkK
-ICBjb25zdCBbaWRlV2lkdGgsIHNldElkZVdpZHRoXSA9IHVzZVN0YXRlKERF
-RkFVTFRfSURFX1dJRFRIKQogIGNvbnN0IFtpc0RyYWdnaW5nLCBzZXRJc0Ry
-YWdnaW5nXSA9IHVzZVN0YXRlKGZhbHNlKQoKICAvLyBVc2UgcmVmcyBmb3Ig
-ZHJhZyBzdGF0ZSDigJQgYXZvaWRzIHN0YWxlIGNsb3N1cmUgaXNzdWVzIGVu
-dGlyZWx5CiAgY29uc3QgZHJhZ1JlZiA9IHVzZVJlZih7IGFjdGl2ZTogZmFs
-c2UsIHN0YXJ0WDogMCwgc3RhcnRXaWR0aDogMCB9KQogIGNvbnN0IGNvbnRh
-aW5lclJlZiA9IHVzZVJlZjxIVE1MRGl2RWxlbWVudD4obnVsbCkKCiAgdXNl
-RWZmZWN0KCgpID0+IHsKICAgIGNvbnN0IG9uTW92ZSA9IChlOiBNb3VzZUV2
-ZW50KSA9PiB7CiAgICAgIGlmICghZHJhZ1JlZi5jdXJyZW50LmFjdGl2ZSB8
-fCAhY29udGFpbmVyUmVmLmN1cnJlbnQpIHJldHVybgogICAgICBjb25zdCB0
-b3RhbFcgPSBjb250YWluZXJSZWYuY3VycmVudC5vZmZzZXRXaWR0aAogICAg
-ICBjb25zdCBkZWx0YSA9IGRyYWdSZWYuY3VycmVudC5zdGFydFggLSBlLmNs
-aWVudFggIC8vIGxlZnQgPSBleHBhbmQgSURFCiAgICAgIGNvbnN0IG5leHQg
-PSBNYXRoLm1pbigKICAgICAgICBNYXRoLm1heChkcmFnUmVmLmN1cnJlbnQu
-c3RhcnRXaWR0aCArIGRlbHRhLCBNSU5fSURFX1dJRFRIKSwKICAgICAgICB0
-b3RhbFcgKiBNQVhfSURFX0ZSQUNUSU9OCiAgICAgICkKICAgICAgc2V0SWRl
-V2lkdGgobmV4dCkKICAgIH0KCiAgICBjb25zdCBvblVwID0gKCkgPT4gewog
-ICAgICBpZiAoIWRyYWdSZWYuY3VycmVudC5hY3RpdGl2ZSkgcmV0dXJuCiAg
-ICAgIGRyYWdSZWYuY3VycmVudC5hY3RpdmUgPSBmYWxzZQogICAgICBzZXRJ
-c0RyYWdnaW5nKGZhbHNlKQogICAgICBkb2N1bWVudC5ib2R5LnN0eWxlLmN1
-cnNvciA9ICcnCiAgICAgIGRvY3VtZW50LmJvZHkuc3R5bGUudXNlclNlbGVj
-dCA9ICcnCiAgICB9CgogICAgd2luZG93LmFkZEV2ZW50TGlzdGVuZXIoJ21v
-dXNlbW92ZScsIG9uTW92ZSkKICAgIHdpbmRvdy5hZGRFdmVudExpc3RlbmVy
-KCdtb3VzZXVwJywgb25VcCkKICAgIHJldHVybiAoKSA9PiB7CiAgICAgIHdp
-bmRvdy5yZW1vdmVFdmVudExpc3RlbmVyKCdtb3VzZW1vdmUnLCBvbk1vdmUp
-CiAgICAgIHdpbmRvdy5yZW1vdmVFdmVudExpc3RlbmVyKCdtb3VzZXVwJywg
-b25VcCkKICAgIH0KICB9LCBbXSkgLy8gc2FmZSDigJQgcmVhZHMgZnJvbSBy
-ZWZzLCBub3Qgc3RhdGUKCiAgY29uc3Qgb25TcGxpdHRlck1vdXNlRG93biA9
-IChlOiBSZWFjdC5Nb3VzZUV2ZW50PEhUTUxEaXZFbGVtZW50PikgPT4gewog
-ICAgZS5wcmV2ZW50RGVmYXVsdCgpCiAgICBkcmFnUmVmLmN1cnJlbnQgPSB7
-IGFjdGl2ZTogdHJ1ZSwgc3RhcnRYOiBlLmNsaWVudFgsIHN0YXJ0V2lkdGg6
-IGlkZVdpZHRoIH0KICAgIHNldElzRHJhZ2dpbmcodHJ1ZSkKICAgIGRvY3Vt
-ZW50LmJvZHkuc3R5bGUuY3Vyc29yID0gJ2NvbC1yZXNpemUnCiAgICBkb2N1
-bWVudC5ib2R5LnN0eWxlLnVzZXJTZWxlY3QgPSAnbm9uZScKICB9CgogIHJl
-dHVybiAoCiAgICA8ZGl2IHJlZj17Y29udGFpbmVyUmVmfSBjbGFzc05hbWU9
-ImZsZXggaC1zY3JlZW4gdy1zY3JlZW4gb3ZlcmZsb3ctaGlkZGVuIGJnLWhp
-dmUtNjAwIj4KICAgICAgeyFtb3VudGVkICYmICFvbmJvYXJkaW5nRG9uZSAm
-JiA8T25ib2FyZGluZ01vZGFsIC8+fQogICAgICA8U2V0dGluZ3NNb2RhbCAv
-PgogICAgICB7LyogRHJhZyBvdmVybGF5IOKAlCBjYXB0dXJlcyBhbGwgbW91
-c2UgZXZlbnRzIGR1cmluZyBkcmFnIHNvIG5vdGhpbmcgdW5kZXJuZWF0aCBp
-bnRlcmZlcmVzICovfQogICAgICB7aXNEcmFnZ2luZyAmJiAoCiAgICAgICAg
-PGRpdiBjbGFzc05hbWU9ImZpeGVkIGluc2V0LTAgei1bOTk5OV0gY3Vyc29y
-LWNvbC1yZXNpemUiIC8+CiAgICAgICl9CgogICAgICB7LyogTGVmdCBTaWRl
-YmFyICovfQogICAgICA8U2lkZWJhciAvPgoKICAgICAgey8qIENlbnRlciBQ
-YW5lbCAqL30KICAgICAgPGRpdiBjbGFzc05hbWU9ImZsZXgtMSBtaW4tdy0w
-IG92ZXJmbG93LWhpZGRlbiI+CiAgICAgICAgPE1haW5QYW5lbCAvPgogICAg
-ICA8L2Rpdj4KCiAgICAgIHsvKiBTcGxpdHRlciDigJQgd2lkZXIgaGl0IGFy
-ZWEgKDE2cHgpIHdpdGggYSB0aGluIHZpc3VhbCBsaW5lIGluIHRoZSBjZW50
-ZXIgKi99CiAgICAgIHtpZGVPcGVuICYmICgKICAgICAgICA8ZGl2CiAgICAg
-ICAgICBvbk1vdXNlRG93bj17b25TcGxpdHRlck1vdXNlRG93bn0KICAgICAg
-ICAgIGNsYXNzTmFtZT0icmVsYXRpdmUgdy00IHNocmluay0wIGN1cnNvci1j
-b2wtcmVzaXplIGdyb3VwIGZsZXggaXRlbXMtY2VudGVyIGp1c3RpZnktY2Vu
-dGVyIgogICAgICAgICAgdGl0bGU9IkRyYWcgdG8gcmVzaXplIgogICAgICAg
-ID4KICAgICAgICAgIHsvKiBWaXN1YWwgbGluZSAqL30KICAgICAgICAgIDxk
-aXYgY2xhc3NOYW1lPXtgYWJzb2x1dGUgaW5zZXQteS0wIHctcHggdHJhbnNp
-dGlvbi1jb2xvcnMgJHsKICAgICAgICAgICAgaXNEcmFnZ2luZyA/ICdiZy1o
-b25leS01MDAnIDogJ2JnLWhpdmUtYm9yZGVyIGdyb3VwLWhvdmVyOmJnLWhv
-bmV5LTUwMC82MCcKICAgICAgICAgIH1gfSAvPgogICAgICAgICAgey8qIEdy
-aXAgZG90cyAqL30KICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPSJyZWxhdGl2
-ZSB6LTEwIGZsZXggZmxleC1jb2wgZ2FwLTEgb3BhY2l0eS0wIGdyb3VwLWhv
-dmVyOm9wYWNpdHktMTAwIHRyYW5zaXRpb24tb3BhY2l0eSI+CiAgICAgICAg
-ICAgIHtbMCwgMSwgMl0ubWFwKGkgPT4gKAogICAgICAgICAgICAgIDxzcGFu
-IGtleT17aX0gY2xhc3NOYW1lPXtgdy0xIGgtMSByb3VuZGVkLWZ1bGwgdHJh
-bnNpdGlvbi1jb2xvcnMgJHsKICAgICAgICAgICAgICAgIGlzRHJhZ2dpbmcg
-PyAnYmctaG9uZXktNTAwJyA6ICdiZy1ob25leS01MDAvNzAnCiAgICAgICAg
-ICAgICAgfWB9IC8+CiAgICAgICAgICAgICkpfQogICAgICAgICAgPC9kaXY+
-CiAgICAgICAgPC9kaXY+CiAgICAgICl9CgogICAgICB7LyogSURFIFBhbmVs
-ICovfQogICAgICB7aWRlT3BlbiAmJiAoCiAgICAgICAgPGRpdiBzdHlsZT17
-eyB3aWR0aDogaWRlV2lkdGggfX0gY2xhc3NOYW1lPSJzaHJpbmstMCBvdmVy
-Zmxvdy1oaWRkZW4iPgogICAgICAgICAgPElERVBhbmVsIC8+CiAgICAgICAg
-PC9kaXY+CiAgICAgICl9CiAgICA8L2Rpdj4KICApCn0K
+'use client'
+
+import React, { useEffect, useRef, useState } from 'react'
+import { IDEPanel } from '@/components/layout/IDEPanel'
+import { MainPanel } from '@/components/layout/MainPanel'
+import { Sidebar } from '@/components/layout/Sidebar'
+import { useAppStore } from '@/store/appStore'
+import { OnboardingModal } from '@/components/OnboardingModal'
+import { SettingsModal } from '@/components/layout/SettingsModal'
+
+const MIN_IDE_WIDTH = 280
+const MAX_IDE_FRACTION = 0.75
+const DEFAULT_IDE_WIDTH = 520
+
+export default function Home() {
+  const { ideOpen, onboardingDone, hydrateFromStorage } = useAppStore()
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    hydrateFromStorage()  // hydrate localStorage → store after mount (SSR-safe)
+    setMounted(true)
+  }, [hydrateFromStorage])
+  const [ideWidth, setIdeWidth] = useState(DEFAULT_IDE_WIDTH)
+  const [isDragging, setIsDragging] = useState(false)
+
+  // Use refs for drag state — avoids stale closure issues entirely
+  const dragRef = useRef({ active: false, startX: 0, startWidth: 0 })
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!dragRef.current.active || !containerRef.current) return
+      const totalW = containerRef.current.offsetWidth
+      const delta = dragRef.current.startX - e.clientX  // left = expand IDE
+      const next = Math.min(
+        Math.max(dragRef.current.startWidth + delta, MIN_IDE_WIDTH),
+        totalW * MAX_IDE_FRACTION
+      )
+      setIdeWidth(next)
+    }
+
+    const onUp = () => {
+      if (!dragRef.current.active) return
+      dragRef.current.active = false
+      setIsDragging(false)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, []) // safe — reads from refs, not state
+
+  const onSplitterMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    dragRef.current = { active: true, startX: e.clientX, startWidth: ideWidth }
+    setIsDragging(true)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+  }
+
+  return (
+    <div ref={containerRef} className="flex h-screen w-screen overflow-hidden bg-hive-600">
+      {mounted && !onboardingDone && <OnboardingModal />}
+      <SettingsModal />
+      {/* Drag overlay — captures all mouse events during drag so nothing underneath interferes */}
+      {isDragging && (
+        <div className="fixed inset-0 z-[9999] cursor-col-resize" />
+      )}
+
+      {/* Left Sidebar */}
+      <Sidebar />
+
+      {/* Center Panel */}
+      <div className="flex-1 min-w-0 overflow-hidden">
+        <MainPanel />
+      </div>
+
+      {/* Splitter — wider hit area (16px) with a thin visual line in the center */}
+      {ideOpen && (
+        <div
+          onMouseDown={onSplitterMouseDown}
+          className="relative w-4 shrink-0 cursor-col-resize group flex items-center justify-center"
+          title="Drag to resize"
+        >
+          {/* Visual line */}
+          <div className={`absolute inset-y-0 w-px transition-colors ${
+            isDragging ? 'bg-honey-500' : 'bg-hive-border group-hover:bg-honey-500/60'
+          }`} />
+          {/* Grip dots */}
+          <div className="relative z-10 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            {[0, 1, 2].map(i => (
+              <span key={i} className={`w-1 h-1 rounded-full transition-colors ${
+                isDragging ? 'bg-honey-500' : 'bg-honey-500/70'
+              }`} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* IDE Panel */}
+      {ideOpen && (
+        <div style={{ width: ideWidth }} className="shrink-0 overflow-hidden">
+          <IDEPanel />
+        </div>
+      )}
+    </div>
+  )
+}
