@@ -6,6 +6,7 @@ import { MainPanel } from '@/components/layout/MainPanel'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { useAppStore } from '@/store/appStore'
 import { OnboardingModal } from '@/components/OnboardingModal'
+import { SettingsModal } from '@/components/layout/SettingsModal'
 
 const MIN_IDE_WIDTH = 280
 const MAX_IDE_FRACTION = 0.75
@@ -64,7 +65,8 @@ export default function Home() {
 
   return (
     <div ref={containerRef} className="flex h-screen w-screen overflow-hidden bg-hive-600">
-      {mounted && !onboardingDone && <OnboardingModal />}
+      {mounted && !onboardingDone && <OnboardingModal />
+      <SettingsModal />}
       {/* Drag overlay — captures all mouse events during drag so nothing underneath interferes */}
       {isDragging && (
         <div className="fixed inset-0 z-[9999] cursor-col-resize" />
