@@ -438,16 +438,19 @@ export function ChatInput() {
       const mediaExt = mediaType === 'video' ? 'mp4' : mediaType === 'music' ? 'mp3' : 'png'
       const mediaAssetType = (mediaType === 'music' || mediaType === 'speech') ? 'audio' : mediaType === 'lyrics' ? 'other' : mediaType
       const safePrompt = prompt.slice(0, 40).replace(/[^a-z0-9 ]/gi, '').trim().replace(/\s+/g, '-') || mediaType
-      addAsset({
-        name: `${safePrompt}.${mediaExt}`,
-        language: '',
-        content: data.url,
-        chatId,
-        chatTitle: mediaChatTitle,
-        fileId: assistantMsgId,
-        assetType: mediaAssetType as import('@/store/appStore').AssetType,
-        source: 'agent' as const,
-      })
+      // Only add to assets if we actually have a URL/data (guards against empty failed results)
+      if (data.url) {
+        addAsset({
+          name: `${safePrompt}.${mediaExt}`,
+          language: '',
+          content: data.url,
+          chatId,
+          chatTitle: mediaChatTitle,
+          fileId: assistantMsgId,
+          assetType: mediaAssetType as import('@/store/appStore').AssetType,
+          source: 'agent' as const,
+        })
+      }
       updateWorklogEntry(logId, { status: "done", duration: Date.now() - startTime })
     } catch (error) {
       console.error(`${mediaType} gen error:`, error)
