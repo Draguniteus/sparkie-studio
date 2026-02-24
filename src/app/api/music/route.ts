@@ -6,8 +6,8 @@ export const maxDuration = 300
 // MiniMax Music Generation (synchronous)
 // POST https://api.minimax.io/v1/music_generation
 // Body: { model, prompt, lyrics, audio_setting }  ← lyrics is REQUIRED by MiniMax
-// Response: { data: { audio: "<hex>", status: 2 }, base_resp: { status_code: 0 } }
-// audio field is HEX-encoded → Buffer.from(hex, 'hex').toString('base64')
+// Response (url mode): { data: { audio_url: "...", status: 2 }, base_resp: { status_code: 0 } }
+// Using output_format: 'url' returns CDN link (expires 24h) — faster, avoids hex decode
 //
 // ⚠️  CRITICAL: Section tags MUST be Title Case with spaces:
 //   [Intro] [Verse] [Pre Chorus] [Chorus] [Bridge] [Outro] [Interlude] [Post Chorus]
@@ -17,6 +17,7 @@ export const maxDuration = 300
 // ACE Music (api.acemusic.ai)
 // POST /release_task → { task_id }
 // GET  /query_result?task_id=xxx → poll → { status, audio_url }
+// ⚠️  GPU cold starts take 2-3 min. Submit call itself may hang → use 30s timeout w/ retry
 
 const MINIMAX_BASE = 'https://api.minimax.io/v1'
 const ACE_MUSIC_BASE = 'https://api.acemusic.ai'
@@ -35,38 +36,22 @@ async function sleep(ms: number) {
 
 /**
  * Extract lyrics and style prompt from a combined user message.
- *
- * The user pastes one big text that looks like:
- *   Song Title: "..."
- *   Style / Vibe: ... (used as MiniMax `prompt`)
- *   [Verse] ...
- *   [Pre Chorus] ...
- *   [Chorus] ...
- *   ... (this whole structured block becomes MiniMax `lyrics`)
- *
- * If no song structure tags are found, uses the full text as both
- * prompt and lyrics (MiniMax accepts this).
  */
 function parseMusicPrompt(raw: string): { stylePrompt: string; lyrics: string } {
   const text = raw.trim()
 
-  // Find first lyric structure tag — match common formats users write
   const lyricsTagRe = /\[\s*(Verse|Pre.?Chorus|Chorus|Bridge|Outro|Intro|Hook|Interlude|Post.?Chorus|Transition|Break|Build.?Up|Inst|Solo)/i
   const tagMatch = lyricsTagRe.exec(text)
 
   if (tagMatch && tagMatch.index > 0) {
-    // Everything before the first tag = style description (as MiniMax prompt)
-    // Everything from the first tag onwards = lyrics
     let stylePart = text.slice(0, tagMatch.index).trim()
     const lyricsPart = text.slice(tagMatch.index).trim()
 
-    // Clean up the style part — strip "Lyrics:" label if present
     stylePart = stylePart
       .replace(/\n?Lyrics\s*[\(\[].*?\]?\)?:?\s*$/im, '')
       .replace(/\n?Lyrics\s*:.*$/im, '')
       .trim()
 
-    // If style part is too long, MiniMax prompt should be short & punchy — take last paragraph
     const styleLines = stylePart.split('\n').filter(l => l.trim())
     const stylePrompt = styleLines.length > 6
       ? styleLines.slice(-4).join(' ').trim()
@@ -75,21 +60,15 @@ function parseMusicPrompt(raw: string): { stylePrompt: string; lyrics: string } 
     return { stylePrompt, lyrics: normalizeLyricsTags(lyricsPart) }
   }
 
-  // No structured lyrics found — use entire text as both
   return { stylePrompt: text.slice(0, 500), lyrics: normalizeLyricsTags(text) }
 }
 
 /**
  * Normalize section tags to MiniMax-compatible Title Case format with spaces.
- * ⚠️  MiniMax requires EXACTLY: [Intro], [Verse], [Pre Chorus], [Chorus], [Bridge],
- *   [Outro], [Interlude], [Post Chorus], [Transition], [Break], [Hook], [Build Up], [Inst], [Solo]
- * Numbered variants ([Verse 1], [Chorus 2]) are stripped to base tag.
- * Lowercase or wrong-format tags cause silent/invalid MP3.
  */
 function normalizeLyricsTags(lyrics: string): string {
   return lyrics.replace(/\[([^\]]+)\]/g, (_, inner) => {
     const s = inner.trim().toLowerCase()
-    // Match and normalize to exact MiniMax Title Case + space format
     if (/\bverse\b/.test(s))                           return '[Verse]'
     if (/\bpre[\s\-]?chorus\b/.test(s))               return '[Pre Chorus]'
     if (/\bpost[\s\-]?chorus\b/.test(s))              return '[Post Chorus]'
@@ -104,7 +83,6 @@ function normalizeLyricsTags(lyrics: string): string {
     if (/\bbuild[\s\-]?up\b/.test(s))                 return '[Build Up]'
     if (/\binst\b|\binstrumental\b/.test(s))          return '[Inst]'
     if (/\bsolo\b/.test(s))                            return '[Solo]'
-    // Unknown tag — strip number suffixes, em-dashes, parens, then Title Case
     const cleaned = s
       .replace(/\s*[–—\-\(].*$/, '')
       .replace(/\s+\d+$/, '')
@@ -113,25 +91,50 @@ function normalizeLyricsTags(lyrics: string): string {
   })
 }
 
-async function generateAceMusic(prompt: string, lyrics?: string): Promise<string> {
-  const taskRes = await fetch(`${ACE_MUSIC_BASE}/release_task`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${ACE_MUSIC_API_KEY}`,
-    },
-    body: JSON.stringify({ prompt, lyrics: lyrics || '', duration: 30 }),
-    signal: AbortSignal.timeout(300000),
-  })
+/**
+ * Submit an ACE Music task with a short timeout + retry logic.
+ * GPU cold starts cause the submit endpoint to hang for 2-3 min.
+ * We use a 30s timeout per attempt and retry up to 3 times.
+ */
+async function submitAceMusicTask(prompt: string, lyrics: string): Promise<string> {
+  const MAX_SUBMIT_ATTEMPTS = 3
+  let lastErr: Error | null = null
 
-  if (!taskRes.ok) {
-    const err = await taskRes.json().catch(() => ({}))
-    throw new Error(err.message || err.error || `ACE Music submit error (${taskRes.status})`)
+  for (let attempt = 1; attempt <= MAX_SUBMIT_ATTEMPTS; attempt++) {
+    try {
+      const taskRes = await fetch(`${ACE_MUSIC_BASE}/release_task`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${ACE_MUSIC_API_KEY}`,
+        },
+        body: JSON.stringify({ prompt, lyrics, duration: 30 }),
+        signal: AbortSignal.timeout(30000), // 30s per attempt — gateway won't 504 us
+      })
+
+      if (!taskRes.ok) {
+        const err = await taskRes.json().catch(() => ({}))
+        throw new Error(err.message || err.error || `ACE Music submit error (${taskRes.status})`)
+      }
+
+      const taskData = await taskRes.json()
+      const taskId = taskData.task_id || taskData.id
+      if (!taskId) throw new Error('ACE Music: no task_id returned')
+      return taskId
+    } catch (e) {
+      lastErr = e instanceof Error ? e : new Error(String(e))
+      const isTimeout = lastErr.name === 'TimeoutError' || lastErr.message.includes('timed out') || lastErr.message.includes('abort')
+      if (!isTimeout || attempt === MAX_SUBMIT_ATTEMPTS) throw lastErr
+      // GPU cold start — wait 5s between submit retries
+      await sleep(5000)
+    }
   }
 
-  const taskData = await taskRes.json()
-  const taskId = taskData.task_id || taskData.id
-  if (!taskId) throw new Error('ACE Music: no task_id returned')
+  throw lastErr!
+}
+
+async function generateAceMusic(prompt: string, lyrics?: string): Promise<string> {
+  const taskId = await submitAceMusicTask(prompt, lyrics || '')
 
   // Poll for result (up to ~3.5 min, every 5s)
   for (let i = 0; i < 40; i++) {
@@ -208,16 +211,17 @@ export async function POST(req: NextRequest) {
 
   const minimaxModel = MINIMAX_MODEL_MAP[model] || 'music-2.5'
 
-  // Parse the combined prompt → extract style description + lyrics
   const { stylePrompt, lyrics } = parseMusicPrompt(rawPrompt)
   const finalLyrics = (explicitLyrics || lyrics).trim()
   const finalPrompt = stylePrompt.trim()
 
-  // MiniMax music_generation requires BOTH prompt and lyrics
+  // Use output_format: 'url' — returns CDN link instead of hex-encoded audio
+  // Significantly faster (avoids large hex payload) and stays well under DO's 60s HTTP timeout
   const requestBody = {
     model: minimaxModel,
     prompt: finalPrompt,
     lyrics: finalLyrics,
+    output_format: 'url',
     audio_setting: {
       sample_rate: 44100,
       bitrate: 256000,
@@ -233,7 +237,7 @@ export async function POST(req: NextRequest) {
         'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify(requestBody),
-      signal: AbortSignal.timeout(120000),
+      signal: AbortSignal.timeout(55000), // 55s — safely under DO's 60s gateway limit
     })
 
     if (!res.ok) {
@@ -253,19 +257,17 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const hexAudio = data?.data?.audio
-    if (!hexAudio) {
+    // output_format: 'url' → data.data.audio_url (CDN link, 24h expiry)
+    const audioUrl = data?.data?.audio_url
+    if (!audioUrl) {
       return new Response(
-        JSON.stringify({ error: 'No audio returned from MiniMax. Verify your MINIMAX_API_KEY has music credits.' }),
+        JSON.stringify({ error: 'No audio URL returned from MiniMax. Verify your MINIMAX_API_KEY has music credits.' }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       )
     }
 
-    // MiniMax returns HEX-encoded audio → convert to base64 data URL
-    const audioBase64 = Buffer.from(hexAudio, 'hex').toString('base64')
-
     return new Response(
-      JSON.stringify({ url: `data:audio/mp3;base64,${audioBase64}`, model: minimaxModel }),
+      JSON.stringify({ url: audioUrl, model: minimaxModel }),
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     )
   } catch (err) {
