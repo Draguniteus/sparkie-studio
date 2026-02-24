@@ -7,7 +7,7 @@ const MINIMAX_BASE = 'https://api.minimax.io/v1'
 
 // MiniMax Lyrics Generation
 // POST /v1/lyrics_generation
-// body: { prompt: string, model: "music-2.5" }
+// body: { prompt: string }  ← model field NOT accepted, causes 400
 // Returns: { base_resp: { status_code, status_msg }, data: { lyrics: string, title: string } }
 
 export async function POST(req: NextRequest) {
@@ -17,12 +17,10 @@ export async function POST(req: NextRequest) {
   }
 
   let prompt: string
-  let model: string
 
   try {
     const body = await req.json()
     prompt = body.prompt
-    model = body.model || 'music-2.5'
     if (!prompt) throw new Error('Missing prompt')
   } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
@@ -35,7 +33,8 @@ export async function POST(req: NextRequest) {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({ prompt, model }),
+      // ⚠️ Do NOT send model field — MiniMax lyrics_generation rejects it with 400
+      body: JSON.stringify({ prompt }),
     })
 
     if (!res.ok) {
@@ -48,6 +47,13 @@ export async function POST(req: NextRequest) {
 
     const data = await res.json()
 
+    if (data?.base_resp?.status_code !== 0) {
+      return NextResponse.json(
+        { error: data.base_resp?.status_msg || 'MiniMax API error' },
+        { status: 500 }
+      )
+    }
+
     const lyricsText = data?.data?.lyrics
     const title = data?.data?.title || 'Generated Lyrics'
 
@@ -55,7 +61,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No lyrics returned from MiniMax' }, { status: 500 })
     }
 
-    return NextResponse.json({ lyrics: lyricsText, title, model })
+    return NextResponse.json({ lyrics: lyricsText, title, model: 'music-2.5' })
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Lyrics generation failed'
     return NextResponse.json({ error: msg }, { status: 500 })
