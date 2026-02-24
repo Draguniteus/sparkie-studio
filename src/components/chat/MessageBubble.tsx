@@ -100,6 +100,7 @@ export function MessageBubble({ message }: Props) {
 
   const isImage = message.type === "image" && message.imageUrl
   const isVideo = message.type === "video" && message.imageUrl
+  const isAudio = (message.type === "music" || message.type === "speech") && message.imageUrl
   const isBuildCard = message.type === "build_card" && message.buildCard
 
   return (
@@ -146,6 +147,37 @@ export function MessageBubble({ message }: Props) {
               {message.imagePrompt && (
                 <p className="text-xs text-text-muted italic">{message.imagePrompt}</p>
               )}
+            </div>
+          ) : isAudio && !message.isStreaming ? (
+            /* Audio Player */
+            <div className="space-y-2">
+              <div className="rounded-xl bg-hive-elevated border border-hive-border p-3">
+                <div className="flex items-center gap-2.5 mb-2">
+                  <div className="w-8 h-8 rounded-lg bg-honey-500/15 flex items-center justify-center shrink-0">
+                    <span className="text-base">{message.type === "music" ? "🎵" : "🎤"}</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-text-primary capitalize">{message.type}</p>
+                    {message.imagePrompt && (
+                      <p className="text-[10px] text-text-muted truncate">{message.imagePrompt}</p>
+                    )}
+                  </div>
+                  <a
+                    href={message.imageUrl}
+                    download={`sparkie-${message.type}.mp3`}
+                    className="p-1.5 rounded-md bg-hive-hover text-text-muted hover:text-text-primary transition-colors"
+                    title="Download"
+                  >
+                    <Download size={13} />
+                  </a>
+                </div>
+                <audio
+                  src={message.imageUrl}
+                  controls
+                  className="w-full"
+                  style={{ height: 40, colorScheme: "dark" }}
+                />
+              </div>
             </div>
           ) : isImage && !message.isStreaming ? (
             /* Image Display */
