@@ -171,6 +171,9 @@ interface AppState {
   setUserProfile: (profile: UserProfile) => void
   updateUserProfile: (patch: Partial<UserProfile>) => void
   dismissOnboarding: () => void
+  settingsOpen: boolean
+  openSettings: () => void
+  closeSettings: () => void
   lastMode: 'chat' | 'build'
   setLastMode: (mode: 'chat' | 'build') => void
   hydrateFromStorage: () => void
@@ -364,6 +367,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     try { if (updated) localStorage.setItem('sparkie_user_profile', JSON.stringify(updated)) } catch {}
     return { userProfile: updated }
   }),
+  settingsOpen: false,
+  openSettings: () => set({ settingsOpen: true }),
+  closeSettings: () => set({ settingsOpen: false }),
   dismissOnboarding: () => {
     try { localStorage.setItem('sparkie_onboarding_done', 'true') } catch {}
     set({ onboardingDone: true })
