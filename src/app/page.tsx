@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { IDEPanel } from '@/components/layout/IDEPanel'
 import { MainPanel } from '@/components/layout/MainPanel'
 import { Sidebar } from '@/components/layout/Sidebar'
@@ -55,7 +55,7 @@ export default function Home() {
     }
   }, []) // safe — reads from refs, not state
 
-  const onSplitterMouseDown = (e: React.MouseEvent) => {
+  const onSplitterMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault()
     dragRef.current = { active: true, startX: e.clientX, startWidth: ideWidth }
     setIsDragging(true)
