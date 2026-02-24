@@ -10,8 +10,7 @@ import {
 export function Sidebar() {
   const {
     sidebarOpen, toggleSidebar, chats, currentChatId,
-    setCurrentChat, createChat, deleteChat, setActiveTab, activeTab
-  } = useAppStore()
+    setCurrentChat, createChat, deleteChat, setActiveTab, activeTab, openSettings} = useAppStore()
   const [historyCollapsed, setHistoryCollapsed] = useState(false)
 
   if (!sidebarOpen) {
@@ -153,7 +152,7 @@ export function Sidebar() {
             <div className="text-sm font-medium truncate text-text-primary">Draguniteus</div>
             <div className="text-[10px] text-text-muted">Free</div>
           </div>
-          <button className="p-1.5 rounded-md hover:bg-hive-hover text-text-muted hover:text-text-secondary transition-colors">
+          <button onClick={openSettings} className="p-1.5 rounded-md hover:bg-hive-hover text-text-muted hover:text-text-secondary transition-colors" title="Settings">
             <Settings size={13} />
           </button>
         </div>
