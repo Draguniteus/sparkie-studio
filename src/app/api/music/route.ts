@@ -69,7 +69,7 @@ function parseMusicPrompt(raw: string): { stylePrompt: string; lyrics: string } 
   for (let i = paragraphs.length - 1; i >= 0; i--) {
     const p = paragraphs[i].trim()
     if (!stylePrompt && !hasSectionTag(p) && p.length > 30) {
-      stylePrompt = p.slice(0, 500)
+      stylePrompt = p.slice(0, 300)
     } else {
       lyricParagraphs.unshift(p)
     }
@@ -78,7 +78,7 @@ function parseMusicPrompt(raw: string): { stylePrompt: string; lyrics: string } 
   if (!stylePrompt) {
     const tagMatch = /\[\s*(Verse|Pre.?Chorus|Chorus|Bridge|Outro|Intro|Hook|Interlude|Post.?Chorus|Transition|Break|Build.?Up|Inst|Solo)/i.exec(text)
     if (tagMatch && tagMatch.index > 0) {
-      stylePrompt = text.slice(0, tagMatch.index).trim().slice(0, 500)
+      stylePrompt = text.slice(0, tagMatch.index).trim().slice(0, 300)
       lyricParagraphs.length = 0
       lyricParagraphs.push(text.slice(tagMatch.index))
     } else {
@@ -90,9 +90,9 @@ function parseMusicPrompt(raw: string): { stylePrompt: string; lyrics: string } 
 
   let fullLyrics = lyricParagraphs.join('\n\n').trim()
   fullLyrics = normalizeLyricsTags(fullLyrics)
-  if (fullLyrics.length > 1200) {
-    const cut = fullLyrics.lastIndexOf('\n', 1200)
-    fullLyrics = cut > 600 ? fullLyrics.slice(0, cut) : fullLyrics.slice(0, 1200)
+  if (fullLyrics.length > 900) {
+    const cut = fullLyrics.lastIndexOf('\n', 900)
+    fullLyrics = cut > 400 ? fullLyrics.slice(0, cut) : fullLyrics.slice(0, 900)
   }
 
   return { stylePrompt: stylePrompt.trim(), lyrics: fullLyrics }
@@ -327,6 +327,13 @@ export async function POST(req: NextRequest) {
         { status: 200, headers: { 'Content-Type': 'application/json' } }
       )
     } catch (err) {
+      const isTimeout = err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError')
+      if (isTimeout) {
+        // Don't retry timeouts — each retry wastes 95s of API credits and still hits DO's 100s limit.
+        return new Response(JSON.stringify({ error: 'Music generation timed out (MiniMax took >95s). Try a shorter prompt or fewer lyrics.' }), {
+          status: 504, headers: { 'Content-Type': 'application/json' },
+        })
+      }
       const msg = err instanceof Error ? err.message : 'Music generation failed'
       if (attempt < 2) { await sleep(2000); continue }
       return new Response(JSON.stringify({ error: msg }), {
