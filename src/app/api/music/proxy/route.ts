@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
 
     const upstream = await fetch(decodedUrl, {
       headers: fetchHeaders,
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(90000), // 90s — large audio files can be 5-10MB
     })
 
     if (!upstream.ok && upstream.status !== 206) {
@@ -48,7 +48,8 @@ export async function GET(req: NextRequest) {
       })
     }
 
-    const contentType = upstream.headers.get('content-type') || 'audio/mpeg'
+    // Force audio/mpeg — some CDNs return application/octet-stream which prevents browser playback
+    const contentType = 'audio/mpeg'
     const contentLength = upstream.headers.get('content-length')
     const contentRange = upstream.headers.get('content-range')
     const acceptRanges = upstream.headers.get('accept-ranges')
