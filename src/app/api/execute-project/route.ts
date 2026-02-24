@@ -46,44 +46,40 @@ export async function POST(req: NextRequest) {
       let sbx: Sandbox | undefined
 
       try {
-        emit('status', 'Starting E2B sandbox…')
+        emit('status', 'Starting E2B sandbox\u2026')
         sbx = await Sandbox.create({ apiKey, timeoutMs: 5 * 60 * 1000 })
-        emit('status', 'Sandbox ready. Writing project files…')
+        emit('status', 'Sandbox ready. Writing project files\u2026')
 
         // Write all files to /project directory
         const pkgFile = files.find(f => f.name === 'package.json' || f.name.endsWith('/package.json'))
         for (const file of files) {
           const filePath = `/project/${file.name}`
-          // Create parent directories implicitly (E2B does this automatically)
           await sbx.files.write(filePath, file.content)
         }
-        emit('status', `Wrote ${files.length} file(s). Installing packages…`)
+        emit('status', `Wrote ${files.length} file(s). Installing packages\u2026`)
 
-        // npm install — blocking
-        const installProc = await sbx.process.start({
-          cmd: 'cd /project && npm install --prefer-offline 2>&1',
-          onStdout: (data) => emit('stdout', data.line ?? String(data)),
-          onStderr: (data) => emit('stderr', data.line ?? String(data)),
+        // npm install — blocking (wait for exit)
+        await sbx.commands.run('cd /project && npm install --prefer-offline 2>&1', {
+          onStdout: (data) => emit('stdout', data),
+          onStderr: (data) => emit('stderr', data),
         })
-        await installProc.wait()
 
         // Detect start command from package.json
         const startCmd = pkgFile ? resolveStartCmd(pkgFile.content) : 'npm start'
         emit('status', `Running: ${startCmd}`)
 
-        // Start the server — non-blocking, stream first 20s of output
+        // Start the server — background (non-blocking), stream first 25s of output
         const serverStarted = { value: false }
-        const serverProc = await sbx.process.start({
-          cmd: `cd /project && ${startCmd} 2>&1`,
+        const serverHandle = await sbx.commands.run(`cd /project && ${startCmd} 2>&1`, {
+          background: true,
           onStdout: (data) => {
-            const line = data.line ?? String(data)
-            emit('stdout', line)
+            emit('stdout', data)
             // Detect server-ready signals
-            if (/listening|started|running|ready|server.*port|port.*\d{4}/i.test(line)) {
+            if (/listening|started|running|ready|server.*port|port.*\d{4}/i.test(data)) {
               serverStarted.value = true
             }
           },
-          onStderr: (data) => emit('stderr', data.line ?? String(data)),
+          onStderr: (data) => emit('stderr', data),
         })
 
         // Wait up to 25s for server to start, then close stream (server keeps running in bg)
@@ -93,6 +89,9 @@ export async function POST(req: NextRequest) {
             if (serverStarted.value) { clearInterval(check); clearTimeout(timeout); resolve() }
           }, 500)
         })
+
+        // Disconnect from the handle — server keeps running, we just stop watching
+        await serverHandle.disconnect().catch(() => {})
 
         if (serverStarted.value) {
           emit('status', 'Server started. Check port 3000 for the live endpoint.')
@@ -104,7 +103,7 @@ export async function POST(req: NextRequest) {
         emit('error', err instanceof Error ? err.message : String(err))
       } finally {
         controller.close()
-        // Keep sandbox alive — don't kill (server is running)
+        // Keep sandbox alive — server is still running in background
       }
     },
   })
