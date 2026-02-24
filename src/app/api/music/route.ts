@@ -7,7 +7,7 @@ export const maxDuration = 300
 // POST https://api.minimax.io/v1/music_generation
 // Both music-2.5 AND music-2.0 support output_format='url' (per MiniMax docs).
 // Use URL output for both: returns data.audio_url CDN link (fast, tiny response).
-// Hex output (default) returns a massive hex payload that overflows DO's 60s gateway.
+// Hex output (default) returns a massive hex payload that can overflow DO's 100s gateway.
 //
 // ACE Music (api.acemusic.ai) — SPLIT ARCHITECTURE:
 // POST /api/music { model: 'ace-step-free' } → { taskId, status:'queued' } in <30s
@@ -109,10 +109,26 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const pollRes = await fetch(`${ACE_MUSIC_BASE}/query_result?task_id=${taskId}`, {
+    // Try GET first; ACE may also accept POST {task_ids:[id]} format
+    let pollRes = await fetch(`${ACE_MUSIC_BASE}/query_result?task_id=${taskId}`, {
       headers: { 'Authorization': `Bearer ${ACE_MUSIC_API_KEY}` },
       signal: AbortSignal.timeout(15000),
     })
+
+    // If GET fails, try POST format (alternate ACE API contract)
+    if (!pollRes.ok) {
+      try {
+        pollRes = await fetch(`${ACE_MUSIC_BASE}/query_result`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${ACE_MUSIC_API_KEY}`,
+          },
+          body: JSON.stringify({ task_ids: [taskId] }),
+          signal: AbortSignal.timeout(15000),
+        })
+      } catch { /* fall through to pending */ }
+    }
 
     if (!pollRes.ok) {
       return new Response(JSON.stringify({ status: 'pending' }), {
@@ -120,7 +136,9 @@ export async function GET(req: NextRequest) {
       })
     }
 
-    const data = await pollRes.json()
+    let rawData = await pollRes.json()
+    // Normalize: POST {task_ids:[id]} returns an array; GET returns object directly
+    const data = Array.isArray(rawData) ? rawData[0] : rawData
     const status = data.status || data.state || ''
 
     if (status === 'done' || status === 'completed' || status === 'success') {
@@ -256,8 +274,8 @@ export async function POST(req: NextRequest) {
           'Authorization': `Bearer ${apiKey}`,
         },
         body: JSON.stringify(requestBody),
-        // 58s — as close to DO's 60s gateway limit as safe
-        signal: AbortSignal.timeout(58000),
+        // 95s — safely under DO App Platform's hard 100s gateway limit (confirmed)
+        signal: AbortSignal.timeout(95000),
       })
 
       if (!res.ok) {
@@ -288,9 +306,18 @@ export async function POST(req: NextRequest) {
 
       const audioUrl = data?.data?.audio_url
       if (!audioUrl) {
+        // Fallback: some model versions return hex audio instead of URL
+        const hexAudio = data?.data?.audio
+        if (hexAudio) {
+          const audioBase64 = Buffer.from(hexAudio, 'hex').toString('base64')
+          return new Response(
+            JSON.stringify({ url: `data:audio/mp3;base64,${audioBase64}`, model: minimaxModel }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          )
+        }
         if (attempt < 2) { await sleep(2000); continue }
         return new Response(
-          JSON.stringify({ error: 'No audio URL from MiniMax. Verify API key has music credits.' }),
+          JSON.stringify({ error: 'No audio from MiniMax. Verify API key has music credits.' }),
           { status: 500, headers: { 'Content-Type': 'application/json' } }
         )
       }
