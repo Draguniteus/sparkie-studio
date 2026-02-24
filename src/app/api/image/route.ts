@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 // Node.js runtime needed for: setTimeout polling (Hailuo), longer timeouts
 export const runtime = 'nodejs'
-export const maxDuration = 120 // seconds
+export const maxDuration = 300 // seconds – MiniMax video polling needs up to 4 min
 
 const POLLINATIONS_IMAGE_MODELS = new Set(['flux', 'flux-realism', 'flux-anime', 'flux-3d', 'turbo', 'gptimage', 'klein', 'klein-large', 'zimage'])
 const POLLINATIONS_VIDEO_MODELS = new Set(['seedance', 'seedance-pro', 'veo', 'wan', 'ltx-2'])
@@ -77,8 +77,8 @@ export async function POST(req: NextRequest) {
       const taskId = submitData?.task_id
       if (!taskId) return NextResponse.json({ error: 'No task_id returned' }, { status: 500 })
 
-      // Poll for result (max 90s, 18 × 5s intervals)
-      for (let i = 0; i < 18; i++) {
+      // Poll for result (max 200s, 40 × 5s intervals)
+      for (let i = 0; i < 40; i++) {
         await sleep(5000)
         try {
           const pollRes = await fetch(`https://api.minimax.io/v1/query/video_generation?task_id=${taskId}`, {
@@ -87,10 +87,18 @@ export async function POST(req: NextRequest) {
           if (!pollRes.ok) continue
           const pollData = await pollRes.json()
           if (pollData?.status === 'Success') {
-            const url = pollData?.video_url || (pollData?.file_id
-              ? `https://api.minimax.io/v1/files/retrieve?file_id=${pollData.file_id}`
-              : null)
-            if (url) return NextResponse.json({ url, prompt: safePrompt, model: safeModel, type: 'video' })
+            let videoUrl = pollData?.video_url || null
+            if (!videoUrl && pollData?.file_id) {
+              // Resolve file_id → public download_url via MiniMax files API
+              const fileRes = await fetch(`https://api.minimax.io/v1/files/retrieve?file_id=${pollData.file_id}`, {
+                headers: { 'Authorization': `Bearer ${apiKey}` },
+              }).catch(() => null)
+              if (fileRes?.ok) {
+                const fileData = await fileRes.json().catch(() => ({}))
+                videoUrl = fileData?.file?.download_url || null
+              }
+            }
+            if (videoUrl) return NextResponse.json({ url: videoUrl, prompt: safePrompt, model: safeModel, type: 'video' })
           }
           if (pollData?.status === 'Fail') {
             return NextResponse.json({ error: 'MiniMax video generation failed' }, { status: 500 })
