@@ -68,11 +68,32 @@ function parseMusicPrompt(raw: string): { stylePrompt: string; lyrics: string } 
       ? styleLines.slice(-4).join(' ').trim()
       : stylePart
 
-    return { stylePrompt, lyrics: lyricsPart }
+    return { stylePrompt, lyrics: normalizeLyricsTags(lyricsPart) }
   }
 
   // No structured lyrics found — use entire text as both
-  return { stylePrompt: text.slice(0, 500), lyrics: text }
+  return { stylePrompt: text.slice(0, 500), lyrics: normalizeLyricsTags(text) }
+}
+
+/**
+ * Normalize section tags to MiniMax-compatible lowercase format.
+ * MiniMax expects: [verse], [chorus], [bridge], [outro], [intro], [pre-chorus]
+ * Users write: [Verse 1], [Pre-Chorus], [Final Chorus – bigger, layered vocals], etc.
+ * Non-standard tags and trailing descriptors (after em-dash/parenthesis) are stripped.
+ */
+function normalizeLyricsTags(lyrics: string): string {
+  return lyrics.replace(/\[([^\]]+)\]/g, (_, inner) => {
+    const s = inner.trim().toLowerCase()
+    if (/\bverse\b/.test(s))       return '[verse]'
+    if (/\bpre.?chorus\b/.test(s)) return '[pre-chorus]'
+    if (/\bchorus\b/.test(s))      return '[chorus]'
+    if (/\bbridge\b/.test(s))      return '[bridge]'
+    if (/\boutro\b/.test(s))       return '[outro]'
+    if (/\bintro\b/.test(s))       return '[intro]'
+    if (/\bhook\b/.test(s))        return '[chorus]'
+    // Unknown: strip em-dash/paren suffix, lowercase
+    return `[${s.replace(/\s*[–—\-\(].*$/, '').trim()}]`
+  })
 }
 
 async function generateAceMusic(prompt: string, lyrics?: string): Promise<string> {
