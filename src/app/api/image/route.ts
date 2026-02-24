@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 // Node.js runtime needed for: setTimeout polling (Hailuo), longer timeouts
 export const runtime = 'nodejs'
-export const maxDuration = 300 // seconds – MiniMax video polling needs up to 4 min
+export const maxDuration = 300 // seconds – MiniMax video polling needs up to ~5 min for Hailuo-02
 
 const POLLINATIONS_IMAGE_MODELS = new Set(['flux', 'flux-realism', 'flux-anime', 'flux-3d', 'turbo', 'gptimage', 'klein', 'klein-large', 'zimage'])
 const POLLINATIONS_VIDEO_MODELS = new Set(['seedance', 'seedance-pro', 'veo', 'wan', 'ltx-2'])
@@ -78,7 +78,7 @@ export async function POST(req: NextRequest) {
       if (!taskId) return NextResponse.json({ error: 'No task_id returned' }, { status: 500 })
 
       // Poll for result (max 200s, 40 × 5s intervals)
-      for (let i = 0; i < 40; i++) {
+      for (let i = 0; i < 55; i++) {  // 55 × 5s = 275s, fits within DO's 300s timeout
         await sleep(5000)
         try {
           const pollRes = await fetch(`https://api.minimax.io/v1/query/video_generation?task_id=${taskId}`, {
