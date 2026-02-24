@@ -3,6 +3,19 @@
 import { useState, useRef, useCallback, useEffect } from "react"
 import { Mic, MicOff, X, Volume2, Loader2, Phone } from "lucide-react"
 
+
+// MiniMax speech-01-turbo voice options
+const SPARKIE_VOICES = [
+  { id: "Wise_Woman",      label: "Wise Woman",    desc: "Warm, wise female" },
+  { id: "Friendly_Person", label: "Friendly",      desc: "Upbeat, approachable" },
+  { id: "Deep_Voice_Man",  label: "Deep Voice",    desc: "Rich, authoritative male" },
+  { id: "Calm_Woman",      label: "Calm Woman",    desc: "Soothing, measured" },
+  { id: "Lively_Girl",     label: "Lively",        desc: "Energetic, fun" },
+  { id: "Gentle_Man",      label: "Gentle Man",    desc: "Soft-spoken, thoughtful" },
+  { id: "Confident_Woman", label: "Confident",     desc: "Assertive, clear" },
+  { id: "news_anchor_en",  label: "News Anchor",   desc: "Professional, crisp" },
+]
+
 interface VoiceChatProps {
   onClose: () => void
   onSendMessage: (text: string) => Promise<string>  // returns AI text reply
@@ -17,6 +30,8 @@ export function VoiceChat({ onClose, onSendMessage, voiceId = "Wise_Woman", isAc
   const [transcript, setTranscript] = useState("")
   const [spokenReply, setSpokenReply] = useState("")
   const [errorMsg, setErrorMsg] = useState("")
+  const [selectedVoiceId, setSelectedVoiceId] = useState(voiceId)
+  const [showVoicePicker, setShowVoicePicker] = useState(false)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null)
@@ -110,7 +125,7 @@ export function VoiceChat({ onClose, onSendMessage, voiceId = "Wise_Woman", isAc
             body: JSON.stringify({
               text: aiReply.trim().slice(0, 2000), // cap for TTS
               model: "speech-01-turbo",
-              voice_id: voiceId,
+              voice_id: selectedVoiceId,
             }),
           })
 
@@ -251,6 +266,35 @@ export function VoiceChat({ onClose, onSendMessage, voiceId = "Wise_Woman", isAc
         {errorMsg && (
           <p className="text-xs text-red-400 text-center">{errorMsg}</p>
         )}
+
+        {/* Voice picker */}
+        <div className="w-full">
+          <button
+            onClick={() => setShowVoicePicker(v => !v)}
+            className="w-full flex items-center justify-between px-3 py-1.5 rounded-lg bg-hive-700 border border-hive-border hover:border-honey-500/30 transition-colors text-xs"
+          >
+            <span className="text-text-muted">Voice:</span>
+            <span className="text-honey-500 font-medium">
+              {SPARKIE_VOICES.find(v => v.id === selectedVoiceId)?.label ?? "Wise Woman"}
+            </span>
+          </button>
+          {showVoicePicker && (
+            <div className="mt-1 bg-hive-700 border border-hive-border rounded-lg overflow-hidden">
+              {SPARKIE_VOICES.map(v => (
+                <button
+                  key={v.id}
+                  onClick={() => { setSelectedVoiceId(v.id); setShowVoicePicker(false) }}
+                  className={`w-full flex items-center justify-between px-3 py-2 text-xs hover:bg-hive-hover transition-colors ${
+                    selectedVoiceId === v.id ? "text-honey-500 bg-honey-500/5" : "text-text-secondary"
+                  }`}
+                >
+                  <span className="font-medium">{v.label}</span>
+                  <span className="text-text-muted">{v.desc}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
         {/* Main action button */}
         <button

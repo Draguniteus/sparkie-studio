@@ -46,7 +46,7 @@ export function RadioPlayer() {
   const [isCollapsed, setIsCollapsed] = useState(false)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const progressIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Hydrate from localStorage on mount
   useEffect(() => {
