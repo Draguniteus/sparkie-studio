@@ -425,6 +425,82 @@ export function ChatInput() {
         return
       }
 
+      // SSE stream (MiniMax models): read event stream, show progress dots while waiting
+      if (response.headers.get("content-type")?.includes("text/event-stream")) {
+        const reader = response.body!.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ""
+        const dots = [".", "..", "..."]
+        let dotIdx = 0
+
+        const tickInterval = setInterval(() => {
+          dotIdx = (dotIdx + 1) % 3
+          const elapsed = Math.round((Date.now() - startTime) / 1000)
+          updateMessage(chatId, assistantMsgId, {
+            content: `🎵 Generating music${dots[dotIdx]} (${elapsed}s)`,
+            isStreaming: true,
+          })
+        }, 1500)
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            buffer += decoder.decode(value, { stream: true })
+            const lines = buffer.split("\n")
+            buffer = lines.pop() ?? ""
+            for (const line of lines) {
+              if (!line.startsWith("data:")) continue
+              const json = line.slice(5).trim()
+              if (!json) continue
+              try {
+                const sseData = JSON.parse(json)
+                clearInterval(tickInterval)
+                if (sseData.error) {
+                  updateMessage(chatId, assistantMsgId, {
+                    content: `music generation failed: ${sseData.error}`,
+                    isStreaming: false, type: "text",
+                  })
+                  updateWorklogEntry(logId, { status: "error", duration: Date.now() - startTime })
+                  setStreaming(false)
+                  return
+                }
+                if (sseData.url) {
+                  updateMessage(chatId, assistantMsgId, {
+                    content: prompt,
+                    imageUrl: sseData.url,
+                    imagePrompt: prompt,
+                    isStreaming: false,
+                    type: "music",
+                    model: model,
+                  })
+                  const mediaChatTitle = useAppStore.getState().chats.find(c => c.id === chatId)?.title || "New Chat"
+                  const safePrompt = prompt.slice(0, 40).replace(/[^a-z0-9 ]/gi, "").trim().replace(/\s+/g, "-") || "music"
+                  addAsset({
+                    name: `${safePrompt}.mp3`,
+                    language: "",
+                    content: sseData.url,
+                    chatId,
+                    chatTitle: mediaChatTitle,
+                    fileId: assistantMsgId,
+                    assetType: "audio" as import("@/store/appStore").AssetType,
+                    source: "agent" as const,
+                  })
+                  updateWorklogEntry(logId, { status: "done", duration: Date.now() - startTime })
+                  setStreaming(false)
+                  return
+                }
+              } catch { /* malformed SSE line, skip */ }
+            }
+          }
+        } finally {
+          clearInterval(tickInterval)
+          reader.cancel().catch(() => {})
+        }
+        setStreaming(false)
+        return
+      }
+
       const data = await response.json()
 
       // ACE Music async path: server returns taskId, frontend polls for result
