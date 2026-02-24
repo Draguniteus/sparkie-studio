@@ -3,11 +3,11 @@ import { NextRequest, NextResponse } from 'next/server'
 export const runtime = 'nodejs'
 export const maxDuration = 30
 
-const MINIMAX_BASE = 'https://api.minimaxi.chat/v1'
+const MINIMAX_BASE = 'https://api.minimax.io/v1'
 
 // MiniMax Lyrics Generation
 // POST /v1/lyrics_generation
-// body: { prompt: string, model: "music-01" }
+// body: { prompt: string, model: "music-2.5" }
 // Returns: { base_resp: { status_code, status_msg }, data: { lyrics: string, title: string } }
 
 export async function POST(req: NextRequest) {
@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
     prompt = body.prompt
-    model = body.model || 'music-01'
+    model = body.model || 'music-2.5'
     if (!prompt) throw new Error('Missing prompt')
   } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
