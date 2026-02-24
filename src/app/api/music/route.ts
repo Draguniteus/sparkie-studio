@@ -139,10 +139,21 @@ export async function GET(req: NextRequest) {
     let rawData = await pollRes.json()
     // Normalize: POST {task_ids:[id]} returns an array; GET returns object directly
     const data = Array.isArray(rawData) ? rawData[0] : rawData
-    const status = data.status || data.state || ''
+    const rawStatus = data.status ?? data.state ?? ''
+    // ACE returns integer status: 0=pending/processing, 1=success, 2=failed
+    // Normalize to string for comparison
+    const status = typeof rawStatus === 'number'
+      ? (rawStatus === 1 ? 'done' : rawStatus === 2 ? 'failed' : 'pending')
+      : String(rawStatus)
 
     if (status === 'done' || status === 'completed' || status === 'success') {
-      const audioUrl = data.audio_url || data.url || data.result?.audio_url
+      // ACE audio URL can be in multiple locations depending on API version
+      const audioUrl = data.audio_url
+        || data.url
+        || data.result?.audio_url
+        || data.result?.url
+        || data.data?.audio_url
+        || (Array.isArray(data.audios) ? data.audios[0] : null)
       if (audioUrl) {
         return new Response(JSON.stringify({ status: 'done', url: audioUrl }), {
           status: 200, headers: { 'Content-Type': 'application/json' },
@@ -154,7 +165,7 @@ export async function GET(req: NextRequest) {
     }
 
     if (status === 'failed' || status === 'error') {
-      return new Response(JSON.stringify({ status: 'error', error: data.message || 'Generation failed' }), {
+      return new Response(JSON.stringify({ status: 'error', error: data.message || data.error || 'Generation failed' }), {
         status: 200, headers: { 'Content-Type': 'application/json' },
       })
     }
