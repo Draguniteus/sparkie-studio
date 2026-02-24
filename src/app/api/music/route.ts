@@ -57,57 +57,6 @@ function normalizeLyricsTags(lyrics: string): string {
   })
 }
 
-
-function smartTrimLyrics(lyrics: string): string {
-  // Keep ALL section headers + first 3 lines per section.
-  // For repeated section types (e.g. Chorus x3), keep full content only on first occurrence,
-  // then skeleton tag only for repeats — the music AI fills repeated sections correctly.
-  const lines = lyrics.split('\n')
-  const resultParts: string[] = []
-  let currentTag: string | null = null
-  const currentContent: string[] = []
-  const seenTypes = new Set<string>()
-
-  function sectionType(tag: string): string {
-    const s = tag.toLowerCase()
-    if (s.includes('verse')) return 'verse'
-    if (s.includes('pre') && s.includes('chorus')) return 'pre chorus'
-    if (s.includes('post') && s.includes('chorus')) return 'post chorus'
-    if (s.includes('chorus')) return 'chorus'
-    if (s.includes('bridge')) return 'bridge'
-    if (s.includes('outro')) return 'outro'
-    if (s.includes('intro')) return 'intro'
-    if (s.includes('hook')) return 'hook'
-    return s.replace(/[^a-z ]/g, '').trim()
-  }
-
-  function flush() {
-    if (!currentTag) return
-    const stype = sectionType(currentTag)
-    const content = currentContent.filter(l => l.trim())
-    if (seenTypes.has(stype)) {
-      resultParts.push(currentTag)
-    } else {
-      seenTypes.add(stype)
-      const kept = content.slice(0, 3)
-      resultParts.push(kept.length ? currentTag + '\n' + kept.join('\n') : currentTag)
-    }
-  }
-
-  for (const line of lines) {
-    if (/^\[/.test(line)) {
-      flush()
-      currentTag = line
-      currentContent.length = 0
-    } else {
-      currentContent.push(line)
-    }
-  }
-  flush()
-
-  return resultParts.join('\n\n').trim()
-}
-
 function parseMusicPrompt(raw: string): { stylePrompt: string; lyrics: string } {
   const text = raw.trim()
   const paragraphs = text.split(/\n\n+/)
@@ -141,14 +90,9 @@ function parseMusicPrompt(raw: string): { stylePrompt: string; lyrics: string } 
 
   let fullLyrics = lyricParagraphs.join('\n\n').trim()
   fullLyrics = normalizeLyricsTags(fullLyrics)
-  // Smart structural trim: preserves full song structure (all section headers + key lines per section)
-  // rather than hard-cutting at 900 chars which drops Bridge/Final Chorus/Outro on long songs.
-  fullLyrics = smartTrimLyrics(fullLyrics)
-  // Safety net: if smart trim still produces very long output, hard-cap at 1200 chars
-  if (fullLyrics.length > 1200) {
-    const cut = fullLyrics.lastIndexOf('\n', 1200)
-    fullLyrics = cut > 600 ? fullLyrics.slice(0, cut) : fullLyrics.slice(0, 1200)
-  }
+  // No lyrics length cap — MiniMax handles full song lyrics natively.
+  // Generation time depends on output duration, not input text length.
+  // Proven: music-2.0 generated a 3-min song from a 2,647-char gothic country prompt.
 
   return { stylePrompt: stylePrompt.trim(), lyrics: fullLyrics }
 }
