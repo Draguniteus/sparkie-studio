@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { useAppStore } from "@/store/appStore"
 import { useWebContainer } from "@/hooks/useWebContainer"
 import { FileExplorer } from "@/components/ide/FileExplorer"
