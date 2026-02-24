@@ -426,6 +426,90 @@ export function ChatInput() {
       }
 
       const data = await response.json()
+
+      // ACE Music async path: server returns taskId, frontend polls for result
+      if (data.taskId && data.status === "queued") {
+        const taskId = data.taskId
+        const dots = [".", "..", "..."]
+        let dotIdx = 0
+        let pollCount = 0
+        const MAX_POLLS = 120 // 10 minutes max (120 × 5s)
+
+        updateMessage(chatId, assistantMsgId, {
+          content: `\ud83c\udfb5 Generating music\u2026 this takes 3-5 minutes for ACE-Step`,
+          isStreaming: true,
+        })
+
+        const pollInterval = setInterval(async () => {
+          pollCount++
+          dotIdx = (dotIdx + 1) % 3
+
+          if (pollCount > MAX_POLLS) {
+            clearInterval(pollInterval)
+            updateMessage(chatId, assistantMsgId, {
+              content: `Music generation timed out after 10 minutes. Please try again.`,
+              isStreaming: false, type: "text",
+            })
+            updateWorklogEntry(logId, { status: "error", duration: Date.now() - startTime })
+            setStreaming(false)
+            return
+          }
+
+          try {
+            const statusRes = await fetch(`/api/music?taskId=${taskId}`)
+            if (!statusRes.ok) return // network blip, keep polling
+
+            const statusData = await statusRes.json()
+
+            if (statusData.status === "done" && statusData.url) {
+              clearInterval(pollInterval)
+              updateMessage(chatId, assistantMsgId, {
+                content: prompt,
+                imageUrl: statusData.url,
+                imagePrompt: prompt,
+                isStreaming: false,
+                type: "music",
+                model: model,
+              })
+              const mediaChatTitle = useAppStore.getState().chats.find(c => c.id === chatId)?.title || "New Chat"
+              const safePrompt = prompt.slice(0, 40).replace(/[^a-z0-9 ]/gi, "").trim().replace(/\s+/g, "-") || "music"
+              addAsset({
+                name: `${safePrompt}.mp3`,
+                language: "",
+                content: statusData.url,
+                chatId,
+                chatTitle: mediaChatTitle,
+                fileId: assistantMsgId,
+                assetType: "audio" as import("@/store/appStore").AssetType,
+                source: "agent" as const,
+              })
+              updateWorklogEntry(logId, { status: "done", duration: Date.now() - startTime })
+              setStreaming(false)
+            } else if (statusData.status === "error") {
+              clearInterval(pollInterval)
+              updateMessage(chatId, assistantMsgId, {
+                content: `Music generation failed: ${statusData.error || "Unknown error"}`,
+                isStreaming: false, type: "text",
+              })
+              updateWorklogEntry(logId, { status: "error", duration: Date.now() - startTime })
+              setStreaming(false)
+            } else {
+              // Still pending — update dots animation
+              const elapsed = Math.round((Date.now() - startTime) / 1000)
+              updateMessage(chatId, assistantMsgId, {
+                content: `\ud83c\udfb5 Generating music${dots[dotIdx]} (${elapsed}s)`,
+                isStreaming: true,
+              })
+            }
+          } catch {
+            // Poll failed — keep trying
+          }
+        }, 5000)
+
+        return // don't call setStreaming(false) yet — interval handles it
+      }
+
+      // Synchronous result (MiniMax models)
       const isTextResult = mediaType === "lyrics"
       updateMessage(chatId, assistantMsgId, {
         content: isTextResult ? (data.title ? `**${data.title}**\n\n${data.lyrics}` : data.lyrics) : prompt,
@@ -435,22 +519,20 @@ export function ChatInput() {
         type: isTextResult ? "text" : mediaType,
         model: model,
       })
-      // Register in Assets tab so generated media appears in the Assets grid
-      const mediaChatTitle = useAppStore.getState().chats.find(c => c.id === chatId)?.title || 'New Chat'
-      const mediaExt = mediaType === 'video' ? 'mp4' : mediaType === 'music' ? 'mp3' : 'png'
-      const mediaAssetType = (mediaType === 'music' || mediaType === 'speech') ? 'audio' : mediaType === 'lyrics' ? 'other' : mediaType
-      const safePrompt = prompt.slice(0, 40).replace(/[^a-z0-9 ]/gi, '').trim().replace(/\s+/g, '-') || mediaType
-      // Only add to assets if we actually have a URL/data (guards against empty failed results)
+      const mediaChatTitle = useAppStore.getState().chats.find(c => c.id === chatId)?.title || "New Chat"
+      const mediaExt = mediaType === "video" ? "mp4" : mediaType === "music" ? "mp3" : "png"
+      const mediaAssetType = (mediaType === "music" || mediaType === "speech") ? "audio" : mediaType === "lyrics" ? "other" : mediaType
+      const safePrompt = prompt.slice(0, 40).replace(/[^a-z0-9 ]/gi, "").trim().replace(/\s+/g, "-") || mediaType
       if (data.url) {
         addAsset({
           name: `${safePrompt}.${mediaExt}`,
-          language: '',
+          language: "",
           content: data.url,
           chatId,
           chatTitle: mediaChatTitle,
           fileId: assistantMsgId,
-          assetType: mediaAssetType as import('@/store/appStore').AssetType,
-          source: 'agent' as const,
+          assetType: mediaAssetType as import("@/store/appStore").AssetType,
+          source: "agent" as const,
         })
       }
       updateWorklogEntry(logId, { status: "done", duration: Date.now() - startTime })
