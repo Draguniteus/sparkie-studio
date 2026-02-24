@@ -13,23 +13,84 @@ import { Download, ChevronLeft, ChevronRight } from "lucide-react"
 export function IDEPanelInner() {
   const {
     ideOpen, ideTab, isExecuting, liveCode, files,
-    setIdeTab, containerStatus,
+    setIdeTab, containerStatus, clearTerminalOutput, appendTerminalOutput, setContainerStatus,
   } = useAppStore()
   const { runProject } = useWebContainer()
   const [showExplorer, setShowExplorer] = useState(true)
   const hasTriedWC = useRef(false)
 
-  // Auto-run WebContainer when a package.json project lands
+  // Detect backend-only Node/Express projects (no frontend bundler, no index.html)
+  const isBackendProject = useCallback((fileList: typeof files): boolean => {
+    const names = fileList.map(f => f.name)
+    const contents = fileList.map(f => f.content ?? '').join('\n')
+    const hasHtml   = names.some(n => n === 'index.html' || n.endsWith('/index.html'))
+    const hasPkg    = names.some(n => n === 'package.json')
+    const hasFrontend = /["'](react|vue|svelte|next|vite|@remix-run|astro)["',]/.test(contents)
+    const hasBackend  = /["'](express|fastify|koa|hapi|@nestjs|http\.createServer)["',]/.test(contents)
+    return hasPkg && !hasHtml && !hasFrontend && hasBackend
+  }, [])
+
+  // Auto-run when a package.json project lands
   useEffect(() => {
     const hasPkg = files.some(f => f.name === 'package.json')
-    if (hasPkg && !isExecuting && containerStatus === 'idle' && !hasTriedWC.current) {
-      hasTriedWC.current = true
+    if (!hasPkg || isExecuting || containerStatus !== 'idle' || hasTriedWC.current) {
+      if (files.length === 0) hasTriedWC.current = false
+      return
+    }
+    hasTriedWC.current = true
+
+    if (isBackendProject(files)) {
+      // Backend project — skip WebContainer, run in E2B via execute-project
+      setIdeTab('terminal')
+      clearTerminalOutput()
+      appendTerminalOutput('[Sparkie] Backend project detected — starting E2B runner…\r\n')
+      setContainerStatus('booting')
+
+      const filePayload = files
+        .filter(f => f.type === 'file' && f.content)
+        .map(f => ({ name: f.name, content: f.content! }))
+
+      fetch('/api/execute-project', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: filePayload }),
+      }).then(async (res) => {
+        if (!res.ok || !res.body) {
+          appendTerminalOutput('[ERROR] Failed to start E2B runner\r\n')
+          setContainerStatus('error')
+          return
+        }
+        const reader  = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buf = ''
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buf += decoder.decode(value, { stream: true })
+          const lines = buf.split('\n'); buf = lines.pop() ?? ''
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue
+            try {
+              const { type, data } = JSON.parse(line.slice(6))
+              if (type === 'stdout' || type === 'stderr') appendTerminalOutput(data.endsWith('\n') ? data : data + '\r\n')
+              else if (type === 'status') appendTerminalOutput(`[E2B] ${data}\r\n`)
+              else if (type === 'error') { appendTerminalOutput(`[ERROR] ${data}\r\n`); setContainerStatus('error') }
+              else if (type === 'done')  { appendTerminalOutput(`[E2B] ${data}\r\n`); setContainerStatus('ready') }
+            } catch {}
+          }
+        }
+      }).catch((err) => {
+        appendTerminalOutput(`[ERROR] ${String(err)}\r\n`)
+        setContainerStatus('error')
+      })
+    } else {
+      // Frontend project — use WebContainer as before
       runProject(files).then((launched) => {
         if (launched) setIdeTab('terminal')
       })
     }
-    if (files.length === 0) hasTriedWC.current = false
-  }, [files, isExecuting, containerStatus, runProject, setIdeTab])
+  }, [files, isExecuting, containerStatus, runProject, setIdeTab, isBackendProject,
+      clearTerminalOutput, appendTerminalOutput, setContainerStatus])
 
   // Listen for BuildCard "Open Preview" button → switch to process tab
   useEffect(() => {
