@@ -1083,6 +1083,7 @@ export function ChatInput() {
   const showTemplates = messages_count === 0 && input === "" && genMode === "chat"
 
   return (
+    <>
     <div className="relative">
       {showTemplates && (
         <div className="mb-3 flex flex-wrap gap-2">
@@ -1231,5 +1232,6 @@ export function ChatInput() {
       onSendMessage={sendMessageFromVoice}
       voiceId="Wise_Woman"
     />
+    </>
   )
 }
