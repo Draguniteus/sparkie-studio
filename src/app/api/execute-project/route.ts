@@ -90,8 +90,8 @@ export async function POST(req: NextRequest) {
           }, 500)
         })
 
-        // Disconnect from the handle — server keeps running, we just stop watching
-        await serverHandle.disconnect().catch(() => {})
+        // Stop watching the handle — server keeps running in background
+        await serverHandle.kill().catch(() => {})
 
         if (serverStarted.value) {
           emit('status', 'Server started. Check port 3000 for the live endpoint.')
