@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 export const runtime = 'nodejs'
 export const maxDuration = 60
 
-const MINIMAX_BASE = 'https://api.minimaxi.chat/v1'
+const MINIMAX_BASE = 'https://api.minimax.io/v1'
 
 // MiniMax T2A v2 HTTP endpoint
 // POST /v1/t2a_v2
@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
     text = body.text
-    model = body.model || 'speech-02-turbo'
+    model = body.model || 'speech-01-turbo'
     voiceId = body.voice_id || 'Wise_Woman'
     speed = body.speed ?? 1.0
     if (!text) throw new Error('Missing text')
