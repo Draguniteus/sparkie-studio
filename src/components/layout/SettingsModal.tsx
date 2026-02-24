@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import React, { useState } from 'react'
 import { X, User, Brain, Key, Sliders, CreditCard, AlertTriangle, ChevronRight } from 'lucide-react'
 import { useAppStore } from '@/store/appStore'
 
