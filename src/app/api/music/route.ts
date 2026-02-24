@@ -5,13 +5,15 @@ export const maxDuration = 300
 
 // MiniMax Music Generation
 // POST https://api.minimax.io/v1/music_generation
-// music-2.5: output_format='url' → data.audio_url CDN link (fast, avoids hex payload timeout)
-// music-2.0: no output_format → data.audio hex → decode to base64
+// Both music-2.5 AND music-2.0 support output_format='url' (per MiniMax docs).
+// Use URL output for both: returns data.audio_url CDN link (fast, tiny response).
+// Hex output (default) returns a massive hex payload that overflows DO's 60s gateway.
 //
 // ACE Music (api.acemusic.ai) — SPLIT ARCHITECTURE:
-// POST /api/music { model: 'ace-step-free', prompt } → { taskId, status: 'queued' } in <5s
+// POST /api/music { model: 'ace-step-free' } → { taskId, status:'queued' } in <30s
 // GET  /api/music?taskId=xxx → proxy to ACE /query_result → { status, url? }
-// Frontend polls GET every 5s until status=done (sidesteps DO's 60s gateway limit)
+// Frontend polls GET every 5s (ACE generates full songs in ~1 min)
+// Note: ACE playground always outputs 2 songs per request — this is expected behavior.
 //
 // ⚠️  Section tags MUST be Title Case with spaces:
 //   [Intro] [Verse] [Pre Chorus] [Chorus] [Bridge] [Outro] etc.
@@ -27,9 +29,6 @@ const MINIMAX_MODEL_MAP: Record<string, string> = {
   'music-01':      'music-2.5',
   'music-01-lite': 'music-2.0',
 }
-
-// Only music-2.5 supports output_format:'url' (CDN link)
-const URL_OUTPUT_SUPPORTED = new Set(['music-2.5', 'music-01'])
 
 async function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -100,8 +99,7 @@ function parseMusicPrompt(raw: string): { stylePrompt: string; lyrics: string } 
 }
 
 // ── GET /api/music?taskId=xxx ─────────────────────────────────────────────
-// Lightweight ACE status proxy — called by frontend every 5s
-// Returns: { status: 'pending'|'done'|'error', url?: string, error?: string }
+// ACE status proxy — called by frontend every 5s
 export async function GET(req: NextRequest) {
   const taskId = req.nextUrl.searchParams.get('taskId')
   if (!taskId) {
@@ -143,12 +141,10 @@ export async function GET(req: NextRequest) {
       })
     }
 
-    // Still in progress
     return new Response(JSON.stringify({ status: 'pending' }), {
       status: 200, headers: { 'Content-Type': 'application/json' },
     })
   } catch {
-    // Timeout or network error → return pending so frontend keeps trying
     return new Response(JSON.stringify({ status: 'pending' }), {
       status: 200, headers: { 'Content-Type': 'application/json' },
     })
@@ -173,12 +169,10 @@ export async function POST(req: NextRequest) {
     })
   }
 
-  // ── ACE-Step: submit task and return taskId immediately ──────────────────
-  // Frontend polls GET /api/music?taskId=xxx every 5s
+  // ── ACE-Step: return taskId immediately, frontend polls ──────────────────
   if (model === 'ace-step-free') {
     const { stylePrompt, lyrics } = parseMusicPrompt(rawPrompt)
 
-    // Submit with 30s timeout, 3 retries — but only if previous attempt didn't return a task_id
     let taskId: string | null = null
     let lastErr = ''
 
@@ -200,7 +194,7 @@ export async function POST(req: NextRequest) {
         if (!taskRes.ok) {
           const err = await taskRes.json().catch(() => ({}))
           lastErr = err.message || err.error || `ACE Music submit error (${taskRes.status})`
-          if (taskRes.status === 401 || taskRes.status === 403) break // no point retrying auth errors
+          if (taskRes.status === 401 || taskRes.status === 403) break
           await sleep(5000)
           continue
         }
@@ -223,7 +217,6 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    // Return taskId immediately — frontend will poll GET /api/music?taskId=xxx
     return new Response(JSON.stringify({ taskId, status: 'queued', model: 'ace-step-free' }), {
       status: 202, headers: { 'Content-Type': 'application/json' },
     })
@@ -238,8 +231,6 @@ export async function POST(req: NextRequest) {
   }
 
   const minimaxModel = MINIMAX_MODEL_MAP[model] || 'music-2.5'
-  const useUrlOutput = URL_OUTPUT_SUPPORTED.has(model)
-
   const { stylePrompt, lyrics } = parseMusicPrompt(rawPrompt)
   const finalLyrics = (explicitLyrics || lyrics).trim()
   const finalPrompt = stylePrompt.trim()
@@ -248,67 +239,77 @@ export async function POST(req: NextRequest) {
     model: minimaxModel,
     prompt: finalPrompt,
     lyrics: finalLyrics,
+    // Both music-2.0 and music-2.5 support output_format:'url' (per MiniMax docs).
+    // URL output returns a tiny CDN link vs a massive hex-encoded audio payload.
+    // Hex payload routinely exceeds DO's 60s gateway limit during transfer — URL avoids this entirely.
+    output_format: 'url',
     audio_setting: { sample_rate: 44100, bitrate: 256000, format: 'mp3' },
   }
-  if (useUrlOutput) requestBody.output_format = 'url'
 
-  try {
-    const res = await fetch(`${MINIMAX_BASE}/music_generation`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(requestBody),
-      signal: AbortSignal.timeout(55000),
-    })
+  // Two attempts: MiniMax can be slow under load, one retry gives it a second chance
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const res = await fetch(`${MINIMAX_BASE}/music_generation`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(requestBody),
+        // 58s — as close to DO's 60s gateway limit as safe
+        signal: AbortSignal.timeout(58000),
+      })
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
-      return new Response(
-        JSON.stringify({ error: err.message || err.base_resp?.status_msg || err.error || `MiniMax error ${res.status}` }),
-        { status: res.status, headers: { 'Content-Type': 'application/json' } }
-      )
-    }
-
-    const data = await res.json()
-    if (data?.base_resp?.status_code !== 0) {
-      return new Response(
-        JSON.stringify({ error: data.base_resp?.status_msg || 'MiniMax API error' }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } }
-      )
-    }
-
-    if (useUrlOutput) {
-      const audioUrl = data?.data?.audio_url
-      if (!audioUrl) {
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
+        // Don't retry on client errors (4xx)
+        if (res.status < 500) {
+          return new Response(
+            JSON.stringify({ error: err.message || err.base_resp?.status_msg || err.error || `MiniMax error ${res.status}` }),
+            { status: res.status, headers: { 'Content-Type': 'application/json' } }
+          )
+        }
+        if (attempt < 2) { await sleep(2000); continue }
         return new Response(
-          JSON.stringify({ error: 'No audio URL from MiniMax. Check MINIMAX_API_KEY music credits.' }),
+          JSON.stringify({ error: err.message || err.base_resp?.status_msg || err.error || `MiniMax error ${res.status}` }),
+          { status: res.status, headers: { 'Content-Type': 'application/json' } }
+        )
+      }
+
+      const data = await res.json()
+      if (data?.base_resp?.status_code !== 0) {
+        const errMsg = data.base_resp?.status_msg || 'MiniMax API error'
+        if (attempt < 2) { await sleep(2000); continue }
+        return new Response(
+          JSON.stringify({ error: errMsg }),
           { status: 500, headers: { 'Content-Type': 'application/json' } }
         )
       }
+
+      const audioUrl = data?.data?.audio_url
+      if (!audioUrl) {
+        if (attempt < 2) { await sleep(2000); continue }
+        return new Response(
+          JSON.stringify({ error: 'No audio URL from MiniMax. Verify API key has music credits.' }),
+          { status: 500, headers: { 'Content-Type': 'application/json' } }
+        )
+      }
+
       return new Response(
         JSON.stringify({ url: audioUrl, model: minimaxModel }),
         { status: 200, headers: { 'Content-Type': 'application/json' } }
       )
-    } else {
-      const hexAudio = data?.data?.audio
-      if (!hexAudio) {
-        return new Response(
-          JSON.stringify({ error: 'No audio from MiniMax. Check MINIMAX_API_KEY music credits.' }),
-          { status: 500, headers: { 'Content-Type': 'application/json' } }
-        )
-      }
-      const audioBase64 = Buffer.from(hexAudio, 'hex').toString('base64')
-      return new Response(
-        JSON.stringify({ url: `data:audio/mp3;base64,${audioBase64}`, model: minimaxModel }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } }
-      )
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Music generation failed'
+      if (attempt < 2) { await sleep(2000); continue }
+      return new Response(JSON.stringify({ error: msg }), {
+        status: 500, headers: { 'Content-Type': 'application/json' },
+      })
     }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Music generation failed'
-    return new Response(JSON.stringify({ error: msg }), {
-      status: 500, headers: { 'Content-Type': 'application/json' },
-    })
   }
+
+  // Should not reach here
+  return new Response(JSON.stringify({ error: 'Music generation failed after retries' }), {
+    status: 500, headers: { 'Content-Type': 'application/json' },
+  })
 }
