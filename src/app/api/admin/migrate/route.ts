@@ -114,12 +114,23 @@ export async function GET(req: Request) {
   const client = await pool.connect();
   try {
     await client.query(migration);
-    const result = await client.query(`
+
+    const tablesResult = await client.query(`
       SELECT table_name FROM information_schema.tables
       WHERE table_schema = 'public' ORDER BY table_name;
     `);
-    const tables = result.rows.map((r: { table_name: string }) => r.table_name);
-    return NextResponse.json({ success: true, tables });
+    const tables = tablesResult.rows.map((r: { table_name: string }) => r.table_name);
+
+    // Return users columns so we can verify the migration visually
+    const colsResult = await client.query(`
+      SELECT column_name, data_type, column_default, is_nullable
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'users'
+      ORDER BY ordinal_position;
+    `);
+    const usersColumns = colsResult.rows;
+
+    return NextResponse.json({ success: true, tables, usersColumns });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: msg }, { status: 500 });
