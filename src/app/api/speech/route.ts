@@ -10,15 +10,16 @@ const MINIMAX_BASE = 'https://api.minimax.io/v1'
 // POST /v1/t2a_v2
 // Returns { data: { audio: "<hex>", ... } }
 
+// Voice IDs must match exactly what VoiceChat.tsx picker sends
 const VOICE_MAP: Record<string, string> = {
   'Wise_Woman':       'Wise_Woman',
   'Friendly_Person':  'Friendly_Person',
-  'Lively_Girl':      'Lively_Girl',
   'Deep_Voice_Man':   'Deep_Voice_Man',
   'Calm_Woman':       'Calm_Woman',
-  'Inspirational_girl': 'Inspirational_girl',
-  'Confident_Man':    'Confident_Man',
-  'Cute_Boy':         'Cute_Boy',
+  'Lively_Girl':      'Lively_Girl',
+  'Gentle_Man':       'Gentle_Man',
+  'Confident_Woman':  'Confident_Woman',
+  'news_anchor_en':   'news_anchor_en',
 }
 
 export async function POST(req: NextRequest) {
