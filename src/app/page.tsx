@@ -1,6 +1,8 @@
 'use client'
 
 import React, { useEffect, useRef, useState } from 'react'
+import { useSession } from 'next-auth/react'
+import { useRouter } from 'next/navigation'
 import { IDEPanel } from '@/components/layout/IDEPanel'
 import { MainPanel } from '@/components/layout/MainPanel'
 import { Sidebar } from '@/components/layout/Sidebar'
@@ -13,6 +15,8 @@ const MAX_IDE_FRACTION = 0.75
 const DEFAULT_IDE_WIDTH = 520
 
 export default function Home() {
+  const { status } = useSession()
+  const router = useRouter()
   const { ideOpen, onboardingDone, hydrateFromStorage } = useAppStore()
   const [mounted, setMounted] = useState(false)
 
@@ -20,6 +24,13 @@ export default function Home() {
     hydrateFromStorage()
     setMounted(true)
   }, [hydrateFromStorage])
+
+  // Client-side guard — belt-and-suspenders behind middleware
+  useEffect(() => {
+    if (status === 'unauthenticated') {
+      router.replace('/auth/signin')
+    }
+  }, [status, router])
 
   const [ideWidth, setIdeWidth] = useState(DEFAULT_IDE_WIDTH)
   const [isDragging, setIsDragging] = useState(false)
@@ -61,6 +72,15 @@ export default function Home() {
     setIsDragging(true)
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
+  }
+
+  // Show nothing while checking auth or if not authed
+  if (status === 'loading' || status === 'unauthenticated') {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-[#0c0c14]">
+        <div className="w-6 h-6 border-2 border-violet-500/40 border-t-violet-500 rounded-full animate-spin" />
+      </div>
+    )
   }
 
   return (
