@@ -10,8 +10,45 @@ const MINIMAX_BASE = 'https://api.minimax.io/v1'
 // POST /v1/t2a_v2
 // Returns { data: { audio: "<hex>", ... } }
 
-// Voice IDs must match exactly what VoiceChat.tsx picker sends
+// Voice IDs — all system voices from platform.minimax.io/docs/faq/system-voice-id
+// Map passes through directly; unknown IDs fall back to English_CalmWoman
 const VOICE_MAP: Record<string, string> = {
+  // English Female / Girl
+  'English_radiant_girl':        'English_radiant_girl',
+  'English_captivating_female1': 'English_captivating_female1',
+  'English_Upbeat_Woman':        'English_Upbeat_Woman',
+  'English_CalmWoman':           'English_CalmWoman',
+  'English_UpsetGirl':           'English_UpsetGirl',
+  'English_Whispering_girl':     'English_Whispering_girl',
+  'English_Graceful_Lady':       'English_Graceful_Lady',
+  'English_PlayfulGirl':         'English_PlayfulGirl',
+  'English_MaturePartner':       'English_MaturePartner',
+  'English_MatureBoss':          'English_MatureBoss',
+  'English_LovelyGirl':          'English_LovelyGirl',
+  'English_WiseladyWise':        'English_WiseladyWise',
+  'English_compelling_lady1':    'English_compelling_lady1',
+  'English_SentimentalLady':     'English_SentimentalLady',
+  'English_ImposingManner':      'English_ImposingManner',
+  'English_Soft-spokenGirl':     'English_Soft-spokenGirl',
+  'English_SereneWoman':         'English_SereneWoman',
+  'English_ConfidentWoman':      'English_ConfidentWoman',
+  'English_StressedLady':        'English_StressedLady',
+  'English_AssertiveQueen':      'English_AssertiveQueen',
+  'English_AnimeCharacter':      'English_AnimeCharacter',
+  'English_WhimsicalGirl':       'English_WhimsicalGirl',
+  'English_Kind-heartedGirl':    'English_Kind-heartedGirl',
+  // English Male
+  'English_expressive_narrator': 'English_expressive_narrator',
+  'English_magnetic_voiced_man': 'English_magnetic_voiced_man',
+  'English_Trustworth_Man':      'English_Trustworth_Man',
+  'English_Gentle-voiced_man':   'English_Gentle-voiced_man',
+  'English_ReservedYoungMan':    'English_ReservedYoungMan',
+  'English_ManWithDeepVoice':    'English_ManWithDeepVoice',
+  'English_FriendlyPerson':      'English_FriendlyPerson',
+  'English_DecentYoungMan':      'English_DecentYoungMan',
+  'English_CaptivatingStoryteller': 'English_CaptivatingStoryteller',
+  'news_anchor_en':              'news_anchor_en',
+  // Legacy speech-01 IDs (kept for backward compatibility)
   'Wise_Woman':       'Wise_Woman',
   'Friendly_Person':  'Friendly_Person',
   'Deep_Voice_Man':   'Deep_Voice_Man',
@@ -19,7 +56,6 @@ const VOICE_MAP: Record<string, string> = {
   'Lively_Girl':      'Lively_Girl',
   'Gentle_Man':       'Gentle_Man',
   'Confident_Woman':  'Confident_Woman',
-  'news_anchor_en':   'news_anchor_en',
 }
 
 export async function POST(req: NextRequest) {
@@ -37,14 +73,14 @@ export async function POST(req: NextRequest) {
     const body = await req.json()
     text = body.text
     model = body.model || 'speech-01-turbo'
-    voiceId = body.voice_id || 'Wise_Woman'
+    voiceId = body.voice_id || 'English_CalmWoman'
     speed = body.speed ?? 1.0
     if (!text) throw new Error('Missing text')
   } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
   }
 
-  const resolvedVoice = VOICE_MAP[voiceId] || 'Wise_Woman'
+  const resolvedVoice = VOICE_MAP[voiceId] || voiceId || 'English_CalmWoman'
 
   try {
     const res = await fetch(`${MINIMAX_BASE}/t2a_v2`, {
