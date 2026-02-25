@@ -4,16 +4,44 @@ import { useState, useRef, useCallback, useEffect } from "react"
 import { Mic, MicOff, X, Volume2, Loader2, Phone } from "lucide-react"
 
 
-// MiniMax speech-01-turbo voice options
+// MiniMax voice options — English female/girl voices from platform.minimax.io/docs/faq/system-voice-id
+// Original speech-01-turbo IDs kept for compatibility; new English_* IDs for speech-02 models
 const SPARKIE_VOICES = [
-  { id: "Wise_Woman",      label: "Wise Woman",    desc: "Warm, wise female" },
-  { id: "Friendly_Person", label: "Friendly",      desc: "Upbeat, approachable" },
-  { id: "Deep_Voice_Man",  label: "Deep Voice",    desc: "Rich, authoritative male" },
-  { id: "Calm_Woman",      label: "Calm Woman",    desc: "Soothing, measured" },
-  { id: "Lively_Girl",     label: "Lively",        desc: "Energetic, fun" },
-  { id: "Gentle_Man",      label: "Gentle Man",    desc: "Soft-spoken, thoughtful" },
-  { id: "Confident_Woman", label: "Confident",     desc: "Assertive, clear" },
-  { id: "news_anchor_en",  label: "News Anchor",   desc: "Professional, crisp" },
+  // ── Female / Girl (English) ────────────────────────────────────────────────
+  { id: "English_radiant_girl",        label: "Radiant Girl",       desc: "Bright, cheerful energy" },
+  { id: "English_Whispering_girl",     label: "Whispering Girl",    desc: "Soft, intimate" },
+  { id: "English_PlayfulGirl",         label: "Playful Girl",       desc: "Fun, lively" },
+  { id: "English_LovelyGirl",          label: "Lovely Girl",        desc: "Sweet, likeable" },
+  { id: "English_Kind-heartedGirl",    label: "Kind-Hearted Girl",  desc: "Warm, caring" },
+  { id: "English_WhimsicalGirl",       label: "Whimsical Girl",     desc: "Dreamy, imaginative" },
+  { id: "English_Soft-spokenGirl",     label: "Soft-Spoken Girl",   desc: "Gentle, quiet" },
+  { id: "English_UpsetGirl",           label: "Upset Girl",         desc: "Emotional, expressive" },
+  { id: "English_AnimeCharacter",      label: "Anime Girl",         desc: "Animated female narrator" },
+  // ── Woman (English) ───────────────────────────────────────────────────────
+  { id: "English_CalmWoman",           label: "Calm Woman",         desc: "Soothing, measured" },
+  { id: "English_Upbeat_Woman",        label: "Upbeat Woman",       desc: "Positive, energetic" },
+  { id: "English_SereneWoman",         label: "Serene Woman",       desc: "Peaceful, composed" },
+  { id: "English_ConfidentWoman",      label: "Confident Woman",    desc: "Bold, clear" },
+  { id: "English_StressedLady",        label: "Stressed Lady",      desc: "Tense, urgent tone" },
+  { id: "English_SentimentalLady",     label: "Sentimental Lady",   desc: "Emotional depth, heartfelt" },
+  { id: "English_Graceful_Lady",       label: "Graceful Lady",      desc: "Elegant, poised" },
+  { id: "English_compelling_lady1",    label: "Compelling Lady",    desc: "Persuasive, strong" },
+  { id: "English_captivating_female1", label: "Captivating Female", desc: "Alluring, engaging" },
+  { id: "English_MaturePartner",       label: "Mature Partner",     desc: "Warm, experienced" },
+  { id: "English_MatureBoss",          label: "Bossy Lady",         desc: "Authoritative, direct" },
+  { id: "English_WiseladyWise",        label: "Wise Lady",          desc: "Thoughtful, assured" },
+  { id: "English_AssertiveQueen",      label: "Assertive Queen",    desc: "Powerful, decisive" },
+  { id: "English_ImposingManner",      label: "Imposing Queen",     desc: "Commanding, regal" },
+  // ── Legacy speech-01 IDs (kept for compatibility) ─────────────────────────
+  { id: "Wise_Woman",                  label: "Wise Woman (Legacy)", desc: "Original TTS v1 voice" },
+  { id: "Calm_Woman",                  label: "Calm Woman (Legacy)", desc: "Original TTS v1 voice" },
+  { id: "Confident_Woman",             label: "Confident (Legacy)",  desc: "Original TTS v1 voice" },
+  { id: "Lively_Girl",                 label: "Lively (Legacy)",     desc: "Original TTS v1 voice" },
+  // ── Male (English) ─────────────────────────────────────────────────────────
+  { id: "Friendly_Person",             label: "Friendly",            desc: "Upbeat, approachable" },
+  { id: "Deep_Voice_Man",              label: "Deep Voice",          desc: "Rich, authoritative male" },
+  { id: "Gentle_Man",                  label: "Gentle Man",          desc: "Soft-spoken, thoughtful" },
+  { id: "news_anchor_en",              label: "News Anchor",         desc: "Professional, crisp" },
 ]
 
 interface VoiceChatProps {
