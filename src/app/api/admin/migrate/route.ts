@@ -15,19 +15,25 @@ const migration = `
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 CREATE TABLE IF NOT EXISTS users (
-  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  email          TEXT UNIQUE NOT NULL,
-  display_name   TEXT,
-  avatar_url     TEXT,
-  password_hash  TEXT,
-  tier           TEXT DEFAULT 'free',
-  credits        INTEGER DEFAULT 100,
-  created_at     TIMESTAMPTZ DEFAULT now(),
-  updated_at     TIMESTAMPTZ DEFAULT now()
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email                 TEXT UNIQUE NOT NULL,
+  display_name          TEXT,
+  avatar_url            TEXT,
+  password_hash         TEXT,
+  email_verified        BOOLEAN DEFAULT false,
+  verify_token          TEXT,
+  verify_token_expires  TIMESTAMPTZ,
+  tier                  TEXT DEFAULT 'free',
+  credits               INTEGER DEFAULT 100,
+  created_at            TIMESTAMPTZ DEFAULT now(),
+  updated_at            TIMESTAMPTZ DEFAULT now()
 );
 
--- Add password_hash if upgrading existing table
-ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
+-- Idempotent column additions for existing tables
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash         TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified        BOOLEAN DEFAULT false;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS verify_token          TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS verify_token_expires  TIMESTAMPTZ;
 
 CREATE TABLE IF NOT EXISTS agents (
   id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -91,6 +97,7 @@ CREATE INDEX IF NOT EXISTS idx_generations_type ON generations(type);
 CREATE INDEX IF NOT EXISTS idx_credit_transactions_user_id ON credit_transactions(user_id);
 CREATE INDEX IF NOT EXISTS idx_agents_creator_id ON agents(creator_id);
 CREATE INDEX IF NOT EXISTS idx_agents_visibility ON agents(visibility);
+CREATE INDEX IF NOT EXISTS idx_users_verify_token ON users(verify_token);
 `;
 
 export async function GET(req: Request) {
@@ -104,7 +111,7 @@ export async function GET(req: Request) {
   try {
     await client.query(migration);
     const result = await client.query(`
-      SELECT table_name FROM information_schema.tables 
+      SELECT table_name FROM information_schema.tables
       WHERE table_schema = 'public' ORDER BY table_name;
     `);
     const tables = result.rows.map((r: { table_name: string }) => r.table_name);
