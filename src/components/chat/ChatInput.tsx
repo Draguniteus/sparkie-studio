@@ -1422,11 +1422,13 @@ export function ChatInput() {
     </div>
 
     {/* Voice Chat overlay */}
-    <VoiceChat
-      isActive={isVoiceChatOpen}
-      onClose={() => setIsVoiceChatOpen(false)}
-      onSendMessage={sendMessageFromVoice}
-    />
+    {isVoiceChatOpen && (
+      <VoiceChat
+        isActive={isVoiceChatOpen}
+        onClose={() => setIsVoiceChatOpen(false)}
+        onSendMessage={sendMessageFromVoice}
+      />
+    )}
     </>
   )
 }
