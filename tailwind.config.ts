@@ -9,37 +9,37 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Queen Bee Theme
-        // hive + text + honey wired to CSS vars so applyTheme() affects Tailwind classes instantly
+        // Queen Bee Theme — dark mode defaults (hardcoded for Tailwind JIT compatibility)
+        // Light mode overrides applied via [data-theme="light"] in globals.css
         honey: {
           50:  '#FFF9E6',
           100: '#FFF0BF',
           200: '#FFE699',
           300: '#FFDB66',
           400: '#FFD140',
-          500: 'var(--honey-primary)',
-          600: 'var(--honey-dark)',
+          500: '#FFC30B', // Primary Gold (dark mode) — overridden in light
+          600: '#E5A800',
           700: '#B38300',
           800: '#805E00',
           900: '#4D3800',
         },
         hive: {
           50:  '#F5F5F5',
-          100: 'var(--hive-hover)',
-          200: 'var(--hive-border)',
-          300: 'var(--hive-elevated)',
-          400: 'var(--hive-surface)',
-          500: 'var(--hive-elevated)',
-          600: 'var(--hive-bg)',
-          700: 'var(--hive-surface)',
+          100: '#3A3A3A',
+          200: '#333333',
+          300: '#2D2D2D',
+          400: '#252525',
+          500: '#1F1F1F',
+          600: '#1A1A1A', // Primary Background (dark)
+          700: '#151515', // Sidebar (dark)
           800: '#111111',
           900: '#0A0A0A',
         },
-        'hive-border': 'var(--hive-border)',
-        'hive-hover':  'var(--hive-hover)',
-        'text-primary':   'var(--text-primary)',
-        'text-secondary': 'var(--text-secondary)',
-        'text-muted':     'var(--text-muted)',
+        'hive-border': '#333333',
+        'hive-hover':  '#3A3A3A',
+        'text-primary':   '#F5F5F5',
+        'text-secondary': '#A0A0A0',
+        'text-muted':     '#666666',
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
