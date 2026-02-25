@@ -55,9 +55,45 @@ const LYRICS_MODELS = [
   { id: "music-01", name: "Lyrics-2.5", tag: "Paid", desc: "AI lyrics generation" },
 ]
 
+// Speech model picker (quality/cost tier)
 const SPEECH_MODELS = [
   { id: "speech-02-turbo", name: "Speech Turbo", tag: "Paid", desc: "$60 / M chars — fastest" },
   { id: "speech-02-hd", name: "Speech HD", tag: "Paid", desc: "$100 / M chars — highest quality" },
+]
+
+// Voice options for speech generation — all English voices from platform.minimax.io/docs/faq/system-voice-id
+const SPEECH_VOICES = [
+  // Girls
+  { id: "English_radiant_girl",        name: "Radiant Girl",        tag: "Girl",  desc: "Bright, cheerful energy" },
+  { id: "English_PlayfulGirl",         name: "Playful Girl",        tag: "Girl",  desc: "Fun, lively" },
+  { id: "English_LovelyGirl",          name: "Lovely Girl",         tag: "Girl",  desc: "Sweet, likeable" },
+  { id: "English_Kind-heartedGirl",    name: "Kind-Hearted Girl",   tag: "Girl",  desc: "Warm, caring" },
+  { id: "English_WhimsicalGirl",       name: "Whimsical Girl",      tag: "Girl",  desc: "Dreamy, imaginative" },
+  { id: "English_Soft-spokenGirl",     name: "Soft-Spoken Girl",    tag: "Girl",  desc: "Gentle, quiet" },
+  { id: "English_Whispering_girl",     name: "Whispering Girl",     tag: "Girl",  desc: "Soft, intimate" },
+  { id: "English_UpsetGirl",           name: "Upset Girl",          tag: "Girl",  desc: "Emotional, expressive" },
+  { id: "English_AnimeCharacter",      name: "Anime Girl",          tag: "Girl",  desc: "Animated female narrator" },
+  // Women
+  { id: "English_CalmWoman",           name: "Calm Woman",          tag: "Woman", desc: "Soothing, measured" },
+  { id: "English_Upbeat_Woman",        name: "Upbeat Woman",        tag: "Woman", desc: "Positive, energetic" },
+  { id: "English_SereneWoman",         name: "Serene Woman",        tag: "Woman", desc: "Peaceful, composed" },
+  { id: "English_ConfidentWoman",      name: "Confident Woman",     tag: "Woman", desc: "Bold, clear" },
+  { id: "English_AssertiveQueen",      name: "Assertive Queen",     tag: "Woman", desc: "Powerful, decisive" },
+  { id: "English_ImposingManner",      name: "Imposing Queen",      tag: "Woman", desc: "Commanding, regal" },
+  { id: "English_WiseladyWise",        name: "Wise Lady",           tag: "Woman", desc: "Thoughtful, assured" },
+  { id: "English_Graceful_Lady",       name: "Graceful Lady",       tag: "Woman", desc: "Elegant, poised" },
+  { id: "English_compelling_lady1",    name: "Compelling Lady",     tag: "Woman", desc: "Persuasive, strong" },
+  { id: "English_captivating_female1", name: "Captivating Female",  tag: "Woman", desc: "Alluring, engaging" },
+  { id: "English_MaturePartner",       name: "Mature Partner",      tag: "Woman", desc: "Warm, experienced" },
+  { id: "English_MatureBoss",          name: "Bossy Lady",          tag: "Woman", desc: "Authoritative, direct" },
+  { id: "English_SentimentalLady",     name: "Sentimental Lady",    tag: "Woman", desc: "Emotional depth" },
+  { id: "English_StressedLady",        name: "Stressed Lady",       tag: "Woman", desc: "Tense, urgent tone" },
+  // Male
+  { id: "English_expressive_narrator", name: "Expressive Narrator", tag: "Male",  desc: "Rich, storytelling" },
+  { id: "Deep_Voice_Man",              name: "Deep Voice",          tag: "Male",  desc: "Rich, authoritative" },
+  { id: "Gentle_Man",                  name: "Gentle Man",          tag: "Male",  desc: "Soft-spoken, thoughtful" },
+  { id: "Friendly_Person",             name: "Friendly",            tag: "Male",  desc: "Upbeat, approachable" },
+  { id: "news_anchor_en",              name: "News Anchor",         tag: "Male",  desc: "Professional, crisp" },
 ]
 
 
@@ -81,6 +117,7 @@ export function ChatInput() {
   const [selectedMusicModel, setSelectedMusicModel] = useState("music-2.5")
   const [selectedLyricsModel, setSelectedLyricsModel] = useState("music-2.5")
   const [selectedSpeechModel, setSelectedSpeechModel] = useState("speech-02-turbo")
+  const [selectedVoiceId, setSelectedVoiceId] = useState("English_CalmWoman")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const agentAbortRef = useRef<AbortController | null>(null)
   const [isRecording, setIsRecording] = useState(false)
@@ -404,7 +441,7 @@ export function ChatInput() {
     const startTime = Date.now()
 
     try {
-      const body: Record<string, unknown> = mediaType === "speech" ? { text: prompt, model } : { prompt, model }
+      const body: Record<string, unknown> = mediaType === "speech" ? { text: prompt, model, voice_id: selectedVoiceId } : { prompt, model }
       if (mediaType === "video") body.duration = 4
 
       const endpoint = mediaType === "music" ? "/api/music" : mediaType === "lyrics" ? "/api/lyrics" : mediaType === "speech" ? "/api/speech" : "/api/image"
@@ -619,7 +656,7 @@ export function ChatInput() {
     } finally {
       setStreaming(false)
     }
-  }, [selectedImageModel, selectedVideoModel, selectedMusicModel, selectedLyricsModel, selectedSpeechModel, addMessage, updateMessage, setStreaming, addWorklogEntry, updateWorklogEntry, openIDE, setIDETab, ideOpen])
+  }, [selectedImageModel, selectedVideoModel, selectedMusicModel, selectedLyricsModel, selectedSpeechModel, selectedVoiceId, addMessage, updateMessage, setStreaming, addWorklogEntry, updateWorklogEntry, openIDE, setIDETab, ideOpen])
 
   // Detect conversational/non-coding messages that shouldn't trigger the IDE
   // Fast synchronous pre-filter — catches obvious cases without a network call.
@@ -1224,8 +1261,8 @@ export function ChatInput() {
     el.style.height = Math.min(el.scrollHeight, 200) + "px"
   }
 
-  const activeModels = genMode === "image" ? IMAGE_MODELS : genMode === "video" ? VIDEO_MODELS : genMode === "music" ? MUSIC_MODELS : genMode === "lyrics" ? LYRICS_MODELS : genMode === "speech" ? SPEECH_MODELS : MODELS
-  const activeModelId = genMode === "image" ? selectedImageModel : genMode === "video" ? selectedVideoModel : genMode === "music" ? selectedMusicModel : genMode === "lyrics" ? selectedLyricsModel : genMode === "speech" ? selectedSpeechModel : selectedModel
+  const activeModels = genMode === "image" ? IMAGE_MODELS : genMode === "video" ? VIDEO_MODELS : genMode === "music" ? MUSIC_MODELS : genMode === "lyrics" ? LYRICS_MODELS : genMode === "speech" ? SPEECH_VOICES : MODELS
+  const activeModelId = genMode === "image" ? selectedImageModel : genMode === "video" ? selectedVideoModel : genMode === "music" ? selectedMusicModel : genMode === "lyrics" ? selectedLyricsModel : genMode === "speech" ? selectedVoiceId : selectedModel
   const activeModelName = activeModels.find(m => m.id === activeModelId)?.name || activeModels[0].name
 
   const placeholders: Record<GenMode, string> = {
@@ -1325,7 +1362,7 @@ export function ChatInput() {
                         else if (genMode === "video") setSelectedVideoModel(model.id)
                         else if (genMode === "music") setSelectedMusicModel(model.id)
                         else if (genMode === "lyrics") setSelectedLyricsModel(model.id)
-                        else if (genMode === "speech") setSelectedSpeechModel(model.id)
+                        else if (genMode === "speech") setSelectedVoiceId(model.id)
                         else setSelectedModel(model.id)
                         setShowModels(false)
                       }}
