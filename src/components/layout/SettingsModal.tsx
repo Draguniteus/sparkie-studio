@@ -158,6 +158,7 @@ function getTokens(theme: 'dark' | 'light'): ThemeTokens {
       textMuted:     '#3D3000',
 
       accent:       '#0A0A0A',
+      accentText:   '#F5C842',
       accentBg:     'rgba(0,0,0,0.10)',
       accentBorder: 'rgba(0,0,0,0.35)',
 
