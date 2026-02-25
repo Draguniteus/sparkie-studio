@@ -353,7 +353,7 @@ export function VoiceChat({ onClose, onSendMessage, isActive }: VoiceChatProps) 
         // Collect the stream into a Blob, then create an object URL.
         // This lets us start building the audio while data arrives and play as soon as
         // enough data is buffered for the browser's audio decoder.
-        const chunks: Uint8Array[] = []
+        const chunks: Uint8Array<ArrayBuffer>[] = []
         const reader = ttsRes.body.getReader()
         const ctx = new AudioContext()
         audioCtxRef.current = ctx
@@ -408,7 +408,7 @@ export function VoiceChat({ onClose, onSendMessage, isActive }: VoiceChatProps) 
         while (true) {
           const { done, value } = await reader.read()
           if (done) break
-          if (value) chunks.push(value)
+          if (value) chunks.push(value as Uint8Array<ArrayBuffer>)
           // Start playback as soon as we have ≥32KB (enough for MP3 header + first frames)
           if (!audioStarted) {
             const totalBytes = chunks.reduce((s, c) => s + c.length, 0)
