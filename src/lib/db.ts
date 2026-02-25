@@ -1,5 +1,8 @@
 import { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 
+// DO managed PostgreSQL uses a self-signed cert chain — disable Node TLS verification
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
