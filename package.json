@@ -11,6 +11,7 @@
   "dependencies": {
     "@e2b/code-interpreter": "^1.0.0",
     "@types/node": "^20",
+    "@types/pg": "^8.11.6",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "@types/react-syntax-highlighter": "^15",
@@ -22,6 +23,7 @@
     "clsx": "^2.1.1",
     "lucide-react": "^0.468.0",
     "next": "14.2.21",
+    "pg": "^8.13.3",
     "postcss": "^8",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
