@@ -4,9 +4,12 @@ export type Theme = 'dark' | 'light'
 
 export function applyTheme(t: Theme) {
   const root = document.documentElement
+  // Set data-theme attribute — drives [data-theme="light"] CSS overrides in globals.css
+  root.setAttribute('data-theme', t)
+  // Also update CSS vars for components that use var() directly (e.g. SettingsModal ThemeTokens)
   if (t === 'light') {
-    root.style.setProperty('--honey-primary', '#1A1A1A')
-    root.style.setProperty('--honey-dark',    '#0A0A0A')
+    root.style.setProperty('--honey-primary', '#0A0A0A')
+    root.style.setProperty('--honey-dark',    '#1A1A1A')
     root.style.setProperty('--hive-bg',       '#F5C842')
     root.style.setProperty('--hive-surface',  '#E5A800')
     root.style.setProperty('--hive-elevated', '#FFD166')
@@ -18,6 +21,7 @@ export function applyTheme(t: Theme) {
     root.style.setProperty('--honey-glow',         'rgba(0,0,0,0.10)')
     root.style.setProperty('--honey-glow-strong',  'rgba(0,0,0,0.22)')
   } else {
+    root.removeAttribute('data-theme')  // dark is default, no attribute needed
     root.style.setProperty('--honey-primary', '#FFC30B')
     root.style.setProperty('--honey-dark',    '#E5A800')
     root.style.setProperty('--hive-bg',       '#1A1A1A')
