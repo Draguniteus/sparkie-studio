@@ -1,4 +1,4 @@
-import { Pool, QueryResult, QueryResultRow } from 'pg';
+import { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -21,7 +21,7 @@ export async function query<T extends QueryResultRow = QueryResultRow>(
 }
 
 export async function transaction<T>(
-  fn: (client: Awaited<ReturnType<typeof pool.connect>>) => Promise<T>
+  fn: (client: PoolClient) => Promise<T>
 ): Promise<T> {
   const client = await pool.connect();
   try {
