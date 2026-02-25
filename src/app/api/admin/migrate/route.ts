@@ -3,6 +3,9 @@ import { Pool } from 'pg';
 
 export const runtime = 'nodejs';
 
+// DO managed PostgreSQL uses a self-signed cert chain
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
@@ -23,60 +26,60 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 CREATE TABLE IF NOT EXISTS agents (
-  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name              TEXT NOT NULL,
-  short_desc        TEXT,
-  full_instructions TEXT,
-  workflow          TEXT,
-  capabilities      TEXT[],
-  icon_url          TEXT,
-  creator_id        UUID REFERENCES users(id) ON DELETE SET NULL,
-  is_official       BOOLEAN DEFAULT false,
-  views             INTEGER DEFAULT 0,
-  credit_cost       INTEGER DEFAULT 1,
-  categories        TEXT[],
-  visibility        TEXT DEFAULT 'public',
-  forked_from       UUID REFERENCES agents(id) ON DELETE SET NULL,
-  created_at        TIMESTAMPTZ DEFAULT now()
+  id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name                 TEXT NOT NULL,
+  short_desc           TEXT,
+  full_instructions    TEXT,
+  workflow             TEXT,
+  capabilities         TEXT[],
+  icon_url             TEXT,
+  creator_id           UUID REFERENCES users(id) ON DELETE SET NULL,
+  is_official          BOOLEAN DEFAULT false,
+  views                INTEGER DEFAULT 0,
+  credit_cost          INTEGER DEFAULT 1,
+  categories           TEXT[],
+  visibility           TEXT DEFAULT 'public',
+  forked_from          UUID REFERENCES agents(id) ON DELETE SET NULL,
+  created_at           TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS agent_starters (
-  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  agent_id   UUID REFERENCES agents(id) ON DELETE CASCADE,
-  text       TEXT NOT NULL,
-  sort_order INTEGER DEFAULT 0
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  agent_id    UUID REFERENCES agents(id) ON DELETE CASCADE,
+  text        TEXT NOT NULL,
+  sort_order  INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS generations (
-  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id      UUID REFERENCES users(id) ON DELETE SET NULL,
-  type         TEXT NOT NULL,
-  model        TEXT,
-  prompt       TEXT,
-  output_url   TEXT,
-  duration_sec INTEGER,
-  credits_used INTEGER DEFAULT 1,
-  metadata     JSONB,
-  created_at   TIMESTAMPTZ DEFAULT now()
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id       UUID REFERENCES users(id) ON DELETE SET NULL,
+  type          TEXT NOT NULL,
+  model         TEXT,
+  prompt        TEXT,
+  output_url    TEXT,
+  duration_sec  INTEGER,
+  credits_used  INTEGER DEFAULT 1,
+  metadata      JSONB,
+  created_at    TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS credit_transactions (
-  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id    UUID REFERENCES users(id) ON DELETE SET NULL,
-  amount     INTEGER NOT NULL,
-  reason     TEXT,
-  ref_id     UUID,
-  created_at TIMESTAMPTZ DEFAULT now()
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     UUID REFERENCES users(id) ON DELETE SET NULL,
+  amount      INTEGER NOT NULL,
+  reason      TEXT,
+  ref_id      UUID,
+  created_at  TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS subscriptions (
-  id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id              UUID REFERENCES users(id) ON DELETE CASCADE UNIQUE,
-  tier                 TEXT NOT NULL,
-  status               TEXT DEFAULT 'active',
-  current_period_end   TIMESTAMPTZ,
-  stripe_sub_id        TEXT,
-  created_at           TIMESTAMPTZ DEFAULT now()
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id               UUID REFERENCES users(id) ON DELETE CASCADE UNIQUE,
+  tier                  TEXT NOT NULL,
+  status                TEXT DEFAULT 'active',
+  current_period_end    TIMESTAMPTZ,
+  stripe_sub_id         TEXT,
+  created_at            TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_generations_user_id ON generations(user_id);
