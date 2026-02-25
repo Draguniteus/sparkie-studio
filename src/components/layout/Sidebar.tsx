@@ -6,12 +6,18 @@ import {
   Plus, Search, FolderOpen, Image, MessageSquare,
   Settings, ChevronLeft, ChevronDown, Trash2, Sparkles, Bot, Zap, Radio
 } from 'lucide-react'
+import { useAuth } from '@/hooks/useAuth'
 
 export function Sidebar() {
   const {
     sidebarOpen, toggleSidebar, chats, currentChatId,
     setCurrentChat, createChat, deleteChat, setActiveTab, activeTab, openSettings} = useAppStore()
   const [historyCollapsed, setHistoryCollapsed] = useState(false)
+  const { user, signOut } = useAuth()
+
+  // Derive display name and avatar initial from session
+  const displayName = user?.name ?? user?.email?.split('@')[0] ?? 'User'
+  const avatarInitial = displayName.charAt(0).toUpperCase()
 
   if (!sidebarOpen) {
     return (
@@ -147,10 +153,10 @@ export function Sidebar() {
       <div className="p-3 border-t border-hive-border shrink-0">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-full bg-honey-500/20 flex items-center justify-center text-honey-500 text-xs font-bold shrink-0">
-            D
+            {avatarInitial}
           </div>
           <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium truncate text-text-primary">Draguniteus</div>
+            <div className="text-sm font-medium truncate text-text-primary">{displayName}</div>
             <div className="text-[10px] text-text-muted">Free</div>
           </div>
           <button onClick={openSettings} className="p-1.5 rounded-md hover:bg-hive-hover text-text-muted hover:text-text-secondary transition-colors" title="Settings">
