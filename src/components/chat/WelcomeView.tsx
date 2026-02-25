@@ -21,7 +21,7 @@ export function WelcomeView() {
             <Sparkles size={28} className="text-honey-500" />
           </div>
           <h1 className="text-2xl font-semibold mb-2">
-            <span className="text-gradient-honey">Sparkie Studio</span>
+            <span className="text-honey-500 font-bold">Sparkie Studio</span>
           </h1>
           <p className="text-text-secondary text-sm">Your AI workspace. Chat, code, create.</p>
         </div>
