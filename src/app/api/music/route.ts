@@ -3,22 +3,6 @@ import { NextRequest } from 'next/server'
 export const runtime = 'nodejs'
 export const maxDuration = 300
 
-// MiniMax Music Generation
-// POST https://api.minimax.io/v1/music_generation
-// Both music-2.5 AND music-2.0 support output_format='url' (per MiniMax docs).
-// Use URL output for both: returns data.audio_url CDN link (fast, tiny response).
-// Hex output (default) returns a massive hex payload that can overflow DO's 100s gateway.
-//
-// ACE Music (api.acemusic.ai) — SPLIT ARCHITECTURE:
-// POST /api/music { model: 'ace-step-free' } → { taskId, status:'queued' } in <30s
-// GET  /api/music?taskId=xxx → proxy to ACE /query_result → { status, url? }
-// Frontend polls GET every 5s (ACE generates full songs in ~1 min)
-// Note: ACE playground always outputs 2 songs per request — this is expected behavior.
-//
-// ⚠️  Section tags MUST be Title Case with spaces:
-//   [Intro] [Verse] [Pre Chorus] [Chorus] [Bridge] [Outro] etc.
-// ⚠️  Lyrics trimmed to ~1200 chars max (MiniMax 30-60s clip)
-
 const MINIMAX_BASE = 'https://api.minimax.io/v1'
 const ACE_MUSIC_BASE = 'https://api.acemusic.ai'
 const ACE_MUSIC_API_KEY = process.env.ACE_MUSIC_API_KEY || ''
@@ -90,15 +74,9 @@ function parseMusicPrompt(raw: string): { stylePrompt: string; lyrics: string } 
 
   let fullLyrics = lyricParagraphs.join('\n\n').trim()
   fullLyrics = normalizeLyricsTags(fullLyrics)
-  // No lyrics length cap — MiniMax handles full song lyrics natively.
-  // Generation time depends on output duration, not input text length.
-  // Proven: music-2.0 generated a 3-min song from a 2,647-char gothic country prompt.
-
   return { stylePrompt: stylePrompt.trim(), lyrics: fullLyrics }
 }
 
-// ── GET /api/music?taskId=xxx ─────────────────────────────────────────────
-// ACE status proxy — called by frontend every 5s
 export async function GET(req: NextRequest) {
   const taskId = req.nextUrl.searchParams.get('taskId')
   if (!taskId) {
@@ -108,13 +86,11 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // Try GET first; ACE may also accept POST {task_ids:[id]} format
     let pollRes = await fetch(`${ACE_MUSIC_BASE}/query_result?task_id=${taskId}`, {
       headers: { 'Authorization': `Bearer ${ACE_MUSIC_API_KEY}` },
       signal: AbortSignal.timeout(15000),
     })
 
-    // If GET fails, try POST format (alternate ACE API contract)
     if (!pollRes.ok) {
       try {
         pollRes = await fetch(`${ACE_MUSIC_BASE}/query_result`, {
@@ -135,24 +111,16 @@ export async function GET(req: NextRequest) {
       })
     }
 
-    let rawData = await pollRes.json()
-    // Normalize: POST {task_ids:[id]} returns an array; GET returns object directly
+    const rawData = await pollRes.json()
     const data = Array.isArray(rawData) ? rawData[0] : rawData
     const rawStatus = data.status ?? data.state ?? ''
-    // ACE returns integer status: 0=pending/processing, 1=success, 2=failed
-    // Normalize to string for comparison
     const status = typeof rawStatus === 'number'
       ? (rawStatus === 1 ? 'done' : rawStatus === 2 ? 'failed' : 'pending')
       : String(rawStatus)
 
     if (status === 'done' || status === 'completed' || status === 'success') {
-      // ACE audio URL can be in multiple locations depending on API version
-      const audioUrl = data.audio_url
-        || data.url
-        || data.result?.audio_url
-        || data.result?.url
-        || data.data?.audio_url
-        || (Array.isArray(data.audios) ? data.audios[0] : null)
+      const audioUrl = data.audio_url || data.url || data.result?.audio_url || data.result?.url
+        || data.data?.audio_url || (Array.isArray(data.audios) ? data.audios[0] : null)
       if (audioUrl) {
         return new Response(JSON.stringify({ status: 'done', url: audioUrl }), {
           status: 200, headers: { 'Content-Type': 'application/json' },
@@ -179,7 +147,6 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// ── POST /api/music ───────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   let rawPrompt: string
   let model: string
@@ -197,10 +164,9 @@ export async function POST(req: NextRequest) {
     })
   }
 
-  // ── ACE-Step: return taskId immediately, frontend polls ──────────────────
   if (model === 'ace-step-free') {
     if (!ACE_MUSIC_API_KEY) {
-      return new Response(JSON.stringify({ error: 'ACE_MUSIC_API_KEY not configured. Get a free key at acemusic.ai/playground/api-key and add it to your environment.' }), {
+      return new Response(JSON.stringify({ error: 'ACE_MUSIC_API_KEY not configured.' }), {
         status: 500, headers: { 'Content-Type': 'application/json' },
       })
     }
@@ -217,17 +183,21 @@ export async function POST(req: NextRequest) {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${ACE_MUSIC_API_KEY}`,
           },
-          body: JSON.stringify({
-            prompt: stylePrompt,
-            lyrics: explicitLyrics || lyrics,
-          }),
+          body: JSON.stringify({ prompt: stylePrompt, lyrics: explicitLyrics || lyrics }),
           signal: AbortSignal.timeout(30000),
         })
 
         if (!taskRes.ok) {
-          const err = await taskRes.json().catch(() => ({}))
-          lastErr = err.message || err.error || `ACE Music submit error (${taskRes.status})`
-          if (taskRes.status === 401 || taskRes.status === 403) break
+          const errText = await taskRes.text().catch(() => '')
+          if (taskRes.status === 403) {
+            lastErr = 'ACE Music API blocked this server IP (Cloudflare 403). The key is valid but api.acemusic.ai blocks server-side requests. Contact ACE Music support to whitelist DO App Platform IPs.'
+            break
+          }
+          if (taskRes.status === 401) {
+            lastErr = 'ACE Music API key invalid or expired. Refresh at acemusic.ai/playground/api-key.'
+            break
+          }
+          lastErr = `ACE Music submit error (${taskRes.status}): ${errText.slice(0, 200)}`
           await sleep(5000)
           continue
         }
@@ -255,7 +225,6 @@ export async function POST(req: NextRequest) {
     })
   }
 
-  // ── MiniMax models — SSE streaming to bypass DO 100s gateway idle timeout ──
   const apiKey = process.env.MINIMAX_API_KEY
   if (!apiKey) {
     return new Response(JSON.stringify({ error: 'MINIMAX_API_KEY not configured' }), {
@@ -276,21 +245,16 @@ export async function POST(req: NextRequest) {
     audio_setting: { sample_rate: 44100, bitrate: 256000, format: 'mp3' },
   }
 
-  // SSE stream: keeps the DO gateway connection alive with periodic keepalive comments
-  // while MiniMax generates (can take 60–120s for full songs).
-  // DO's 100s "gateway timeout" is an idle timeout — active streaming resets it.
   const stream = new ReadableStream({
     async start(controller) {
       const enc = new TextEncoder()
       const send = (data: string) => controller.enqueue(enc.encode(data))
 
-      // Keepalive timer: send SSE comment every 15s to prevent idle timeout
       const keepaliveInterval = setInterval(() => {
         try { send(': keepalive\n\n') } catch { /* stream closed */ }
       }, 15000)
 
       try {
-        // Fire MiniMax request — NO AbortSignal timeout, let it run as long as needed
         const res = await fetch(`${MINIMAX_BASE}/music_generation`, {
           method: 'POST',
           headers: {
@@ -318,21 +282,27 @@ export async function POST(req: NextRequest) {
         }
 
         const audioUrl = data?.data?.audio_url
-        if (!audioUrl) {
-          // Fallback: decode hex audio
-          const hexAudio = data?.data?.audio
-          if (hexAudio) {
-            const audioBase64 = Buffer.from(hexAudio, 'hex').toString('base64')
-            send(`data: ${JSON.stringify({ url: `data:audio/mp3;base64,${audioBase64}`, model: minimaxModel })}\n\n`)
-            controller.close()
-            return
-          }
-          send(`data: ${JSON.stringify({ error: 'No audio from MiniMax. Verify API key has music credits.' })}\n\n`)
+        if (audioUrl) {
+          send(`data: ${JSON.stringify({ url: audioUrl, model: minimaxModel })}\n\n`)
           controller.close()
           return
         }
 
-        send(`data: ${JSON.stringify({ url: audioUrl, model: minimaxModel })}\n\n`)
+        const hexAudio = data?.data?.audio
+        if (hexAudio) {
+          const audioBase64 = Buffer.from(hexAudio, 'hex').toString('base64')
+          send(`data: ${JSON.stringify({ url: `data:audio/mp3;base64,${audioBase64}`, model: minimaxModel })}\n\n`)
+          controller.close()
+          return
+        }
+
+        // Neither audio_url nor hex — surface diagnostics
+        const dataKeys = Object.keys(data?.data || {})
+        const statusCode = data?.base_resp?.status_code
+        const statusMsg = data?.base_resp?.status_msg || ''
+        send(`data: ${JSON.stringify({
+          error: `MiniMax returned success (status_code ${statusCode}) but no audio. Response keys: [${dataKeys.join(', ')}].${statusMsg ? ' ' + statusMsg + '.' : ''} This usually means the MiniMax account has no music generation credits or the model requires a paid tier. Check your MiniMax dashboard.`
+        })}\n\n`)
         controller.close()
       } catch (err) {
         clearInterval(keepaliveInterval)
@@ -349,8 +319,7 @@ export async function POST(req: NextRequest) {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no', // Disable nginx buffering (important for DO)
+      'X-Accel-Buffering': 'no',
     },
   })
-
 }
