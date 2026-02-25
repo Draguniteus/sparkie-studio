@@ -1425,7 +1425,6 @@ export function ChatInput() {
       isActive={isVoiceChatOpen}
       onClose={() => setIsVoiceChatOpen(false)}
       onSendMessage={sendMessageFromVoice}
-      voiceId="English_radiant_girl"
     />
     </>
   )
