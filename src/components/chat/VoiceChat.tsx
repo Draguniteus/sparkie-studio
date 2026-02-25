@@ -85,7 +85,7 @@ export function VoiceChat({ onClose, onSendMessage, isActive }: VoiceChatProps) 
   // FIX: analyserRef is read INSIDE animation frames, not captured at mount
   const analyserRef       = useRef<AnalyserNode | null>(null)
   const audioCtxRef       = useRef<AudioContext | null>(null)
-  const autoRestartRef    = useRef(true)
+  const autoRestartRef    = useRef(false)  // PTT mode: never auto-restart
   const ttsAbortRef       = useRef<AbortController | null>(null)  // abort streaming TTS fetch on nuke
   const pttActiveRef      = useRef(false)  // push-to-talk: true while button/spacebar held
   const timerRef          = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -394,12 +394,8 @@ export function VoiceChat({ onClose, onSendMessage, isActive }: VoiceChatProps) 
             URL.revokeObjectURL(blobUrl)
             ctx.close(); audioCtxRef.current = null
             isProcessingRef.current = false
-            if (autoRestartRef.current) {
-              setVoiceState("idle")
-              setTimeout(() => { if (autoRestartRef.current && !isProcessingRef.current) startListening() }, 600)
-            } else {
-              setVoiceState("idle")
-            }
+            // PTT mode: always just go idle — user holds button/SPACE to talk again
+            setVoiceState("idle")
           }
           audio.onerror = () => {
             stopBars(); stopKaraoke(); analyserRef.current = null
@@ -477,6 +473,7 @@ export function VoiceChat({ onClose, onSendMessage, isActive }: VoiceChatProps) 
 
       const buf = new Float32Array(analyser.frequencyBinCount)
       const checkSilence = () => {
+        if (pttActiveRef.current) return  // PTT mode: user controls stop, not VAD
         if (!analyserRef.current || mediaRecorderRef.current?.state !== "recording") return
         analyser.getFloatTimeDomainData(buf)
         const rms = Math.sqrt(buf.reduce((s, x) => s + x * x, 0) / buf.length)
@@ -511,7 +508,7 @@ export function VoiceChat({ onClose, onSendMessage, isActive }: VoiceChatProps) 
     analyserRef.current = null
     stopBars(); stopKaraoke()
     setVoiceState("idle"); isProcessingRef.current = false
-    setTimeout(() => { autoRestartRef.current = true }, 500)
+    // PTT mode: do NOT re-arm autoRestart — user holds to talk again
   }, [stopBars, stopKaraoke])
 
   // Push-to-Talk handlers
