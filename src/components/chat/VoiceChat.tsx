@@ -162,28 +162,6 @@ export function VoiceChat({ onClose, onSendMessage, isActive }: VoiceChatProps) 
     }
   }, [isActive, nukeAudio])
 
-  // ── Spacebar PTT ──────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!isActive) return
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.code !== "Space" || e.repeat) return
-      if ((e.target as HTMLElement)?.tagName === "INPUT" || (e.target as HTMLElement)?.tagName === "TEXTAREA") return
-      e.preventDefault()
-      handlePTTStart()
-    }
-    const onKeyUp = (e: KeyboardEvent) => {
-      if (e.code !== "Space") return
-      e.preventDefault()
-      handlePTTEnd()
-    }
-    window.addEventListener("keydown", onKeyDown)
-    window.addEventListener("keyup", onKeyUp)
-    return () => {
-      window.removeEventListener("keydown", onKeyDown)
-      window.removeEventListener("keyup", onKeyUp)
-    }
-  }, [isActive, handlePTTStart, handlePTTEnd])
-
   // ── Cleanup on unmount ────────────────────────────────────────────
   useEffect(() => {
     return () => {
@@ -554,6 +532,28 @@ export function VoiceChat({ onClose, onSendMessage, isActive }: VoiceChatProps) 
   const handleMicClick = useCallback(() => {
     if (voiceState === "speaking") cancelSpeaking()
   }, [voiceState, cancelSpeaking])
+
+  // ── Spacebar PTT ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!isActive) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code !== "Space" || e.repeat) return
+      if ((e.target as HTMLElement)?.tagName === "INPUT" || (e.target as HTMLElement)?.tagName === "TEXTAREA") return
+      e.preventDefault()
+      handlePTTStart()
+    }
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code !== "Space") return
+      e.preventDefault()
+      handlePTTEnd()
+    }
+    window.addEventListener("keydown", onKeyDown)
+    window.addEventListener("keyup", onKeyUp)
+    return () => {
+      window.removeEventListener("keydown", onKeyDown)
+      window.removeEventListener("keyup", onKeyUp)
+    }
+  }, [isActive, handlePTTStart, handlePTTEnd])
 
   // FIX: handleClose uses nukeAudio for guaranteed mic shutdown
   const handleClose = useCallback(() => {
