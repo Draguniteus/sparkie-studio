@@ -15,15 +15,19 @@ const migration = `
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 CREATE TABLE IF NOT EXISTS users (
-  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  email         TEXT UNIQUE NOT NULL,
-  display_name  TEXT,
-  avatar_url    TEXT,
-  tier          TEXT DEFAULT 'free',
-  credits       INTEGER DEFAULT 100,
-  created_at    TIMESTAMPTZ DEFAULT now(),
-  updated_at    TIMESTAMPTZ DEFAULT now()
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email          TEXT UNIQUE NOT NULL,
+  display_name   TEXT,
+  avatar_url     TEXT,
+  password_hash  TEXT,
+  tier           TEXT DEFAULT 'free',
+  credits        INTEGER DEFAULT 100,
+  created_at     TIMESTAMPTZ DEFAULT now(),
+  updated_at     TIMESTAMPTZ DEFAULT now()
 );
+
+-- Add password_hash if upgrading existing table
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
 
 CREATE TABLE IF NOT EXISTS agents (
   id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
