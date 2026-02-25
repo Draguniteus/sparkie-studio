@@ -146,6 +146,18 @@ export function VoiceChat({ onClose, onSendMessage, isActive }: VoiceChatProps) 
     audioCtxRef.current = null
   }, [])
 
+  // ── Kill mic immediately when voice chat is closed (isActive → false) ──
+  // Component stays mounted (parent uses isActive flag, not conditional render)
+  // so React's cleanup-on-unmount never fires. This effect fills that gap.
+  useEffect(() => {
+    if (!isActive) {
+      autoRestartRef.current = false
+      nukeAudio()
+      setVoiceState("idle")
+      setBars(Array(20).fill(2))
+    }
+  }, [isActive, nukeAudio])
+
   // ── Cleanup on unmount ────────────────────────────────────────────
   useEffect(() => {
     return () => {
@@ -329,39 +341,51 @@ export function VoiceChat({ onClose, onSendMessage, isActive }: VoiceChatProps) 
       setReplyWords(words)
       setVoiceState("speaking")
 
-      // TTS
-      const ttsRes = await fetch("/api/speech", {
+      // TTS — streaming: pipe /api/speech-stream directly to Audio via Blob URL
+      // First chunk arrives ~400ms after request, browser starts playing immediately
+      const ttsRes = await fetch("/api/speech-stream", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: aiReply.trim().slice(0, 2000), model: "speech-02-turbo", voice_id: selectedVoice }),
+        signal: AbortSignal.timeout(95000),
       })
 
-      if (ttsRes.ok) {
-        const { url } = await ttsRes.json()
-        if (url) {
-          const ctx = new AudioContext()
-          audioCtxRef.current = ctx
-          const analyser = ctx.createAnalyser()
-          analyser.fftSize = 256
-          // Wire AudioElement → AudioContext analyser so rings react to TTS audio
-          const audio = new Audio(url)
+      if (ttsRes.ok && ttsRes.body) {
+        // Collect the stream into a Blob, then create an object URL.
+        // This lets us start building the audio while data arrives and play as soon as
+        // enough data is buffered for the browser's audio decoder.
+        const chunks: Uint8Array[] = []
+        const reader = ttsRes.body.getReader()
+        const ctx = new AudioContext()
+        audioCtxRef.current = ctx
+        const analyser = ctx.createAnalyser()
+        analyser.fftSize = 256
+
+        let audioStarted = false
+        let audioEl: HTMLAudioElement | null = null
+
+        const startAudioPlayback = (blobUrl: string) => {
+          if (audioStarted) return
+          audioStarted = true
+          const audio = new Audio(blobUrl)
           audio.crossOrigin = "anonymous"
           audioPlayerRef.current = audio
-
-          // Connect audio element to analyser via media element source
-          const src = ctx.createMediaElementSource(audio)
-          src.connect(analyser)
-          analyser.connect(ctx.destination)
+          try {
+            const src = ctx.createMediaElementSource(audio)
+            src.connect(analyser)
+            analyser.connect(ctx.destination)
+          } catch {}
           analyserRef.current = analyser
           animateBars(analyser, "speak")
+          audioEl = audio
 
           audio.onloadedmetadata = () => {
             const ms = isNaN(audio.duration) ? words.length * MS_PER_WORD : audio.duration * 1000
             startKaraoke(words, ms)
           }
-
           audio.onended = () => {
             stopBars(); stopKaraoke()
             analyserRef.current = null
+            URL.revokeObjectURL(blobUrl)
             ctx.close(); audioCtxRef.current = null
             isProcessingRef.current = false
             if (autoRestartRef.current) {
@@ -373,12 +397,34 @@ export function VoiceChat({ onClose, onSendMessage, isActive }: VoiceChatProps) 
           }
           audio.onerror = () => {
             stopBars(); stopKaraoke(); analyserRef.current = null
+            URL.revokeObjectURL(blobUrl)
             ctx.close(); audioCtxRef.current = null
             setVoiceState("idle"); isProcessingRef.current = false
           }
-          await audio.play()
-          return
+          audio.play().catch(() => {})
         }
+
+        // Stream all chunks
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          if (value) chunks.push(value)
+          // Start playback as soon as we have ≥32KB (enough for MP3 header + first frames)
+          if (!audioStarted) {
+            const totalBytes = chunks.reduce((s, c) => s + c.length, 0)
+            if (totalBytes >= 32768) {
+              const partialBlob = new Blob(chunks, { type: "audio/mpeg" })
+              startAudioPlayback(URL.createObjectURL(partialBlob))
+            }
+          }
+        }
+
+        // If audio hasn't started yet (short response), play the complete audio
+        if (!audioStarted && chunks.length > 0) {
+          const fullBlob = new Blob(chunks, { type: "audio/mpeg" })
+          startAudioPlayback(URL.createObjectURL(fullBlob))
+        }
+        return
       }
       setVoiceState("idle"); isProcessingRef.current = false
     } catch (err) {
@@ -564,16 +610,6 @@ export function VoiceChat({ onClose, onSendMessage, isActive }: VoiceChatProps) 
 
         {/* Transcript + karaoke */}
         <div className="w-full max-w-sm flex-1 flex flex-col gap-3 overflow-hidden py-2 min-h-0">
-          {transcript && (
-            <div className="flex flex-col gap-1">
-              <p className="text-[11px] text-white/35 text-center">You</p>
-              <div ref={transcriptRef}
-                className="max-h-16 overflow-y-auto text-sm text-white/65 text-center leading-relaxed px-2 scrollbar-hide">
-                {transcript}
-              </div>
-            </div>
-          )}
-
           {replyWords.length > 0 && voiceState !== "thinking" && (
             <div className="flex flex-col gap-1 flex-1 min-h-0">
               <p className="text-[11px] text-yellow-400/50 text-center">Sparkie</p>
