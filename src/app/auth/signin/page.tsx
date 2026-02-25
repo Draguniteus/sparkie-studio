@@ -42,12 +42,12 @@ function PasswordInput({
         value={value}
         required
         onChange={e => onChange(e.target.value)}
-        className="w-full bg-hive-600 border border-hive-border text-white placeholder-hive-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-honey-500 pr-10"
+        className="w-full bg-hive-600 border border-hive-border text-white placeholder-hive-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-honey-500 pr-9"
       />
       <button
         type="button"
         onClick={() => setShow(s => !s)}
-        className="absolute right-3 top-1/2 -translate-y-1/2 text-hive-300 hover:text-honey-400 transition-colors"
+        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-hive-300 hover:text-honey-400 transition-colors"
         tabIndex={-1}
         aria-label={show ? 'Hide password' : 'Show password'}
       >
@@ -133,7 +133,6 @@ function SignInContent() {
         return;
       }
 
-      // Sign in
       const result = await signIn('credentials', { email, password, redirect: false });
       if (result?.error === 'EMAIL_NOT_VERIFIED') {
         setError('Please verify your email before signing in. Check your inbox.');
@@ -153,18 +152,16 @@ function SignInContent() {
   };
 
   const inputClass =
-    'w-full bg-hive-600 border border-hive-border text-white placeholder-hive-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-honey-500';
-
-  const labelClass = 'block text-xs font-medium text-hive-300 mb-1';
+    'w-full bg-hive-600 border border-hive-border text-white placeholder-hive-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-honey-500';
 
   if (checkEmail) {
     return (
       <div className="min-h-screen bg-hive-600 flex items-center justify-center p-4">
-        <div className="w-full max-w-md text-center">
+        <div className="w-full max-w-sm text-center">
           <div className="bg-hive-500 rounded-2xl p-8 border border-hive-border">
-            <div className="text-4xl mb-4">📬</div>
-            <h2 className="text-xl font-bold text-white mb-2">Check your email</h2>
-            <p className="text-hive-300 text-sm mb-6">
+            <div className="text-4xl mb-3">📬</div>
+            <h2 className="text-lg font-bold text-white mb-2">Check your email</h2>
+            <p className="text-hive-300 text-sm mb-4">
               We sent a verification link to{' '}
               <span className="text-honey-500">{email}</span>.
               Click it to activate your account.
@@ -183,30 +180,32 @@ function SignInContent() {
   }
 
   return (
-    <div className="min-h-screen bg-hive-600 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
-        {/* Logo */}
-        <div className="flex flex-col items-center mb-8">
+    <div className="min-h-screen bg-hive-600 flex items-center justify-center p-3">
+      <div className="w-full max-w-sm">
+
+        {/* Logo — compact */}
+        <div className="flex flex-col items-center mb-4">
           <Image
             src="/sparkie-avatar.jpg"
             alt="Sparkie"
-            width={80}
-            height={80}
-            className="rounded-full mb-3 ring-2 ring-honey-500"
+            width={56}
+            height={56}
+            className="rounded-full mb-2 ring-2 ring-honey-500"
           />
-          <h1 className="text-2xl font-bold text-white">Sparkie Studio</h1>
-          <p className="text-hive-300 text-sm mt-1">Your AI creative workspace</p>
+          <h1 className="text-xl font-bold text-white">Sparkie Studio</h1>
+          <p className="text-hive-300 text-xs mt-0.5">Your AI creative workspace</p>
         </div>
 
         {/* Card */}
-        <div className="bg-hive-500 rounded-2xl p-6 border border-hive-border shadow-xl">
+        <div className="bg-hive-500 rounded-2xl px-5 py-4 border border-hive-border shadow-xl">
+
           {/* Tabs */}
-          <div className="flex mb-6 bg-hive-600 rounded-lg p-1">
+          <div className="flex mb-4 bg-hive-600 rounded-lg p-0.5">
             {(['signin', 'register'] as const).map(m => (
               <button
                 key={m}
                 onClick={() => { setMode(m); resetForm(); }}
-                className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
+                className={`flex-1 py-1.5 rounded-md text-sm font-medium transition-colors ${
                   mode === m ? 'bg-honey-500 text-black' : 'text-hive-300 hover:text-white'
                 }`}
               >
@@ -216,109 +215,80 @@ function SignInContent() {
           </div>
 
           {info && (
-            <div className="bg-green-900/40 border border-green-700 text-green-300 rounded-xl px-4 py-2.5 text-sm mb-4">
+            <div className="bg-green-900/40 border border-green-700 text-green-300 rounded-lg px-3 py-2 text-xs mb-3">
               {info}
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-2.5">
+
+            {mode === 'register' && (
+              <input
+                type="text"
+                placeholder="Display name (optional)"
+                value={displayName}
+                onChange={e => setDisplayName(e.target.value)}
+                className={inputClass}
+              />
+            )}
+
+            <input
+              type="email"
+              placeholder="Email address"
+              value={email}
+              required
+              onChange={e => setEmail(e.target.value)}
+              className={inputClass}
+            />
+
+            <PasswordInput
+              id="password"
+              value={password}
+              onChange={setPassword}
+              placeholder={mode === 'register' ? 'Password (min. 8 chars)' : 'Password'}
+            />
+
             {mode === 'register' && (
               <>
-                {/* Display Name */}
-                <div>
-                  <label htmlFor="displayName" className={labelClass}>Display Name</label>
+                <PasswordInput
+                  id="confirmPassword"
+                  value={confirmPassword}
+                  onChange={setConfirmPassword}
+                  placeholder="Confirm password"
+                />
+
+                <div className="grid grid-cols-2 gap-2">
+                  <select
+                    value={gender}
+                    onChange={e => setGender(e.target.value)}
+                    className="w-full bg-hive-600 border border-hive-border text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-honey-500"
+                  >
+                    <option value="">Gender (optional)</option>
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                  </select>
+
                   <input
-                    id="displayName"
-                    type="text"
-                    placeholder="How should we call you?"
-                    value={displayName}
-                    onChange={e => setDisplayName(e.target.value)}
+                    type="number"
+                    min={13}
+                    max={120}
+                    placeholder="Age (optional)"
+                    value={age}
+                    onChange={e => setAge(e.target.value)}
                     className={inputClass}
                   />
                 </div>
-              </>
-            )}
 
-            {/* Email */}
-            <div>
-              <label htmlFor="email" className={labelClass}>Email Address</label>
-              <input
-                id="email"
-                type="email"
-                placeholder="you@example.com"
-                value={email}
-                required
-                onChange={e => setEmail(e.target.value)}
-                className={inputClass}
-              />
-            </div>
-
-            {/* Password */}
-            <div>
-              <label htmlFor="password" className={labelClass}>Password</label>
-              <PasswordInput
-                id="password"
-                value={password}
-                onChange={setPassword}
-                placeholder={mode === 'register' ? 'Min. 8 characters' : 'Enter your password'}
-              />
-            </div>
-
-            {mode === 'register' && (
-              <>
-                {/* Confirm Password */}
-                <div>
-                  <label htmlFor="confirmPassword" className={labelClass}>Confirm Password</label>
-                  <PasswordInput
-                    id="confirmPassword"
-                    value={confirmPassword}
-                    onChange={setConfirmPassword}
-                    placeholder="Re-enter your password"
-                  />
-                </div>
-
-                {/* Gender + Age row */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label htmlFor="gender" className={labelClass}>Gender <span className="text-hive-400">(optional)</span></label>
-                    <select
-                      id="gender"
-                      value={gender}
-                      onChange={e => setGender(e.target.value)}
-                      className="w-full bg-hive-600 border border-hive-border text-white rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-honey-500 appearance-none"
-                    >
-                      <option value="">Prefer not to say</option>
-                      <option value="male">Male</option>
-                      <option value="female">Female</option>
-                      <option value="non_binary">Non-binary</option>
-                      <option value="other">Other</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label htmlFor="age" className={labelClass}>Age <span className="text-hive-400">(optional)</span></label>
-                    <input
-                      id="age"
-                      type="number"
-                      min={13}
-                      max={120}
-                      placeholder="e.g. 25"
-                      value={age}
-                      onChange={e => setAge(e.target.value)}
-                      className={inputClass}
-                    />
-                  </div>
-                </div>
-
-                <p className="text-hive-400 text-xs">
-                  By creating an account, you agree to our{' '}
-                  <span className="text-honey-500 cursor-pointer hover:underline">Terms of Service</span>{' '}and{' '}
+                <p className="text-hive-400 text-xs pt-0.5">
+                  By signing up you agree to our{' '}
+                  <span className="text-honey-500 cursor-pointer hover:underline">Terms</span>{' '}and{' '}
                   <span className="text-honey-500 cursor-pointer hover:underline">Privacy Policy</span>.
                 </p>
               </>
             )}
 
             {error && (
-              <div className="bg-red-900/40 border border-red-700 text-red-300 rounded-xl px-4 py-2.5 text-sm">
+              <div className="bg-red-900/40 border border-red-700 text-red-300 rounded-lg px-3 py-2 text-xs">
                 {error}
               </div>
             )}
@@ -326,35 +296,25 @@ function SignInContent() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-honey-500 hover:bg-honey-400 text-black font-semibold py-2.5 rounded-xl transition-colors disabled:opacity-50 mt-2"
+              className="w-full bg-honey-500 hover:bg-honey-400 text-black font-semibold py-2.5 rounded-xl transition-colors disabled:opacity-50"
             >
               {loading ? 'Loading…' : mode === 'signin' ? 'Sign In' : 'Create Account'}
             </button>
           </form>
 
-          {mode === 'signin' && (
-            <p className="text-center text-hive-400 text-xs mt-4">
-              Don&apos;t have an account?{' '}
-              <button
-                onClick={() => { setMode('register'); resetForm(); }}
-                className="text-honey-500 hover:underline font-medium"
-              >
-                Create one
-              </button>
-            </p>
-          )}
-
-          {mode === 'register' && (
-            <p className="text-center text-hive-400 text-xs mt-4">
-              Already have an account?{' '}
-              <button
-                onClick={() => { setMode('signin'); resetForm(); }}
-                className="text-honey-500 hover:underline font-medium"
-              >
-                Sign in
-              </button>
-            </p>
-          )}
+          <p className="text-center text-hive-400 text-xs mt-3">
+            {mode === 'signin' ? (
+              <>Don&apos;t have an account?{' '}
+                <button onClick={() => { setMode('register'); resetForm(); }}
+                  className="text-honey-500 hover:underline font-medium">Create one</button>
+              </>
+            ) : (
+              <>Already have an account?{' '}
+                <button onClick={() => { setMode('signin'); resetForm(); }}
+                  className="text-honey-500 hover:underline font-medium">Sign in</button>
+              </>
+            )}
+          </p>
         </div>
       </div>
     </div>
