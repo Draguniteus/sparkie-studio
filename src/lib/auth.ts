@@ -1,15 +1,10 @@
 import { NextAuthOptions } from 'next-auth';
-import GoogleProvider from 'next-auth/providers/google';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import { query } from '@/lib/db';
 import crypto from 'crypto';
 
 export const authOptions: NextAuthOptions = {
   providers: [
-    GoogleProvider({
-      clientId: process.env.GOOGLE_CLIENT_ID!,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-    }),
     CredentialsProvider({
       name: 'Email',
       credentials: {
@@ -18,15 +13,36 @@ export const authOptions: NextAuthOptions = {
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
-        const res = await query<{ id: string; email: string; display_name: string; avatar_url: string; password_hash: string }>(
-          'SELECT id, email, display_name, avatar_url, password_hash FROM users WHERE email = $1',
+
+        const res = await query<{
+          id: string;
+          email: string;
+          display_name: string;
+          avatar_url: string;
+          password_hash: string;
+          email_verified: boolean;
+        }>(
+          'SELECT id, email, display_name, avatar_url, password_hash, email_verified FROM users WHERE email = $1',
           [credentials.email.toLowerCase()]
         );
+
         const user = res.rows[0];
         if (!user || !user.password_hash) return null;
+
         const hash = crypto.createHash('sha256').update(credentials.password).digest('hex');
         if (hash !== user.password_hash) return null;
-        return { id: user.id, email: user.email, name: user.display_name, image: user.avatar_url };
+
+        if (!user.email_verified) {
+          // Throw a recognisable error so the sign-in page can surface it
+          throw new Error('EMAIL_NOT_VERIFIED');
+        }
+
+        return {
+          id: user.id,
+          email: user.email,
+          name: user.display_name,
+          image: user.avatar_url,
+        };
       },
     }),
   ],
@@ -35,21 +51,6 @@ export const authOptions: NextAuthOptions = {
   },
   session: { strategy: 'jwt' },
   callbacks: {
-    async signIn({ user, account }) {
-      if (!user.email) return false;
-      // Upsert user row on every sign-in
-      await query(
-        `INSERT INTO users (email, display_name, avatar_url)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (email) DO UPDATE
-           SET display_name = COALESCE(EXCLUDED.display_name, users.display_name),
-               avatar_url   = COALESCE(EXCLUDED.avatar_url,   users.avatar_url),
-               updated_at   = now()
-         RETURNING id`,
-        [user.email.toLowerCase(), user.name ?? null, user.image ?? null]
-      );
-      return true;
-    },
     async jwt({ token, user }) {
       if (user) token.id = user.id;
       return token;
