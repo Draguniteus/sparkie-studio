@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import './globals.css'
+import { SessionProvider } from '@/components/providers/SessionProvider'
 
 export const metadata: Metadata = {
   title: 'Sparkie Studio | Polleneer AI Workspace',
@@ -15,7 +16,9 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body className="bg-hive-600 text-white antialiased">
-        {children}
+        <SessionProvider>
+          {children}
+        </SessionProvider>
       </body>
     </html>
   )
