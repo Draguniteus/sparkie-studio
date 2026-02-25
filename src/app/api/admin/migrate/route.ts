@@ -15,25 +15,29 @@ const migration = `
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 CREATE TABLE IF NOT EXISTS users (
-  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  email                 TEXT UNIQUE NOT NULL,
-  display_name          TEXT,
-  avatar_url            TEXT,
-  password_hash         TEXT,
-  email_verified        BOOLEAN DEFAULT false,
-  verify_token          TEXT,
-  verify_token_expires  TIMESTAMPTZ,
-  tier                  TEXT DEFAULT 'free',
-  credits               INTEGER DEFAULT 100,
-  created_at            TIMESTAMPTZ DEFAULT now(),
-  updated_at            TIMESTAMPTZ DEFAULT now()
+  id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email                  TEXT UNIQUE NOT NULL,
+  display_name           TEXT,
+  avatar_url             TEXT,
+  password_hash          TEXT,
+  email_verified         BOOLEAN DEFAULT false,
+  verify_token           TEXT,
+  verify_token_expires   TIMESTAMPTZ,
+  gender                 TEXT,
+  age                    INTEGER,
+  tier                   TEXT DEFAULT 'free',
+  credits                INTEGER DEFAULT 100,
+  created_at             TIMESTAMPTZ DEFAULT now(),
+  updated_at             TIMESTAMPTZ DEFAULT now()
 );
 
 -- Idempotent column additions for existing tables
-ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash         TEXT;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified        BOOLEAN DEFAULT false;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS verify_token          TEXT;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS verify_token_expires  TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash          TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified         BOOLEAN DEFAULT false;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS verify_token           TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS verify_token_expires   TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS gender                 TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS age                    INTEGER;
 
 CREATE TABLE IF NOT EXISTS agents (
   id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -83,13 +87,13 @@ CREATE TABLE IF NOT EXISTS credit_transactions (
 );
 
 CREATE TABLE IF NOT EXISTS subscriptions (
-  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id               UUID REFERENCES users(id) ON DELETE CASCADE UNIQUE,
-  tier                  TEXT NOT NULL,
-  status                TEXT DEFAULT 'active',
-  current_period_end    TIMESTAMPTZ,
-  stripe_sub_id         TEXT,
-  created_at            TIMESTAMPTZ DEFAULT now()
+  id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id              UUID REFERENCES users(id) ON DELETE CASCADE UNIQUE,
+  tier                 TEXT NOT NULL,
+  status               TEXT DEFAULT 'active',
+  current_period_end   TIMESTAMPTZ,
+  stripe_sub_id        TEXT,
+  created_at           TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_generations_user_id ON generations(user_id);
