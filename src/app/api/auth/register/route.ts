@@ -15,7 +15,7 @@ async function sendVerificationEmail(email: string, token: string) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      from: process.env.EMAIL_FROM ?? 'Sparkie Studio <noreply@sparkie.studio>',
+      from: process.env.EMAIL_FROM ?? 'Sparkie Studio <noreply@sparkiestudio.com>',
       to: [email],
       subject: 'Verify your Sparkie Studio account',
       html: `
@@ -42,7 +42,7 @@ async function sendVerificationEmail(email: string, token: string) {
 
 export async function POST(req: Request) {
   try {
-    const { email, password, displayName } = await req.json();
+    const { email, password, displayName, gender, age } = await req.json();
 
     if (!email || !password)
       return NextResponse.json({ error: 'Email and password required' }, { status: 400 });
@@ -58,24 +58,30 @@ export async function POST(req: Request) {
     );
 
     if (existing.rows.length > 0) {
-      // Already registered and verified — don\'t expose which state
       if (existing.rows[0].email_verified) {
         return NextResponse.json({ error: 'Email already registered' }, { status: 409 });
       }
-      // Registered but not verified — resend verification
     }
 
     const verifyToken = crypto.randomBytes(32).toString('hex');
-    const verifyExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+    const verifyExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
     if (existing.rows.length === 0) {
       await query(
-        `INSERT INTO users (email, display_name, password_hash, email_verified, verify_token, verify_token_expires)
-         VALUES ($1, $2, $3, false, $4, $5)`,
-        [emailLower, displayName ?? emailLower.split('@')[0], passwordHash, verifyToken, verifyExpires]
+        `INSERT INTO users (email, display_name, password_hash, email_verified, verify_token, verify_token_expires, gender, age)
+         VALUES ($1, $2, $3, false, $4, $5, $6, $7)`,
+        [
+          emailLower,
+          displayName ?? emailLower.split('@')[0],
+          passwordHash,
+          verifyToken,
+          verifyExpires,
+          gender ?? null,
+          age ?? null,
+        ]
       );
     } else {
-      // Resend: update token
+      // Resend: update token only
       await query(
         `UPDATE users SET verify_token = $1, verify_token_expires = $2 WHERE email = $3`,
         [verifyToken, verifyExpires, emailLower]
