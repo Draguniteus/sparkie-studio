@@ -1149,6 +1149,7 @@ export function ChatInput() {
             body: JSON.stringify({
               messages: [{ role: 'user', content: userText }],
               model: selectedModel,
+              voiceMode: true,
             }),
           })
 
