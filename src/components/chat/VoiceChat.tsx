@@ -86,6 +86,8 @@ export function VoiceChat({ onClose, onSendMessage, isActive }: VoiceChatProps) 
   const analyserRef       = useRef<AnalyserNode | null>(null)
   const audioCtxRef       = useRef<AudioContext | null>(null)
   const autoRestartRef    = useRef(true)
+  const ttsAbortRef       = useRef<AbortController | null>(null)  // abort streaming TTS fetch on nuke
+  const pttActiveRef      = useRef(false)  // push-to-talk: true while button/spacebar held
   const timerRef          = useRef<ReturnType<typeof setInterval> | null>(null)
   const highlightTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const transcriptRef     = useRef<HTMLDivElement>(null)
@@ -136,6 +138,8 @@ export function VoiceChat({ onClose, onSendMessage, isActive }: VoiceChatProps) 
     // Kill stream tracks — THE actual microphone
     try { streamRef.current?.getTracks().forEach(t => { t.stop(); t.enabled = false }) } catch {}
     streamRef.current = null
+    // Kill streaming TTS fetch (aborts the in-flight /api/speech-stream request)
+    try { ttsAbortRef.current?.abort(); ttsAbortRef.current = null } catch {}
     // Kill audio playback
     try { audioPlayerRef.current?.pause() } catch {}
     audioPlayerRef.current = null
@@ -157,6 +161,28 @@ export function VoiceChat({ onClose, onSendMessage, isActive }: VoiceChatProps) 
       setBars(Array(20).fill(2))
     }
   }, [isActive, nukeAudio])
+
+  // ── Spacebar PTT ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!isActive) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code !== "Space" || e.repeat) return
+      if ((e.target as HTMLElement)?.tagName === "INPUT" || (e.target as HTMLElement)?.tagName === "TEXTAREA") return
+      e.preventDefault()
+      handlePTTStart()
+    }
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code !== "Space") return
+      e.preventDefault()
+      handlePTTEnd()
+    }
+    window.addEventListener("keydown", onKeyDown)
+    window.addEventListener("keyup", onKeyUp)
+    return () => {
+      window.removeEventListener("keydown", onKeyDown)
+      window.removeEventListener("keyup", onKeyUp)
+    }
+  }, [isActive, handlePTTStart, handlePTTEnd])
 
   // ── Cleanup on unmount ────────────────────────────────────────────
   useEffect(() => {
@@ -343,10 +369,12 @@ export function VoiceChat({ onClose, onSendMessage, isActive }: VoiceChatProps) 
 
       // TTS — streaming: pipe /api/speech-stream directly to Audio via Blob URL
       // First chunk arrives ~400ms after request, browser starts playing immediately
+      const ttsAbort = new AbortController()
+      ttsAbortRef.current = ttsAbort
       const ttsRes = await fetch("/api/speech-stream", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: aiReply.trim().slice(0, 2000), model: "speech-02-turbo", voice_id: selectedVoice }),
-        signal: AbortSignal.timeout(95000),
+        signal: ttsAbort.signal,
       })
 
       if (ttsRes.ok && ttsRes.body) {
@@ -404,11 +432,16 @@ export function VoiceChat({ onClose, onSendMessage, isActive }: VoiceChatProps) 
           audio.play().catch(() => {})
         }
 
-        // Stream all chunks
+        // Stream all chunks (break early if nukeAudio aborted the fetch)
         while (true) {
-          const { done, value } = await reader.read()
+          let done = false, value: Uint8Array<ArrayBuffer> | undefined
+          try {
+            const res = await reader.read()
+            done = res.done
+            value = res.value as Uint8Array<ArrayBuffer> | undefined
+          } catch { break }  // AbortError or network cancel — stop cleanly
           if (done) break
-          if (value) chunks.push(value as Uint8Array<ArrayBuffer>)
+          if (value) chunks.push(value)
           // Start playback as soon as we have ≥32KB (enough for MP3 header + first frames)
           if (!audioStarted) {
             const totalBytes = chunks.reduce((s, c) => s + c.length, 0)
@@ -503,11 +536,24 @@ export function VoiceChat({ onClose, onSendMessage, isActive }: VoiceChatProps) 
     setTimeout(() => { autoRestartRef.current = true }, 500)
   }, [stopBars, stopKaraoke])
 
+  // Push-to-Talk handlers
+  const handlePTTStart = useCallback(() => {
+    if (voiceState === "speaking") cancelSpeaking()
+    if (voiceState !== "idle") return
+    pttActiveRef.current = true
+    startListening()
+  }, [voiceState, startListening, cancelSpeaking])
+
+  const handlePTTEnd = useCallback(() => {
+    if (!pttActiveRef.current) return
+    pttActiveRef.current = false
+    if (voiceState === "listening") stopListening()  // triggers mr.onstop → processAudio
+  }, [voiceState, stopListening])
+
+  // Legacy click handler (cancel speaking on tap when speaking)
   const handleMicClick = useCallback(() => {
-    if (voiceState === "idle")       startListening()
-    else if (voiceState === "listening") stopListening()
-    else if (voiceState === "speaking")  cancelSpeaking()
-  }, [voiceState, startListening, stopListening, cancelSpeaking])
+    if (voiceState === "speaking") cancelSpeaking()
+  }, [voiceState, cancelSpeaking])
 
   // FIX: handleClose uses nukeAudio for guaranteed mic shutdown
   const handleClose = useCallback(() => {
@@ -677,15 +723,22 @@ export function VoiceChat({ onClose, onSendMessage, isActive }: VoiceChatProps) 
               <PhoneOff size={18} />
             </button>
 
-            <button onClick={handleMicClick} disabled={voiceState === "thinking"}
-              className={`w-[72px] h-[72px] rounded-full flex items-center justify-center transition-all duration-200 active:scale-95 ${
+            <button
+              onMouseDown={handlePTTStart}
+              onMouseUp={handlePTTEnd}
+              onMouseLeave={handlePTTEnd}
+              onTouchStart={(e) => { e.preventDefault(); handlePTTStart() }}
+              onTouchEnd={(e) => { e.preventDefault(); handlePTTEnd() }}
+              onClick={handleMicClick}
+              disabled={voiceState === "thinking"}
+              className={`w-[72px] h-[72px] rounded-full flex items-center justify-center transition-all duration-200 select-none ${
                 voiceState === "thinking"   ? "bg-white/5 border border-white/10 text-white/20 cursor-wait"
-                : voiceState === "listening" ? "bg-red-500/20 border-2 border-red-400/60 text-red-400 scale-105"
+                : voiceState === "listening" ? "bg-red-500/20 border-2 border-red-400/60 text-red-400 scale-110 animate-pulse"
                 : voiceState === "speaking"  ? "bg-yellow-500/15 border-2 border-yellow-400/55 text-yellow-400 scale-105"
-                : "bg-white/10 border-2 border-white/25 text-white hover:bg-white/18"
+                : "bg-white/10 border-2 border-white/25 text-white hover:bg-white/18 active:scale-95 active:bg-red-500/20 active:border-red-400/60 active:text-red-400"
               }`}
               style={
-                voiceState === "listening" ? { boxShadow: "0 0 22px rgba(248,113,113,0.35)" }
+                voiceState === "listening" ? { boxShadow: "0 0 28px rgba(248,113,113,0.55)" }
                 : voiceState === "speaking" ? { boxShadow: "0 0 22px rgba(250,204,21,0.35)" } : {}
               }
             >
@@ -695,6 +748,9 @@ export function VoiceChat({ onClose, onSendMessage, isActive }: VoiceChatProps) 
                 : voiceState === "listening" ? <MicOff size={20} />
                 : <Mic size={20} />}
             </button>
+            <p className="text-[10px] text-white/30 text-center mt-1 select-none">
+              {voiceState === "idle" ? "Hold · SPACE" : voiceState === "listening" ? "Release to send" : ""}
+            </p>
 
             <button onClick={() => setShowPicker(p => !p)}
               className={`w-[52px] h-[52px] rounded-full border flex items-center justify-center transition-all active:scale-95 ${
