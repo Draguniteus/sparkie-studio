@@ -6,13 +6,67 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import { Suspense } from 'react';
 
+function EyeIcon({ open }: { open: boolean }) {
+  return open ? (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
+      className="w-4 h-4">
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  ) : (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
+      className="w-4 h-4">
+      <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24" />
+      <line x1="1" y1="1" x2="23" y2="23" />
+    </svg>
+  );
+}
+
+function PasswordInput({
+  value, onChange, placeholder, id,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  id: string;
+}) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="relative">
+      <input
+        id={id}
+        type={show ? 'text' : 'password'}
+        placeholder={placeholder}
+        value={value}
+        required
+        onChange={e => onChange(e.target.value)}
+        className="w-full bg-hive-600 border border-hive-border text-white placeholder-hive-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-honey-500 pr-10"
+      />
+      <button
+        type="button"
+        onClick={() => setShow(s => !s)}
+        className="absolute right-3 top-1/2 -translate-y-1/2 text-hive-300 hover:text-honey-400 transition-colors"
+        tabIndex={-1}
+        aria-label={show ? 'Hide password' : 'Show password'}
+      >
+        <EyeIcon open={show} />
+      </button>
+    </div>
+  );
+}
+
 function SignInContent() {
   const router = useRouter();
   const params = useSearchParams();
   const [mode, setMode] = useState<'signin' | 'register'>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
+  const [gender, setGender] = useState('');
+  const [age, setAge] = useState('');
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [loading, setLoading] = useState(false);
@@ -27,10 +81,36 @@ function SignInContent() {
     if (err === 'missing_token') setError('Missing token.');
   }, [params]);
 
+  const resetForm = () => {
+    setError('');
+    setInfo('');
+    setPassword('');
+    setConfirmPassword('');
+    setGender('');
+    setAge('');
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setInfo('');
+
+    if (mode === 'register') {
+      if (password !== confirmPassword) {
+        setError('Passwords do not match.');
+        return;
+      }
+      if (password.length < 8) {
+        setError('Password must be at least 8 characters.');
+        return;
+      }
+      const ageNum = age ? parseInt(age, 10) : null;
+      if (age && (isNaN(ageNum!) || ageNum! < 13 || ageNum! > 120)) {
+        setError('Please enter a valid age (13–120).');
+        return;
+      }
+    }
+
     setLoading(true);
 
     try {
@@ -38,7 +118,13 @@ function SignInContent() {
         const res = await fetch('/api/auth/register', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password, displayName }),
+          body: JSON.stringify({
+            email,
+            password,
+            displayName,
+            gender: gender || null,
+            age: age ? parseInt(age, 10) : null,
+          }),
         });
         const data = await res.json();
         if (!res.ok) { setError(data.error); setLoading(false); return; }
@@ -69,6 +155,8 @@ function SignInContent() {
   const inputClass =
     'w-full bg-hive-600 border border-hive-border text-white placeholder-hive-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-honey-500';
 
+  const labelClass = 'block text-xs font-medium text-hive-300 mb-1';
+
   if (checkEmail) {
     return (
       <div className="min-h-screen bg-hive-600 flex items-center justify-center p-4">
@@ -77,7 +165,8 @@ function SignInContent() {
             <div className="text-4xl mb-4">📬</div>
             <h2 className="text-xl font-bold text-white mb-2">Check your email</h2>
             <p className="text-hive-300 text-sm mb-6">
-              We sent a verification link to <span className="text-honey-500">{email}</span>.
+              We sent a verification link to{' '}
+              <span className="text-honey-500">{email}</span>.
               Click it to activate your account.
             </p>
             <p className="text-hive-400 text-xs">Didn&apos;t get it? Check spam, or{' '}
@@ -110,14 +199,14 @@ function SignInContent() {
         </div>
 
         {/* Card */}
-        <div className="bg-hive-500 rounded-2xl p-6 border border-hive-border">
+        <div className="bg-hive-500 rounded-2xl p-6 border border-hive-border shadow-xl">
           {/* Tabs */}
-          <div className="flex mb-5 bg-hive-600 rounded-lg p-1">
+          <div className="flex mb-6 bg-hive-600 rounded-lg p-1">
             {(['signin', 'register'] as const).map(m => (
               <button
                 key={m}
-                onClick={() => { setMode(m); setError(''); setInfo(''); }}
-                className={`flex-1 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                onClick={() => { setMode(m); resetForm(); }}
+                className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
                   mode === m ? 'bg-honey-500 text-black' : 'text-hive-300 hover:text-white'
                 }`}
               >
@@ -132,37 +221,112 @@ function SignInContent() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-3">
+          <form onSubmit={handleSubmit} className="space-y-4">
             {mode === 'register' && (
+              <>
+                {/* Display Name */}
+                <div>
+                  <label htmlFor="displayName" className={labelClass}>Display Name</label>
+                  <input
+                    id="displayName"
+                    type="text"
+                    placeholder="How should we call you?"
+                    value={displayName}
+                    onChange={e => setDisplayName(e.target.value)}
+                    className={inputClass}
+                  />
+                </div>
+              </>
+            )}
+
+            {/* Email */}
+            <div>
+              <label htmlFor="email" className={labelClass}>Email Address</label>
               <input
-                type="text"
-                placeholder="Display name (optional)"
-                value={displayName}
-                onChange={e => setDisplayName(e.target.value)}
+                id="email"
+                type="email"
+                placeholder="you@example.com"
+                value={email}
+                required
+                onChange={e => setEmail(e.target.value)}
                 className={inputClass}
               />
+            </div>
+
+            {/* Password */}
+            <div>
+              <label htmlFor="password" className={labelClass}>Password</label>
+              <PasswordInput
+                id="password"
+                value={password}
+                onChange={setPassword}
+                placeholder={mode === 'register' ? 'Min. 8 characters' : 'Enter your password'}
+              />
+            </div>
+
+            {mode === 'register' && (
+              <>
+                {/* Confirm Password */}
+                <div>
+                  <label htmlFor="confirmPassword" className={labelClass}>Confirm Password</label>
+                  <PasswordInput
+                    id="confirmPassword"
+                    value={confirmPassword}
+                    onChange={setConfirmPassword}
+                    placeholder="Re-enter your password"
+                  />
+                </div>
+
+                {/* Gender + Age row */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label htmlFor="gender" className={labelClass}>Gender <span className="text-hive-400">(optional)</span></label>
+                    <select
+                      id="gender"
+                      value={gender}
+                      onChange={e => setGender(e.target.value)}
+                      className="w-full bg-hive-600 border border-hive-border text-white rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-honey-500 appearance-none"
+                    >
+                      <option value="">Prefer not to say</option>
+                      <option value="male">Male</option>
+                      <option value="female">Female</option>
+                      <option value="non_binary">Non-binary</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="age" className={labelClass}>Age <span className="text-hive-400">(optional)</span></label>
+                    <input
+                      id="age"
+                      type="number"
+                      min={13}
+                      max={120}
+                      placeholder="e.g. 25"
+                      value={age}
+                      onChange={e => setAge(e.target.value)}
+                      className={inputClass}
+                    />
+                  </div>
+                </div>
+
+                <p className="text-hive-400 text-xs">
+                  By creating an account, you agree to our{' '}
+                  <span className="text-honey-500 cursor-pointer hover:underline">Terms of Service</span>{' '}and{' '}
+                  <span className="text-honey-500 cursor-pointer hover:underline">Privacy Policy</span>.
+                </p>
+              </>
             )}
-            <input
-              type="email"
-              placeholder="Email"
-              value={email}
-              required
-              onChange={e => setEmail(e.target.value)}
-              className={inputClass}
-            />
-            <input
-              type="password"
-              placeholder="Password"
-              value={password}
-              required
-              onChange={e => setPassword(e.target.value)}
-              className={inputClass}
-            />
-            {error && <p className="text-red-400 text-xs">{error}</p>}
+
+            {error && (
+              <div className="bg-red-900/40 border border-red-700 text-red-300 rounded-xl px-4 py-2.5 text-sm">
+                {error}
+              </div>
+            )}
+
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-honey-500 hover:bg-honey-400 text-black font-semibold py-2.5 rounded-xl transition-colors disabled:opacity-50"
+              className="w-full bg-honey-500 hover:bg-honey-400 text-black font-semibold py-2.5 rounded-xl transition-colors disabled:opacity-50 mt-2"
             >
               {loading ? 'Loading…' : mode === 'signin' ? 'Sign In' : 'Create Account'}
             </button>
@@ -170,12 +334,24 @@ function SignInContent() {
 
           {mode === 'signin' && (
             <p className="text-center text-hive-400 text-xs mt-4">
-              No account?{' '}
+              Don&apos;t have an account?{' '}
               <button
-                onClick={() => { setMode('register'); setError(''); }}
-                className="text-honey-500 hover:underline"
+                onClick={() => { setMode('register'); resetForm(); }}
+                className="text-honey-500 hover:underline font-medium"
               >
                 Create one
+              </button>
+            </p>
+          )}
+
+          {mode === 'register' && (
+            <p className="text-center text-hive-400 text-xs mt-4">
+              Already have an account?{' '}
+              <button
+                onClick={() => { setMode('signin'); resetForm(); }}
+                className="text-honey-500 hover:underline font-medium"
+              >
+                Sign in
               </button>
             </p>
           )}
