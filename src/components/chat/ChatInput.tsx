@@ -1354,7 +1354,7 @@ export function ChatInput() {
                 <ChevronDown size={12} />
               </button>
               {showModels && (
-                <div className="absolute bottom-full left-0 mb-1 w-72 bg-hive-elevated border border-hive-border rounded-lg shadow-xl py-1 z-50">
+                <div className="absolute bottom-full left-0 mb-1 w-72 bg-hive-elevated border border-hive-border rounded-lg shadow-xl py-1 z-[200]" style={{ background: "var(--hive-elevated)", backdropFilter: "none" }}>
                   {activeModels.map((model) => (
                     <button
                       key={model.id}
@@ -1378,7 +1378,7 @@ export function ChatInput() {
                         )}
                       </div>
                       <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                        model.tag === "Free" ? "bg-green-500/15 text-green-400" : "bg-honey-500/15 text-honey-500"
+                        model.tag === "Free" ? "bg-honey-500/20 text-honey-500" : "bg-honey-500/15 text-honey-500"
                       }`}>{model.tag}</span>
                     </button>
                   ))}
