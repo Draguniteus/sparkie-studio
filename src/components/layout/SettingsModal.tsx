@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import { useAppStore } from '@/store/appStore'
 import { useAuth } from '@/hooks/useAuth'
+import { applyTheme } from '@/utils/themeUtils'
 
 type SettingsTab = 'account' | 'persona' | 'api-keys' | 'preferences' | 'notifications' | 'billing' | 'danger'
 
@@ -63,38 +64,6 @@ function loadPrefs(): Prefs {
   return DEFAULT_PREFS
 }
 function savePrefs(p: Prefs) { try { localStorage.setItem('sparkie_prefs', JSON.stringify(p)) } catch {} }
-
-// Apply theme to the whole page via CSS vars
-function applyTheme(t: 'dark' | 'light') {
-  const root = document.documentElement
-  if (t === 'light') {
-    root.style.setProperty('--hive-bg', '#F5C842')
-    root.style.setProperty('--hive-surface', '#E5A800')
-    root.style.setProperty('--hive-elevated', '#FFD166')
-    root.style.setProperty('--hive-border', '#B38300')
-    root.style.setProperty('--hive-hover', '#FFD700')
-    root.style.setProperty('--text-primary', '#0A0A0A')
-    root.style.setProperty('--text-secondary', '#1A1A1A')
-    root.style.setProperty('--text-muted', '#3D3000')
-    root.style.setProperty('--honey-primary', '#1A1A1A')
-    root.style.setProperty('--honey-glow', 'rgba(0,0,0,0.15)')
-    root.classList.add('sparkie-light')
-    root.classList.remove('sparkie-dark')
-  } else {
-    root.style.setProperty('--hive-bg', '#1A1A1A')
-    root.style.setProperty('--hive-surface', '#252525')
-    root.style.setProperty('--hive-elevated', '#2D2D2D')
-    root.style.setProperty('--hive-border', '#333333')
-    root.style.setProperty('--hive-hover', '#3A3A3A')
-    root.style.setProperty('--text-primary', '#F5F5F5')
-    root.style.setProperty('--text-secondary', '#A0A0A0')
-    root.style.setProperty('--text-muted', '#666666')
-    root.style.setProperty('--honey-primary', '#FFC30B')
-    root.style.setProperty('--honey-glow', 'rgba(255,195,11,0.15)')
-    root.classList.add('sparkie-dark')
-    root.classList.remove('sparkie-light')
-  }
-}
 
 // ── Theme tokens — all colors computed from theme, never from CSS vars inside JSX ──
 // This ensures the modal always re-renders with correct colors when theme changes.
