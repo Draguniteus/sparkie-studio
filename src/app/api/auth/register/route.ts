@@ -8,6 +8,11 @@ async function sendVerificationEmail(email: string, token: string) {
   const baseUrl = process.env.NEXTAUTH_URL ?? 'http://localhost:3000';
   const verifyUrl = `${baseUrl}/api/auth/verify-email?token=${token}`;
 
+  // EMAIL_FROM must be a Resend-verified sender.
+  // Free tier: use your own verified email (e.g. draguniteus@gmail.com).
+  // Production: use noreply@yourdomain.com after verifying domain on resend.com/domains
+  const from = process.env.EMAIL_FROM ?? 'draguniteus@gmail.com';
+
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
@@ -15,21 +20,28 @@ async function sendVerificationEmail(email: string, token: string) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      from: process.env.EMAIL_FROM ?? 'Sparkie Studio <noreply@sparkiestudio.com>',
+      from: `Sparkie Studio <${from}>`,
       to: [email],
       subject: 'Verify your Sparkie Studio account',
       html: `
-        <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px;background:#1a1a2e;color:#fff;border-radius:16px">
-          <img src="${baseUrl}/sparkie-avatar.jpg" width="64" height="64"
-            style="border-radius:50%;margin-bottom:16px;border:2px solid #f5a623" alt="Sparkie" />
-          <h2 style="margin:0 0 8px">Verify your email</h2>
-          <p style="color:#aaa;margin:0 0 24px">Click the button below to activate your Sparkie Studio account. Link expires in 24 hours.</p>
-          <a href="${verifyUrl}"
-            style="display:inline-block;background:#f5a623;color:#000;font-weight:700;padding:12px 28px;border-radius:10px;text-decoration:none">
-            Verify Email
-          </a>
-          <p style="color:#555;font-size:12px;margin-top:24px">If you didn&apos;t create an account, ignore this email.</p>
-        </div>
+        <!DOCTYPE html>
+        <html>
+          <body style="font-family:sans-serif;background:#0f0f0f;color:#fff;padding:40px;">
+            <div style="max-width:480px;margin:0 auto;background:#1a1a2e;border-radius:12px;padding:32px;">
+              <img src="${baseUrl}/sparkie-avatar.jpg" width="64" height="64"
+                style="border-radius:50%;display:block;margin:0 auto 16px;" />
+              <h2 style="text-align:center;color:#a78bfa;">Verify your email</h2>
+              <p style="color:#ccc;text-align:center;">Click below to activate your Sparkie Studio account. Link expires in 24 hours.</p>
+              <div style="text-align:center;margin:28px 0;">
+                <a href="${verifyUrl}"
+                  style="background:#7c3aed;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold;">
+                  Verify Email
+                </a>
+              </div>
+              <p style="color:#666;font-size:12px;text-align:center;">If you didn&apos;t create an account, you can safely ignore this email.</p>
+            </div>
+          </body>
+        </html>
       `,
     }),
   });
@@ -81,7 +93,7 @@ export async function POST(req: Request) {
         ]
       );
     } else {
-      // Resend: update token only
+      // Resend verification: refresh token only
       await query(
         `UPDATE users SET verify_token = $1, verify_token_expires = $2 WHERE email = $3`,
         [verifyToken, verifyExpires, emailLower]
