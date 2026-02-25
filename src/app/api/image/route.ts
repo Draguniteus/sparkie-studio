@@ -1,182 +1,115 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 
-// Node.js runtime needed for: setTimeout polling (Hailuo), longer timeouts
 export const runtime = 'nodejs'
-export const maxDuration = 300 // seconds – MiniMax video polling needs up to ~5 min for Hailuo-02
+export const maxDuration = 120
 
-const POLLINATIONS_IMAGE_MODELS = new Set(['flux', 'flux-realism', 'flux-anime', 'flux-3d', 'turbo', 'gptimage', 'klein', 'klein-large', 'zimage'])
-const POLLINATIONS_VIDEO_MODELS = new Set(['seedance', 'seedance-pro', 'veo', 'wan', 'ltx-2'])
-const MINIMAX_IMAGE_MODELS = new Set(['image-01'])
-const MINIMAX_VIDEO_MODELS = new Set(['hailuo-2.3-fast', 'hailuo-2.3', 'hailuo-02'])
-const ALL_MODELS = new Set([
-  ...Array.from(POLLINATIONS_IMAGE_MODELS),
-  ...Array.from(POLLINATIONS_VIDEO_MODELS),
-  ...Array.from(MINIMAX_IMAGE_MODELS),
-  ...Array.from(MINIMAX_VIDEO_MODELS),
-])
+// DO Gradient AI — Image Generation
+// Supports:
+//   fal-ai/flux/schnell  — fast, high quality
+//   fal-ai/fast-sdxl     — fast SDXL
+//   openai-gpt-image-1   — OpenAI GPT-Image-1.5 (via DO)
+//
+// fal models use async-invoke (POST → poll status → GET result)
+// OpenAI model uses /v1/images/generations (sync)
 
-const MAX_PROMPT_LENGTH = 500
-const ALLOWED_DIMS = [256, 512, 768, 1024, 1280, 1536]
+const DO_INFERENCE_BASE = 'https://inference.do-ai.run/v1'
+const DO_MODEL_ACCESS_KEY = process.env.DO_MODEL_ACCESS_KEY || ''
 
-function clampDim(v: string | null, fallback: number): number {
-  const n = parseInt(v ?? String(fallback))
-  if (isNaN(n)) return fallback
-  return ALLOWED_DIMS.reduce((a, b) => Math.abs(b - n) < Math.abs(a - n) ? b : a)
+const FAL_MODELS = new Set(['fal-ai/flux/schnell', 'fal-ai/fast-sdxl'])
+
+async function pollAsyncJob(requestId: string): Promise<{ url: string }> {
+  const headers = {
+    Authorization: `Bearer ${DO_MODEL_ACCESS_KEY}`,
+    'Content-Type': 'application/json',
+  }
+  // Poll up to 60 iterations × 2s = 120s max
+  for (let i = 0; i < 60; i++) {
+    await new Promise(r => setTimeout(r, 2000))
+    const statusRes = await fetch(`${DO_INFERENCE_BASE}/async-invoke/${requestId}/status`, { headers })
+    const statusData = await statusRes.json() as { status: string }
+    if (statusData.status === 'COMPLETE') {
+      const resultRes = await fetch(`${DO_INFERENCE_BASE}/async-invoke/${requestId}`, { headers })
+      const result = await resultRes.json() as { output?: { images?: Array<{ url: string }> } }
+      const imgUrl = result.output?.images?.[0]?.url
+      if (imgUrl) return { url: imgUrl }
+      throw new Error('No image URL in result')
+    }
+    if (statusData.status === 'FAILED') throw new Error('Image generation failed')
+  }
+  throw new Error('Image generation timed out')
 }
 
-function sleep(ms: number) {
-  return new Promise<void>(resolve => setTimeout(resolve, ms))
-}
-
-// POST: initiate generation, return proxy URL or direct URL for MiniMax
 export async function POST(req: NextRequest) {
-  try {
-    const { prompt, width = 1024, height = 1024, model = 'flux', duration } = await req.json()
+  const { prompt, model = 'fal-ai/flux/schnell', size = '1024x1024', n = 1 } = await req.json() as {
+    prompt: string; model?: string; size?: string; n?: number
+  }
 
-    if (!prompt || typeof prompt !== 'string') {
-      return NextResponse.json({ error: 'Prompt is required' }, { status: 400 })
-    }
+  if (!DO_MODEL_ACCESS_KEY) {
+    return new Response(JSON.stringify({ error: 'DO_MODEL_ACCESS_KEY not configured' }), {
+      status: 500, headers: { 'Content-Type': 'application/json' },
+    })
+  }
 
-    const safePrompt = prompt.slice(0, MAX_PROMPT_LENGTH)
-    const safeModel = ALL_MODELS.has(model) ? model : 'flux'
+  const headers = {
+    Authorization: `Bearer ${DO_MODEL_ACCESS_KEY}`,
+    'Content-Type': 'application/json',
+  }
 
-    // ── MiniMax image-01 ──────────────────────────────────────────────
-    if (MINIMAX_IMAGE_MODELS.has(safeModel)) {
-      const apiKey = process.env.MINIMAX_API_KEY
-      if (!apiKey) return NextResponse.json({ error: 'MINIMAX_API_KEY not configured' }, { status: 500 })
-      const mmRes = await fetch('https://api.minimax.io/v1/image_generation', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({ model: 'image-01', prompt: safePrompt }),
-      })
-      if (!mmRes.ok) return NextResponse.json({ error: `MiniMax ${mmRes.status}` }, { status: mmRes.status })
-      const mmData = await mmRes.json()
-      const url = mmData?.data?.image_urls?.[0] || mmData?.data?.images?.[0]?.url
-      if (!url) return NextResponse.json({ error: 'No image URL returned' }, { status: 500 })
-      return NextResponse.json({ url, prompt: safePrompt, model: safeModel, type: 'image' })
-    }
+  // SSE stream for polling-based fal models + keepalive
+  const stream = new ReadableStream({
+    async start(controller) {
+      const enc = new TextEncoder()
+      const send = (data: string) => controller.enqueue(enc.encode(data))
 
-    // ── MiniMax Hailuo video ──────────────────────────────────────────
-    if (MINIMAX_VIDEO_MODELS.has(safeModel)) {
-      const apiKey = process.env.MINIMAX_API_KEY
-      if (!apiKey) return NextResponse.json({ error: 'MINIMAX_API_KEY not configured' }, { status: 500 })
+      const keepaliveInterval = setInterval(() => {
+        try { send(': keepalive\n\n') } catch { /* closed */ }
+      }, 15000)
 
-      const modelNameMap: Record<string, string> = {
-        'hailuo-2.3-fast': 'MiniMax-Hailuo-2.3',
-        'hailuo-2.3':      'MiniMax-Hailuo-2.3',
-        'hailuo-02':       'MiniMax-Hailuo-02',
-      }
-      const mmModel = modelNameMap[safeModel] || 'T2V-01'
-      const submitRes = await fetch('https://api.minimax.io/v1/video_generation', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({ model: mmModel, prompt: safePrompt }),
-      })
-      if (!submitRes.ok) return NextResponse.json({ error: `MiniMax ${submitRes.status}` }, { status: submitRes.status })
-      const submitData = await submitRes.json()
-      const taskId = submitData?.task_id
-      if (!taskId) return NextResponse.json({ error: 'No task_id returned' }, { status: 500 })
-
-      // Poll for result (max 200s, 40 × 5s intervals)
-      for (let i = 0; i < 55; i++) {  // 55 × 5s = 275s, fits within DO's 300s timeout
-        await sleep(5000)
-        try {
-          const pollRes = await fetch(`https://api.minimax.io/v1/query/video_generation?task_id=${taskId}`, {
-            headers: { 'Authorization': `Bearer ${apiKey}` },
+      try {
+        if (FAL_MODELS.has(model)) {
+          // async-invoke path
+          const invokeRes = await fetch(`${DO_INFERENCE_BASE}/async-invoke`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              model_id: model,
+              input: { prompt, num_images: n },
+            }),
           })
-          if (!pollRes.ok) continue
-          const pollData = await pollRes.json()
-          if (pollData?.status === 'Success') {
-            let videoUrl = pollData?.video_url || null
-            if (!videoUrl && pollData?.file_id) {
-              // Resolve file_id → public download_url via MiniMax files API
-              const fileRes = await fetch(`https://api.minimax.io/v1/files/retrieve?file_id=${pollData.file_id}`, {
-                headers: { 'Authorization': `Bearer ${apiKey}` },
-              }).catch(() => null)
-              if (fileRes?.ok) {
-                const fileData = await fileRes.json().catch(() => ({}))
-                videoUrl = fileData?.file?.download_url || null
-              }
-            }
-            if (videoUrl) return NextResponse.json({ url: videoUrl, prompt: safePrompt, model: safeModel, type: 'video' })
-          }
-          if (pollData?.status === 'Fail') {
-            return NextResponse.json({ error: 'MiniMax video generation failed' }, { status: 500 })
-          }
-        } catch { continue }
+          const invokeData = await invokeRes.json() as { request_id: string }
+          const requestId = invokeData.request_id
+
+          send(': queued\n\n')
+
+          const result = await pollAsyncJob(requestId)
+          send(`data: ${JSON.stringify({ url: result.url, model })}\n\n`)
+        } else {
+          // /v1/images/generations path (openai-gpt-image-1, etc.)
+          const genRes = await fetch(`${DO_INFERENCE_BASE}/images/generations`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ model, prompt, n, size }),
+          })
+          const genData = await genRes.json() as { data: Array<{ b64_json?: string; url?: string }> }
+          const b64 = genData.data?.[0]?.b64_json
+          const url = genData.data?.[0]?.url
+          send(`data: ${JSON.stringify({ b64_json: b64, url, model })}\n\n`)
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Unknown error'
+        send(`data: ${JSON.stringify({ error: msg })}\n\n`)
+      } finally {
+        clearInterval(keepaliveInterval)
+        controller.close()
       }
-      return NextResponse.json({ error: 'Video generation timed out' }, { status: 504 })
-    }
+    },
+  })
 
-    // ── Pollinations (image + video) ──────────────────────────────────
-    const isVideo = POLLINATIONS_VIDEO_MODELS.has(safeModel)
-    const seed = Math.floor(Math.random() * 1_000_000)
-    const params = new URLSearchParams({
-      prompt: safePrompt,
-      width: String(clampDim(String(width), 1024)),
-      height: String(clampDim(String(height), 1024)),
-      model: safeModel,
-      seed: String(seed),
-    })
-    if (isVideo && duration) {
-      params.set('duration', String(Math.min(Math.max(parseInt(String(duration)) || 5, 1), 30)))
-    }
-    return NextResponse.json({
-      url: `/api/image?${params.toString()}`,
-      prompt: safePrompt, width, height, model: safeModel, seed,
-      type: isVideo ? 'video' : 'image',
-    })
-  } catch {
-    return NextResponse.json({ error: 'Failed to generate media' }, { status: 500 })
-  }
-}
-
-// GET: proxy binary from Pollinations
-export async function GET(req: NextRequest) {
-  try {
-    const { searchParams } = new URL(req.url)
-    const prompt = searchParams.get('prompt')
-    const width = searchParams.get('width') || '1024'
-    const height = searchParams.get('height') || '1024'
-    const model = searchParams.get('model') || 'flux'
-    const seed = searchParams.get('seed') || '0'
-    const duration = searchParams.get('duration')
-
-    if (!prompt) return new Response('Missing prompt', { status: 400 })
-
-    const pollinationsModels = new Set([
-      ...Array.from(POLLINATIONS_IMAGE_MODELS),
-      ...Array.from(POLLINATIONS_VIDEO_MODELS),
-    ])
-    const safeModel = pollinationsModels.has(model) ? model : 'flux'
-    const safeWidth = clampDim(width, 1024)
-    const safeHeight = clampDim(height, 1024)
-    const safeSeed = Math.abs(parseInt(seed) || 0)
-
-    const imageUrl = new URL(`https://gen.pollinations.ai/image/${encodeURIComponent(prompt.slice(0, MAX_PROMPT_LENGTH))}`)
-    imageUrl.searchParams.set('width', String(safeWidth))
-    imageUrl.searchParams.set('height', String(safeHeight))
-    imageUrl.searchParams.set('model', safeModel)
-    imageUrl.searchParams.set('seed', String(safeSeed))
-    imageUrl.searchParams.set('nologo', 'true')
-    if (duration) imageUrl.searchParams.set('duration', String(Math.min(parseInt(duration) || 5, 30)))
-
-    const headers: Record<string, string> = { 'User-Agent': 'SparkieStudio/2.0' }
-    const apiKey = process.env.POLLINATIONS_API_KEY
-    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
-
-    const response = await fetch(imageUrl.toString(), { headers })
-    if (!response.ok) return new Response(`Generation failed: ${response.status}`, { status: response.status })
-
-    const contentType = response.headers.get('content-type') || 'image/png'
-    if (!contentType.startsWith('image/') && !contentType.startsWith('video/')) {
-      return new Response('Unexpected content type from upstream', { status: 502 })
-    }
-
-    return new Response(response.body, {
-      headers: { 'Content-Type': contentType, 'Cache-Control': 'public, max-age=86400' },
-    })
-  } catch {
-    return new Response('Internal server error', { status: 500 })
-  }
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'X-Accel-Buffering': 'no',
+    },
+  })
 }
