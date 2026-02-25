@@ -113,6 +113,7 @@ interface ThemeTokens {
 
   // Accent (gold in dark, dark in light)
   accent: string          // gold (#FFC30B) in dark, near-black (#1A1A1A) in light
+  accentText: string      // text ON accent-colored bg: dark in dark, gold in light
   accentBg: string        // accent tinted bg
   accentBorder: string    // accent border
 
@@ -196,6 +197,7 @@ function getTokens(theme: 'dark' | 'light'): ThemeTokens {
     textMuted:     '#666666',
 
     accent:       '#FFC30B',
+    accentText:   '#0A0A0A',
     accentBg:     'rgba(255,195,11,0.12)',
     accentBorder: 'rgba(255,195,11,0.45)',
 
@@ -681,7 +683,7 @@ function BillingPanel({ tk, tier, credits }: { tk: ThemeTokens; tier: string; cr
       </div>
       {!isPro && (
         <button className="w-full py-3 rounded-xl font-semibold text-sm transition-colors hover:opacity-90"
-          style={{ background: tk.accent, color: tk.theme === 'light' ? '#F5C842' : '#0A0A0A' } as React.CSSProperties}>
+          style={{ background: tk.accent, color: tk.accentText }}>
           Upgrade to Pro &mdash; $12/mo
         </button>
       )}
