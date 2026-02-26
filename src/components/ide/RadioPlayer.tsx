@@ -56,6 +56,10 @@ export function RadioPlayer() {
   const [isSyncing, setIsSyncing] = useState(false)
   const [activeTab, setActiveTab] = useState<"station" | "mine">("station")
   const [showStationUpload, setShowStationUpload] = useState(false)
+  // Drag-reorder state (admin Station tab only)
+  const [dragIndex, setDragIndex] = useState<number | null>(null)
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
+  const [isReordering, setIsReordering] = useState(false)
   const [stationUploadFile, setStationUploadFile] = useState<File | null>(null)
   const [stationUploadTitle, setStationUploadTitle] = useState("")
   const [stationUploadArtist, setStationUploadArtist] = useState("")
@@ -264,7 +268,64 @@ export function RadioPlayer() {
     })
   }, [currentIndex, clearProgressInterval])
 
-  const handleStationUpload = useCallback(async () => {
+  const handleDragReorder = useCallback(async (fromIdx: number, toIdx: number) => {
+    if (fromIdx === toIdx) return
+    const reordered = [...stationTracks]
+    const [moved] = reordered.splice(fromIdx, 1)
+    reordered.splice(toIdx, 0, moved)
+    setStationTracks(reordered)
+    if (currentIndex === fromIdx) {
+      setCurrentIndex(toIdx)
+    } else if (currentIndex > fromIdx && currentIndex <= toIdx) {
+      setCurrentIndex(i => i - 1)
+    } else if (currentIndex < fromIdx && currentIndex >= toIdx) {
+      setCurrentIndex(i => i + 1)
+    }
+    setIsReordering(true)
+    try {
+      const res = await fetch('/api/radio/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order: reordered.map(t => t.id) })
+      })
+      if (!res.ok) {
+        console.error('Reorder failed:', await res.json().catch(() => ({})))
+        await syncStation()
+      }
+    } catch {
+      await syncStation()
+    } finally {
+      setIsReordering(false)
+    }
+  }, [stationTracks, currentIndex, syncStation])
+
+  const handleDragStart = useCallback((e: React.DragEvent, idx: number) => {
+    setDragIndex(idx)
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', String(idx))
+  }, [])
+
+  const handleDragOver = useCallback((e: React.DragEvent, idx: number) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    setDragOverIndex(idx)
+  }, [])
+
+  const handleDrop = useCallback((e: React.DragEvent, toIdx: number) => {
+    e.preventDefault()
+    if (dragIndex !== null && dragIndex !== toIdx) {
+      handleDragReorder(dragIndex, toIdx)
+    }
+    setDragIndex(null)
+    setDragOverIndex(null)
+  }, [dragIndex, handleDragReorder])
+
+  const handleDragEnd = useCallback(() => {
+    setDragIndex(null)
+    setDragOverIndex(null)
+  }, [])
+
+    const handleStationUpload = useCallback(async () => {
     if (!stationUploadFile || !stationUploadTitle.trim()) return
     setStationUploading(true)
     setStationUploadError(null)
@@ -459,7 +520,7 @@ export function RadioPlayer() {
             {activeTab === "station" && (
               <div className="px-3 py-1.5 flex items-center justify-between border-b border-hive-border">
                 <span className="text-[10px] text-text-muted">
-                  {lastSync ? `Synced ${lastSync.toLocaleTimeString()}` : "Syncing…"}
+                  {isReordering ? <span className="text-honey-500 animate-pulse">saving order…</span> : lastSync ? `Synced ${lastSync.toLocaleTimeString()}` : "Syncing…"}
                 </span>
                 <div className="flex items-center gap-1">
                   {isAdmin && (
@@ -557,12 +618,30 @@ export function RadioPlayer() {
                   <div
                     key={track.id}
                     onClick={() => playTrack(idx)}
+                    draggable={isAdmin && activeTab === "station"}
+                    onDragStart={isAdmin && activeTab === "station" ? e => handleDragStart(e, idx) : undefined}
+                    onDragOver={isAdmin && activeTab === "station" ? e => handleDragOver(e, idx) : undefined}
+                    onDrop={isAdmin && activeTab === "station" ? e => handleDrop(e, idx) : undefined}
+                    onDragEnd={isAdmin && activeTab === "station" ? handleDragEnd : undefined}
                     className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer group transition-colors ${
                       idx === currentIndex
                         ? "bg-honey-500/10 border border-honey-500/20"
                         : "hover:bg-hive-hover"
-                    }`}
+                    } ${dragOverIndex === idx && dragIndex !== idx ? "border border-honey-500/60 bg-honey-500/5" : ""} ${dragIndex === idx ? "opacity-40" : ""}`}
                   >
+                    {isAdmin && activeTab === "station" && (
+                      <div
+                        className="shrink-0 text-text-muted opacity-0 group-hover:opacity-60 cursor-grab active:cursor-grabbing transition-opacity select-none"
+                        title="Drag to reorder"
+                        onMouseDown={e => e.stopPropagation()}
+                      >
+                        <svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor">
+                          <circle cx="3" cy="3" r="1.5"/><circle cx="7" cy="3" r="1.5"/>
+                          <circle cx="3" cy="8" r="1.5"/><circle cx="7" cy="8" r="1.5"/>
+                          <circle cx="3" cy="13" r="1.5"/><circle cx="7" cy="13" r="1.5"/>
+                        </svg>
+                      </div>
+                    )}
                     <div className="w-8 h-8 rounded-md overflow-hidden shrink-0 bg-hive-600 flex items-center justify-center relative">
                       {activeTab === "station" && track.coverUrl ? (
                         idx === currentIndex && isPlaying ? (
