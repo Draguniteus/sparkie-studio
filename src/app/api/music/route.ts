@@ -165,63 +165,12 @@ export async function POST(req: NextRequest) {
   }
 
   if (model === 'ace-step-free') {
-    if (!ACE_MUSIC_API_KEY) {
-      return new Response(JSON.stringify({ error: 'ACE_MUSIC_API_KEY not configured.' }), {
-        status: 500, headers: { 'Content-Type': 'application/json' },
-      })
-    }
-    const { stylePrompt, lyrics } = parseMusicPrompt(rawPrompt)
-
-    let taskId: string | null = null
-    let lastErr = ''
-
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        const taskRes = await fetch(`${ACE_MUSIC_BASE}/release_task`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${ACE_MUSIC_API_KEY}`,
-          },
-          body: JSON.stringify({ prompt: stylePrompt, lyrics: explicitLyrics || lyrics }),
-          signal: AbortSignal.timeout(30000),
-        })
-
-        if (!taskRes.ok) {
-          const errText = await taskRes.text().catch(() => '')
-          if (taskRes.status === 403) {
-            lastErr = 'ACE Music API blocked this server IP (Cloudflare 403). The key is valid but api.acemusic.ai blocks server-side requests. Contact ACE Music support to whitelist DO App Platform IPs.'
-            break
-          }
-          if (taskRes.status === 401) {
-            lastErr = 'ACE Music API key invalid or expired. Refresh at acemusic.ai/playground/api-key.'
-            break
-          }
-          lastErr = `ACE Music submit error (${taskRes.status}): ${errText.slice(0, 200)}`
-          await sleep(5000)
-          continue
-        }
-
-        const taskData = await taskRes.json()
-        taskId = taskData.task_id || taskData.id || null
-        if (taskId) break
-        lastErr = 'ACE Music: no task_id in response'
-      } catch (e) {
-        lastErr = e instanceof Error ? e.message : String(e)
-        const isTimeout = lastErr.includes('TimeoutError') || lastErr.includes('timed out') || lastErr.includes('abort') || (e instanceof Error && e.name === 'TimeoutError')
-        if (!isTimeout) break
-        await sleep(5000)
-      }
-    }
-
-    if (!taskId) {
-      return new Response(JSON.stringify({ error: `ACE Music submit failed: ${lastErr}` }), {
-        status: 500, headers: { 'Content-Type': 'application/json' },
-      })
-    }
-
-    return new Response(JSON.stringify({ taskId, status: 'queued', model: 'ace-step-free' }), {
-      status: 202, headers: { 'Content-Type': 'application/json' },
+    // ACE Music (api.acemusic.ai) is no longer available — provider shut down.
+    // To restore: migrate to MusicAPI.ai (docs.musicapi.ai) with MUSICAPI_KEY env var.
+    return new Response(JSON.stringify({
+      error: 'ACE Music provider (acemusic.ai) is no longer available. Use a MiniMax music model instead (music-2.5 or music-2.0).'
+    }), {
+      status: 503, headers: { 'Content-Type': 'application/json' },
     })
   }
 
@@ -234,8 +183,28 @@ export async function POST(req: NextRequest) {
 
   const minimaxModel = MINIMAX_MODEL_MAP[model] || 'music-2.5'
   const { stylePrompt, lyrics } = parseMusicPrompt(rawPrompt)
-  const finalLyrics = (explicitLyrics || lyrics).trim()
+  let finalLyrics = (explicitLyrics || lyrics).trim()
   const finalPrompt = stylePrompt.trim()
+
+  // If no lyrics (e.g. user gave a plain prompt), auto-generate via MiniMax lyrics API
+  if (!finalLyrics) {
+    try {
+      const lyricsRes = await fetch(`${MINIMAX_BASE}/lyrics_generation`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({ mode: 'write_full_song', prompt: rawPrompt }),
+      })
+      if (lyricsRes.ok) {
+        const lyricsData = await lyricsRes.json()
+        if (lyricsData?.base_resp?.status_code === 0 && lyricsData?.lyrics) {
+          finalLyrics = lyricsData.lyrics
+        }
+      }
+    } catch { /* fall through — MiniMax music will error on empty lyrics */ }
+  }
 
   const requestBody: Record<string, unknown> = {
     model: minimaxModel,

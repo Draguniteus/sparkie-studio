@@ -7,8 +7,8 @@ const MINIMAX_BASE = 'https://api.minimax.io/v1'
 
 // MiniMax Lyrics Generation
 // POST /v1/lyrics_generation
-// body: { prompt: string }  ← model field NOT accepted, causes 400
-// Returns: { base_resp: { status_code, status_msg }, data: { lyrics: string, title: string } }
+// body: { mode: 'write_full_song', prompt: string }  ← mode is REQUIRED, no model field
+// Returns: { song_title, style_tags, lyrics, base_resp: { status_code, status_msg } }
 
 export async function POST(req: NextRequest) {
   const apiKey = process.env.MINIMAX_API_KEY
@@ -33,8 +33,8 @@ export async function POST(req: NextRequest) {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
       },
-      // ⚠️ Do NOT send model field — MiniMax lyrics_generation rejects it with 400
-      body: JSON.stringify({ prompt }),
+      // mode is REQUIRED — omitting it causes 400. Do NOT send model field.
+      body: JSON.stringify({ mode: 'write_full_song', prompt }),
     })
 
     if (!res.ok) {
@@ -54,14 +54,16 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const lyricsText = data?.data?.lyrics
-    const title = data?.data?.title || 'Generated Lyrics'
+    // New API shape: { song_title, style_tags, lyrics, base_resp }  (top-level, not nested under data.data)
+    const lyricsText = data?.lyrics
+    const title = data?.song_title || 'Generated Lyrics'
+    const styleTags = data?.style_tags || ''
 
     if (!lyricsText) {
       return NextResponse.json({ error: 'No lyrics returned from MiniMax' }, { status: 500 })
     }
 
-    return NextResponse.json({ lyrics: lyricsText, title, model: 'music-2.5' })
+    return NextResponse.json({ lyrics: lyricsText, title, styleTags, model: 'music-2.5' })
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Lyrics generation failed'
     return NextResponse.json({ error: msg }, { status: 500 })
