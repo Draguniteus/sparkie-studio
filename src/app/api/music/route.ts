@@ -8,10 +8,11 @@ const ACE_MUSIC_BASE = 'https://api.acemusic.ai'
 const ACE_MUSIC_API_KEY = process.env.ACE_MUSIC_API_KEY || ''
 
 const MINIMAX_MODEL_MAP: Record<string, string> = {
+  // music-2.0 removed from MiniMax API — all variants now map to music-2.5 (only valid model)
   'music-2.5':     'music-2.5',
-  'music-2.0':     'music-2.0',
+  'music-2.0':     'music-2.5',
   'music-01':      'music-2.5',
-  'music-01-lite': 'music-2.0',
+  'music-01-lite': 'music-2.5',
 }
 
 async function sleep(ms: number) {
