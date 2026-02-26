@@ -39,10 +39,10 @@ const IMAGE_MODELS = [
 ]
 
 const VIDEO_MODELS = [
-  { id: "seedance", name: "Seedance", tag: "Free", desc: "BytePlus text-to-video" },
-  { id: "hailuo-2.3-fast", name: "Hailuo 2.3 Fast", tag: "Paid", desc: "$0.19 / 768P 6s video" },
-  { id: "hailuo-2.3", name: "Hailuo 2.3", tag: "Paid", desc: "$0.28 / 768P 6s video" },
-  { id: "hailuo-02", name: "Hailuo 02", tag: "Paid", desc: "$0.10 / 512P 6s video" },
+  { id: "MiniMax-Hailuo-2.3", name: "Hailuo 2.3", tag: "Paid", desc: "$0.28 / 768P 6s — best quality" },
+  { id: "MiniMax-Hailuo-02", name: "Hailuo 02", tag: "Paid", desc: "$0.10 / 512P 6s — balanced" },
+  { id: "T2V-01-Director", name: "T2V Director", tag: "Paid", desc: "Camera control commands" },
+  { id: "T2V-01", name: "T2V-01", tag: "Paid", desc: "Standard text-to-video" },
 ]
 
 const MUSIC_MODELS = [
@@ -113,7 +113,7 @@ export function ChatInput() {
   const [showModels, setShowModels] = useState(false)
   const [genMode, setGenMode] = useState<GenMode>("chat")
   const [selectedImageModel, setSelectedImageModel] = useState("flux")
-  const [selectedVideoModel, setSelectedVideoModel] = useState("seedance")
+  const [selectedVideoModel, setSelectedVideoModel] = useState("MiniMax-Hailuo-2.3")
   const [selectedMusicModel, setSelectedMusicModel] = useState("music-2.5")
   const [selectedLyricsModel, setSelectedLyricsModel] = useState("music-2.5")
   const [selectedSpeechModel, setSelectedSpeechModel] = useState("speech-02-turbo")
@@ -444,7 +444,7 @@ export function ChatInput() {
       const body: Record<string, unknown> = mediaType === "speech" ? { text: prompt, model, voice_id: selectedVoiceId } : { prompt, model }
       if (mediaType === "video") body.duration = 4
 
-      const endpoint = mediaType === "music" ? "/api/music" : mediaType === "lyrics" ? "/api/lyrics" : mediaType === "speech" ? "/api/speech" : "/api/image"
+      const endpoint = mediaType === "music" ? "/api/music" : mediaType === "lyrics" ? "/api/lyrics" : mediaType === "speech" ? "/api/speech" : mediaType === "video" ? "/api/video" : "/api/image"
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -540,16 +540,20 @@ export function ChatInput() {
 
       const data = await response.json()
 
-      // ACE Music async path: server returns taskId, frontend polls for result
+      // Async task path: server returns taskId (music ACE-Step or video MiniMax)
       if (data.taskId && data.status === "queued") {
         const taskId = data.taskId
+        const isVideoTask = mediaType === "video"
+        const taskEmoji = isVideoTask ? "🎬" : "🎵"
+        const taskLabel = isVideoTask ? "video" : "music"
+        const pollEndpoint = isVideoTask ? `/api/video?taskId=${taskId}` : `/api/music?taskId=${taskId}`
         const dots = [".", "..", "..."]
         let dotIdx = 0
         let pollCount = 0
         const MAX_POLLS = 120 // 10 minutes max (120 × 5s)
 
         updateMessage(chatId, assistantMsgId, {
-          content: `\ud83c\udfb5 Generating music\u2026 this takes 3-5 minutes for ACE-Step`,
+          content: `${taskEmoji} Generating ${taskLabel}… this takes 2-5 minutes`,
           isStreaming: true,
         })
 
@@ -560,7 +564,7 @@ export function ChatInput() {
           if (pollCount > MAX_POLLS) {
             clearInterval(pollInterval)
             updateMessage(chatId, assistantMsgId, {
-              content: `Music generation timed out after 10 minutes. Please try again.`,
+              content: `${taskLabel.charAt(0).toUpperCase() + taskLabel.slice(1)} generation timed out after 10 minutes. Please try again.`,
               isStreaming: false, type: "text",
             })
             updateWorklogEntry(logId, { status: "error", duration: Date.now() - startTime })
@@ -569,7 +573,7 @@ export function ChatInput() {
           }
 
           try {
-            const statusRes = await fetch(`/api/music?taskId=${taskId}`)
+            const statusRes = await fetch(pollEndpoint)
             if (!statusRes.ok) return // network blip, keep polling
 
             const statusData = await statusRes.json()
@@ -581,19 +585,21 @@ export function ChatInput() {
                 imageUrl: statusData.url,
                 imagePrompt: prompt,
                 isStreaming: false,
-                type: "music",
+                type: isVideoTask ? "video" : "music",
                 model: model,
               })
               const mediaChatTitle = useAppStore.getState().chats.find(c => c.id === chatId)?.title || "New Chat"
-              const safePrompt = prompt.slice(0, 40).replace(/[^a-z0-9 ]/gi, "").trim().replace(/\s+/g, "-") || "music"
+              const safePrompt = prompt.slice(0, 40).replace(/[^a-z0-9 ]/gi, "").trim().replace(/\s+/g, "-") || taskLabel
+              const fileExt = isVideoTask ? "mp4" : "mp3"
+              const assetType = isVideoTask ? "video" : "audio"
               addAsset({
-                name: `${safePrompt}.mp3`,
+                name: `${safePrompt}.${fileExt}`,
                 language: "",
                 content: statusData.url,
                 chatId,
                 chatTitle: mediaChatTitle,
                 fileId: assistantMsgId,
-                assetType: "audio" as import("@/store/appStore").AssetType,
+                assetType: assetType as import("@/store/appStore").AssetType,
                 source: "agent" as const,
               })
               updateWorklogEntry(logId, { status: "done", duration: Date.now() - startTime })
@@ -601,7 +607,7 @@ export function ChatInput() {
             } else if (statusData.status === "error") {
               clearInterval(pollInterval)
               updateMessage(chatId, assistantMsgId, {
-                content: `Music generation failed: ${statusData.error || "Unknown error"}`,
+                content: `${taskLabel.charAt(0).toUpperCase() + taskLabel.slice(1)} generation failed: ${statusData.error || "Unknown error"}`,
                 isStreaming: false, type: "text",
               })
               updateWorklogEntry(logId, { status: "error", duration: Date.now() - startTime })
@@ -610,7 +616,7 @@ export function ChatInput() {
               // Still pending — update dots animation
               const elapsed = Math.round((Date.now() - startTime) / 1000)
               updateMessage(chatId, assistantMsgId, {
-                content: `\ud83c\udfb5 Generating music${dots[dotIdx]} (${elapsed}s)`,
+                content: `${taskEmoji} Generating ${taskLabel}${dots[dotIdx]} (${elapsed}s)`,
                 isStreaming: true,
               })
             }
