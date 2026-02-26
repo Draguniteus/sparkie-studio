@@ -12,8 +12,9 @@ export async function GET() {
   const res = await query<{
     id: string; email: string; display_name: string;
     tier: string; credits: number; gender: string | null; age: number | null;
+    avatar_url: string | null;
   }>(
-    'SELECT id, email, display_name, tier, credits, gender, age FROM users WHERE email = $1',
+    'SELECT id, email, display_name, tier, credits, gender, age, avatar_url FROM users WHERE email = $1',
     [session.user.email]
   );
 
@@ -28,6 +29,7 @@ export async function GET() {
     credits: user.credits ?? 0,
     gender: user.gender,
     age: user.age,
+    avatarUrl: user.avatar_url ?? null,
   });
 }
 

@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import {
   type LucideIcon, X, User, Brain, Key, Sliders, CreditCard,
   AlertTriangle, ChevronRight, LogOut, Loader2, Check, ChevronDown,
-  Bell, Moon, Sun
+  Bell, Moon, Sun, Camera
 } from 'lucide-react'
 import { useAppStore } from '@/store/appStore'
 import { useAuth } from '@/hooks/useAuth'
@@ -44,6 +44,7 @@ const LANGUAGES = [
 interface DbUser {
   id: string; email: string; displayName: string
   tier: string; credits: number; gender: string | null; age: number | null
+  avatarUrl: string | null
 }
 
 interface Prefs {
@@ -196,7 +197,7 @@ function getTokens(theme: 'dark' | 'light'): ThemeTokens {
 }
 
 export function SettingsModal() {
-  const { settingsOpen, closeSettings, userProfile, updateUserProfile, setSelectedModel } = useAppStore()
+  const { settingsOpen, closeSettings, userProfile, updateUserProfile, setSelectedModel, setUserAvatarUrl } = useAppStore()
   const { user, signOut } = useAuth()
   const [activeTab, setActiveTab] = useState<SettingsTab>('account')
   const [saved, setSaved] = useState(false)
@@ -211,7 +212,7 @@ export function SettingsModal() {
   useEffect(() => {
     if (settingsOpen && !dbUser) {
       setLoading(true)
-      fetch('/api/user/profile').then(r => r.json()).then(d => { if (!d.error) setDbUser(d) }).finally(() => setLoading(false))
+      fetch('/api/user/profile').then(r => r.json()).then(d => { if (!d.error) { setDbUser(d); if (d.avatarUrl) setUserAvatarUrl(d.avatarUrl) } }).finally(() => setLoading(false))
     }
   }, [settingsOpen])
 
@@ -223,6 +224,7 @@ export function SettingsModal() {
   const email = dbUser?.email || user?.email || ''
   const tier = dbUser?.tier ?? 'free'
   const credits = dbUser?.credits ?? 0
+  const avatarUrl = dbUser?.avatarUrl ?? null
   const initial = displayName.charAt(0).toUpperCase()
 
   const handleSaveProfile = async (patch: Record<string, string>) => {
@@ -262,9 +264,14 @@ export function SettingsModal() {
               </div>
             ) : (
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0"
-                  style={{ background: tk.accentBg, border: `1px solid ${tk.accentBorder}`, color: tk.accent }}>
-                  {initial}
+                <div className="w-8 h-8 rounded-full overflow-hidden shrink-0" style={{ border: `1px solid ${tk.accentBorder}` }}>
+                  {avatarUrl ? (
+                    <img src={avatarUrl} alt={displayName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-sm font-bold" style={{ background: tk.accentBg, color: tk.accent }}>
+                      {initial}
+                    </div>
+                  )}
                 </div>
                 <div className="min-w-0">
                   <div className="text-[13px] font-semibold truncate leading-tight" style={{ color: tk.textPrimary }}>{displayName}</div>
@@ -324,7 +331,7 @@ export function SettingsModal() {
           </div>
 
           <div className="flex-1 overflow-y-auto px-6 py-5">
-            {activeTab === 'account'       && <AccountPanel tk={tk} displayName={displayName} email={email} tier={tier} credits={credits} onSave={handleSaveProfile} />}
+            {activeTab === 'account'       && <AccountPanel tk={tk} displayName={displayName} email={email} tier={tier} credits={credits} avatarUrl={avatarUrl} onSave={handleSaveProfile} onAvatarChange={(url) => { setDbUser(prev => prev ? { ...prev, avatarUrl: url } : prev); setUserAvatarUrl(url) }} />}
             {activeTab === 'persona'       && <PersonaPanel tk={tk} profile={userProfile} onSave={handleSaveProfile} />}
             {activeTab === 'api-keys'      && <ApiKeysPanel tk={tk} />}
             {activeTab === 'preferences'   && <PreferencesPanel tk={tk} prefs={prefs} onChange={handlePrefsChange} />}
@@ -479,18 +486,78 @@ function Toggle({ tk, enabled, onChange, label, desc }: { tk: ThemeTokens; enabl
 
 // ── Panels ───────────────────────────────────────────────────────────
 
-function AccountPanel({ tk, displayName, email, tier, credits, onSave }: {
+function AccountPanel({ tk, displayName, email, tier, credits, avatarUrl, onSave, onAvatarChange }: {
   tk: ThemeTokens; displayName: string; email: string; tier: string; credits: number
+  avatarUrl: string | null
   onSave: (p: Record<string, string>) => void
+  onAvatarChange: (url: string) => void
 }) {
   const isPro = tier === 'pro'
+  const [uploading, setUploading] = React.useState(false)
+  const [uploadError, setUploadError] = React.useState<string | null>(null)
+  const fileInputRef = React.useRef<HTMLInputElement>(null)
+
+  const handleAvatarClick = () => fileInputRef.current?.click()
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    setUploadError(null)
+    const fd = new FormData()
+    fd.append('avatar', file)
+    try {
+      const res = await fetch('/api/user/avatar', { method: 'POST', body: fd })
+      const data = await res.json()
+      if (data.avatarUrl) {
+        onAvatarChange(data.avatarUrl)
+      } else {
+        setUploadError(data.error ?? 'Upload failed')
+      }
+    } catch {
+      setUploadError('Upload failed')
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  const initial = displayName.charAt(0).toUpperCase()
+
   return (
     <div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp,image/gif"
+        className="hidden"
+        onChange={handleFileChange}
+      />
       <div className="flex items-center gap-4 mb-6 p-4 rounded-xl" style={{ background: tk.bgElevated, border: `1px solid ${tk.border}` }}>
-        <div className="w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold shrink-0"
-          style={{ background: tk.accentBg, border: `2px solid ${tk.accentBorder}`, color: tk.accent }}>
-          {displayName.charAt(0).toUpperCase()}
-        </div>
+        {/* Clickable avatar */}
+        <button
+          type="button"
+          onClick={handleAvatarClick}
+          title="Change profile picture"
+          className="relative w-12 h-12 rounded-full overflow-hidden shrink-0 group"
+          style={{ border: `2px solid ${tk.accentBorder}` }}
+        >
+          {avatarUrl ? (
+            <img src={avatarUrl} alt={displayName} className="w-full h-full object-cover" />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-lg font-bold" style={{ background: tk.accentBg, color: tk.accent }}>
+              {initial}
+            </div>
+          )}
+          {/* Hover overlay */}
+          <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+            {uploading ? (
+              <Loader2 size={14} className="text-white animate-spin" />
+            ) : (
+              <Camera size={14} className="text-white" />
+            )}
+          </div>
+        </button>
         <div className="flex-1 min-w-0">
           <div className="font-semibold text-[15px] truncate" style={{ color: tk.textPrimary }}>{displayName}</div>
           <div className="text-[12px] truncate mt-0.5" style={{ color: tk.textSecondary }}>{email}</div>
@@ -504,6 +571,10 @@ function AccountPanel({ tk, displayName, email, tier, credits, onSave }: {
           </div>
         </div>
       </div>
+      {uploadError && (
+        <p className="text-[11px] mb-3 text-red-400">{uploadError}</p>
+      )}
+      <p className="text-[11px] mb-5" style={{ color: tk.textMuted }}>Click your avatar to upload a new photo (JPG, PNG, WebP · max 2 MB)</p>
       <Field tk={tk} label="Display Name" hint="How you appear across the platform.">
         <ThemedInput tk={tk} defaultValue={displayName} onBlur={(v) => onSave({ displayName: v, name: v })} placeholder="Your name" />
       </Field>

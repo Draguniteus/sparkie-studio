@@ -5,9 +5,10 @@ import { useAppStore } from '@/store/appStore'
 import { ChatInput } from './ChatInput'
 import { MessageBubble } from './MessageBubble'
 import { Code, Share, MoreHorizontal } from 'lucide-react'
+import { useAuth } from '@/hooks/useAuth'
 
 export function ChatView() {
-  const { chats, currentChatId, ideOpen, toggleIDE } = useAppStore()
+  const { chats, currentChatId, ideOpen, toggleIDE, userAvatarUrl } = useAppStore()
   const chat = chats.find(c => c.id === currentChatId)
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -48,9 +49,9 @@ export function ChatView() {
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
         {chat.messages.filter(msg => msg.isStreaming || msg.content).map((msg) => (
-          <MessageBubble key={msg.id} message={msg} />
+          <MessageBubble key={msg.id} message={msg} userAvatarUrl={userAvatarUrl} />
         ))}
       </div>
 

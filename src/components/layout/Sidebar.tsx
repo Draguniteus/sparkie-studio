@@ -11,7 +11,9 @@ import { useAuth } from '@/hooks/useAuth'
 export function Sidebar() {
   const {
     sidebarOpen, toggleSidebar, chats, currentChatId,
-    setCurrentChat, createChat, deleteChat, setActiveTab, activeTab, openSettings} = useAppStore()
+    setCurrentChat, createChat, deleteChat, setActiveTab, activeTab, openSettings,
+    userAvatarUrl,
+  } = useAppStore()
   const [historyCollapsed, setHistoryCollapsed] = useState(false)
   const { user, signOut } = useAuth()
 
@@ -152,8 +154,15 @@ export function Sidebar() {
       {/* User Profile */}
       <div className="p-3 border-t border-hive-border shrink-0">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-full bg-honey-500/20 flex items-center justify-center text-honey-500 text-xs font-bold shrink-0">
-            {avatarInitial}
+          {/* Avatar: photo if set, else initial */}
+          <div className="w-8 h-8 rounded-full overflow-hidden shrink-0 border border-hive-border">
+            {userAvatarUrl ? (
+              <img src={userAvatarUrl} alt={displayName} className="w-full h-full object-cover" />
+            ) : (
+              <div className="w-full h-full bg-honey-500/20 flex items-center justify-center text-honey-500 text-xs font-bold">
+                {avatarInitial}
+              </div>
+            )}
           </div>
           <div className="flex-1 min-w-0">
             <div className="text-sm font-medium truncate text-text-primary">{displayName}</div>

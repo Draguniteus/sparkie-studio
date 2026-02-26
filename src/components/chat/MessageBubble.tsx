@@ -8,6 +8,7 @@ import remarkGfm from "remark-gfm"
 
 interface Props {
   message: Message
+  userAvatarUrl?: string | null  // user's uploaded profile picture
 }
 
 // File type → icon color
@@ -63,7 +64,6 @@ function BuildCard({ card }: { card: NonNullable<Message["buildCard"]> }) {
       <div className="flex items-center gap-2 px-4 py-2.5 border-t border-honey-500/10">
         <button
           onClick={() => {
-            // Trigger IDE preview tab focus — dispatch custom event
             window.dispatchEvent(new CustomEvent('sparkie:open-preview'))
           }}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-honey-500 text-black text-xs font-semibold hover:bg-honey-400 transition-colors"
@@ -88,7 +88,7 @@ function BuildCard({ card }: { card: NonNullable<Message["buildCard"]> }) {
   )
 }
 
-export function MessageBubble({ message }: Props) {
+export function MessageBubble({ message, userAvatarUrl }: Props) {
   const isUser = message.role === "user"
   const [copied, setCopied] = useState(false)
 
@@ -105,9 +105,14 @@ export function MessageBubble({ message }: Props) {
 
   return (
     <div className={`flex gap-3 animate-fade-in ${isUser ? "justify-end" : ""}`}>
+      {/* Sparkie avatar */}
       {!isUser && (
-        <div className="w-7 h-7 rounded-lg bg-honey-500/15 flex items-center justify-center shrink-0 mt-0.5">
-          <Sparkles size={14} className="text-honey-500" />
+        <div className="w-7 h-7 rounded-lg overflow-hidden shrink-0 mt-0.5 border border-honey-500/20">
+          <img
+            src="/sparkie-avatar.jpg"
+            alt="Sparkie"
+            className="w-full h-full object-cover"
+          />
         </div>
       )}
 
@@ -174,7 +179,7 @@ export function MessageBubble({ message }: Props) {
                 <audio
                    src={
                      message.imageUrl?.startsWith('https://')
-                       ? `/api/music/proxy?url=${encodeURIComponent(message.imageUrl)}`
+                       ? `/api/music/proxy?url=${encodeURIComponent(message.imageUrl!)}`
                        : message.imageUrl
                    }
                    controls
@@ -261,9 +266,20 @@ export function MessageBubble({ message }: Props) {
         )}
       </div>
 
+      {/* User avatar */}
       {isUser && (
-        <div className="w-7 h-7 rounded-lg bg-hive-elevated flex items-center justify-center shrink-0 mt-0.5">
-          <User size={14} className="text-text-secondary" />
+        <div className="w-7 h-7 rounded-lg overflow-hidden shrink-0 mt-0.5 border border-hive-border">
+          {userAvatarUrl ? (
+            <img
+              src={userAvatarUrl}
+              alt="You"
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <div className="w-full h-full bg-hive-elevated flex items-center justify-center">
+              <User size={14} className="text-text-secondary" />
+            </div>
+          )}
         </div>
       )}
     </div>

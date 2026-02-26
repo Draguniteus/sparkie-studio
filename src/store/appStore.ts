@@ -177,6 +177,9 @@ interface AppState {
   lastMode: 'chat' | 'build'
   setLastMode: (mode: 'chat' | 'build') => void
   hydrateFromStorage: () => void
+  // Avatar
+  userAvatarUrl: string | null
+  setUserAvatarUrl: (url: string | null) => void
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -367,6 +370,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     try { if (updated) localStorage.setItem('sparkie_user_profile', JSON.stringify(updated)) } catch {}
     return { userProfile: updated }
   }),
+  // Avatar URL (loaded from DB on settings open)
+  userAvatarUrl: null,
+  setUserAvatarUrl: (url) => set({ userAvatarUrl: url }),
   settingsOpen: false,
   openSettings: () => set({ settingsOpen: true }),
   closeSettings: () => set({ settingsOpen: false }),
