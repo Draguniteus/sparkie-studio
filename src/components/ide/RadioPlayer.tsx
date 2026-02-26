@@ -153,6 +153,31 @@ export function RadioPlayer() {
     })
   }, [allTracks, volume, isMuted, startProgressTracking])
 
+  // ─── Slash command event listeners (/startradio, /stopradio) ─────────────────
+  useEffect(() => {
+    const handleStart = () => {
+      if (!isPlaying) {
+        if (allTracks.length > 0) {
+          playTrack(currentIndex >= 0 ? currentIndex : 0)
+        }
+      }
+    }
+    const handleStop = () => {
+      const audio = audioRef.current
+      if (audio && isPlaying) {
+        audio.pause()
+        setIsPlaying(false)
+        clearProgressInterval()
+      }
+    }
+    window.addEventListener('sparkie:startradio', handleStart)
+    window.addEventListener('sparkie:stopradio', handleStop)
+    return () => {
+      window.removeEventListener('sparkie:startradio', handleStart)
+      window.removeEventListener('sparkie:stopradio', handleStop)
+    }
+  }, [isPlaying, allTracks, currentIndex, playTrack, clearProgressInterval])
+
   const togglePlay = useCallback(() => {
     const audio = audioRef.current
     if (!audio) return
