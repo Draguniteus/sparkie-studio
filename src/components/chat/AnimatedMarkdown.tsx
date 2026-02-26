@@ -12,7 +12,6 @@ interface Props {
 }
 
 // Tracks which messages have finished animating
-// Key: messageId → marked done = render plain settled text
 const animationDoneSet = new Set<string>()
 
 // Per-render char offset — reset each render, incremented as spans are created
@@ -33,7 +32,6 @@ function AnimatedText({
   }
 
   const startOffset = renderCharOffset
-  // Use Array.from so multi-codepoint emoji (🎵, 📻, etc.) stay intact as one element
   const chars = Array.from(text)
   renderCharOffset += chars.length
 
@@ -56,6 +54,65 @@ function AnimatedText({
   )
 }
 
+// ── Media renderers ───────────────────────────────────────────────────────────
+
+function SparkieImage({ src, alt }: { src: string; alt?: string }) {
+  return (
+    <div style={{ margin: "12px 0", borderRadius: "12px", overflow: "hidden", maxWidth: "480px" }}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt={alt ?? "Sparkie generated image"}
+        style={{ width: "100%", display: "block", borderRadius: "12px" }}
+        loading="lazy"
+      />
+    </div>
+  )
+}
+
+function SparkieAudio({ src, label }: { src: string; label?: string }) {
+  const parts = src.split("|")
+  const audioUrl = parts[0].trim()
+  const title = parts[1]?.trim() ?? label ?? "Sparkie track"
+
+  return (
+    <div
+      style={{
+        margin: "12px 0",
+        padding: "12px 16px",
+        background: "rgba(255, 195, 11, 0.08)",
+        border: "1px solid rgba(255, 195, 11, 0.25)",
+        borderRadius: "12px",
+        maxWidth: "420px",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
+        <span style={{ fontSize: "18px" }}>🎵</span>
+        <span style={{ color: "#FFC30B", fontWeight: 600, fontSize: "14px" }}>{title}</span>
+      </div>
+      <audio
+        controls
+        src={audioUrl}
+        style={{ width: "100%", accentColor: "#FFC30B" }}
+      />
+    </div>
+  )
+}
+
+function SparkieVideo({ src }: { src: string }) {
+  return (
+    <div style={{ margin: "12px 0", borderRadius: "12px", overflow: "hidden", maxWidth: "480px" }}>
+      <video
+        controls
+        src={src.trim()}
+        style={{ width: "100%", display: "block", borderRadius: "12px", background: "#000" }}
+      />
+    </div>
+  )
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
+
 export function AnimatedMarkdown({ content, isStreaming, messageId }: Props) {
   const wasStreamingRef = useRef(isStreaming)
   const markedDoneRef = useRef(false)
@@ -72,13 +129,10 @@ export function AnimatedMarkdown({ content, isStreaming, messageId }: Props) {
   wasStreamingRef.current = isStreaming
 
   // Case B: message was never streamed (slash commands, system messages, etc.)
-  // isStreaming starts false and never transitions — mark done immediately
-  // so it never re-animates on subsequent renders
   const neverStreamedRef = useRef(!isStreaming)
   if (neverStreamedRef.current && !markedDoneRef.current) {
     markedDoneRef.current = true
     const id = messageId
-    // Short delay so first-render animation (if any) still plays out
     setTimeout(() => {
       animationDoneSet.add(id)
     }, (Array.from(content).length * 0.03 + 1.2) * 1000)
@@ -114,9 +168,22 @@ export function AnimatedMarkdown({ content, isStreaming, messageId }: Props) {
     li({ children }) {
       return <li><AnimatedNodes isDone={done}>{children}</AnimatedNodes></li>
     },
-    // Code blocks — never animated
+    // Code blocks — intercept media fences, pass through real code
     code(props) {
       const { children, className } = props
+      const lang = className?.replace("language-", "") ?? ""
+      const raw = String(children).trim()
+
+      if (lang === "image") {
+        return <SparkieImage src={raw} />
+      }
+      if (lang === "audio") {
+        return <SparkieAudio src={raw} />
+      }
+      if (lang === "video") {
+        return <SparkieVideo src={raw} />
+      }
+
       return <code className={className}>{children}</code>
     },
     pre({ children }) {
