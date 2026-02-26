@@ -13,6 +13,14 @@ interface RadioTrack {
   addedAt: Date
 }
 
+interface StationTrack {
+  id: string
+  title: string
+  artist?: string
+  src: string
+  coverUrl?: string
+}
+
 const STORAGE_KEY = "sparkie_radio_tracks"
 const SPARKIE_RADIO_PLAYLIST_URL =
   "https://raw.githubusercontent.com/Draguniteus/SparkieRadio/main/playlist.json"
@@ -50,7 +58,7 @@ export function RadioPlayer() {
   const [isCollapsed, setIsCollapsed] = useState(false)
   const { data: session } = useSession()
   const isAdmin = session?.user?.email?.toLowerCase() === "draguniteus@gmail.com"
-  const [stationTracks, setStationTracks] = useState<RadioTrack[]>([])
+  const [stationTracks, setStationTracks] = useState<StationTrack[]>([])
   const [lastSync, setLastSync] = useState<Date | null>(null)
   const [isSyncing, setIsSyncing] = useState(false)
   const [activeTab, setActiveTab] = useState<"station" | "mine">("station")
@@ -61,6 +69,9 @@ export function RadioPlayer() {
   const [stationUploading, setStationUploading] = useState(false)
   const [stationUploadError, setStationUploadError] = useState<string | null>(null)
   const stationFileInputRef = useRef<HTMLInputElement | null>(null)
+  const stationCoverInputRef = useRef<HTMLInputElement | null>(null)
+  const [stationCoverFile, setStationCoverFile] = useState<File | null>(null)
+  const [stationCoverPreview, setStationCoverPreview] = useState<string | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -82,13 +93,12 @@ export function RadioPlayer() {
       const res = await fetch(SPARKIE_RADIO_PLAYLIST_URL + "?t=" + Date.now())
       if (!res.ok) throw new Error("fetch failed")
       const data = await res.json() as Array<{ id: string; title: string; artist?: string; url: string }>
-      const mapped: RadioTrack[] = data.map(item => ({
-        id: item.id,
-        title: item.title,
+      const mapped: StationTrack[] = data.map((item: { id?: string; title?: string; artist?: string; url?: string; coverUrl?: string }) => ({
+        id: item.id ?? crypto.randomUUID(),
+        title: item.title ?? "Untitled",
         artist: item.artist,
-        src: item.url,
-        type: "url" as const,
-        addedAt: new Date(),
+        src: item.url ?? "",
+        coverUrl: item.coverUrl,
       }))
       setStationTracks(mapped)
       setLastSync(new Date())
@@ -270,6 +280,7 @@ export function RadioPlayer() {
       fd.append("file", stationUploadFile)
       fd.append("title", stationUploadTitle.trim())
       if (stationUploadArtist.trim()) fd.append("artist", stationUploadArtist.trim())
+      if (stationCoverFile) fd.append("coverImage", stationCoverFile)
       const res = await fetch("/api/radio/upload", { method: "POST", body: fd })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? "Upload failed")
@@ -277,8 +288,11 @@ export function RadioPlayer() {
       setStationUploadFile(null)
       setStationUploadTitle("")
       setStationUploadArtist("")
+      setStationCoverFile(null)
+      setStationCoverPreview(null)
       setShowStationUpload(false)
       if (stationFileInputRef.current) stationFileInputRef.current.value = ""
+      if (stationCoverInputRef.current) stationCoverInputRef.current.value = ""
       // Refresh station immediately
       await syncStation()
     } catch (err) {
@@ -324,6 +338,20 @@ export function RadioPlayer() {
           }
         }}
       />
+      <input
+        ref={stationCoverInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif"
+        className="hidden"
+        onChange={e => {
+          const f = e.target.files?.[0]
+          if (f) {
+            setStationCoverFile(f)
+            const url = URL.createObjectURL(f)
+            setStationCoverPreview(url)
+          }
+        }}
+      />
 
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-hive-border shrink-0">
@@ -355,37 +383,76 @@ export function RadioPlayer() {
 
       {!isCollapsed && (
         <>
-          {/* Now playing */}
+          {/* Now playing — Pro player */}
           <div className="px-4 py-4 border-b border-hive-border shrink-0">
+            {/* Cover art + track info row */}
             <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-lg bg-honey-500/10 border border-honey-500/20 flex items-center justify-center shrink-0">
-                {isPlaying ? (
-                  <Music size={18} className="text-honey-500 animate-pulse" />
+              {/* Cover art */}
+              <div className="relative w-14 h-14 rounded-xl overflow-hidden shrink-0 bg-gradient-to-br from-honey-500/20 to-hive-700 border border-honey-500/20 shadow-lg">
+                {activeTab === "station" && (currentTrack as StationTrack | null)?.coverUrl ? (
+                  <img
+                    src={(currentTrack as StationTrack).coverUrl}
+                    alt={(currentTrack as StationTrack).title}
+                    className="w-full h-full object-cover"
+                  />
                 ) : (
-                  <Music size={18} className="text-honey-500/50" />
+                  <div className="w-full h-full flex items-center justify-center">
+                    {isPlaying ? (
+                      <Music size={22} className="text-honey-500 animate-pulse" />
+                    ) : (
+                      <Music size={22} className="text-honey-500/40" />
+                    )}
+                  </div>
+                )}
+                {isPlaying && (
+                  <div className="absolute inset-0 bg-black/10 flex items-end justify-center pb-1">
+                    <div className="flex gap-0.5 items-end h-3">
+                      <span className="w-0.5 bg-honey-400 rounded-full animate-[equalizer_0.8s_ease-in-out_infinite]" style={{height: '40%', animationDelay: '0ms'}} />
+                      <span className="w-0.5 bg-honey-400 rounded-full animate-[equalizer_0.8s_ease-in-out_infinite]" style={{height: '100%', animationDelay: '150ms'}} />
+                      <span className="w-0.5 bg-honey-400 rounded-full animate-[equalizer_0.8s_ease-in-out_infinite]" style={{height: '60%', animationDelay: '300ms'}} />
+                      <span className="w-0.5 bg-honey-400 rounded-full animate-[equalizer_0.8s_ease-in-out_infinite]" style={{height: '80%', animationDelay: '100ms'}} />
+                    </div>
+                  </div>
                 )}
               </div>
+
+              {/* Track info + download */}
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-text-primary truncate">
+                <p className="text-sm font-semibold text-text-primary truncate leading-tight">
                   {currentTrack?.title ?? "No track selected"}
                 </p>
-                <p className="text-xs text-text-muted truncate">
-                  {playError ? <span className="text-yellow-400">⚠ Use a direct audio URL (.mp3/.ogg/stream), not a webpage</span> : (currentTrack?.artist ?? (tracks.length === 0 ? "Add tracks to get started" : "Unknown Artist"))}
+                <p className="text-xs text-text-muted truncate mt-0.5">
+                  {playError
+                    ? <span className="text-yellow-400">⚠ Use a direct audio URL (.mp3/.ogg/stream)</span>
+                    : (currentTrack?.artist ?? (allTracks.length === 0 ? "Add tracks to get started" : ""))}
                 </p>
+                {/* Download button — station tracks only */}
+                {activeTab === "station" && currentTrack && !playError && (
+                  <a
+                    href={(currentTrack as StationTrack).src}
+                    download={(currentTrack as StationTrack).title + ".mp3"}
+                    className="inline-flex items-center gap-1 mt-1.5 text-[10px] px-2 py-0.5 rounded-full bg-honey-500/10 text-honey-500/80 border border-honey-500/20 hover:bg-honey-500/20 hover:text-honey-500 transition-all"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 15V3m0 12-4-4m4 4 4-4M2 17l.621 2.485A2 2 0 0 0 4.561 21h14.878a2 2 0 0 0 1.94-1.515L22 17"/></svg>
+                    Download
+                  </a>
+                )}
               </div>
             </div>
 
             {/* Progress bar */}
-            <div className="mb-2">
+            <div className="mb-3">
               <input
                 type="range"
                 min={0}
                 max={duration || 1}
                 value={progress}
                 onChange={handleSeek}
-                className="w-full h-1 accent-honey-500 cursor-pointer"
+                className="w-full h-1 accent-honey-500 cursor-pointer rounded-full"
+                style={{background: `linear-gradient(to right, var(--color-honey-500, #f59e0b) ${duration ? (progress/duration*100) : 0}%, rgba(255,255,255,0.1) 0%)`}}
               />
-              <div className="flex justify-between text-xs text-text-muted mt-1">
+              <div className="flex justify-between text-[10px] text-text-muted mt-1">
                 <span>{formatTime(progress)}</span>
                 <span>{formatTime(duration)}</span>
               </div>
@@ -393,34 +460,34 @@ export function RadioPlayer() {
 
             {/* Controls */}
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3">
                 <button
                   onClick={skipPrev}
                   disabled={allTracks.length === 0}
-                  className="w-7 h-7 rounded-md flex items-center justify-center text-text-secondary hover:text-honey-500 disabled:opacity-30 transition-colors"
+                  className="w-7 h-7 rounded-lg flex items-center justify-center text-text-secondary hover:text-honey-500 disabled:opacity-30 transition-colors hover:bg-honey-500/10"
                 >
-                  <SkipBack size={16} />
+                  <SkipBack size={15} />
                 </button>
                 <button
                   onClick={togglePlay}
                   disabled={allTracks.length === 0}
-                  className="w-9 h-9 rounded-full bg-honey-500/15 border border-honey-500/30 flex items-center justify-center text-honey-500 hover:bg-honey-500/25 disabled:opacity-30 transition-all"
+                  className="w-10 h-10 rounded-full bg-honey-500 flex items-center justify-center text-hive-900 hover:bg-honey-400 disabled:opacity-30 transition-all shadow-lg shadow-honey-500/20 active:scale-95"
                 >
-                  {isPlaying ? <Pause size={16} /> : <Play size={16} />}
+                  {isPlaying ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" className="ml-0.5" />}
                 </button>
                 <button
                   onClick={skipNext}
                   disabled={allTracks.length === 0}
-                  className="w-7 h-7 rounded-md flex items-center justify-center text-text-secondary hover:text-honey-500 disabled:opacity-30 transition-colors"
+                  className="w-7 h-7 rounded-lg flex items-center justify-center text-text-secondary hover:text-honey-500 disabled:opacity-30 transition-colors hover:bg-honey-500/10"
                 >
-                  <SkipForward size={16} />
+                  <SkipForward size={15} />
                 </button>
               </div>
 
               {/* Volume */}
               <div className="flex items-center gap-1.5">
-                <button onClick={toggleMute} className="text-text-muted hover:text-text-secondary transition-colors">
-                  {isMuted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+                <button onClick={toggleMute} className="text-text-muted hover:text-honey-500 transition-colors p-1 rounded-md hover:bg-honey-500/10">
+                  {isMuted ? <VolumeX size={13} /> : <Volume2 size={13} />}
                 </button>
                 <input
                   type="range"
@@ -463,15 +530,30 @@ export function RadioPlayer() {
                 </div>
                 {isAdmin && showStationUpload && (
                   <div className="px-4 pb-3 flex flex-col gap-2 border-t border-hive-border pt-2">
-                    <div
-                      onClick={() => stationFileInputRef.current?.click()}
-                      className="w-full py-2 border border-dashed border-hive-border rounded-lg text-center cursor-pointer hover:border-honey-500/50 transition-colors"
-                    >
-                      {stationUploadFile ? (
-                        <span className="text-[11px] text-honey-500 font-medium">{stationUploadFile.name}</span>
-                      ) : (
-                        <span className="text-[11px] text-text-muted">Click to select MP3 / OGG / AAC / WAV</span>
-                      )}
+                    {/* Audio + Cover row */}
+                    <div className="flex gap-2">
+                      {/* Audio file picker */}
+                      <div
+                        onClick={() => stationFileInputRef.current?.click()}
+                        className="flex-1 py-2 border border-dashed border-hive-border rounded-lg text-center cursor-pointer hover:border-honey-500/50 transition-colors"
+                      >
+                        {stationUploadFile ? (
+                          <span className="text-[10px] text-honey-500 font-medium leading-tight block px-1 truncate">{stationUploadFile.name}</span>
+                        ) : (
+                          <span className="text-[10px] text-text-muted">🎵 Pick MP3 / OGG</span>
+                        )}
+                      </div>
+                      {/* Cover art picker */}
+                      <div
+                        onClick={() => stationCoverInputRef.current?.click()}
+                        className="w-14 h-10 border border-dashed border-hive-border rounded-lg cursor-pointer hover:border-honey-500/50 transition-colors overflow-hidden flex items-center justify-center shrink-0 relative"
+                      >
+                        {stationCoverPreview ? (
+                          <img src={stationCoverPreview} alt="cover" className="w-full h-full object-cover" />
+                        ) : (
+                          <span className="text-[9px] text-text-muted text-center leading-tight">🖼<br/>Art</span>
+                        )}
+                      </div>
                     </div>
                     <div className="flex gap-2">
                       <input
@@ -495,9 +577,9 @@ export function RadioPlayer() {
                     <button
                       onClick={handleStationUpload}
                       disabled={!stationUploadFile || !stationUploadTitle.trim() || stationUploading}
-                      className="w-full text-xs py-1.5 rounded-md bg-honey-500/15 text-honey-500 border border-honey-500/30 hover:bg-honey-500/25 disabled:opacity-30 transition-all"
+                      className="w-full text-xs py-1.5 rounded-md bg-honey-500 text-hive-900 font-semibold hover:bg-honey-400 disabled:opacity-30 transition-all shadow-sm shadow-honey-500/20"
                     >
-                      {stationUploading ? "Uploading to Station…" : "Upload to SparkieRadio 🎙"}
+                      {stationUploading ? "Uploading to Station…" : "🎙 Upload to SparkieRadio"}
                     </button>
                   </div>
                 )}
@@ -524,13 +606,26 @@ export function RadioPlayer() {
                         : "hover:bg-hive-hover"
                     }`}
                   >
-                    <div className={`w-5 h-5 flex items-center justify-center shrink-0 ${
-                      idx === currentIndex ? "text-honey-500" : "text-text-muted"
-                    }`}>
-                      {idx === currentIndex && isPlaying ? (
-                        <Music size={12} className="animate-pulse" />
+                    <div className="w-7 h-7 rounded-md overflow-hidden shrink-0 border border-honey-500/10 bg-honey-500/5 flex items-center justify-center">
+                      {activeTab === "station" && (track as StationTrack).coverUrl ? (
+                        idx === currentIndex && isPlaying ? (
+                          <div className="relative w-full h-full">
+                            <img src={(track as StationTrack).coverUrl} alt="" className="w-full h-full object-cover" />
+                            <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                              <div className="flex gap-px items-end h-3">
+                                <span className="w-0.5 bg-honey-400 rounded-full animate-[equalizer_0.8s_ease-in-out_infinite]" style={{height:'40%',animationDelay:'0ms'}} />
+                                <span className="w-0.5 bg-honey-400 rounded-full animate-[equalizer_0.8s_ease-in-out_infinite]" style={{height:'100%',animationDelay:'150ms'}} />
+                                <span className="w-0.5 bg-honey-400 rounded-full animate-[equalizer_0.8s_ease-in-out_infinite]" style={{height:'60%',animationDelay:'300ms'}} />
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <img src={(track as StationTrack).coverUrl} alt="" className="w-full h-full object-cover" />
+                        )
                       ) : (
-                        <span className="text-xs">{idx + 1}</span>
+                        <span className={`text-[10px] font-medium ${idx === currentIndex ? "text-honey-500" : "text-text-muted"}`}>
+                          {idx === currentIndex && isPlaying ? "♪" : idx + 1}
+                        </span>
                       )}
                     </div>
                     <div className="min-w-0 flex-1">
