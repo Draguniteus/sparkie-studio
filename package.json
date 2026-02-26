@@ -1,5 +1,6 @@
 {
   "name": "sparkie-studio",
+  "description": "Sparkie Studio creative platform",
   "version": "0.1.0",
   "private": true,
   "scripts": {
