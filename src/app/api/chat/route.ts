@@ -83,11 +83,11 @@ async function loadMemories(userId: string): Promise<string> {
         first_seen_at TIMESTAMPTZ DEFAULT NOW()
       )
     `)
-    const res = await query(
+    const res = await query<{ category: string; content: string }>(
       'SELECT category, content FROM user_memories WHERE user_id = $1 ORDER BY created_at ASC',
       [userId]
     )
-    return res.rows.map((r: { category: string; content: string }) => `[${r.category}] ${r.content}`).join('\n')
+    return res.rows.map((r) => `[${r.category}] ${r.content}`).join('\n')
   } catch { return '' }
 }
 
