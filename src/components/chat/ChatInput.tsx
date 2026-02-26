@@ -113,7 +113,7 @@ export function ChatInput() {
   const [input, setInput] = useState("")
   const [showModels, setShowModels] = useState(false)
   const [genMode, setGenMode] = useState<GenMode>("chat")
-  const [slashSuggestions, setSlashSuggestions] = useState<typeof SLASH_COMMANDS>([])
+  const [slashSuggestions, setSlashSuggestions] = useState<Array<{ cmd: string; desc: string }>>([])
   const [selectedImageModel, setSelectedImageModel] = useState("flux")
   const [selectedVideoModel, setSelectedVideoModel] = useState("MiniMax-Hailuo-2.3")
   const [videoFrameImage, setVideoFrameImage] = useState<string | null>(null)  // I2V: base64 data URL
