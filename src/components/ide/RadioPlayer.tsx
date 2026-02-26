@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useRef, useCallback, useEffect } from "react"
+import { useSession } from "next-auth/react"
 import { Music, Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Plus, X, Radio, Link, Upload, ChevronDown, ChevronUp } from "lucide-react"
 
 interface RadioTrack {
@@ -47,10 +48,19 @@ export function RadioPlayer() {
   const [titleInput, setTitleInput] = useState("")
   const [artistInput, setArtistInput] = useState("")
   const [isCollapsed, setIsCollapsed] = useState(false)
+  const { data: session } = useSession()
+  const isAdmin = session?.user?.email?.toLowerCase() === "draguniteus@gmail.com"
   const [stationTracks, setStationTracks] = useState<RadioTrack[]>([])
   const [lastSync, setLastSync] = useState<Date | null>(null)
   const [isSyncing, setIsSyncing] = useState(false)
   const [activeTab, setActiveTab] = useState<"station" | "mine">("station")
+  const [showStationUpload, setShowStationUpload] = useState(false)
+  const [stationUploadFile, setStationUploadFile] = useState<File | null>(null)
+  const [stationUploadTitle, setStationUploadTitle] = useState("")
+  const [stationUploadArtist, setStationUploadArtist] = useState("")
+  const [stationUploading, setStationUploading] = useState(false)
+  const [stationUploadError, setStationUploadError] = useState<string | null>(null)
+  const stationFileInputRef = useRef<HTMLInputElement | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -251,6 +261,33 @@ export function RadioPlayer() {
     })
   }, [currentIndex, clearProgressInterval])
 
+  const handleStationUpload = useCallback(async () => {
+    if (!stationUploadFile || !stationUploadTitle.trim()) return
+    setStationUploading(true)
+    setStationUploadError(null)
+    try {
+      const fd = new FormData()
+      fd.append("file", stationUploadFile)
+      fd.append("title", stationUploadTitle.trim())
+      if (stationUploadArtist.trim()) fd.append("artist", stationUploadArtist.trim())
+      const res = await fetch("/api/radio/upload", { method: "POST", body: fd })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? "Upload failed")
+      // Reset form
+      setStationUploadFile(null)
+      setStationUploadTitle("")
+      setStationUploadArtist("")
+      setShowStationUpload(false)
+      if (stationFileInputRef.current) stationFileInputRef.current.value = ""
+      // Refresh station immediately
+      await syncStation()
+    } catch (err) {
+      setStationUploadError(err instanceof Error ? err.message : "Upload failed")
+    } finally {
+      setStationUploading(false)
+    }
+  }, [stationUploadFile, stationUploadTitle, stationUploadArtist, syncStation])
+
   const formatTime = (s: number) => {
     if (!isFinite(s)) return "0:00"
     const m = Math.floor(s / 60)
@@ -273,6 +310,19 @@ export function RadioPlayer() {
         multiple
         className="hidden"
         onChange={handleFileUpload}
+      />
+      <input
+        ref={stationFileInputRef}
+        type="file"
+        accept="audio/mpeg,audio/mp3,audio/ogg,audio/aac,audio/wav,.mp3,.ogg,.aac,.wav"
+        className="hidden"
+        onChange={e => {
+          const f = e.target.files?.[0]
+          if (f) {
+            setStationUploadFile(f)
+            if (!stationUploadTitle) setStationUploadTitle(f.name.replace(/\.[^.]+$/, ""))
+          }
+        }}
       />
 
       {/* Header */}
@@ -388,17 +438,69 @@ export function RadioPlayer() {
           {/* Playlist */}
           <div className="flex-1 overflow-y-auto min-h-0 flex flex-col">
             {activeTab === "station" && (
-              <div className="px-4 py-1.5 flex items-center justify-between border-b border-hive-border shrink-0">
-                <span className="text-[10px] text-text-muted">
-                  {lastSync ? `Synced ${lastSync.toLocaleTimeString()}` : "Syncing…"}
-                </span>
-                <button
-                  onClick={syncStation}
-                  disabled={isSyncing}
-                  className="text-[10px] text-text-muted hover:text-honey-500 transition-colors disabled:opacity-40"
-                >
-                  {isSyncing ? "Syncing…" : "↻ Refresh"}
-                </button>
+              <div className="border-b border-hive-border shrink-0">
+                <div className="px-4 py-1.5 flex items-center justify-between">
+                  <span className="text-[10px] text-text-muted">
+                    {lastSync ? `Synced ${lastSync.toLocaleTimeString()}` : "Syncing…"}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    {isAdmin && (
+                      <button
+                        onClick={() => setShowStationUpload(v => !v)}
+                        className="text-[10px] px-2 py-0.5 rounded-full bg-honey-500/15 text-honey-500 hover:bg-honey-500/25 transition-colors"
+                      >
+                        {showStationUpload ? "✕ Cancel" : "＋ Add to Station"}
+                      </button>
+                    )}
+                    <button
+                      onClick={syncStation}
+                      disabled={isSyncing}
+                      className="text-[10px] text-text-muted hover:text-honey-500 transition-colors disabled:opacity-40"
+                    >
+                      {isSyncing ? "Syncing…" : "↻ Refresh"}
+                    </button>
+                  </div>
+                </div>
+                {isAdmin && showStationUpload && (
+                  <div className="px-4 pb-3 flex flex-col gap-2 border-t border-hive-border pt-2">
+                    <div
+                      onClick={() => stationFileInputRef.current?.click()}
+                      className="w-full py-2 border border-dashed border-hive-border rounded-lg text-center cursor-pointer hover:border-honey-500/50 transition-colors"
+                    >
+                      {stationUploadFile ? (
+                        <span className="text-[11px] text-honey-500 font-medium">{stationUploadFile.name}</span>
+                      ) : (
+                        <span className="text-[11px] text-text-muted">Click to select MP3 / OGG / AAC / WAV</span>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="Title *"
+                        value={stationUploadTitle}
+                        onChange={e => setStationUploadTitle(e.target.value)}
+                        className="flex-1 text-xs bg-hive-700 border border-hive-border rounded-md px-2 py-1.5 text-text-primary placeholder:text-text-muted outline-none focus:border-honey-500/50"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Artist"
+                        value={stationUploadArtist}
+                        onChange={e => setStationUploadArtist(e.target.value)}
+                        className="flex-1 text-xs bg-hive-700 border border-hive-border rounded-md px-2 py-1.5 text-text-primary placeholder:text-text-muted outline-none focus:border-honey-500/50"
+                      />
+                    </div>
+                    {stationUploadError && (
+                      <p className="text-[10px] text-red-400">{stationUploadError}</p>
+                    )}
+                    <button
+                      onClick={handleStationUpload}
+                      disabled={!stationUploadFile || !stationUploadTitle.trim() || stationUploading}
+                      className="w-full text-xs py-1.5 rounded-md bg-honey-500/15 text-honey-500 border border-honey-500/30 hover:bg-honey-500/25 disabled:opacity-30 transition-all"
+                    >
+                      {stationUploading ? "Uploading to Station…" : "Upload to SparkieRadio 🎙"}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
             {allTracks.length === 0 ? (
