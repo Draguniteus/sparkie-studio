@@ -208,20 +208,37 @@ export function AssetsTab() {
   }, [enriched, filterTab, sourceFilter, search])
 
   async function downloadAsset(name: string, content: string) {
+    // Derive correct MIME type from filename extension so browser saves with the right type
+    const ext = name.split(".").pop()?.toLowerCase() || ""
+    const MIME_MAP: Record<string, string> = {
+      mp3: "audio/mpeg", wav: "audio/wav", ogg: "audio/ogg", aac: "audio/aac",
+      mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime",
+      jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif",
+      svg: "image/svg+xml", webp: "image/webp",
+      pdf: "application/pdf", txt: "text/plain", md: "text/markdown",
+      html: "text/html", htm: "text/html", json: "application/json",
+      csv: "text/csv",
+    }
+    const mimeType = MIME_MAP[ext] || "application/octet-stream"
     let objectUrl: string | null = null
     try {
       if (isMediaUrl(content)) {
         const res = await fetch(content)
+        // Use server MIME if available and sensible, otherwise use our derived one
+        const serverMime = res.headers.get("content-type")?.split(";")[0].trim()
         const blob = await res.blob()
-        objectUrl = URL.createObjectURL(blob)
+        const typedBlob = new Blob([blob], { type: serverMime || mimeType })
+        objectUrl = URL.createObjectURL(typedBlob)
       } else {
-        const blob = new Blob([content], { type: "text/plain" })
+        const blob = new Blob([content], { type: mimeType })
         objectUrl = URL.createObjectURL(blob)
       }
       const a = document.createElement("a")
       a.href = objectUrl
-      a.download = name
+      a.download = name  // name already has the correct extension
+      document.body.appendChild(a)
       a.click()
+      document.body.removeChild(a)
     } catch {
       if (isMediaUrl(content)) window.open(content, "_blank")
     } finally {
