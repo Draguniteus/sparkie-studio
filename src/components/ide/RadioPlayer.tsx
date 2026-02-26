@@ -23,7 +23,7 @@ function loadTracks(): RadioTrack[] {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return []
     const parsed = JSON.parse(raw) as RadioTrack[]
-    return parsed.map(t => ({ ...t, addedAt: new Date(t.addedAt) }))
+    return parsed.map(t => ({ ...t, addedAt: t.addedAt ? new Date(t.addedAt) : new Date() }))
   } catch { return [] }
 }
 
@@ -61,12 +61,12 @@ export function RadioPlayer() {
   const [stationUploadArtist, setStationUploadArtist] = useState("")
   const [stationUploading, setStationUploading] = useState(false)
   const [stationUploadError, setStationUploadError] = useState<string | null>(null)
-  const stationFileInputRef = useRef<HTMLInputElement | null>(null)
-  const stationCoverInputRef = useRef<HTMLInputElement | null>(null)
+  const stationFileInputRef = useRef<HTMLInputElement>(null)
+  const stationCoverInputRef = useRef<HTMLInputElement>(null)
   const [stationCoverFile, setStationCoverFile] = useState<File | null>(null)
   const [stationCoverPreview, setStationCoverPreview] = useState<string | null>(null)
-  const audioRef = useRef<HTMLAudioElement | null>(null)
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const audioRef = useRef<HTMLAudioElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Hydrate from localStorage on mount
@@ -147,7 +147,7 @@ export function RadioPlayer() {
     }).catch(() => {
       setIsPlaying(false)
     })
-  }, [tracks, volume, isMuted, startProgressTracking])
+  }, [allTracks, volume, isMuted, startProgressTracking])
 
   const togglePlay = useCallback(() => {
     const audio = audioRef.current
@@ -168,13 +168,13 @@ export function RadioPlayer() {
         startProgressTracking()
       }).catch(() => {})
     }
-  }, [isPlaying, currentTrack, tracks, playTrack, clearProgressInterval, startProgressTracking])
+  }, [isPlaying, currentTrack, allTracks, playTrack, clearProgressInterval, startProgressTracking])
 
   const skipNext = useCallback(() => {
     if (allTracks.length === 0) return
     const next = currentIndex < allTracks.length - 1 ? currentIndex + 1 : 0
     playTrack(next)
-  }, [currentIndex, tracks.length, playTrack])
+  }, [currentIndex, allTracks.length, playTrack])
 
   const skipPrev = useCallback(() => {
     if (allTracks.length === 0) return
@@ -186,7 +186,7 @@ export function RadioPlayer() {
     }
     const prev = currentIndex > 0 ? currentIndex - 1 : allTracks.length - 1
     playTrack(prev)
-  }, [currentIndex, tracks.length, playTrack])
+  }, [currentIndex, allTracks.length, playTrack])
 
   const handleSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const audio = audioRef.current
@@ -293,7 +293,7 @@ export function RadioPlayer() {
     } finally {
       setStationUploading(false)
     }
-  }, [stationUploadFile, stationUploadTitle, stationUploadArtist, syncStation])
+  }, [stationUploadFile, stationUploadTitle, stationUploadArtist, stationCoverFile, syncStation])
 
   const formatTime = (s: number) => {
     if (!isFinite(s)) return "0:00"
@@ -303,27 +303,20 @@ export function RadioPlayer() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-hive-900 select-none">
+    <div className="flex flex-col h-full bg-hive-700 rounded-xl border border-hive-border overflow-hidden">
       {/* Hidden audio element */}
       <audio
         ref={audioRef}
         onEnded={skipNext}
         onError={() => { setIsPlaying(false); clearProgressInterval(); setPlayError(true) }}
       />
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="audio/*,video/mp4"
-        multiple
-        className="hidden"
-        onChange={handleFileUpload}
-      />
+      <input ref={fileInputRef} type="file" accept="audio/*" multiple className="hidden" onChange={handleFileUpload} />
       <input
         ref={stationFileInputRef}
         type="file"
-        accept="audio/mpeg,audio/mp3,audio/ogg,audio/aac,audio/wav,.mp3,.ogg,.aac,.wav"
+        accept="audio/mpeg,audio/ogg,audio/aac,audio/wav"
         className="hidden"
-        onChange={e => {
+        onChange={(e) => {
           const f = e.target.files?.[0]
           if (f) {
             setStationUploadFile(f)
@@ -334,9 +327,9 @@ export function RadioPlayer() {
       <input
         ref={stationCoverInputRef}
         type="file"
-        accept="image/jpeg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif"
+        accept="image/jpeg,image/png,image/webp"
         className="hidden"
-        onChange={e => {
+        onChange={(e) => {
           const f = e.target.files?.[0]
           if (f) {
             setStationCoverFile(f)
@@ -347,76 +340,66 @@ export function RadioPlayer() {
       />
 
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-hive-border shrink-0">
-        <div className="flex items-center gap-2">
-          <Radio size={16} className="text-honey-500" />
-          <span className="text-sm font-semibold text-honey-500">Sparkie Radio</span>
-          <div className="flex items-center gap-1 ml-1">
-            <button
-              onClick={() => { setActiveTab("station"); setCurrentIndex(-1) }}
-              className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${activeTab === "station" ? "bg-honey-500/20 text-honey-500" : "text-text-muted hover:text-text-secondary"}`}
-            >
-              🎙 Station {stationTracks.length > 0 && `(${stationTracks.length})`}
-            </button>
-            <button
-              onClick={() => { setActiveTab("mine"); setCurrentIndex(-1) }}
-              className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${activeTab === "mine" ? "bg-honey-500/20 text-honey-500" : "text-text-muted hover:text-text-secondary"}`}
-            >
-              My Tracks {tracks.length > 0 && `(${tracks.length})`}
-            </button>
-          </div>
+      <div className="flex items-center justify-between px-3 py-2 border-b border-hive-border shrink-0">
+        <div className="flex items-center gap-1.5">
+          <Radio className="w-3.5 h-3.5 text-honey-500" />
+          <span className="text-xs font-semibold text-text-primary">Sparkie Radio</span>
         </div>
-        <button
-          onClick={() => setIsCollapsed(c => !c)}
-          className="text-text-muted hover:text-text-secondary transition-colors"
-        >
-          {isCollapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => { setActiveTab("station"); setCurrentIndex(-1) }}
+            className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${activeTab === "station" ? "bg-honey-500/20 text-honey-500" : "text-text-muted hover:text-text-secondary"}`}
+          >
+            🎙 Station {stationTracks.length > 0 && `(${stationTracks.length})`}
+          </button>
+          <button
+            onClick={() => { setActiveTab("mine"); setCurrentIndex(-1) }}
+            className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${activeTab === "mine" ? "bg-honey-500/20 text-honey-500" : "text-text-muted hover:text-text-secondary"}`}
+          >
+            My Tracks {tracks.length > 0 && `(${tracks.length})`}
+          </button>
+          <button
+            onClick={() => setIsCollapsed(c => !c)}
+            className="text-text-muted hover:text-text-secondary transition-colors"
+          >
+            {isCollapsed ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
+          </button>
+        </div>
       </div>
 
       {!isCollapsed && (
         <>
           {/* Now playing — Pro player */}
-          <div className="px-4 py-4 border-b border-hive-border shrink-0">
+          <div className="px-3 pt-3 pb-2 shrink-0">
             {/* Cover art + track info row */}
-            <div className="flex items-center gap-3 mb-3">
+            <div className="flex items-start gap-3 mb-2">
               {/* Cover art */}
-              <div className="relative w-14 h-14 rounded-xl overflow-hidden shrink-0 bg-gradient-to-br from-honey-500/20 to-hive-700 border border-honey-500/20 shadow-lg">
+              <div className="relative w-14 h-14 rounded-lg overflow-hidden shrink-0 bg-hive-600 border border-hive-border shadow-md flex items-center justify-center">
                 {activeTab === "station" && currentTrack?.coverUrl ? (
-                  <img
-                    src={currentTrack.coverUrl}
-                    alt={currentTrack.title}
-                    className="w-full h-full object-cover"
-                  />
+                  <img src={currentTrack.coverUrl} alt={currentTrack.title} className="w-full h-full object-cover" />
                 ) : (
-                  <div className="w-full h-full flex items-center justify-center">
+                  <div className="flex items-center justify-center w-full h-full">
                     {isPlaying ? (
-                      <Music size={22} className="text-honey-500 animate-pulse" />
+                      <Music className="w-6 h-6 text-honey-500 animate-pulse" />
                     ) : (
-                      <Music size={22} className="text-honey-500/40" />
+                      <Music className="w-6 h-6 text-text-muted" />
                     )}
                   </div>
                 )}
                 {isPlaying && (
-                  <div className="absolute inset-0 bg-black/10 flex items-end justify-center pb-1">
-                    <div className="flex gap-0.5 items-end h-3">
-                      <span className="w-0.5 bg-honey-400 rounded-full animate-[equalizer_0.8s_ease-in-out_infinite]" style={{height: '40%', animationDelay: '0ms'}} />
-                      <span className="w-0.5 bg-honey-400 rounded-full animate-[equalizer_0.8s_ease-in-out_infinite]" style={{height: '100%', animationDelay: '150ms'}} />
-                      <span className="w-0.5 bg-honey-400 rounded-full animate-[equalizer_0.8s_ease-in-out_infinite]" style={{height: '60%', animationDelay: '300ms'}} />
-                      <span className="w-0.5 bg-honey-400 rounded-full animate-[equalizer_0.8s_ease-in-out_infinite]" style={{height: '80%', animationDelay: '100ms'}} />
-                    </div>
+                  <div className="absolute inset-0 flex items-end justify-center gap-[2px] pb-1 bg-black/30">
+                    <span className="w-[3px] bg-honey-500 rounded-sm animate-[equalizer_0.8s_ease-in-out_infinite]" style={{height:'40%',animationDelay:'0ms'}} />
+                    <span className="w-[3px] bg-honey-500 rounded-sm animate-[equalizer_0.8s_ease-in-out_infinite]" style={{height:'65%',animationDelay:'150ms'}} />
+                    <span className="w-[3px] bg-honey-500 rounded-sm animate-[equalizer_0.8s_ease-in-out_infinite]" style={{height:'50%',animationDelay:'300ms'}} />
                   </div>
                 )}
               </div>
-
               {/* Track info + download */}
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-text-primary truncate leading-tight">
-                  {currentTrack?.title ?? "No track selected"}
-                </p>
-                <p className="text-xs text-text-muted truncate mt-0.5">
+              <div className="flex-1 min-w-0 pt-0.5">
+                <p className="text-xs font-semibold text-text-primary truncate">{currentTrack?.title ?? "No track selected"}</p>
+                <p className="text-[10px] text-text-muted truncate mt-0.5">
                   {playError
-                    ? <span className="text-yellow-400">⚠ Use a direct audio URL (.mp3/.ogg/stream)</span>
+                    ? <span className="text-yellow-500">⚠ Use a direct audio URL (.mp3/.ogg/stream)</span>
                     : (currentTrack?.artist ?? (allTracks.length === 0 ? "Add tracks to get started" : ""))}
                 </p>
                 {/* Download button — station tracks only */}
@@ -424,10 +407,10 @@ export function RadioPlayer() {
                   <a
                     href={currentTrack.src}
                     download={currentTrack.title + ".mp3"}
-                    className="inline-flex items-center gap-1 mt-1.5 text-[10px] px-2 py-0.5 rounded-full bg-honey-500/10 text-honey-500/80 border border-honey-500/20 hover:bg-honey-500/20 hover:text-honey-500 transition-all"
+                    className="inline-flex items-center gap-1 mt-1.5 text-[10px] px-2 py-0.5 rounded-full bg-honey-500/10 text-honey-500/80 border border-honey-500/20 hover:bg-honey-500/20 transition-colors"
                     onClick={e => e.stopPropagation()}
                   >
-                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 15V3m0 12-4-4m4 4 4-4M2 17l.621 2.485A2 2 0 0 0 4.561 21h14.878a2 2 0 0 0 1.94-1.515L22 17"/></svg>
+                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 15V3m0 12-4-4m4 4 4-4M2 17l.621 2.485A2 2 0 0 0 4.561 21h14.878a2 2 0 0 0 1.94-1.515L22 17" /></svg>
                     Download
                   </a>
                 )}
@@ -435,160 +418,141 @@ export function RadioPlayer() {
             </div>
 
             {/* Progress bar */}
-            <div className="mb-3">
+            <div className="flex items-center gap-1.5 mb-2">
+              <span className="text-[9px] text-text-muted w-6 text-right">{formatTime(progress)}</span>
               <input
-                type="range"
-                min={0}
-                max={duration || 1}
-                value={progress}
+                type="range" min={0} max={duration || 0} step={0.5} value={progress}
                 onChange={handleSeek}
-                className="w-full h-1 accent-honey-500 cursor-pointer rounded-full"
+                className="flex-1 h-1 accent-honey-500 cursor-pointer rounded-full"
                 style={{background: `linear-gradient(to right, var(--color-honey-500, #f59e0b) ${duration ? (progress/duration*100) : 0}%, rgba(255,255,255,0.1) 0%)`}}
               />
-              <div className="flex justify-between text-[10px] text-text-muted mt-1">
-                <span>{formatTime(progress)}</span>
-                <span>{formatTime(duration)}</span>
-              </div>
+              <span className="text-[9px] text-text-muted w-6">{formatTime(duration)}</span>
             </div>
 
             {/* Controls */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={skipPrev}
-                  disabled={allTracks.length === 0}
-                  className="w-7 h-7 rounded-lg flex items-center justify-center text-text-secondary hover:text-honey-500 disabled:opacity-30 transition-colors hover:bg-honey-500/10"
-                >
-                  <SkipBack size={15} />
-                </button>
-                <button
-                  onClick={togglePlay}
-                  disabled={allTracks.length === 0}
-                  className="w-10 h-10 rounded-full bg-honey-500 flex items-center justify-center text-hive-900 hover:bg-honey-400 disabled:opacity-30 transition-all shadow-lg shadow-honey-500/20 active:scale-95"
-                >
-                  {isPlaying ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" className="ml-0.5" />}
-                </button>
-                <button
-                  onClick={skipNext}
-                  disabled={allTracks.length === 0}
-                  className="w-7 h-7 rounded-lg flex items-center justify-center text-text-secondary hover:text-honey-500 disabled:opacity-30 transition-colors hover:bg-honey-500/10"
-                >
-                  <SkipForward size={15} />
-                </button>
-              </div>
+            <div className="flex items-center justify-center gap-3 mb-2">
+              <button onClick={skipPrev} className="text-text-muted hover:text-text-primary transition-colors"><SkipBack className="w-4 h-4" /></button>
+              <button
+                onClick={togglePlay}
+                className="w-9 h-9 rounded-full bg-honey-500 hover:bg-honey-400 flex items-center justify-center transition-colors shadow-md"
+              >
+                {isPlaying ? <Pause className="w-4 h-4 text-hive-900" /> : <Play className="w-4 h-4 text-hive-900 ml-0.5" />}
+              </button>
+              <button onClick={skipNext} className="text-text-muted hover:text-text-primary transition-colors"><SkipForward className="w-4 h-4" /></button>
+            </div>
 
-              {/* Volume */}
-              <div className="flex items-center gap-1.5">
-                <button onClick={toggleMute} className="text-text-muted hover:text-honey-500 transition-colors p-1 rounded-md hover:bg-honey-500/10">
-                  {isMuted ? <VolumeX size={13} /> : <Volume2 size={13} />}
-                </button>
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={isMuted ? 0 : volume}
-                  onChange={handleVolumeChange}
-                  className="w-16 h-1 accent-honey-500 cursor-pointer"
-                />
-              </div>
+            {/* Volume */}
+            <div className="flex items-center gap-1.5">
+              <button onClick={toggleMute} className="text-text-muted hover:text-text-primary transition-colors">
+                {isMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+              </button>
+              <input
+                type="range" min={0} max={1} step={0.01} value={isMuted ? 0 : volume}
+                onChange={handleVolumeChange}
+                className="flex-1 h-1 accent-honey-500"
+              />
             </div>
           </div>
 
           {/* Playlist */}
-          <div className="flex-1 overflow-y-auto min-h-0 flex flex-col">
+          <div className="flex-1 overflow-y-auto min-h-0">
             {activeTab === "station" && (
-              <div className="border-b border-hive-border shrink-0">
-                <div className="px-4 py-1.5 flex items-center justify-between">
-                  <span className="text-[10px] text-text-muted">
-                    {lastSync ? `Synced ${lastSync.toLocaleTimeString()}` : "Syncing…"}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    {isAdmin && (
-                      <button
-                        onClick={() => setShowStationUpload(v => !v)}
-                        className="text-[10px] px-2 py-0.5 rounded-full bg-honey-500/15 text-honey-500 hover:bg-honey-500/25 transition-colors"
-                      >
-                        {showStationUpload ? "✕ Cancel" : "＋ Add to Station"}
-                      </button>
-                    )}
+              <div className="px-3 py-1.5 flex items-center justify-between border-b border-hive-border">
+                <span className="text-[10px] text-text-muted">
+                  {lastSync ? `Synced ${lastSync.toLocaleTimeString()}` : "Syncing…"}
+                </span>
+                <div className="flex items-center gap-1">
+                  {isAdmin && (
                     <button
-                      onClick={syncStation}
-                      disabled={isSyncing}
-                      className="text-[10px] text-text-muted hover:text-honey-500 transition-colors disabled:opacity-40"
+                      onClick={() => setShowStationUpload(v => !v)}
+                      className="text-[10px] px-2 py-0.5 rounded-full bg-honey-500/15 text-honey-500 hover:bg-honey-500/25 transition-colors"
                     >
-                      {isSyncing ? "Syncing…" : "↻ Refresh"}
+                      {showStationUpload ? "✕ Cancel" : "＋ Add to Station"}
                     </button>
-                  </div>
+                  )}
+                  <button
+                    onClick={syncStation}
+                    disabled={isSyncing}
+                    className="text-[10px] px-2 py-0.5 rounded-full bg-hive-600 text-text-muted hover:text-text-secondary transition-colors disabled:opacity-50"
+                  >
+                    {isSyncing ? "Syncing…" : "↻ Refresh"}
+                  </button>
                 </div>
-                {isAdmin && showStationUpload && (
-                  <div className="px-4 pb-3 flex flex-col gap-2 border-t border-hive-border pt-2">
-                    {/* Audio + Cover row */}
-                    <div className="flex gap-2">
-                      {/* Audio file picker */}
-                      <div
-                        onClick={() => stationFileInputRef.current?.click()}
-                        className="flex-1 py-2 border border-dashed border-hive-border rounded-lg text-center cursor-pointer hover:border-honey-500/50 transition-colors"
-                      >
-                        {stationUploadFile ? (
-                          <span className="text-[10px] text-honey-500 font-medium leading-tight block px-1 truncate">{stationUploadFile.name}</span>
-                        ) : (
-                          <span className="text-[10px] text-text-muted">🎵 Pick MP3 / OGG</span>
-                        )}
-                      </div>
-                      {/* Cover art picker */}
-                      <div
-                        onClick={() => stationCoverInputRef.current?.click()}
-                        className="w-14 h-10 border border-dashed border-hive-border rounded-lg cursor-pointer hover:border-honey-500/50 transition-colors overflow-hidden flex items-center justify-center shrink-0 relative"
-                      >
-                        {stationCoverPreview ? (
-                          <img src={stationCoverPreview} alt="cover" className="w-full h-full object-cover" />
-                        ) : (
-                          <span className="text-[9px] text-text-muted text-center leading-tight">🖼<br/>Art</span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        placeholder="Title *"
-                        value={stationUploadTitle}
-                        onChange={e => setStationUploadTitle(e.target.value)}
-                        className="flex-1 text-xs bg-hive-700 border border-hive-border rounded-md px-2 py-1.5 text-text-primary placeholder:text-text-muted outline-none focus:border-honey-500/50"
-                      />
-                      <input
-                        type="text"
-                        placeholder="Artist"
-                        value={stationUploadArtist}
-                        onChange={e => setStationUploadArtist(e.target.value)}
-                        className="flex-1 text-xs bg-hive-700 border border-hive-border rounded-md px-2 py-1.5 text-text-primary placeholder:text-text-muted outline-none focus:border-honey-500/50"
-                      />
-                    </div>
-                    {stationUploadError && (
-                      <p className="text-[10px] text-red-400">{stationUploadError}</p>
-                    )}
-                    <button
-                      onClick={handleStationUpload}
-                      disabled={!stationUploadFile || !stationUploadTitle.trim() || stationUploading}
-                      className="w-full text-xs py-1.5 rounded-md bg-honey-500 text-hive-900 font-semibold hover:bg-honey-400 disabled:opacity-30 transition-all shadow-sm shadow-honey-500/20"
-                    >
-                      {stationUploading ? "Uploading to Station…" : "🎙 Upload to SparkieRadio"}
-                    </button>
-                  </div>
-                )}
               </div>
             )}
+
+            {isAdmin && showStationUpload && (
+              <div className="px-3 py-2 border-b border-hive-border space-y-2">
+                {/* Audio + Cover row */}
+                <div className="flex gap-2">
+                  {/* Audio file picker */}
+                  <div
+                    onClick={() => stationFileInputRef.current?.click()}
+                    className="flex-1 py-2 border border-dashed border-hive-border rounded-lg text-center cursor-pointer hover:border-honey-500/50 transition-colors"
+                  >
+                    {stationUploadFile ? (
+                      <span className="text-[10px] text-text-primary truncate block px-1">{stationUploadFile.name}</span>
+                    ) : (
+                      <span className="text-[10px] text-text-muted">🎵 Pick MP3 / OGG</span>
+                    )}
+                  </div>
+                  {/* Cover art picker */}
+                  <div
+                    onClick={() => stationCoverInputRef.current?.click()}
+                    className="w-14 h-10 border border-dashed border-hive-border rounded-lg cursor-pointer hover:border-honey-500/50 transition-colors overflow-hidden flex items-center justify-center shrink-0 relative"
+                  >
+                    {stationCoverPreview ? (
+                      <img src={stationCoverPreview} alt="cover" className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-[10px] text-text-muted text-center leading-tight">🖼<br />Art</span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex gap-1">
+                  <input
+                    value={stationUploadTitle}
+                    placeholder="Title *"
+                    onChange={e => setStationUploadTitle(e.target.value)}
+                    className="flex-1 text-xs bg-hive-700 border border-hive-border rounded-md px-2 py-1.5 text-text-primary placeholder:text-text-muted outline-none focus:border-honey-500/50"
+                  />
+                  <input
+                    value={stationUploadArtist}
+                    placeholder="Artist"
+                    onChange={e => setStationUploadArtist(e.target.value)}
+                    className="flex-1 text-xs bg-hive-700 border border-hive-border rounded-md px-2 py-1.5 text-text-primary placeholder:text-text-muted outline-none focus:border-honey-500/50"
+                  />
+                </div>
+                {stationUploadError && (
+                  <p className="text-[10px] text-red-400">{stationUploadError}</p>
+                )}
+                <button
+                  onClick={handleStationUpload}
+                  disabled={stationUploading || !stationUploadFile || !stationUploadTitle.trim()}
+                  className="w-full text-xs py-1.5 rounded-md bg-honey-500 text-hive-900 font-semibold hover:bg-honey-400 disabled:opacity-50 transition-colors"
+                >
+                  {stationUploading ? "Uploading to Station…" : "🎙 Upload to SparkieRadio"}
+                </button>
+              </div>
+            )}
+
             {allTracks.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-32 text-text-muted text-sm gap-2">
-                <Radio size={24} className="text-honey-500/30" />
+              <div className="flex flex-col items-center justify-center py-8 text-center">
                 {activeTab === "station" ? (
-                  <><p>Station is empty</p><p className="text-xs">Add MP3s to SparkieRadio on GitHub</p></>
+                  <>
+                    <Radio className="w-8 h-8 text-text-muted mb-2" />
+                    <p className="text-xs text-text-muted">Station is empty</p>
+                    <p className="text-[10px] text-text-muted mt-1">Add MP3s to SparkieRadio on GitHub</p>
+                  </>
                 ) : (
-                  <><p>No tracks yet</p><p className="text-xs">Upload MP3s or add URL links</p></>
+                  <>
+                    <Music className="w-8 h-8 text-text-muted mb-2" />
+                    <p className="text-xs text-text-muted">No tracks yet</p>
+                    <p className="text-[10px] text-text-muted mt-1">Upload MP3s or add URL links</p>
+                  </>
                 )}
               </div>
             ) : (
-              <div className="p-2 flex flex-col gap-0.5">
+              <div className="py-1">
                 {allTracks.map((track, idx) => (
                   <div
                     key={track.id}
@@ -599,113 +563,96 @@ export function RadioPlayer() {
                         : "hover:bg-hive-hover"
                     }`}
                   >
-                    <div className="w-7 h-7 rounded-md overflow-hidden shrink-0 border border-honey-500/10 bg-honey-500/5 flex items-center justify-center">
+                    <div className="w-8 h-8 rounded-md overflow-hidden shrink-0 bg-hive-600 flex items-center justify-center relative">
                       {activeTab === "station" && track.coverUrl ? (
                         idx === currentIndex && isPlaying ? (
                           <div className="relative w-full h-full">
-                            <img src={track.coverUrl} alt="" className="w-full h-full object-cover" />
-                            <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                              <div className="flex gap-px items-end h-3">
-                                <span className="w-0.5 bg-honey-400 rounded-full animate-[equalizer_0.8s_ease-in-out_infinite]" style={{height:'40%',animationDelay:'0ms'}} />
-                                <span className="w-0.5 bg-honey-400 rounded-full animate-[equalizer_0.8s_ease-in-out_infinite]" style={{height:'100%',animationDelay:'150ms'}} />
-                                <span className="w-0.5 bg-honey-400 rounded-full animate-[equalizer_0.8s_ease-in-out_infinite]" style={{height:'60%',animationDelay:'300ms'}} />
-                              </div>
+                            <img src={track.coverUrl} alt={track.title} className="w-full h-full object-cover" />
+                            <div className="absolute inset-0 flex items-end justify-center gap-[2px] pb-0.5 bg-black/40">
+                              <span className="w-[2px] bg-honey-500 rounded-sm animate-[equalizer_0.8s_ease-in-out_infinite]" style={{height:'40%',animationDelay:'0ms'}} />
+                              <span className="w-[2px] bg-honey-500 rounded-sm animate-[equalizer_0.8s_ease-in-out_infinite]" style={{height:'65%',animationDelay:'150ms'}} />
+                              <span className="w-[2px] bg-honey-500 rounded-sm animate-[equalizer_0.8s_ease-in-out_infinite]" style={{height:'50%',animationDelay:'300ms'}} />
                             </div>
                           </div>
                         ) : (
-                          <img src={track.coverUrl} alt="" className="w-full h-full object-cover" />
+                          <img src={track.coverUrl} alt={track.title} className="w-full h-full object-cover" />
                         )
                       ) : (
-                        <span className={`text-[10px] font-medium ${idx === currentIndex ? "text-honey-500" : "text-text-muted"}`}>
-                          {idx === currentIndex && isPlaying ? "♪" : idx + 1}
-                        </span>
+                        <span className="text-[10px] text-text-muted font-mono">{idx === currentIndex && isPlaying ? "♪" : idx + 1}</span>
                       )}
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <p className={`text-xs font-medium truncate ${idx === currentIndex ? "text-honey-500" : "text-text-primary"}`}>
-                        {track.title}
-                      </p>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-text-primary truncate">{track.title}</p>
                       {track.artist && (
-                        <p className="text-xs text-text-muted truncate">{track.artist}</p>
+                        <p className="text-[10px] text-text-muted truncate">{track.artist}</p>
                       )}
                     </div>
-                    <span className="text-xs text-text-muted shrink-0 opacity-0 group-hover:opacity-100">
-                      {track.type === "url" ? <Link size={10} /> : <Upload size={10} />}
-                    </span>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); removeTrack(track.id) }}
-                      className="w-5 h-5 rounded flex items-center justify-center text-text-muted hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"
-                    >
-                      <X size={10} />
-                    </button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {track.type === "url" ? <Link className="w-3 h-3 text-text-muted" /> : <Upload className="w-3 h-3 text-text-muted" />}
+                      <button
+                        onClick={e => { e.stopPropagation(); removeTrack(track.id) }}
+                        className="w-5 h-5 rounded flex items-center justify-center text-text-muted hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
             )}
-          </div>
 
-          {/* Add track section — only for My Tracks tab */}
-          {activeTab === "mine" && <div className="border-t border-hive-border p-3 shrink-0">
-            {showAddForm ? (
-              <div className="flex flex-col gap-2">
-                <input
-                  type="text"
-                  placeholder="Direct audio URL (.mp3, .ogg, stream link)"
-                  value={urlInput}
-                  onChange={e => setUrlInput(e.target.value)}
-                  className="w-full text-xs bg-hive-700 border border-hive-border rounded-md px-2 py-1.5 text-text-primary placeholder:text-text-muted outline-none focus:border-honey-500/50"
-                />
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    placeholder="Title (optional)"
-                    value={titleInput}
-                    onChange={e => setTitleInput(e.target.value)}
-                    className="flex-1 text-xs bg-hive-700 border border-hive-border rounded-md px-2 py-1.5 text-text-primary placeholder:text-text-muted outline-none focus:border-honey-500/50"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Artist"
-                    value={artistInput}
-                    onChange={e => setArtistInput(e.target.value)}
-                    className="flex-1 text-xs bg-hive-700 border border-hive-border rounded-md px-2 py-1.5 text-text-primary placeholder:text-text-muted outline-none focus:border-honey-500/50"
-                  />
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={addUrlTrack}
-                    disabled={!urlInput.trim()}
-                    className="flex-1 text-xs py-1.5 rounded-md bg-honey-500/15 text-honey-500 border border-honey-500/30 hover:bg-honey-500/25 disabled:opacity-30 transition-all"
-                  >
-                    Add Link
-                  </button>
-                  <button
-                    onClick={() => setShowAddForm(false)}
-                    className="text-xs px-3 py-1.5 rounded-md bg-hive-700 text-text-muted hover:text-text-secondary transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
+            {/* Add track section — only for My Tracks tab */}
+            {activeTab === "mine" &&
+              <div className="px-3 py-2 border-t border-hive-border">
+                {showAddForm ? (
+                  <div className="space-y-1.5">
+                    <input
+                      value={urlInput}
+                      placeholder="Audio URL (direct .mp3/.ogg/stream)"
+                      onChange={e => setUrlInput(e.target.value)}
+                      className="w-full text-xs bg-hive-700 border border-hive-border rounded-md px-2 py-1.5 text-text-primary placeholder:text-text-muted outline-none focus:border-honey-500/50"
+                    />
+                    <div className="flex gap-1">
+                      <input
+                        value={titleInput}
+                        placeholder="Title"
+                        onChange={e => setTitleInput(e.target.value)}
+                        className="flex-1 text-xs bg-hive-700 border border-hive-border rounded-md px-2 py-1.5 text-text-primary placeholder:text-text-muted outline-none focus:border-honey-500/50"
+                      />
+                      <input
+                        value={artistInput}
+                        placeholder="Artist"
+                        onChange={e => setArtistInput(e.target.value)}
+                        className="flex-1 text-xs bg-hive-700 border border-hive-border rounded-md px-2 py-1.5 text-text-primary placeholder:text-text-muted outline-none focus:border-honey-500/50"
+                      />
+                    </div>
+                    <div className="flex gap-1">
+                      <button onClick={addUrlTrack} className="flex-1 text-xs py-1.5 rounded-md bg-honey-500 text-hive-900 font-semibold hover:bg-honey-400 transition-colors">Add Link</button>
+                      <button
+                        onClick={() => setShowAddForm(false)}
+                        className="text-xs px-3 py-1.5 rounded-md bg-hive-700 text-text-muted hover:text-text-secondary transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="flex-1 flex items-center justify-center gap-1.5 text-xs py-1.5 rounded-md bg-hive-700 border border-hive-border text-text-secondary hover:text-honey-500 hover:border-honey-500/30 transition-all"
+                    ><Upload className="w-3 h-3" /> Upload MP3</button>
+                    <button
+                      onClick={() => setShowAddForm(true)}
+                      className="flex-1 flex items-center justify-center gap-1.5 text-xs py-1.5 rounded-md bg-hive-700 border border-hive-border text-text-secondary hover:text-honey-500 hover:border-honey-500/30 transition-all"
+                    >
+                      <Plus className="w-3 h-3" /> Add URL
+                    </button>
+                  </div>
+                )}
               </div>
-            ) : (
-              <div className="flex gap-2">
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="flex-1 flex items-center justify-center gap-1.5 text-xs py-1.5 rounded-md bg-hive-700 border border-hive-border text-text-secondary hover:text-honey-500 hover:border-honey-500/30 transition-all"
-                >
-                  <Upload size={12} />
-                  Upload MP3
-                </button>
-                <button
-                  onClick={() => setShowAddForm(true)}
-                  className="flex-1 flex items-center justify-center gap-1.5 text-xs py-1.5 rounded-md bg-hive-700 border border-hive-border text-text-secondary hover:text-honey-500 hover:border-honey-500/30 transition-all"
-                >
-                  <Link size={12} />
-                  Add URL
-                </button>
-              </div>
-            )}
-          </div>}
+            }
+          </div>
         </>
       )}
     </div>
