@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 
-export const runtime = 'edge'
+export const runtime = 'nodejs'
+export const maxDuration = 60
 
 const OPENCODE_BASE = 'https://opencode.ai/zen/v1'
 
@@ -181,8 +182,8 @@ When in doubt, respond "search".`,
       body: JSON.stringify({ model, messages: fullMessages, stream: true, temperature: 0.7, max_tokens: 8192 }),
     })
     if (!response.ok) {
-      const err = await response.text()
-      return new Response(JSON.stringify({ error: `OpenCode API error: ${response.status}` }), {
+      const errBody = await response.text()
+      return new Response(JSON.stringify({ error: `OpenCode API error: ${response.status}`, detail: errBody }), {
         status: response.status, headers: { 'Content-Type': 'application/json' },
       })
     }
