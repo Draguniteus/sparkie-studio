@@ -11,8 +11,8 @@ interface Props {
   messageId: string
 }
 
-// Tracks which messages have finished animating (survived unmount/remount)
-// Key: messageId, Value: true = animation done, render plain text
+// Tracks which messages have finished animating
+// Key: messageId → marked done = render plain settled text
 const animationDoneSet = new Set<string>()
 
 // Per-render char offset — reset each render, incremented as spans are created
@@ -33,11 +33,13 @@ function AnimatedText({
   }
 
   const startOffset = renderCharOffset
-  renderCharOffset += text.length
+  // Use Array.from so multi-codepoint emoji (🎵, 📻, etc.) stay intact as one element
+  const chars = Array.from(text)
+  renderCharOffset += chars.length
 
   return (
     <>
-      {text.split("").map((char, i) => (
+      {chars.map((char, i) => (
         <span
           key={`${startOffset}-${i}`}
           className="char"
@@ -55,21 +57,32 @@ function AnimatedText({
 }
 
 export function AnimatedMarkdown({ content, isStreaming, messageId }: Props) {
-  // Track when streaming ends so we can mark this message as done
   const wasStreamingRef = useRef(isStreaming)
   const markedDoneRef = useRef(false)
 
-  // When streaming transitions false → true, mark this message done
-  // so subsequent re-renders (from other messages arriving) render plain text
+  // Case A: was streaming, now done — mark after animation completes
   if (wasStreamingRef.current && !isStreaming && !markedDoneRef.current) {
     markedDoneRef.current = true
-    // Delay to let the final animation frame complete before locking
     const id = messageId
+    const charCount = Array.from(content).length
     setTimeout(() => {
       animationDoneSet.add(id)
-    }, (content.length * 0.03 + 1.2) * 1000)
+    }, (charCount * 0.03 + 1.2) * 1000)
   }
   wasStreamingRef.current = isStreaming
+
+  // Case B: message was never streamed (slash commands, system messages, etc.)
+  // isStreaming starts false and never transitions — mark done immediately
+  // so it never re-animates on subsequent renders
+  const neverStreamedRef = useRef(!isStreaming)
+  if (neverStreamedRef.current && !markedDoneRef.current) {
+    markedDoneRef.current = true
+    const id = messageId
+    // Short delay so first-render animation (if any) still plays out
+    setTimeout(() => {
+      animationDoneSet.add(id)
+    }, (Array.from(content).length * 0.03 + 1.2) * 1000)
+  }
 
   const isDone = animationDoneSet.has(messageId)
 
