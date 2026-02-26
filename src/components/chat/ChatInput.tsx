@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react"
 import { useAppStore } from "@/store/appStore"
 import { parseAIResponse, getLanguageFromFilename, deriveProjectName } from "@/lib/fileParser"
-import { Paperclip, ArrowUp, Sparkles, ChevronDown, Image as ImageIcon, Video, Music, Mic, MicOff, FileText, Headphones, Phone } from "lucide-react"
+import { Paperclip, ArrowUp, Sparkles, ChevronDown, Image as ImageIcon, Video, Music, Mic, MicOff, FileText, Headphones, Phone, Film, X } from "lucide-react"
 import { VoiceChat } from "@/components/chat/VoiceChat"
 
 // ── Asset type detection helper (for AssetsTab categories) ─────────────────
@@ -114,11 +114,13 @@ export function ChatInput() {
   const [genMode, setGenMode] = useState<GenMode>("chat")
   const [selectedImageModel, setSelectedImageModel] = useState("flux")
   const [selectedVideoModel, setSelectedVideoModel] = useState("MiniMax-Hailuo-2.3")
+  const [videoFrameImage, setVideoFrameImage] = useState<string | null>(null)  // I2V: base64 data URL
   const [selectedMusicModel, setSelectedMusicModel] = useState("music-2.5")
   const [selectedLyricsModel, setSelectedLyricsModel] = useState("music-2.5")
   const [selectedSpeechModel, setSelectedSpeechModel] = useState("speech-02-turbo")
   const [selectedVoiceId, setSelectedVoiceId] = useState("English_CalmWoman")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const videoFileRef = useRef<HTMLInputElement>(null)
   const agentAbortRef = useRef<AbortController | null>(null)
   const [isRecording, setIsRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
@@ -442,7 +444,10 @@ export function ChatInput() {
 
     try {
       const body: Record<string, unknown> = mediaType === "speech" ? { text: prompt, model, voice_id: selectedVoiceId } : { prompt, model }
-      if (mediaType === "video") body.duration = 4
+      if (mediaType === "video") {
+        body.duration = 6
+        if (videoFrameImage) body.first_frame_image = videoFrameImage
+      }
 
       const endpoint = mediaType === "music" ? "/api/music" : mediaType === "lyrics" ? "/api/lyrics" : mediaType === "speech" ? "/api/speech" : mediaType === "video" ? "/api/video" : "/api/image"
       const response = await fetch(endpoint, {
@@ -1275,7 +1280,7 @@ export function ChatInput() {
   const placeholders: Record<GenMode, string> = {
     chat: "Enter your task and submit to Sparkie...",
     image: "Describe the image you want to generate...",
-    video: "Describe the video you want to generate...",
+    video: "Describe the video you want to generate... (add a start frame for I2V)",
     music: "Describe the music you want to generate...",
     lyrics: "Describe the song — genre, mood, theme, story...",
     speech: "Enter the text you want to convert to speech...",
@@ -1312,6 +1317,44 @@ export function ChatInput() {
             <button className="p-1.5 rounded-md hover:bg-hive-hover text-text-muted hover:text-text-secondary transition-colors" title="Attach file">
               <Paperclip size={15} />
             </button>
+            {/* I2V: Image upload for video mode */}
+            {genMode === "video" && (
+              <>
+                <input
+                  ref={videoFileRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (!file) return
+                    const reader = new FileReader()
+                    reader.onload = (ev) => setVideoFrameImage(ev.target?.result as string)
+                    reader.readAsDataURL(file)
+                    e.target.value = ""
+                  }}
+                />
+                <button
+                  onClick={() => videoFileRef.current?.click()}
+                  className={`p-1.5 rounded-md transition-colors ${videoFrameImage ? "bg-honey-500/20 text-honey-500" : "hover:bg-hive-hover text-text-muted hover:text-text-secondary"}`}
+                  title={videoFrameImage ? "Change start frame (Image-to-Video)" : "Add start frame (Image-to-Video)"}
+                >
+                  <Film size={15} />
+                </button>
+                {videoFrameImage && (
+                  <div className="relative flex items-center">
+                    <img src={videoFrameImage} alt="Start frame" className="h-6 w-6 rounded object-cover border border-honey-500/40" />
+                    <button
+                      onClick={() => setVideoFrameImage(null)}
+                      className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-hive-elevated border border-hive-border flex items-center justify-center text-text-muted hover:text-red-400 transition-colors"
+                      title="Remove start frame"
+                    >
+                      <X size={8} />
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
             <button
               onClick={() => setGenMode(genMode === "image" ? "chat" : "image")}
               className={`p-1.5 rounded-md transition-colors ${genMode === "image" ? "bg-honey-500/15 text-honey-500" : "hover:bg-hive-hover text-text-muted hover:text-text-secondary"}`}
@@ -1320,7 +1363,7 @@ export function ChatInput() {
               <ImageIcon size={15} />
             </button>
             <button
-              onClick={() => setGenMode(genMode === "video" ? "chat" : "video")}
+              onClick={() => { const next = genMode === "video" ? "chat" : "video"; if (next !== "video") setVideoFrameImage(null); setGenMode(next) }}
               className={`p-1.5 rounded-md transition-colors ${genMode === "video" ? "bg-honey-500/15 text-honey-500" : "hover:bg-hive-hover text-text-muted hover:text-text-secondary"}`}
               title={genMode === "video" ? "Switch to chat" : "Video generation"}
             >
