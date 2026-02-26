@@ -579,7 +579,11 @@ async function executeTool(
       }
 
       default:
-        return `Unknown tool: ${name}`
+        // Try as a connector action (user's connected apps)
+        if (userId) {
+          return await executeConnectorTool(name, args, userId)
+        }
+        return `Tool not available: ${name}`
     }
   } catch (e) {
     return `Tool error: ${String(e)}`
@@ -604,6 +608,210 @@ function injectMediaIntoContent(content: string, toolResults: Array<{ name: stri
   return content + extra
 }
 
+
+// ── Dynamic connector tools from user's connected apps ────────────────────────
+const CONNECTOR_TOOL_CATALOG: Record<string, {
+  description: string
+  parameters: Record<string, unknown>
+  actionSlug: string
+}> = {
+  GMAIL_FETCH_EMAILS: {
+    description: "Fetch recent emails from the user's Gmail inbox. Use when they ask about their emails.",
+    actionSlug: 'GMAIL_FETCH_EMAILS',
+    parameters: {
+      type: 'object',
+      properties: {
+        max_results: { type: 'number', description: 'Max emails to fetch (default 5)' },
+        query: { type: 'string', description: 'Gmail search query, e.g. "from:boss is:unread"' },
+      },
+      required: [],
+    },
+  },
+  GMAIL_SEND_EMAIL: {
+    description: "Send an email from the user's Gmail. Use when they ask you to send an email.",
+    actionSlug: 'GMAIL_SEND_EMAIL',
+    parameters: {
+      type: 'object',
+      properties: {
+        to: { type: 'string', description: 'Recipient email address' },
+        subject: { type: 'string', description: 'Email subject' },
+        body: { type: 'string', description: 'Email body (plain text or HTML)' },
+      },
+      required: ['to', 'subject', 'body'],
+    },
+  },
+  TWITTER_CREATE_TWEET: {
+    description: "Post a tweet on the user's Twitter/X account.",
+    actionSlug: 'TWITTER_CREATE_TWEET',
+    parameters: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: 'Tweet text (max 280 chars)' },
+      },
+      required: ['text'],
+    },
+  },
+  TWITTER_USER_LOOKUP_ME: {
+    description: "Get the user's own Twitter profile and recent stats.",
+    actionSlug: 'TWITTER_USER_LOOKUP_ME',
+    parameters: { type: 'object', properties: {}, required: [] },
+  },
+  INSTAGRAM_CREATE_PHOTO_POST: {
+    description: "Post an image to the user's Instagram account.",
+    actionSlug: 'INSTAGRAM_CREATE_PHOTO_POST',
+    parameters: {
+      type: 'object',
+      properties: {
+        image_url: { type: 'string', description: 'URL of image to post' },
+        caption: { type: 'string', description: 'Post caption' },
+      },
+      required: ['image_url'],
+    },
+  },
+  GITHUB_LIST_REPOSITORIES: {
+    description: "List the user's GitHub repositories.",
+    actionSlug: 'GITHUB_LIST_REPOSITORIES',
+    parameters: {
+      type: 'object',
+      properties: {
+        type: { type: 'string', enum: ['all', 'owner', 'public', 'private'], description: 'Repo type' },
+      },
+      required: [],
+    },
+  },
+  GITHUB_CREATE_ISSUE: {
+    description: "Create a GitHub issue on a repository.",
+    actionSlug: 'GITHUB_CREATE_ISSUE',
+    parameters: {
+      type: 'object',
+      properties: {
+        owner: { type: 'string' },
+        repo: { type: 'string' },
+        title: { type: 'string' },
+        body: { type: 'string' },
+      },
+      required: ['owner', 'repo', 'title'],
+    },
+  },
+  SLACK_SEND_MESSAGE: {
+    description: "Send a message to a Slack channel or DM.",
+    actionSlug: 'SLACK_SEND_MESSAGE',
+    parameters: {
+      type: 'object',
+      properties: {
+        channel: { type: 'string', description: 'Channel name or user ID' },
+        text: { type: 'string', description: 'Message text' },
+      },
+      required: ['channel', 'text'],
+    },
+  },
+  TIKTOK_CREATE_POST: {
+    description: "Create a TikTok post for the user.",
+    actionSlug: 'TIKTOK_CREATE_POST',
+    parameters: {
+      type: 'object',
+      properties: {
+        video_url: { type: 'string', description: 'URL of video to post' },
+        caption: { type: 'string', description: 'Post caption' },
+      },
+      required: ['video_url'],
+    },
+  },
+  GOOGLECALENDAR_CREATE_EVENT: {
+    description: "Create a Google Calendar event for the user.",
+    actionSlug: 'GOOGLECALENDAR_CREATE_EVENT',
+    parameters: {
+      type: 'object',
+      properties: {
+        summary: { type: 'string' },
+        start_datetime: { type: 'string', description: 'ISO 8601 datetime' },
+        end_datetime: { type: 'string', description: 'ISO 8601 datetime' },
+        description: { type: 'string' },
+      },
+      required: ['summary', 'start_datetime', 'end_datetime'],
+    },
+  },
+}
+
+// App name → tool slugs mapping
+const APP_TOOLS: Record<string, string[]> = {
+  gmail: ['GMAIL_FETCH_EMAILS', 'GMAIL_SEND_EMAIL'],
+  twitter: ['TWITTER_CREATE_TWEET', 'TWITTER_USER_LOOKUP_ME'],
+  instagram: ['INSTAGRAM_CREATE_PHOTO_POST'],
+  github: ['GITHUB_LIST_REPOSITORIES', 'GITHUB_CREATE_ISSUE'],
+  slack: ['SLACK_SEND_MESSAGE'],
+  tiktok: ['TIKTOK_CREATE_POST'],
+  'google-calendar': ['GOOGLECALENDAR_CREATE_EVENT'],
+}
+
+async function getUserConnectorTools(userId: string): Promise<Array<{
+  type: string
+  function: { name: string; description: string; parameters: Record<string, unknown> }
+}>> {
+  try {
+    const apiKey = process.env.COMPOSIO_API_KEY
+    if (!apiKey) return []
+    const entityId = `sparkie_user_${userId}`
+    const res = await fetch(
+      `https://backend.composio.dev/api/v1/connectedAccounts?entityId=${entityId}&showActiveOnly=true`,
+      { headers: { 'x-api-key': apiKey }, signal: AbortSignal.timeout(5000) }
+    )
+    if (!res.ok) return []
+    const data = await res.json() as { items?: Array<{ appName: string; status: string }> }
+    const activeApps = (data.items ?? [])
+      .filter(c => c.status === 'ACTIVE')
+      .map(c => c.appName.toLowerCase())
+
+    const tools: Array<{ type: string; function: { name: string; description: string; parameters: Record<string, unknown> } }> = []
+    for (const appName of activeApps) {
+      const slugs = APP_TOOLS[appName] ?? []
+      for (const slug of slugs) {
+        const catalog = CONNECTOR_TOOL_CATALOG[slug]
+        if (catalog) {
+          tools.push({
+            type: 'function',
+            function: {
+              name: slug,
+              description: catalog.description,
+              parameters: catalog.parameters,
+            },
+          })
+        }
+      }
+    }
+    return tools
+  } catch { return [] }
+}
+
+async function executeConnectorTool(
+  actionSlug: string,
+  args: Record<string, unknown>,
+  userId: string
+): Promise<string> {
+  try {
+    const apiKey = process.env.COMPOSIO_API_KEY
+    if (!apiKey) return 'Connector not available'
+    const entityId = `sparkie_user_${userId}`
+    const res = await fetch(
+      `https://backend.composio.dev/api/v1/actions/execute/${actionSlug}`,
+      {
+        method: 'POST',
+        headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entityId, input: args }),
+        signal: AbortSignal.timeout(20000),
+      }
+    )
+    if (!res.ok) {
+      const text = await res.text()
+      return `Action failed (${res.status}): ${text.slice(0, 200)}`
+    }
+    const data = await res.json()
+    return JSON.stringify(data).slice(0, 2000)
+  } catch (e) {
+    return `Connector error: ${String(e)}`
+  }
+}
+
 // ── POST handler ──────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   try {
@@ -622,6 +830,9 @@ export async function POST(req: NextRequest) {
     const baseUrl = `${proto}://${host}`
     const doKey = process.env.DO_MODEL_ACCESS_KEY ?? ''
     const tavilyKey = process.env.TAVILY_API_KEY
+
+    // Load user's connected app tools in parallel with system prompt build
+    const connectorToolsPromise = userId ? getUserConnectorTools(userId) : Promise.resolve([])
 
     // ── Build system prompt ─────────────────────────────────────────────────
     let systemContent = SYSTEM_PROMPT
@@ -665,6 +876,14 @@ Make it feel like walking into your friend's creative space and being genuinely 
     }
 
     const recentMessages = messages.slice(-12)
+
+    // Await user's connector tools (was started in parallel with system prompt build)
+    const connectorTools = await connectorToolsPromise
+    if (connectorTools.length > 0) {
+      const connectedAppNames = [...new Set(connectorTools.map((t) => t.function.name.split('_')[0].toLowerCase()))]
+      finalSystemContent += `\n\n## USER'S CONNECTED APPS\nThis user has connected: ${connectedAppNames.join(', ')}. You have real tools to act on their behalf — read emails, post to their social, check their calendar. Use when they ask, or proactively when it would genuinely help.`
+    }
+
     const useTools = !voiceMode && model !== 'glm-5-free'
     const toolContext = { userId, tavilyKey, apiKey, doKey, baseUrl }
     const toolMediaResults: Array<{ name: string; result: string }> = []
@@ -679,7 +898,7 @@ Make it feel like walking into your friend's creative space and being genuinely 
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
         body: JSON.stringify({
           model, stream: false, temperature: 0.8, max_tokens: 2048,
-          tools: SPARKIE_TOOLS,
+          tools: [...SPARKIE_TOOLS, ...connectorTools],
           tool_choice: 'auto',
           messages: [{ role: 'system', content: systemContent }, ...recentMessages],
         }),
