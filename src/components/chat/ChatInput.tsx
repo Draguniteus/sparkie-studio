@@ -21,6 +21,13 @@ function detectAssetTypeFromName(name: string): import('@/store/appStore').Asset
 }
 
 
+// ─── Slash commands registry ─────────────────────────────────────────────────
+const SLASH_COMMANDS = [
+  { cmd: '/startradio', desc: 'Start Sparkie Radio' },
+  { cmd: '/stopradio',  desc: 'Stop the radio' },
+  { cmd: '/weather',    desc: 'Get your local weather forecast' },
+] as const
+
 const MODELS = [
   { id: "gpt-5-nano", name: "GPT-5 Nano", tag: "Free", type: "chat" },
   { id: "minimax-m2.5-free", name: "MiniMax M2.5", tag: "Free", type: "chat" },
@@ -106,6 +113,7 @@ export function ChatInput() {
   const [input, setInput] = useState("")
   const [showModels, setShowModels] = useState(false)
   const [genMode, setGenMode] = useState<GenMode>("chat")
+  const [slashSuggestions, setSlashSuggestions] = useState<typeof SLASH_COMMANDS>([])
   const [selectedImageModel, setSelectedImageModel] = useState("flux")
   const [selectedVideoModel, setSelectedVideoModel] = useState("MiniMax-Hailuo-2.3")
   const [videoFrameImage, setVideoFrameImage] = useState<string | null>(null)  // I2V: base64 data URL
@@ -1211,6 +1219,62 @@ export function ChatInput() {
   const handleSubmit = useCallback(async () => {
     if (!input.trim() || isStreaming) return
 
+    // ─── Slash commands ────────────────────────────────────────────────────
+    const trimmed = input.trim()
+    const slashCmd = trimmed.toLowerCase().split(/\s+/)[0]
+    if (slashCmd.startsWith('/')) {
+      let chatId = currentChatId
+      if (!chatId) chatId = createChat()
+      addMessage(chatId, { role: 'user', content: trimmed })
+      setInput('')
+      if (textareaRef.current) textareaRef.current.style.height = 'auto'
+
+      if (slashCmd === '/startradio') {
+        window.dispatchEvent(new CustomEvent('sparkie:startradio'))
+        addMessage(chatId, {
+          role: 'assistant',
+          content: "🎵 Sparkie Radio is now live! Tuning in to the station for you...",
+        })
+        return
+      }
+
+      if (slashCmd === '/stopradio') {
+        window.dispatchEvent(new CustomEvent('sparkie:stopradio'))
+        addMessage(chatId, {
+          role: 'assistant',
+          content: "📻 Radio stopped. Come back anytime — the station's always on.",
+        })
+        return
+      }
+
+      if (slashCmd === '/weather') {
+        const loadingMsgId = addMessage(chatId, {
+          role: 'assistant',
+          content: '⛅ One moment, pulling up your local forecast...',
+          isStreaming: true,
+        })
+        try {
+          const res = await fetch('/api/weather')
+          const data = await res.json()
+          updateMessage(chatId, loadingMsgId, { content: data.report, isStreaming: false })
+        } catch {
+          updateMessage(chatId, loadingMsgId, {
+            content: "Couldn't reach the weather service right now. Try again in a moment.",
+            isStreaming: false,
+          })
+        }
+        return
+      }
+
+      // Unknown slash command — let Sparkie explain what's available
+      addMessage(chatId, {
+        role: 'assistant',
+        content: `I don't know that command yet! Here's what I've got:\n\n**\`/startradio\`** — Start Sparkie Radio\n**\`/stopradio\`** — Stop the radio\n**\`/weather\`** — Get your local weather forecast`,
+      })
+      return
+    }
+    // ─── End slash commands ────────────────────────────────────────────────
+
     let chatId = currentChatId
     if (!chatId) chatId = createChat()
 
@@ -1266,14 +1330,36 @@ export function ChatInput() {
   }, [input, isStreaming, currentChatId, createChat, addMessage, genMode, streamAgent, generateMedia, classifyIntent, streamReply])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (slashSuggestions.length > 0) {
+      if (e.key === "Tab" || e.key === "ArrowRight") {
+        e.preventDefault()
+        setInput(slashSuggestions[0].cmd + " ")
+        setSlashSuggestions([])
+        return
+      }
+      if (e.key === "Escape") {
+        setSlashSuggestions([])
+        return
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit() }
   }
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setInput(e.target.value)
+    const val = e.target.value
+    setInput(val)
     const el = e.target
     el.style.height = "auto"
     el.style.height = Math.min(el.scrollHeight, 200) + "px"
+    // Slash command autocomplete
+    const word = val.split(/\s+/)[0]
+    if (word.startsWith('/') && val === word) {
+      setSlashSuggestions(
+        SLASH_COMMANDS.filter(s => s.cmd.startsWith(word.toLowerCase()))
+      )
+    } else {
+      setSlashSuggestions([])
+    }
   }
 
   const activeModels = genMode === "image" ? IMAGE_MODELS : genMode === "video" ? VIDEO_MODELS : genMode === "music" ? MUSIC_MODELS : genMode === "lyrics" ? LYRICS_MODELS : genMode === "speech" ? SPEECH_VOICES : MODELS
@@ -1305,6 +1391,21 @@ export function ChatInput() {
             >
               <span>{t.icon}</span>
               <span>{t.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {/* Slash command autocomplete */}
+      {slashSuggestions.length > 0 && (
+        <div className="mb-1 rounded-xl border border-honey-500/30 bg-hive-elevated overflow-hidden shadow-lg">
+          {slashSuggestions.map((s) => (
+            <button
+              key={s.cmd}
+              onMouseDown={(e) => { e.preventDefault(); setInput(s.cmd + " "); setSlashSuggestions([]) }}
+              className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-hive-hover text-left transition-colors"
+            >
+              <span className="text-honey-500 font-mono text-sm font-semibold">{s.cmd}</span>
+              <span className="text-xs text-text-muted">{s.desc}</span>
             </button>
           ))}
         </div>
