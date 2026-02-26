@@ -22,6 +22,7 @@ function detectAssetTypeFromName(name: string): import('@/store/appStore').Asset
 
 
 const MODELS = [
+  { id: "gpt-5-nano", name: "GPT-5 Nano", tag: "Free", type: "chat" },
   { id: "glm-5-free", name: "GLM 5", tag: "Free", type: "chat" },
   { id: "minimax-m2.5-free", name: "MiniMax M2.5", tag: "Free", type: "chat" },
   { id: "minimax-m2.1-free", name: "MiniMax M2.1", tag: "Free", type: "chat" },
