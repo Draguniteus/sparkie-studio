@@ -1,140 +1,51 @@
 import { NextResponse } from 'next/server';
-import { Pool } from 'pg';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
+import { query } from '@/lib/db';
 
 export const runtime = 'nodejs';
 
-// DO managed PostgreSQL uses a self-signed cert chain
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+// Max size: 2MB base64 encoded (covers ~1.5MB raw image)
+const MAX_BYTES = 2 * 1024 * 1024;
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
-});
+export async function POST(req: Request) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-const migration = `
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-
-CREATE TABLE IF NOT EXISTS users (
-  id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  email                  TEXT UNIQUE NOT NULL,
-  display_name           TEXT,
-  avatar_url             TEXT,
-  password_hash          TEXT,
-  email_verified         BOOLEAN DEFAULT false,
-  verify_token           TEXT,
-  verify_token_expires   TIMESTAMPTZ,
-  gender                 TEXT,
-  age                    INTEGER,
-  tier                   TEXT DEFAULT 'free',
-  credits                INTEGER DEFAULT 100,
-  created_at             TIMESTAMPTZ DEFAULT now(),
-  updated_at             TIMESTAMPTZ DEFAULT now()
-);
-
--- Idempotent column additions for existing tables
-ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash          TEXT;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified         BOOLEAN DEFAULT false;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS verify_token           TEXT;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS verify_token_expires   TIMESTAMPTZ;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS gender                 TEXT;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS age                    INTEGER;
-
-CREATE TABLE IF NOT EXISTS agents (
-  id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name                 TEXT NOT NULL,
-  short_desc           TEXT,
-  full_instructions    TEXT,
-  workflow             TEXT,
-  capabilities         TEXT[],
-  icon_url             TEXT,
-  creator_id           UUID REFERENCES users(id) ON DELETE SET NULL,
-  is_official          BOOLEAN DEFAULT false,
-  views                INTEGER DEFAULT 0,
-  credit_cost          INTEGER DEFAULT 1,
-  categories           TEXT[],
-  visibility           TEXT DEFAULT 'public',
-  forked_from          UUID REFERENCES agents(id) ON DELETE SET NULL,
-  created_at           TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS agent_starters (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  agent_id    UUID REFERENCES agents(id) ON DELETE CASCADE,
-  text        TEXT NOT NULL,
-  sort_order  INTEGER DEFAULT 0
-);
-
-CREATE TABLE IF NOT EXISTS generations (
-  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id       UUID REFERENCES users(id) ON DELETE SET NULL,
-  type          TEXT NOT NULL,
-  model         TEXT,
-  prompt        TEXT,
-  output_url    TEXT,
-  duration_sec  INTEGER,
-  credits_used  INTEGER DEFAULT 1,
-  metadata      JSONB,
-  created_at    TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS credit_transactions (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id     UUID REFERENCES users(id) ON DELETE SET NULL,
-  amount      INTEGER NOT NULL,
-  reason      TEXT,
-  ref_id      UUID,
-  created_at  TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS subscriptions (
-  id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id              UUID REFERENCES users(id) ON DELETE CASCADE UNIQUE,
-  tier                 TEXT NOT NULL,
-  status               TEXT DEFAULT 'active',
-  current_period_end   TIMESTAMPTZ,
-  stripe_sub_id        TEXT,
-  created_at           TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_generations_user_id ON generations(user_id);
-CREATE INDEX IF NOT EXISTS idx_generations_type ON generations(type);
-CREATE INDEX IF NOT EXISTS idx_credit_transactions_user_id ON credit_transactions(user_id);
-CREATE INDEX IF NOT EXISTS idx_agents_creator_id ON agents(creator_id);
-CREATE INDEX IF NOT EXISTS idx_agents_visibility ON agents(visibility);
-CREATE INDEX IF NOT EXISTS idx_users_verify_token ON users(verify_token);
-`;
-
-export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const secret = searchParams.get('secret');
-  if (!process.env.MIGRATE_SECRET || secret !== process.env.MIGRATE_SECRET) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const contentType = req.headers.get('content-type') || '';
+  if (!contentType.includes('multipart/form-data')) {
+    return NextResponse.json({ error: 'Expected multipart/form-data' }, { status: 400 });
   }
 
-  const client = await pool.connect();
-  try {
-    await client.query(migration);
+  const formData = await req.formData();
+  const file = formData.get('avatar') as File | null;
+  if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 });
 
-    const tablesResult = await client.query(`
-      SELECT table_name FROM information_schema.tables
-      WHERE table_schema = 'public' ORDER BY table_name;
-    `);
-    const tables = tablesResult.rows.map((r: { table_name: string }) => r.table_name);
-
-    // Return users columns so we can verify the migration visually
-    const colsResult = await client.query(`
-      SELECT column_name, data_type, column_default, is_nullable
-      FROM information_schema.columns
-      WHERE table_schema = 'public' AND table_name = 'users'
-      ORDER BY ordinal_position;
-    `);
-    const usersColumns = colsResult.rows;
-
-    return NextResponse.json({ success: true, tables, usersColumns });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: msg }, { status: 500 });
-  } finally {
-    client.release();
+  const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+  if (!allowed.includes(file.type)) {
+    return NextResponse.json({ error: 'Invalid file type. Use JPG, PNG, WebP, or GIF.' }, { status: 400 });
   }
+
+  const bytes = await file.arrayBuffer();
+  if (bytes.byteLength > MAX_BYTES) {
+    return NextResponse.json({ error: 'Image too large. Max 2MB.' }, { status: 400 });
+  }
+
+  const b64 = Buffer.from(bytes).toString('base64');
+  const dataUrl = `data:${file.type};base64,${b64}`;
+
+  await query(
+    'UPDATE users SET avatar_url = $1 WHERE email = $2',
+    [dataUrl, session.user.email]
+  );
+
+  return NextResponse.json({ avatarUrl: dataUrl });
+}
+
+export async function DELETE() {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  await query('UPDATE users SET avatar_url = NULL WHERE email = $1', [session.user.email]);
+  return NextResponse.json({ success: true });
 }
