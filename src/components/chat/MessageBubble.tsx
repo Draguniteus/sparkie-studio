@@ -5,6 +5,7 @@ import { Message } from "@/store/appStore"
 import { Sparkles, User, Copy, RefreshCw, ThumbsUp, ThumbsDown, Download, Check, ExternalLink, FileCode, Layers, Eye } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
+import { AnimatedMarkdown } from "./AnimatedMarkdown"
 
 interface Props {
   message: Message
@@ -223,9 +224,11 @@ export function MessageBubble({ message, userAvatarUrl }: Props) {
               {isUser ? (
                 <div className="whitespace-pre-wrap break-words">{message.content}</div>
               ) : (
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {message.content || " "}
-                </ReactMarkdown>
+                <AnimatedMarkdown
+                  content={message.content || " "}
+                  isStreaming={message.isStreaming ?? false}
+                  messageId={message.id}
+                />
               )}
             </div>
           )}
