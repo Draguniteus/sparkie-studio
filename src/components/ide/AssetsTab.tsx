@@ -207,12 +207,30 @@ export function AssetsTab() {
       })
   }, [enriched, filterTab, sourceFilter, search])
 
+  function getMimeType(filename: string): string {
+    const ext = filename.split(".").pop()?.toLowerCase() || ""
+    const map: Record<string, string> = {
+      mp3: "audio/mpeg", wav: "audio/wav", ogg: "audio/ogg",
+      aac: "audio/aac", flac: "audio/flac", m4a: "audio/mp4",
+      mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime",
+      png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+      gif: "image/gif", webp: "image/webp", svg: "image/svg+xml",
+      pdf: "application/pdf",
+    }
+    return map[ext] || "application/octet-stream"
+  }
+
   async function downloadAsset(name: string, content: string) {
     let objectUrl: string | null = null
     try {
       if (isMediaUrl(content)) {
         const res = await fetch(content)
-        const blob = await res.blob()
+        const rawBlob = await res.blob()
+        // Force correct MIME type from filename — server may return wrong Content-Type
+        const mimeType = getMimeType(name)
+        const blob = rawBlob.type && rawBlob.type !== "application/octet-stream" && rawBlob.type !== "image/png"
+          ? rawBlob
+          : new Blob([await rawBlob.arrayBuffer()], { type: mimeType })
         objectUrl = URL.createObjectURL(blob)
       } else {
         const blob = new Blob([content], { type: "text/plain" })
