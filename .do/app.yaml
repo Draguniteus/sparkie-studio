@@ -6,11 +6,12 @@ services:
       repo: Draguniteus/sparkie-studio
       branch: master
       deploy_on_push: true
-    dockerfile_path: Dockerfile
+    build_command: npm run build
+    run_command: npm start
     source_dir: /
     instance_size_slug: apps-s-1vcpu-1gb
     instance_count: 1
-    http_port: 8080
+    http_port: 3000
     envs:
       - key: OPENROUTER_API_KEY
         scope: RUN_TIME
