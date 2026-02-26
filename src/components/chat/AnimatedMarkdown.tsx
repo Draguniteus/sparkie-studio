@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useCallback } from "react"
+import { useRef } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import type { Components } from "react-markdown"
@@ -11,33 +11,40 @@ interface Props {
   messageId: string
 }
 
-// Global char index counter per message – persists across re-renders via ref
-// We use a module-level map so each message tracks its own offset
-const charOffsetMap = new Map<string, number>()
+// Tracks which messages have finished animating (survived unmount/remount)
+// Key: messageId, Value: true = animation done, render plain text
+const animationDoneSet = new Set<string>()
+
+// Per-render char offset — reset each render, incremented as spans are created
+let renderCharOffset = 0
 
 function AnimatedText({
   text,
-  messageId,
+  isDone,
 }: {
   text: string
-  messageId: string
+  isDone: boolean
 }) {
   if (!text) return null
 
-  // Get current offset for this message, then advance it
-  const offset = charOffsetMap.get(messageId) ?? 0
-  charOffsetMap.set(messageId, offset + text.length)
+  // Already animated — render settled plain text, no animation
+  if (isDone) {
+    return <>{text}</>
+  }
+
+  const startOffset = renderCharOffset
+  renderCharOffset += text.length
 
   return (
     <>
       {text.split("").map((char, i) => (
         <span
-          key={`${offset}-${i}`}
+          key={`${startOffset}-${i}`}
           className="char"
           style={{
             opacity: 0,
             animation: "colorShift 1s forwards",
-            animationDelay: `${(offset + i) * 0.03}s`,
+            animationDelay: `${(startOffset + i) * 0.03}s`,
           }}
         >
           {char}
@@ -48,81 +55,87 @@ function AnimatedText({
 }
 
 export function AnimatedMarkdown({ content, isStreaming, messageId }: Props) {
-  // Reset char offset at the start of each render for this message
-  // so stagger always starts from the rendered chars
-  charOffsetMap.delete(messageId)
+  // Track when streaming ends so we can mark this message as done
+  const wasStreamingRef = useRef(isStreaming)
+  const markedDoneRef = useRef(false)
 
-  const components: Components = {
-    // Paragraphs — animate text
+  // When streaming transitions false → true, mark this message done
+  // so subsequent re-renders (from other messages arriving) render plain text
+  if (wasStreamingRef.current && !isStreaming && !markedDoneRef.current) {
+    markedDoneRef.current = true
+    // Delay to let the final animation frame complete before locking
+    const id = messageId
+    setTimeout(() => {
+      animationDoneSet.add(id)
+    }, (content.length * 0.03 + 1.2) * 1000)
+  }
+  wasStreamingRef.current = isStreaming
+
+  const isDone = animationDoneSet.has(messageId)
+
+  // Reset per-render offset at top of each render
+  renderCharOffset = 0
+
+  const makeComponents = (done: boolean): Components => ({
     p({ children }) {
-      return <p><AnimatedNodes messageId={messageId}>{children}</AnimatedNodes></p>
+      return <p><AnimatedNodes isDone={done}>{children}</AnimatedNodes></p>
     },
-    // Headers — animate text
     h1({ children }) {
-      return <h1><AnimatedNodes messageId={messageId}>{children}</AnimatedNodes></h1>
+      return <h1><AnimatedNodes isDone={done}>{children}</AnimatedNodes></h1>
     },
     h2({ children }) {
-      return <h2><AnimatedNodes messageId={messageId}>{children}</AnimatedNodes></h2>
+      return <h2><AnimatedNodes isDone={done}>{children}</AnimatedNodes></h2>
     },
     h3({ children }) {
-      return <h3><AnimatedNodes messageId={messageId}>{children}</AnimatedNodes></h3>
+      return <h3><AnimatedNodes isDone={done}>{children}</AnimatedNodes></h3>
     },
     h4({ children }) {
-      return <h4><AnimatedNodes messageId={messageId}>{children}</AnimatedNodes></h4>
+      return <h4><AnimatedNodes isDone={done}>{children}</AnimatedNodes></h4>
     },
-    // Bold / italic — animate text
     strong({ children }) {
-      return <strong><AnimatedNodes messageId={messageId}>{children}</AnimatedNodes></strong>
+      return <strong><AnimatedNodes isDone={done}>{children}</AnimatedNodes></strong>
     },
     em({ children }) {
-      return <em><AnimatedNodes messageId={messageId}>{children}</AnimatedNodes></em>
+      return <em><AnimatedNodes isDone={done}>{children}</AnimatedNodes></em>
     },
-    // List items — animate text
     li({ children }) {
-      return <li><AnimatedNodes messageId={messageId}>{children}</AnimatedNodes></li>
+      return <li><AnimatedNodes isDone={done}>{children}</AnimatedNodes></li>
     },
-    // Code blocks — NO animation (pass through untouched)
+    // Code blocks — never animated
     code(props) {
       const { children, className } = props
-      const isBlock = className?.includes("language-")
-      if (isBlock) {
-        return <code className={className}>{children}</code>
-      }
-      return <code>{children}</code>
+      return <code className={className}>{children}</code>
     },
     pre({ children }) {
       return <pre>{children}</pre>
     },
-  }
+  })
 
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={makeComponents(isDone)}>
       {content || " "}
     </ReactMarkdown>
   )
 }
 
-// Recursively walk React children and animate string nodes
 function AnimatedNodes({
   children,
-  messageId,
+  isDone,
 }: {
   children: React.ReactNode
-  messageId: string
+  isDone: boolean
 }): React.ReactElement {
-  return (
-    <>
-      {flatMapChildren(children, messageId)}
-    </>
-  )
+  return <>{flatMapChildren(children, isDone)}</>
 }
 
-function flatMapChildren(children: React.ReactNode, messageId: string): React.ReactNode[] {
+function flatMapChildren(children: React.ReactNode, isDone: boolean): React.ReactNode[] {
   const result: React.ReactNode[] = []
 
   const walk = (node: React.ReactNode) => {
     if (typeof node === "string") {
-      result.push(<AnimatedText key={`t-${result.length}`} text={node} messageId={messageId} />)
+      result.push(
+        <AnimatedText key={`t-${result.length}`} text={node} isDone={isDone} />
+      )
     } else if (Array.isArray(node)) {
       node.forEach(walk)
     } else {
