@@ -35,6 +35,7 @@ export function RadioPlayer() {
   const [tracks, setTracks] = useState<RadioTrack[]>([])
   const [currentIndex, setCurrentIndex] = useState<number>(-1)
   const [isPlaying, setIsPlaying] = useState(false)
+  const [playError, setPlayError] = useState(false)
   const [volume, setVolume] = useState(0.8)
   const [isMuted, setIsMuted] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -88,6 +89,7 @@ export function RadioPlayer() {
 
     audio.src = track.src
     audio.volume = isMuted ? 0 : volume
+    setPlayError(false)
     audio.play().then(() => {
       setIsPlaying(true)
       startProgressTracking()
@@ -224,7 +226,7 @@ export function RadioPlayer() {
       <audio
         ref={audioRef}
         onEnded={skipNext}
-        onError={() => { setIsPlaying(false); clearProgressInterval() }}
+        onError={() => { setIsPlaying(false); clearProgressInterval(); setPlayError(true) }}
       />
       <input
         ref={fileInputRef}
@@ -267,7 +269,7 @@ export function RadioPlayer() {
                   {currentTrack?.title ?? "No track selected"}
                 </p>
                 <p className="text-xs text-text-muted truncate">
-                  {currentTrack?.artist ?? (tracks.length === 0 ? "Add tracks to get started" : "Unknown Artist")}
+                  {playError ? <span className="text-yellow-400">⚠ Use a direct audio URL (.mp3/.ogg/stream), not a webpage</span> : (currentTrack?.artist ?? (tracks.length === 0 ? "Add tracks to get started" : "Unknown Artist"))}
                 </p>
               </div>
             </div>
@@ -390,7 +392,7 @@ export function RadioPlayer() {
               <div className="flex flex-col gap-2">
                 <input
                   type="text"
-                  placeholder="URL (mp3, stream, YouTube...)"
+                  placeholder="Direct audio URL (.mp3, .ogg, stream link)"
                   value={urlInput}
                   onChange={e => setUrlInput(e.target.value)}
                   className="w-full text-xs bg-hive-700 border border-hive-border rounded-md px-2 py-1.5 text-text-primary placeholder:text-text-muted outline-none focus:border-honey-500/50"

@@ -34,11 +34,6 @@ const SPARKIE_VOICES = [
   { id: "English_MatureBoss",          label: "Bossy",           cat: "Woman" as const },
   { id: "English_SentimentalLady",     label: "Sentimental",     cat: "Woman" as const },
   { id: "English_StressedLady",        label: "Stressed",        cat: "Woman" as const },
-  { id: "English_expressive_narrator", label: "Expressive",      cat: "Male"  as const },
-  { id: "English_ManWithDeepVoice",    label: "Deep Voice",      cat: "Male"  as const },
-  { id: "English_Gentle-voiced_man",   label: "Gentle",          cat: "Male"  as const },
-  { id: "English_FriendlyPerson",      label: "Friendly",        cat: "Male"  as const },
-  { id: "news_anchor_en",              label: "News Anchor",      cat: "Male"  as const },
 ]
 
 interface VoiceChatProps {
@@ -522,8 +517,8 @@ export function VoiceChat({ onClose, onSendMessage, isActive }: VoiceChatProps) 
   const handlePTTEnd = useCallback(() => {
     if (!pttActiveRef.current) return
     pttActiveRef.current = false
-    if (voiceState === "listening") stopListening()  // triggers mr.onstop → processAudio
-  }, [voiceState, stopListening])
+    if (voiceStateRef.current === "listening") stopListening()  // triggers mr.onstop → processAudio
+  }, [stopListening])
 
   // Legacy click handler (cancel speaking on tap when speaking)
   const handleMicClick = useCallback(() => {
@@ -703,12 +698,30 @@ export function VoiceChat({ onClose, onSendMessage, isActive }: VoiceChatProps) 
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {SPARKIE_VOICES.filter(v => v.cat === voiceCat).map(v => (
-                  <button key={v.id} onClick={() => setSelectedVoice(v.id)}
-                    className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors ${
-                      selectedVoice === v.id
-                        ? "bg-yellow-500 text-black"
-                        : "bg-white/8 text-white/55 hover:bg-white/15 border border-white/10"
-                    }`}>{v.label}</button>
+                  <div key={v.id} className="flex items-center gap-0.5">
+                    <button onClick={() => setSelectedVoice(v.id)}
+                      className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors ${
+                        selectedVoice === v.id
+                          ? "bg-yellow-500 text-black"
+                          : "bg-white/8 text-white/55 hover:bg-white/15 border border-white/10"
+                      }`}>{v.label}</button>
+                    <button
+                      onClick={() => {
+                        fetch("/api/speech-stream", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ text: "Hi, I'm Sparkie!", model: "speech-02-turbo", voice_id: v.id }),
+                        }).then(r => r.arrayBuffer()).then(buf => {
+                          const a = new Audio(URL.createObjectURL(new Blob([buf], { type: "audio/mpeg" })))
+                          a.play().catch(() => {})
+                        }).catch(() => {})
+                      }}
+                      className="w-4 h-4 flex items-center justify-center text-white/30 hover:text-yellow-400 transition-colors"
+                      title={`Preview ${v.label}`}
+                    >
+                      <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor"><polygon points="0,0 8,4 0,8"/></svg>
+                    </button>
+                  </div>
                 ))}
               </div>
             </div>

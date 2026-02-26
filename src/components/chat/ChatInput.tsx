@@ -88,12 +88,6 @@ const SPEECH_VOICES = [
   { id: "English_MatureBoss",          name: "Bossy Lady",          tag: "Woman", desc: "Authoritative, direct" },
   { id: "English_SentimentalLady",     name: "Sentimental Lady",    tag: "Woman", desc: "Emotional depth" },
   { id: "English_StressedLady",        name: "Stressed Lady",       tag: "Woman", desc: "Tense, urgent tone" },
-  // Male
-  { id: "English_expressive_narrator", name: "Expressive Narrator", tag: "Male",  desc: "Rich, storytelling" },
-  { id: "Deep_Voice_Man",              name: "Deep Voice",          tag: "Male",  desc: "Rich, authoritative" },
-  { id: "Gentle_Man",                  name: "Gentle Man",          tag: "Male",  desc: "Soft-spoken, thoughtful" },
-  { id: "Friendly_Person",             name: "Friendly",            tag: "Male",  desc: "Upbeat, approachable" },
-  { id: "news_anchor_en",              name: "News Anchor",         tag: "Male",  desc: "Professional, crisp" },
 ]
 
 
@@ -1156,11 +1150,18 @@ export function ChatInput() {
     return new Promise<string>((resolve) => {
       (async () => {
         try {
+          // Pass full chat history so Sparkie has context (not just the current utterance)
+          const chatHistory = useAppStore.getState().chats.find(c => c.id === chatId)?.messages ?? []
+          const apiMessages = chatHistory
+            .filter(m => m.type !== 'image' && m.type !== 'video')
+            .map(m => ({ role: m.role, content: m.content }))
+          // Append current user message (already added to store above)
+          const messagesWithUser = [...apiMessages.filter(m => m.content !== userText || m.role !== 'user'), { role: 'user', content: userText }]
           const res = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              messages: [{ role: 'user', content: userText }],
+              messages: messagesWithUser,
               model: selectedModel,
               voiceMode: true,
             }),
@@ -1405,7 +1406,7 @@ export function ChatInput() {
                 <ChevronDown size={12} />
               </button>
               {showModels && (
-                <div className="absolute bottom-full left-0 mb-1 w-72 bg-hive-elevated border border-hive-border rounded-lg shadow-xl py-1 z-[200]" style={{ background: "var(--hive-elevated)", backdropFilter: "none" }}>
+                <div className="absolute bottom-full left-0 mb-1 w-72 bg-hive-elevated border border-hive-border rounded-lg shadow-xl py-1 z-[200] max-h-72 overflow-y-auto" style={{ background: "var(--hive-elevated)", backdropFilter: "none" }}>
                   {activeModels.map((model) => (
                     <button
                       key={model.id}
@@ -1428,9 +1429,31 @@ export function ChatInput() {
                           <span className="text-[10px] text-text-muted ml-2">{(model as { desc: string }).desc}</span>
                         )}
                       </div>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                        model.tag === "Free" ? "bg-honey-500/20 text-honey-500" : "bg-honey-500/15 text-honey-500"
-                      }`}>{model.tag}</span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {genMode === "speech" && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              const audio = new Audio()
+                              fetch("/api/speech-stream", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ text: "Hi, I'm Sparkie. How can I help you today?", model: "speech-02-turbo", voice_id: model.id }),
+                              }).then(r => r.arrayBuffer()).then(buf => {
+                                audio.src = URL.createObjectURL(new Blob([buf], { type: "audio/mpeg" }))
+                                audio.play().catch(() => {})
+                              }).catch(() => {})
+                            }}
+                            className="p-1 rounded text-text-muted hover:text-honey-500 hover:bg-honey-500/10 transition-colors"
+                            title="Preview voice"
+                          >
+                            <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor"><polygon points="1,1 9,5 1,9"/></svg>
+                          </button>
+                        )}
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                          model.tag === "Free" ? "bg-honey-500/20 text-honey-500" : "bg-honey-500/15 text-honey-500"
+                        }`}>{model.tag}</span>
+                      </div>
                     </button>
                   ))}
                 </div>
