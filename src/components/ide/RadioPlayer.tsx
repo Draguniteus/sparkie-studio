@@ -13,6 +13,8 @@ interface RadioTrack {
 }
 
 const STORAGE_KEY = "sparkie_radio_tracks"
+const SPARKIE_RADIO_PLAYLIST_URL =
+  "https://raw.githubusercontent.com/Draguniteus/SparkieRadio/main/playlist.json"
 
 function loadTracks(): RadioTrack[] {
   try {
@@ -45,6 +47,10 @@ export function RadioPlayer() {
   const [titleInput, setTitleInput] = useState("")
   const [artistInput, setArtistInput] = useState("")
   const [isCollapsed, setIsCollapsed] = useState(false)
+  const [stationTracks, setStationTracks] = useState<RadioTrack[]>([])
+  const [lastSync, setLastSync] = useState<Date | null>(null)
+  const [isSyncing, setIsSyncing] = useState(false)
+  const [activeTab, setActiveTab] = useState<"station" | "mine">("station")
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -59,7 +65,39 @@ export function RadioPlayer() {
     saveTracks(tracks)
   }, [tracks])
 
-  const currentTrack = currentIndex >= 0 ? tracks[currentIndex] : null
+  // Fetch Sparkie Radio station playlist from GitHub
+  const syncStation = useCallback(async () => {
+    setIsSyncing(true)
+    try {
+      const res = await fetch(SPARKIE_RADIO_PLAYLIST_URL + "?t=" + Date.now())
+      if (!res.ok) throw new Error("fetch failed")
+      const data = await res.json() as Array<{ id: string; title: string; artist?: string; url: string }>
+      const mapped: RadioTrack[] = data.map(item => ({
+        id: item.id,
+        title: item.title,
+        artist: item.artist,
+        src: item.url,
+        type: "url" as const,
+        addedAt: new Date(),
+      }))
+      setStationTracks(mapped)
+      setLastSync(new Date())
+    } catch {
+      // silently ignore — keep existing station tracks
+    } finally {
+      setIsSyncing(false)
+    }
+  }, [])
+
+  // Auto-sync on mount + every 5 minutes
+  useEffect(() => {
+    syncStation()
+    const interval = setInterval(syncStation, 5 * 60 * 1000)
+    return () => clearInterval(interval)
+  }, [syncStation])
+
+  const allTracks = activeTab === "station" ? stationTracks : tracks
+  const currentTrack = currentIndex >= 0 ? allTracks[currentIndex] : null
 
   const clearProgressInterval = useCallback(() => {
     if (progressIntervalRef.current) {
@@ -80,8 +118,8 @@ export function RadioPlayer() {
   }, [clearProgressInterval])
 
   const playTrack = useCallback((index: number) => {
-    if (index < 0 || index >= tracks.length) return
-    const track = tracks[index]
+    if (index < 0 || index >= allTracks.length) return
+    const track = allTracks[index]
     setCurrentIndex(index)
 
     const audio = audioRef.current
@@ -102,7 +140,7 @@ export function RadioPlayer() {
     const audio = audioRef.current
     if (!audio) return
 
-    if (!currentTrack && tracks.length > 0) {
+    if (!currentTrack && allTracks.length > 0) {
       playTrack(0)
       return
     }
@@ -120,20 +158,20 @@ export function RadioPlayer() {
   }, [isPlaying, currentTrack, tracks, playTrack, clearProgressInterval, startProgressTracking])
 
   const skipNext = useCallback(() => {
-    if (tracks.length === 0) return
-    const next = currentIndex < tracks.length - 1 ? currentIndex + 1 : 0
+    if (allTracks.length === 0) return
+    const next = currentIndex < allTracks.length - 1 ? currentIndex + 1 : 0
     playTrack(next)
   }, [currentIndex, tracks.length, playTrack])
 
   const skipPrev = useCallback(() => {
-    if (tracks.length === 0) return
+    if (allTracks.length === 0) return
     const audio = audioRef.current
     // If more than 3s in, restart; otherwise go back
     if (audio && audio.currentTime > 3) {
       audio.currentTime = 0
       return
     }
-    const prev = currentIndex > 0 ? currentIndex - 1 : tracks.length - 1
+    const prev = currentIndex > 0 ? currentIndex - 1 : allTracks.length - 1
     playTrack(prev)
   }, [currentIndex, tracks.length, playTrack])
 
@@ -242,7 +280,20 @@ export function RadioPlayer() {
         <div className="flex items-center gap-2">
           <Radio size={16} className="text-honey-500" />
           <span className="text-sm font-semibold text-honey-500">Sparkie Radio</span>
-          <span className="text-xs text-text-muted">{tracks.length} tracks</span>
+          <div className="flex items-center gap-1 ml-1">
+            <button
+              onClick={() => { setActiveTab("station"); setCurrentIndex(-1) }}
+              className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${activeTab === "station" ? "bg-honey-500/20 text-honey-500" : "text-text-muted hover:text-text-secondary"}`}
+            >
+              🎙 Station {stationTracks.length > 0 && `(${stationTracks.length})`}
+            </button>
+            <button
+              onClick={() => { setActiveTab("mine"); setCurrentIndex(-1) }}
+              className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${activeTab === "mine" ? "bg-honey-500/20 text-honey-500" : "text-text-muted hover:text-text-secondary"}`}
+            >
+              My Tracks {tracks.length > 0 && `(${tracks.length})`}
+            </button>
+          </div>
         </div>
         <button
           onClick={() => setIsCollapsed(c => !c)}
@@ -295,21 +346,21 @@ export function RadioPlayer() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={skipPrev}
-                  disabled={tracks.length === 0}
+                  disabled={allTracks.length === 0}
                   className="w-7 h-7 rounded-md flex items-center justify-center text-text-secondary hover:text-honey-500 disabled:opacity-30 transition-colors"
                 >
                   <SkipBack size={16} />
                 </button>
                 <button
                   onClick={togglePlay}
-                  disabled={tracks.length === 0}
+                  disabled={allTracks.length === 0}
                   className="w-9 h-9 rounded-full bg-honey-500/15 border border-honey-500/30 flex items-center justify-center text-honey-500 hover:bg-honey-500/25 disabled:opacity-30 transition-all"
                 >
                   {isPlaying ? <Pause size={16} /> : <Play size={16} />}
                 </button>
                 <button
                   onClick={skipNext}
-                  disabled={tracks.length === 0}
+                  disabled={allTracks.length === 0}
                   className="w-7 h-7 rounded-md flex items-center justify-center text-text-secondary hover:text-honey-500 disabled:opacity-30 transition-colors"
                 >
                   <SkipForward size={16} />
@@ -335,16 +386,33 @@ export function RadioPlayer() {
           </div>
 
           {/* Playlist */}
-          <div className="flex-1 overflow-y-auto min-h-0">
-            {tracks.length === 0 ? (
+          <div className="flex-1 overflow-y-auto min-h-0 flex flex-col">
+            {activeTab === "station" && (
+              <div className="px-4 py-1.5 flex items-center justify-between border-b border-hive-border shrink-0">
+                <span className="text-[10px] text-text-muted">
+                  {lastSync ? `Synced ${lastSync.toLocaleTimeString()}` : "Syncing…"}
+                </span>
+                <button
+                  onClick={syncStation}
+                  disabled={isSyncing}
+                  className="text-[10px] text-text-muted hover:text-honey-500 transition-colors disabled:opacity-40"
+                >
+                  {isSyncing ? "Syncing…" : "↻ Refresh"}
+                </button>
+              </div>
+            )}
+            {allTracks.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-32 text-text-muted text-sm gap-2">
                 <Radio size={24} className="text-honey-500/30" />
-                <p>No tracks yet</p>
-                <p className="text-xs">Upload MP3s or add URL links</p>
+                {activeTab === "station" ? (
+                  <><p>Station is empty</p><p className="text-xs">Add MP3s to SparkieRadio on GitHub</p></>
+                ) : (
+                  <><p>No tracks yet</p><p className="text-xs">Upload MP3s or add URL links</p></>
+                )}
               </div>
             ) : (
               <div className="p-2 flex flex-col gap-0.5">
-                {tracks.map((track, idx) => (
+                {allTracks.map((track, idx) => (
                   <div
                     key={track.id}
                     onClick={() => playTrack(idx)}
@@ -386,8 +454,8 @@ export function RadioPlayer() {
             )}
           </div>
 
-          {/* Add track section */}
-          <div className="border-t border-hive-border p-3 shrink-0">
+          {/* Add track section — only for My Tracks tab */}
+          {activeTab === "mine" && <div className="border-t border-hive-border p-3 shrink-0">
             {showAddForm ? (
               <div className="flex flex-col gap-2">
                 <input
@@ -447,7 +515,7 @@ export function RadioPlayer() {
                 </button>
               </div>
             )}
-          </div>
+          </div>}
         </>
       )}
     </div>
