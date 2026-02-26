@@ -1254,7 +1254,21 @@ export function ChatInput() {
           isStreaming: true,
         })
         try {
-          const res = await fetch('/api/weather')
+          // Try browser geolocation first for accurate user location
+          const getCoords = (): Promise<{ lat: number; lon: number } | null> =>
+            new Promise((resolve) => {
+              if (!navigator.geolocation) { resolve(null); return }
+              navigator.geolocation.getCurrentPosition(
+                (pos) => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+                () => resolve(null),
+                { timeout: 5000 }
+              )
+            })
+          const coords = await getCoords()
+          const url = coords
+            ? `/api/weather?lat=${coords.lat}&lon=${coords.lon}`
+            : '/api/weather'
+          const res = await fetch(url)
           const data = await res.json()
           updateMessage(chatId, loadingMsgId, { content: data.report, isStreaming: false })
         } catch {
