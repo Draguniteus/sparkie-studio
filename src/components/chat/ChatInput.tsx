@@ -23,9 +23,8 @@ function detectAssetTypeFromName(name: string): import('@/store/appStore').Asset
 
 const MODELS = [
   { id: "gpt-5-nano", name: "GPT-5 Nano", tag: "Free", type: "chat" },
-  { id: "glm-5-free", name: "GLM 5", tag: "Free", type: "chat" },
   { id: "minimax-m2.5-free", name: "MiniMax M2.5", tag: "Free", type: "chat" },
-  { id: "minimax-m2.1-free", name: "MiniMax M2.1", tag: "Free", type: "chat" },
+  { id: "glm-5-free", name: "GLM 5", tag: "Free", type: "chat" },
   { id: "kimi-k2.5-free", name: "Kimi K2.5", tag: "Free", type: "chat" },
   { id: "big-pickle", name: "Big Pickle", tag: "Free", type: "chat" },
 ]
@@ -749,7 +748,9 @@ export function ChatInput() {
         body: JSON.stringify({ messages: apiMessages, model: selectedModel, userProfile }),
       })
       if (!response.ok) {
-        updateMessage(chatId, assistantMsgId, { content: "Something went wrong.", isStreaming: false })
+        const err = await response.json().catch(() => ({ error: `HTTP ${response.status}` }))
+        const msg = response.status === 429 ? "Rate limited — wait a moment and try again." : response.status === 401 ? "This model isn't available on the current plan." : `Error: ${err.error || response.status}`
+        updateMessage(chatId, assistantMsgId, { content: msg, isStreaming: false })
         setStreaming(false); return
       }
       const reader = response.body?.getReader()
