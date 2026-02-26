@@ -34,54 +34,52 @@
 }
 
 /* ─── Light Theme — overrides ALL hardcoded Tailwind hive/honey/text classes ─── */
+/* ─── Light Theme — CSS vars ─── */
 [data-theme="light"] {
-  /* CSS var overrides (for var() usages in globals) */
   --honey-primary: #0A0A0A;
   --honey-dark: #1A1A1A;
   --honey-glow: rgba(0, 0, 0, 0.10);
   --honey-glow-strong: rgba(0, 0, 0, 0.22);
-
   --hive-bg: #F5C842;
   --hive-surface: #E5A800;
   --hive-elevated: #FFD166;
   --hive-border: #B38300;
   --hive-hover: #FFD700;
-
   --text-primary: #0A0A0A;
   --text-secondary: #1A1A1A;
   --text-muted: #3D3000;
-
-  /* ── Override every hive-* background class ── */
-  .bg-hive-600, .bg-\[\#1A1A1A\] { background-color: #F5C842 !important; }
-  .bg-hive-700, .bg-\[\#151515\] { background-color: #E5A800 !important; }
-  .bg-hive-400                    { background-color: #E5A800 !important; }
-  .bg-hive-300                    { background-color: #FFD166 !important; }
-  .bg-hive-500                    { background-color: #F0BB30 !important; }
-
-  /* ── Override every border-hive-* class ── */
-  .border-hive-border,
-  .border-hive-200,
-  .border-hive-300 { border-color: #B38300 !important; }
-
-  /* ── Override hover states ── */
-  .hover\:bg-hive-hover:hover  { background-color: #FFD700 !important; }
-  .hover\:bg-hive-elevated:hover { background-color: #FFD166 !important; }
-
-  /* ── Override text colors ── */
-  .text-text-primary   { color: #0A0A0A !important; }
-  .text-text-secondary { color: #1A1A1A !important; }
-  .text-text-muted     { color: #3D3000 !important; }
-
-  /* ── Override honey/gold color classes (accent = dark in light mode) ── */
-  .text-honey-500, .text-honey   { color: #0A0A0A !important; }
-  .bg-honey-500\/15, .bg-honey-500\/20 { background-color: rgba(0,0,0,0.12) !important; }
-  .border-honey-500\/30 { border-color: rgba(0,0,0,0.25) !important; }
-  .hover\:text-honey-500:hover { color: #0A0A0A !important; }
-  .hover\:border-honey-500\/30:hover { border-color: rgba(0,0,0,0.25) !important; }
-
-  /* ── Body background ── */
-  html, body { background: #F5C842 !important; color: #0A0A0A !important; }
 }
+
+/* ─── Light Theme — flat descendant selectors (no CSS nesting needed) ─── */
+[data-theme="light"] .bg-hive-600,
+[data-theme="light"] .bg-\[\#1A1A1A\]  { background-color: #F5C842 !important; }
+[data-theme="light"] .bg-hive-700,
+[data-theme="light"] .bg-\[\#151515\]  { background-color: #E5A800 !important; }
+[data-theme="light"] .bg-hive-400      { background-color: #E5A800 !important; }
+[data-theme="light"] .bg-hive-300      { background-color: #FFD166 !important; }
+[data-theme="light"] .bg-hive-500      { background-color: #F0BB30 !important; }
+
+[data-theme="light"] .border-hive-border,
+[data-theme="light"] .border-hive-200,
+[data-theme="light"] .border-hive-300  { border-color: #B38300 !important; }
+
+[data-theme="light"] .hover\:bg-hive-hover:hover    { background-color: #FFD700 !important; }
+[data-theme="light"] .hover\:bg-hive-elevated:hover { background-color: #FFD166 !important; }
+
+[data-theme="light"] .text-text-primary              { color: #0A0A0A !important; }
+[data-theme="light"] .text-text-secondary            { color: #1A1A1A !important; }
+[data-theme="light"] .text-text-muted                { color: #3D3000 !important; }
+
+[data-theme="light"] .text-honey-500,
+[data-theme="light"] .text-honey                     { color: #0A0A0A !important; }
+[data-theme="light"] .bg-honey-500\/15,
+[data-theme="light"] .bg-honey-500\/20              { background-color: rgba(0,0,0,0.12) !important; }
+[data-theme="light"] .border-honey-500\/30          { border-color: rgba(0,0,0,0.25) !important; }
+[data-theme="light"] .hover\:text-honey-500:hover   { color: #0A0A0A !important; }
+[data-theme="light"] .hover\:border-honey-500\/30:hover { border-color: rgba(0,0,0,0.25) !important; }
+
+[data-theme="light"] html,
+[data-theme="light"] body                            { background: #F5C842 !important; color: #0A0A0A !important; }
 
 * {
   box-sizing: border-box;
