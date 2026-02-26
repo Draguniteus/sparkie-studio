@@ -40,21 +40,42 @@ function cToF(c: number): number {
 
 export async function GET(req: Request) {
   try {
-    // 1. Get user location via IP (no key needed)
-    const forwarded = req.headers.get('x-forwarded-for')
-    const ip = forwarded ? forwarded.split(',')[0].trim() : null
+    // 1. Get user location — prefer browser-supplied lat/lon, fall back to IP
+    const { searchParams } = new URL(req.url)
+    const qLat = searchParams.get('lat')
+    const qLon = searchParams.get('lon')
 
     let lat = 36.8529, lon = -75.9780, city = 'Virginia Beach', region = 'VA', country = 'US'
 
-    if (ip && ip !== '127.0.0.1' && !ip.startsWith('::')) {
+    if (qLat && qLon) {
+      // Browser geolocation — accurate
+      lat = parseFloat(qLat)
+      lon = parseFloat(qLon)
+      // Reverse-geocode to get city name
       try {
-        const geoRes = await fetch(`http://ip-api.com/json/${ip}?fields=lat,lon,city,regionName,countryCode`)
-        const geo = await geoRes.json()
-        if (geo.lat) {
-          lat = geo.lat; lon = geo.lon
-          city = geo.city; region = geo.regionName; country = geo.countryCode
-        }
-      } catch { /* fallback to default */ }
+        const rgRes = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`,
+          { headers: { 'User-Agent': 'SparkyStudio/1.0' } }
+        )
+        const rg = await rgRes.json()
+        city = rg.address?.city || rg.address?.town || rg.address?.village || rg.address?.county || 'Your area'
+        region = rg.address?.state || ''
+        country = rg.address?.country_code?.toUpperCase() || ''
+      } catch { /* use defaults */ }
+    } else {
+      // Fallback: IP-based geolocation
+      const forwarded = req.headers.get('x-forwarded-for')
+      const ip = forwarded ? forwarded.split(',')[0].trim() : null
+      if (ip && ip !== '127.0.0.1' && !ip.startsWith('::')) {
+        try {
+          const geoRes = await fetch(`http://ip-api.com/json/${ip}?fields=lat,lon,city,regionName,countryCode`)
+          const geo = await geoRes.json()
+          if (geo.lat) {
+            lat = geo.lat; lon = geo.lon
+            city = geo.city; region = geo.regionName; country = geo.countryCode
+          }
+        } catch { /* fallback to default */ }
+      }
     }
 
     // 2. Fetch weather from open-meteo (free, no API key)
