@@ -238,8 +238,8 @@ export function AssetsTab() {
         }
         objectUrl = URL.createObjectURL(blob)
       } else {
-        const blob = new Blob([content], { type: "text/plain" })
-        objectUrl = URL.createObjectURL(blob)
+        const textBlob = new Blob([content], { type: "text/plain" })
+        objectUrl = URL.createObjectURL(textBlob)
       }
       const a = document.createElement("a")
       a.href = objectUrl
