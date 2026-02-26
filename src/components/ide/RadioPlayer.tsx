@@ -9,16 +9,9 @@ interface RadioTrack {
   title: string
   artist?: string
   src: string        // data URL or external URL
-  type: "file" | "url"
-  addedAt: Date
-}
-
-interface StationTrack {
-  id: string
-  title: string
-  artist?: string
-  src: string
-  coverUrl?: string
+  type?: "file" | "url"
+  addedAt?: Date
+  coverUrl?: string  // station tracks only
 }
 
 const STORAGE_KEY = "sparkie_radio_tracks"
@@ -58,7 +51,7 @@ export function RadioPlayer() {
   const [isCollapsed, setIsCollapsed] = useState(false)
   const { data: session } = useSession()
   const isAdmin = session?.user?.email?.toLowerCase() === "draguniteus@gmail.com"
-  const [stationTracks, setStationTracks] = useState<StationTrack[]>([])
+  const [stationTracks, setStationTracks] = useState<RadioTrack[]>([])
   const [lastSync, setLastSync] = useState<Date | null>(null)
   const [isSyncing, setIsSyncing] = useState(false)
   const [activeTab, setActiveTab] = useState<"station" | "mine">("station")
@@ -93,7 +86,7 @@ export function RadioPlayer() {
       const res = await fetch(SPARKIE_RADIO_PLAYLIST_URL + "?t=" + Date.now())
       if (!res.ok) throw new Error("fetch failed")
       const data = await res.json() as Array<{ id: string; title: string; artist?: string; url: string }>
-      const mapped: StationTrack[] = data.map((item: { id?: string; title?: string; artist?: string; url?: string; coverUrl?: string }) => ({
+      const mapped: RadioTrack[] = data.map((item: { id?: string; title?: string; artist?: string; url?: string; coverUrl?: string }) => ({
         id: item.id ?? crypto.randomUUID(),
         title: item.title ?? "Untitled",
         artist: item.artist,
@@ -389,10 +382,10 @@ export function RadioPlayer() {
             <div className="flex items-center gap-3 mb-3">
               {/* Cover art */}
               <div className="relative w-14 h-14 rounded-xl overflow-hidden shrink-0 bg-gradient-to-br from-honey-500/20 to-hive-700 border border-honey-500/20 shadow-lg">
-                {activeTab === "station" && (currentTrack as StationTrack | null)?.coverUrl ? (
+                {activeTab === "station" && currentTrack?.coverUrl ? (
                   <img
-                    src={(currentTrack as StationTrack).coverUrl}
-                    alt={(currentTrack as StationTrack).title}
+                    src={currentTrack.coverUrl}
+                    alt={currentTrack.title}
                     className="w-full h-full object-cover"
                   />
                 ) : (
@@ -429,8 +422,8 @@ export function RadioPlayer() {
                 {/* Download button — station tracks only */}
                 {activeTab === "station" && currentTrack && !playError && (
                   <a
-                    href={(currentTrack as StationTrack).src}
-                    download={(currentTrack as StationTrack).title + ".mp3"}
+                    href={currentTrack.src}
+                    download={currentTrack.title + ".mp3"}
                     className="inline-flex items-center gap-1 mt-1.5 text-[10px] px-2 py-0.5 rounded-full bg-honey-500/10 text-honey-500/80 border border-honey-500/20 hover:bg-honey-500/20 hover:text-honey-500 transition-all"
                     onClick={e => e.stopPropagation()}
                   >
@@ -607,10 +600,10 @@ export function RadioPlayer() {
                     }`}
                   >
                     <div className="w-7 h-7 rounded-md overflow-hidden shrink-0 border border-honey-500/10 bg-honey-500/5 flex items-center justify-center">
-                      {activeTab === "station" && (track as StationTrack).coverUrl ? (
+                      {activeTab === "station" && track.coverUrl ? (
                         idx === currentIndex && isPlaying ? (
                           <div className="relative w-full h-full">
-                            <img src={(track as StationTrack).coverUrl} alt="" className="w-full h-full object-cover" />
+                            <img src={track.coverUrl} alt="" className="w-full h-full object-cover" />
                             <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
                               <div className="flex gap-px items-end h-3">
                                 <span className="w-0.5 bg-honey-400 rounded-full animate-[equalizer_0.8s_ease-in-out_infinite]" style={{height:'40%',animationDelay:'0ms'}} />
@@ -620,7 +613,7 @@ export function RadioPlayer() {
                             </div>
                           </div>
                         ) : (
-                          <img src={(track as StationTrack).coverUrl} alt="" className="w-full h-full object-cover" />
+                          <img src={track.coverUrl} alt="" className="w-full h-full object-cover" />
                         )
                       ) : (
                         <span className={`text-[10px] font-medium ${idx === currentIndex ? "text-honey-500" : "text-text-muted"}`}>
