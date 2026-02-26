@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useAppStore } from '@/store/appStore'
 import {
   Plus, Search, FolderOpen, Image, MessageSquare,
-  Settings, ChevronLeft, ChevronDown, Trash2, Sparkles, Bot, Zap, Radio
+  Settings, ChevronLeft, ChevronDown, Trash2, Sparkles, Bot, Zap, Radio, Plug
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 
@@ -78,12 +78,13 @@ export function Sidebar() {
           { icon: FolderOpen, label: 'Assets', key: 'assets' as const },
           { icon: Image, label: 'Gallery', key: 'images' as const },
           { icon: Radio, label: 'Radio', key: 'radio' as const },
+          { icon: Plug, label: 'Apps', key: 'connectors' as const },
         ].map(({ icon: Icon, label, key }) => (
           <button
             key={key}
-            onClick={() => key !== 'search' && setActiveTab(key === 'images' ? 'images' : key === 'radio' ? 'radio' : 'assets')}
+            onClick={() => key !== 'search' && setActiveTab(key === 'images' ? 'images' : key === 'radio' ? 'radio' : key === 'connectors' ? 'connectors' : 'assets')}
             className={`flex-1 flex flex-col items-center gap-1 py-2 rounded-lg transition-colors text-[10px] font-medium ${
-              activeTab === key || (key === 'assets' && activeTab === 'assets') || (key === 'radio' && activeTab === 'radio')
+              activeTab === key || (key === 'assets' && activeTab === 'assets') || (key === 'radio' && activeTab === 'radio') || (key === 'connectors' && activeTab === 'connectors')
                 ? 'bg-honey-500/10 text-honey-500'
                 : 'hover:bg-hive-hover text-text-muted hover:text-text-secondary'
             }`}
