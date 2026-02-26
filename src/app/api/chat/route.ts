@@ -2,16 +2,7 @@ import { NextRequest } from 'next/server'
 
 export const runtime = 'edge'
 
-const OR_BASE = 'https://openrouter.ai/api/v1'
-
-// Map Sparkie UI model IDs → OpenRouter model IDs
-const MODEL_MAP: Record<string, string> = {
-  'glm-5-free':         'z-ai/glm-5',
-  'minimax-m2.5-free':  'minimax/minimax-m2.5',
-  'minimax-m2.1-free':  'minimax/minimax-m2.1',
-  'kimi-k2.5-free':     'moonshotai/kimi-k2.5',
-  'big-pickle':         'z-ai/glm-4.5-air:free',
-}
+const OPENCODE_BASE = 'https://opencode.ai/zen/v1'
 
 const SYSTEM_PROMPT = `You are Sparkie — an AI companion with her own identity, personality, and home.
 
@@ -73,9 +64,9 @@ const ALWAYS_SEARCH_RE = /\b(weather|forecast|temperature|rain|snow|humidity|win
 export async function POST(req: NextRequest) {
   try {
     const { messages, model, userProfile, voiceMode } = await req.json()
-    const apiKey = process.env.OPENROUTER_API_KEY
+    const apiKey = process.env.OPENCODE_API_KEY
     if (!apiKey) {
-      return new Response(JSON.stringify({ error: 'OPENROUTER_API_KEY not configured' }), {
+      return new Response(JSON.stringify({ error: 'OPENCODE_API_KEY not configured' }), {
         status: 500, headers: { 'Content-Type': 'application/json' },
       })
     }
@@ -118,7 +109,7 @@ You are currently in a LIVE VOICE CONVERSATION. The user is speaking to you and 
         shouldSearch = true
       } else {
         try {
-          const scRes = await fetch(`${OR_BASE}/chat/completions`, {
+          const scRes = await fetch(`${OPENCODE_BASE}/chat/completions`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -126,7 +117,7 @@ You are currently in a LIVE VOICE CONVERSATION. The user is speaking to you and 
               'User-Agent': 'SparkieStudio/2.0',
             },
             body: JSON.stringify({
-              model: MODEL_MAP['minimax-m2.5-free'] ?? 'minimax/minimax-m2.5',
+              model: 'minimax-m2.5-free',
               messages: [
                 {
                   role: 'system',
@@ -181,18 +172,13 @@ When in doubt, respond "search".`,
       : systemContent
 
     const fullMessages = [{ role: 'system', content: enrichedSystem }, ...recentMessages]
-    // Remap UI model ID to OpenRouter model ID
-    const orModel = MODEL_MAP[model] ?? model
-
-        const response = await fetch(`${OR_BASE}/chat/completions`, {
+        const response = await fetch(`${OPENCODE_BASE}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
-        'HTTP-Referer': 'https://sparkie-studio-mhouq.ondigitalocean.app',
-        'X-Title': 'Sparkie Studio',
       },
-      body: JSON.stringify({ model: orModel, messages: fullMessages, stream: true, temperature: 0.7, max_tokens: 8192 }),
+      body: JSON.stringify({ model, messages: fullMessages, stream: true, temperature: 0.7, max_tokens: 8192 }),
     })
     if (!response.ok) {
       const err = await response.text()
