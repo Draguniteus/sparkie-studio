@@ -1184,10 +1184,7 @@ async function executeTool(
             params
           )
           if (result.rows.length === 0) return 'No tasks found.'
-          const taskList = result.rows.map((t: {
-            id: string; label: string; action: string; status: string;
-            executor: string; trigger_type: string; scheduled_at: string; created_at: string
-          }) =>
+          const taskList = (result.rows as any[]).map(t =>
             `- [${t.status.toUpperCase()}] ${t.label} (${t.executor}, ${t.trigger_type}${t.scheduled_at ? `, due: ${new Date(t.scheduled_at).toLocaleDateString()}` : ''})`
           ).join('\n')
           return 'Pending tasks:\n' + taskList
