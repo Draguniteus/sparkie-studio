@@ -360,10 +360,33 @@ function RichEditor({ onContentChange, placeholder }: {
 
 // ── FORMATTING TOOLBAR ────────────────────────────────────────────────────────
 function FormatToolbar({ editorRef }: { editorRef: React.RefObject<HTMLDivElement> }) {
+  // Track which format commands are currently active at the cursor
+  const [activeStates, setActiveStates] = useState<Record<string, boolean>>({})
+
   const exec = (cmd: string, value?: string) => {
     editorRef.current?.focus()
     document.execCommand(cmd, false, value)
+    // Re-check active states after toggling
+    updateActiveStates()
   }
+
+  const updateActiveStates = () => {
+    try {
+      setActiveStates({
+        bold: document.queryCommandState('bold'),
+        italic: document.queryCommandState('italic'),
+        insertUnorderedList: document.queryCommandState('insertUnorderedList'),
+        insertOrderedList: document.queryCommandState('insertOrderedList'),
+      })
+    } catch {}
+  }
+
+  // Listen for selection changes to update active states in real time
+  useEffect(() => {
+    const handler = () => updateActiveStates()
+    document.addEventListener('selectionchange', handler)
+    return () => document.removeEventListener('selectionchange', handler)
+  }, [])
 
   const tools: { icon: React.ElementType; title: string; cmd: string; val?: string }[] = [
     { icon: Bold,        title: 'Bold (⌘B)',       cmd: 'bold' },
@@ -375,20 +398,27 @@ function FormatToolbar({ editorRef }: { editorRef: React.RefObject<HTMLDivElemen
 
   return (
     <div className="flex items-center gap-1 px-4 py-2.5 border-b border-hive-border shrink-0 bg-white/2">
-      {tools.map(t => (
-        <button
-          key={t.title}
-          title={t.title}
-          type="button"
-          onMouseDown={e => {
-            e.preventDefault() // Prevent blur on editor
-            exec(t.cmd, t.val)
-          }}
-          className="w-8 h-8 rounded-lg flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-all"
-        >
-          <t.icon size={14} strokeWidth={2} />
-        </button>
-      ))}
+      {tools.map(t => {
+        const isActive = !!activeStates[t.cmd]
+        return (
+          <button
+            key={t.title}
+            title={t.title}
+            type="button"
+            onMouseDown={e => {
+              e.preventDefault()
+              exec(t.cmd, t.val)
+            }}
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
+              isActive
+                ? 'bg-violet-500/30 border border-violet-400/60 text-violet-300 shadow-[0_0_8px_rgba(167,139,250,0.4)]'
+                : 'text-white/40 hover:text-white hover:bg-white/10 border border-transparent'
+            }`}
+          >
+            <t.icon size={14} strokeWidth={isActive ? 2.5 : 2} />
+          </button>
+        )
+      })}
       <div className="ml-auto flex items-center gap-2">
         <span className="text-[10px] text-white/20">⌘B bold · ⌘I italic</span>
       </div>
