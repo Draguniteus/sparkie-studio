@@ -774,6 +774,17 @@ export function ChatInput() {
           if (data === "[DONE]") continue
           try {
             const parsed = JSON.parse(data)
+            // HITL task approval event
+            if (parsed.sparkie_task) {
+              const task = parsed.sparkie_task
+              updateMessage(chatId, assistantMsgId, {
+                content: fullContent || parsed.text || "I need your approval before I do this:",
+                isStreaming: false,
+                pendingTask: { ...task, status: "pending" },
+              })
+              setStreaming(false)
+              return
+            }
             const delta = parsed.choices?.[0]?.delta
             if (delta?.content) {
               fullContent += delta.content
