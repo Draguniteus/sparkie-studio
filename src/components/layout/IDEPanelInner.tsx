@@ -8,7 +8,6 @@ import { CodeEditor } from "@/components/ide/CodeEditor"
 import { Preview } from "@/components/ide/Preview"
 import { LiveCodeView } from "@/components/ide/LiveCodeView"
 import { Terminal } from "@/components/ide/Terminal"
-import { useAppStore } from "@/store/appStore"
 import { Download, ChevronLeft, ChevronRight } from "lucide-react"
 
 
