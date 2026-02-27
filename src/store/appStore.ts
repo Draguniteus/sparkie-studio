@@ -8,6 +8,14 @@ export interface BuildCardData {
   isEdit: boolean         // was this an edit or a fresh build
 }
 
+export interface PendingTask {
+  id: string
+  action: string
+  label: string
+  payload: Record<string, unknown>
+  status: 'pending' | 'approved' | 'rejected'
+}
+
 export interface Message {
   id: string
   role: 'user' | 'assistant'
@@ -18,6 +26,7 @@ export interface Message {
   model?: string
   isStreaming?: boolean
   buildCard?: BuildCardData  // only present when type === 'build_card'
+  pendingTask?: PendingTask  // only present for HITL approval messages
 }
 
 export interface Chat {
