@@ -6,7 +6,6 @@ import crypto from 'crypto'
 
 export const runtime = 'nodejs'
 
-// PBKDF2-based passcode hashing — no external dependencies
 function hashPasscode(passcode: string): string {
   const salt = 'sparkie_journal_salt_v1'
   return crypto.pbkdf2Sync(passcode, salt, 100000, 32, 'sha256').toString('hex')
@@ -16,7 +15,15 @@ function verifyPasscode(passcode: string, hash: string): boolean {
   return hashPasscode(passcode) === hash
 }
 
-// Auto-create tables + migrate on first use
+function stripHtml(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<\/?(li|p|div|h[1-6])[^>]*>/gi, ' ')
+    .replace(/<[^>]+>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 async function ensureTable() {
   await query(`
     CREATE TABLE IF NOT EXISTS dream_journal (
@@ -24,16 +31,14 @@ async function ensureTable() {
       user_id TEXT NOT NULL,
       title TEXT,
       content TEXT NOT NULL,
-      mood TEXT DEFAULT 'neutral',
       category TEXT DEFAULT 'night_dreams',
+      mood TEXT DEFAULT 'neutral',
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
   `, [])
-  // Migrate: add category column if it doesn't exist
-  await query(`
-    ALTER TABLE dream_journal ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'night_dreams'
-  `, []).catch(() => {})
+  await query(`ALTER TABLE dream_journal ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'night_dreams'`, []).catch(() => {})
+  await query(`ALTER TABLE dream_journal ADD COLUMN IF NOT EXISTS title TEXT`, []).catch(() => {})
   await query(`
     CREATE TABLE IF NOT EXISTS dream_journal_lock (
       user_id TEXT PRIMARY KEY,
@@ -43,7 +48,6 @@ async function ensureTable() {
   `, [])
 }
 
-// GET /api/journal?action=entries|lock_status
 export async function GET(req: Request) {
   const session = await getServerSession(authOptions)
   if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -59,15 +63,46 @@ export async function GET(req: Request) {
     return NextResponse.json({ hasPasscode: res.rows.length > 0 })
   }
 
-  // entries
-  const res = await query<{ id: string; title: string; content: string; mood: string; category: string; created_at: string }>(
-    'SELECT id, title, content, mood, category, created_at FROM dream_journal WHERE user_id = $1 ORDER BY created_at DESC',
+  if (action === 'get_entry') {
+    const id = searchParams.get('id')
+    if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
+    const res = await query<{ id: string; title: string; content: string; category: string; created_at: string }>(
+      'SELECT id, title, content, category, created_at FROM dream_journal WHERE id = $1 AND user_id = $2',
+      [id, session.user.email]
+    )
+    if (!res.rows.length) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    const entry = res.rows[0]
+    return NextResponse.json({ entry: { ...entry, plainText: stripHtml(entry.content) } })
+  }
+
+  if (action === 'search') {
+    const q = searchParams.get('q') || ''
+    const category = searchParams.get('category') || ''
+    let sql = `SELECT id, title, content, category, created_at FROM dream_journal WHERE user_id = $1`
+    const params: string[] = [session.user.email]
+    if (q) {
+      params.push(`%${q}%`)
+      sql += ` AND (LOWER(title) LIKE LOWER($${params.length}) OR LOWER(content) LIKE LOWER($${params.length}))`
+    }
+    if (category) {
+      params.push(category)
+      sql += ` AND category = $${params.length}`
+    }
+    sql += ` ORDER BY created_at DESC LIMIT 10`
+    const res = await query<{ id: string; title: string; content: string; category: string; created_at: string }>(sql, params)
+    return NextResponse.json({
+      entries: res.rows.map(e => ({ ...e, plainText: stripHtml(e.content).slice(0, 500) }))
+    })
+  }
+
+  // entries (default)
+  const res = await query<{ id: string; title: string; content: string; category: string; created_at: string }>(
+    'SELECT id, title, content, category, created_at FROM dream_journal WHERE user_id = $1 ORDER BY created_at DESC',
     [session.user.email]
   )
   return NextResponse.json({ entries: res.rows })
 }
 
-// POST /api/journal — action: create | set_passcode | verify_passcode | delete | update | remove_passcode
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions)
   if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -82,8 +117,7 @@ export async function POST(req: Request) {
     }
     const hash = hashPasscode(String(passcode))
     await query(
-      `INSERT INTO dream_journal_lock (user_id, passcode_hash) VALUES ($1, $2)
-       ON CONFLICT (user_id) DO UPDATE SET passcode_hash = $2`,
+      `INSERT INTO dream_journal_lock (user_id, passcode_hash) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET passcode_hash = $2`,
       [session.user.email, hash]
     )
     return NextResponse.json({ success: true })
@@ -96,8 +130,7 @@ export async function POST(req: Request) {
       [session.user.email]
     )
     if (!res.rows.length) return NextResponse.json({ valid: false })
-    const valid = verifyPasscode(String(passcode), res.rows[0].passcode_hash)
-    return NextResponse.json({ valid })
+    return NextResponse.json({ valid: verifyPasscode(String(passcode), res.rows[0].passcode_hash) })
   }
 
   if (action === 'remove_passcode') {
@@ -107,43 +140,36 @@ export async function POST(req: Request) {
       [session.user.email]
     )
     if (!res.rows.length) return NextResponse.json({ error: 'No passcode set' }, { status: 400 })
-    const valid = verifyPasscode(String(passcode), res.rows[0].passcode_hash)
-    if (!valid) return NextResponse.json({ error: 'Wrong passcode' }, { status: 403 })
+    if (!verifyPasscode(String(passcode), res.rows[0].passcode_hash)) {
+      return NextResponse.json({ error: 'Wrong passcode' }, { status: 403 })
+    }
     await query('DELETE FROM dream_journal_lock WHERE user_id = $1', [session.user.email])
     return NextResponse.json({ success: true })
   }
 
   if (action === 'create') {
-    const { title, content, category, mood } = body
-    if (!content?.trim()) return NextResponse.json({ error: 'Content required' }, { status: 400 })
+    const { title, content, category } = body
+    if (!title?.trim()) return NextResponse.json({ error: 'Title required' }, { status: 400 })
+    if (!content?.trim() || content === '<br>') return NextResponse.json({ error: 'Content required' }, { status: 400 })
     const res = await query<{ id: string; created_at: string }>(
-      `INSERT INTO dream_journal (user_id, title, content, category, mood)
-       VALUES ($1, $2, $3, $4, $5) RETURNING id, created_at`,
-      [session.user.email, title?.trim() || null, content.trim(), category || 'night_dreams', mood || 'neutral']
+      `INSERT INTO dream_journal (user_id, title, content, category) VALUES ($1, $2, $3, $4) RETURNING id, created_at`,
+      [session.user.email, title.trim(), content, category || 'night_dreams']
     )
     return NextResponse.json({
-      entry: {
-        id: res.rows[0].id,
-        created_at: res.rows[0].created_at,
-        title,
-        content,
-        category: category || 'night_dreams',
-        mood: mood || 'neutral'
-      }
+      entry: { id: res.rows[0].id, created_at: res.rows[0].created_at, title, content, category: category || 'night_dreams' }
     })
   }
 
   if (action === 'delete') {
-    const { id } = body
-    await query('DELETE FROM dream_journal WHERE id = $1 AND user_id = $2', [id, session.user.email])
+    await query('DELETE FROM dream_journal WHERE id = $1 AND user_id = $2', [body.id, session.user.email])
     return NextResponse.json({ success: true })
   }
 
   if (action === 'update') {
-    const { id, title, content, category, mood } = body
+    const { id, title, content, category } = body
     await query(
-      'UPDATE dream_journal SET title=$1, content=$2, category=$3, mood=$4, updated_at=NOW() WHERE id=$5 AND user_id=$6',
-      [title?.trim() || null, content.trim(), category || 'night_dreams', mood || 'neutral', id, session.user.email]
+      'UPDATE dream_journal SET title=$1, content=$2, category=$3, updated_at=NOW() WHERE id=$4 AND user_id=$5',
+      [title?.trim() || null, content, category || 'night_dreams', id, session.user.email]
     )
     return NextResponse.json({ success: true })
   }
