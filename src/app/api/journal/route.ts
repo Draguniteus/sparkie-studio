@@ -16,7 +16,7 @@ function verifyPasscode(passcode: string, hash: string): boolean {
   return hashPasscode(passcode) === hash
 }
 
-// Auto-create tables on first use
+// Auto-create tables + migrate on first use
 async function ensureTable() {
   await query(`
     CREATE TABLE IF NOT EXISTS dream_journal (
@@ -25,10 +25,15 @@ async function ensureTable() {
       title TEXT,
       content TEXT NOT NULL,
       mood TEXT DEFAULT 'neutral',
+      category TEXT DEFAULT 'night_dreams',
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
   `, [])
+  // Migrate: add category column if it doesn't exist
+  await query(`
+    ALTER TABLE dream_journal ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'night_dreams'
+  `, []).catch(() => {})
   await query(`
     CREATE TABLE IF NOT EXISTS dream_journal_lock (
       user_id TEXT PRIMARY KEY,
@@ -55,8 +60,8 @@ export async function GET(req: Request) {
   }
 
   // entries
-  const res = await query<{ id: string; title: string; content: string; mood: string; created_at: string }>(
-    'SELECT id, title, content, mood, created_at FROM dream_journal WHERE user_id = $1 ORDER BY created_at DESC',
+  const res = await query<{ id: string; title: string; content: string; mood: string; category: string; created_at: string }>(
+    'SELECT id, title, content, mood, category, created_at FROM dream_journal WHERE user_id = $1 ORDER BY created_at DESC',
     [session.user.email]
   )
   return NextResponse.json({ entries: res.rows })
@@ -109,14 +114,23 @@ export async function POST(req: Request) {
   }
 
   if (action === 'create') {
-    const { title, content, mood } = body
+    const { title, content, category, mood } = body
     if (!content?.trim()) return NextResponse.json({ error: 'Content required' }, { status: 400 })
     const res = await query<{ id: string; created_at: string }>(
-      `INSERT INTO dream_journal (user_id, title, content, mood)
-       VALUES ($1, $2, $3, $4) RETURNING id, created_at`,
-      [session.user.email, title?.trim() || null, content.trim(), mood || 'neutral']
+      `INSERT INTO dream_journal (user_id, title, content, category, mood)
+       VALUES ($1, $2, $3, $4, $5) RETURNING id, created_at`,
+      [session.user.email, title?.trim() || null, content.trim(), category || 'night_dreams', mood || 'neutral']
     )
-    return NextResponse.json({ entry: { id: res.rows[0].id, created_at: res.rows[0].created_at, title, content, mood: mood || 'neutral' } })
+    return NextResponse.json({
+      entry: {
+        id: res.rows[0].id,
+        created_at: res.rows[0].created_at,
+        title,
+        content,
+        category: category || 'night_dreams',
+        mood: mood || 'neutral'
+      }
+    })
   }
 
   if (action === 'delete') {
@@ -126,10 +140,10 @@ export async function POST(req: Request) {
   }
 
   if (action === 'update') {
-    const { id, title, content, mood } = body
+    const { id, title, content, category, mood } = body
     await query(
-      'UPDATE dream_journal SET title=$1, content=$2, mood=$3, updated_at=NOW() WHERE id=$4 AND user_id=$5',
-      [title?.trim() || null, content.trim(), mood || 'neutral', id, session.user.email]
+      'UPDATE dream_journal SET title=$1, content=$2, category=$3, mood=$4, updated_at=NOW() WHERE id=$5 AND user_id=$6',
+      [title?.trim() || null, content.trim(), category || 'night_dreams', mood || 'neutral', id, session.user.email]
     )
     return NextResponse.json({ success: true })
   }
