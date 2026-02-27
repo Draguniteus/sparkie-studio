@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { useAppStore, UserProfile } from "@/store/appStore"
-import { Sparkles, ArrowRight, Check } from "lucide-react"
+import { Sparkles, ArrowRight, Check, Plug, SkipForward } from "lucide-react"
 
 const QUESTIONS = [
   {
@@ -20,43 +20,43 @@ const QUESTIONS = [
       "Full-stack engineer",
       "Designer who codes",
       "Startup founder",
+      "Creator / artist",
       "Student / learning",
     ],
   },
   {
     id: "goals",
-    question: "What are you mainly building with Sparkie?",
-    placeholder: "e.g. web apps, tools, games, prototypes...",
+    question: "What are you building or exploring?",
+    placeholder: "e.g. web apps, music, content, ideas...",
     type: "text",
   },
   {
     id: "experience",
-    question: "How would you rate your coding experience?",
+    question: "How would you rate your tech experience?",
     type: "choice",
-    options: ["Beginner", "Intermediate", "Expert"],
+    options: ["Just starting out", "Getting comfortable", "Pretty experienced", "Expert-level"],
   },
   {
-    id: "style",
-    question: "How do you like your code?",
-    type: "choice",
-    options: [
-      "Heavily commented — explain everything",
-      "Clean & minimal — just the code",
-      "Production-ready — with error handling",
-    ],
+    id: "connect",
+    question: "Connect your world to Sparkie",
+    type: "connect",
   },
 ]
 
-const STYLE_MAP: Record<string, string> = {
-  "Heavily commented — explain everything": "commented",
-  "Clean & minimal — just the code": "minimal",
-  "Production-ready — with error handling": "production",
-}
+const FEATURED_APPS = [
+  { name: "Gmail", slug: "gmail", icon: "📧", description: "Read & send emails" },
+  { name: "Twitter/X", slug: "twitter", icon: "🐦", description: "Post & search tweets" },
+  { name: "GitHub", slug: "github", icon: "🐙", description: "Read repos & issues" },
+  { name: "Google Calendar", slug: "google-calendar", icon: "📅", description: "Check your schedule" },
+  { name: "Instagram", slug: "instagram", icon: "📸", description: "Post content" },
+  { name: "Slack", slug: "slack", icon: "💬", description: "Send messages" },
+]
 
 const EXP_MAP: Record<string, string> = {
-  "Beginner": "beginner",
-  "Intermediate": "intermediate",
-  "Expert": "expert",
+  "Just starting out": "beginner",
+  "Getting comfortable": "intermediate",
+  "Pretty experienced": "intermediate",
+  "Expert-level": "expert",
 }
 
 export function OnboardingModal() {
@@ -64,10 +64,11 @@ export function OnboardingModal() {
   const [step, setStep] = useState(0)
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [textVal, setTextVal] = useState("")
+  const [connecting, setConnecting] = useState<string | null>(null)
+  const [connected, setConnected] = useState<string[]>([])
 
   const q = QUESTIONS[step]
   const isLast = step === QUESTIONS.length - 1
-  const currentAnswer = answers[q.id] ?? ""
 
   const handleChoice = (choice: string) => {
     const next = { ...answers, [q.id]: choice }
@@ -82,26 +83,46 @@ export function OnboardingModal() {
     const next = { ...answers, [q.id]: textVal.trim() }
     setAnswers(next)
     setTextVal("")
-    if (!isLast) {
-      setStep(s => s + 1)
-    } else {
-      finish(next)
+    setStep(s => s + 1)
+  }
+
+  const handleConnectApp = async (slug: string) => {
+    setConnecting(slug)
+    try {
+      const res = await fetch("/api/connectors", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ appName: slug }),
+      })
+      const data = await res.json()
+      if (data.redirectUrl) {
+        const popup = window.open(data.redirectUrl, "sparkie_connect", "width=600,height=700,scrollbars=yes")
+        // Poll for popup close
+        const poll = setInterval(() => {
+          if (popup?.closed) {
+            clearInterval(poll)
+            setConnected(prev => [...prev, slug])
+            setConnecting(null)
+          }
+        }, 500)
+      }
+    } catch {
+      setConnecting(null)
     }
   }
 
   const finish = (finalAnswers: Record<string, string>) => {
     const profile: UserProfile = {
       name: finalAnswers.name || "there",
-      role: finalAnswers.role || "developer",
-      goals: finalAnswers.goals || "building projects",
-      style: STYLE_MAP[finalAnswers.style] || "minimal",
+      role: finalAnswers.role || "creator",
+      goals: finalAnswers.goals || "exploring",
+      style: "minimal",
       experience: EXP_MAP[finalAnswers.experience] || "intermediate",
       completedAt: new Date().toISOString(),
     }
     setUserProfile(profile)
   }
 
-  // Auto-advance text step when user hits enter
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
@@ -109,49 +130,46 @@ export function OnboardingModal() {
     }
   }
 
-  // If last choice question — finish on pick
-  const handleLastChoice = (choice: string) => {
-    const next = { ...answers, [q.id]: choice }
-    setAnswers(next)
-    setTimeout(() => finish(next), 300)
+  const handleChoiceIsLast = step === QUESTIONS.length - 2 // role/experience questions
+
+  // Finish connect step
+  const handleFinish = () => {
+    finish(answers)
   }
 
+  const progressPct = ((step) / (QUESTIONS.length - 1)) * 100
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
-      <div className="relative w-full max-w-lg mx-4 bg-hive-800 border border-hive-border rounded-2xl shadow-2xl overflow-hidden">
-        {/* Header */}
-        <div className="px-8 pt-8 pb-4">
-          <div className="flex items-center gap-2 mb-6">
-            <Sparkles size={18} className="text-honey-500" />
-            <span className="text-xs text-honey-500 font-medium tracking-widest uppercase">Sparkie Studio</span>
-          </div>
-          <h2 className="text-xl font-semibold text-text-primary mb-1">
-            Quick setup
-          </h2>
-          <p className="text-sm text-text-muted">
-            5 questions to personalise your experience
-          </p>
-        </div>
-
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div className="w-full max-w-md mx-4 bg-hive-500 border border-hive-border rounded-2xl shadow-2xl overflow-hidden">
         {/* Progress bar */}
-        <div className="px-8 mb-6">
-          <div className="h-1 bg-hive-600 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-honey-500 rounded-full transition-all duration-500"
-              style={{ width: `${((step + 1) / QUESTIONS.length) * 100}%` }}
-            />
-          </div>
-          <div className="flex justify-between mt-1">
-            <span className="text-[10px] text-text-muted">Step {step + 1} of {QUESTIONS.length}</span>
-          </div>
+        <div className="h-1 bg-hive-600">
+          <div
+            className="h-full bg-gradient-to-r from-violet-500 to-honey-400 transition-all duration-500"
+            style={{ width: `${progressPct}%` }}
+          />
         </div>
 
-        {/* Question */}
-        <div className="px-8 pb-8 min-h-[200px]">
-          <p className="text-base text-text-primary font-medium mb-5">{q.question}</p>
+        <div className="p-8">
+          {/* Header */}
+          <div className="flex items-center gap-3 mb-8">
+            <div className="w-10 h-10 rounded-xl bg-violet-500/20 flex items-center justify-center">
+              <Sparkles className="w-5 h-5 text-violet-400" />
+            </div>
+            <div>
+              <div className="text-xs text-hive-text-muted uppercase tracking-wider">
+                {step + 1} of {QUESTIONS.length}
+              </div>
+              <div className="text-sm font-medium text-hive-text-secondary">Setting up your Studio</div>
+            </div>
+          </div>
 
+          {/* Question */}
+          <h2 className="text-xl font-semibold text-white mb-2">{q.question}</h2>
+
+          {/* Text input */}
           {q.type === "text" && (
-            <div className="flex gap-2">
+            <div className="mt-6">
               <input
                 autoFocus
                 type="text"
@@ -159,45 +177,112 @@ export function OnboardingModal() {
                 onChange={e => setTextVal(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder={q.placeholder}
-                className="flex-1 px-4 py-2.5 bg-hive-700 border border-hive-border rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-honey-500 transition-colors"
+                className="w-full bg-hive-600 border border-hive-border rounded-xl px-4 py-3 text-white placeholder-hive-text-muted outline-none focus:border-violet-500/60 transition-colors"
               />
               <button
                 onClick={handleTextNext}
                 disabled={!textVal.trim()}
-                className="px-4 py-2.5 bg-honey-500 text-black rounded-lg hover:bg-honey-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="mt-3 w-full flex items-center justify-center gap-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium py-3 rounded-xl transition-colors"
               >
-                {isLast ? <Check size={16} /> : <ArrowRight size={16} />}
+                Continue <ArrowRight className="w-4 h-4" />
               </button>
             </div>
           )}
 
+          {/* Choice input */}
           {q.type === "choice" && (
-            <div className="flex flex-col gap-2">
+            <div className="mt-6 flex flex-col gap-2">
               {q.options?.map(opt => (
                 <button
                   key={opt}
-                  onClick={() => isLast ? handleLastChoice(opt) : handleChoice(opt)}
-                  className={`px-4 py-2.5 rounded-lg text-sm text-left border transition-all duration-150 ${
-                    currentAnswer === opt
-                      ? "bg-honey-500/20 border-honey-500 text-honey-400"
-                      : "bg-hive-700 border-hive-border text-text-secondary hover:border-honey-500/50 hover:text-text-primary"
+                  onClick={() => handleChoice(opt)}
+                  className={`w-full text-left px-4 py-3 rounded-xl border transition-all font-medium ${
+                    answers[q.id] === opt
+                      ? "bg-violet-600/30 border-violet-500 text-violet-200"
+                      : "bg-hive-600 border-hive-border text-hive-text-secondary hover:border-violet-500/50 hover:text-white"
                   }`}
                 >
-                  {opt}
+                  <div className="flex items-center gap-3">
+                    {answers[q.id] === opt && <Check className="w-4 h-4 text-violet-400 shrink-0" />}
+                    <span>{opt}</span>
+                  </div>
                 </button>
               ))}
+              {answers[q.id] && !isLast && (
+                <button
+                  onClick={() => setStep(s => s + 1)}
+                  className="mt-2 w-full flex items-center justify-center gap-2 bg-violet-600 hover:bg-violet-500 text-white font-medium py-3 rounded-xl transition-colors"
+                >
+                  Continue <ArrowRight className="w-4 h-4" />
+                </button>
+              )}
             </div>
           )}
-        </div>
 
-        {/* Skip */}
-        <div className="px-8 pb-6 text-center">
-          <button
-            onClick={() => dismissOnboarding()}
-            className="text-xs text-text-muted hover:text-text-secondary transition-colors"
-          >
-            Skip for now
-          </button>
+          {/* Connect apps step */}
+          {q.type === "connect" && (
+            <div className="mt-4">
+              <p className="text-hive-text-muted text-sm mb-5">
+                Connect your apps and Sparkie can act on your behalf — read emails, post to social,
+                check your calendar. You can always connect more later in the Apps tab.
+              </p>
+              <div className="grid grid-cols-2 gap-2 mb-6">
+                {FEATURED_APPS.map(app => {
+                  const isConnected = connected.includes(app.slug)
+                  const isConnecting = connecting === app.slug
+                  return (
+                    <button
+                      key={app.slug}
+                      onClick={() => !isConnected && handleConnectApp(app.slug)}
+                      disabled={isConnecting}
+                      className={`flex items-center gap-3 p-3 rounded-xl border text-left transition-all ${
+                        isConnected
+                          ? "bg-emerald-500/10 border-emerald-500/40 cursor-default"
+                          : "bg-hive-600 border-hive-border hover:border-violet-500/50 cursor-pointer"
+                      }`}
+                    >
+                      <span className="text-xl">{app.icon}</span>
+                      <div className="min-w-0">
+                        <div className={`text-sm font-medium truncate ${isConnected ? "text-emerald-300" : "text-white"}`}>
+                          {isConnected ? "✓ " : ""}{app.name}
+                        </div>
+                        <div className="text-xs text-hive-text-muted truncate">{app.description}</div>
+                      </div>
+                      {isConnecting && (
+                        <div className="w-3.5 h-3.5 border border-violet-400 border-t-transparent rounded-full animate-spin ml-auto shrink-0" />
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleFinish}
+                  className="flex-1 flex items-center justify-center gap-2 bg-violet-600 hover:bg-violet-500 text-white font-medium py-3 rounded-xl transition-colors"
+                >
+                  {connected.length > 0 ? (
+                    <>Enter the Studio <Sparkles className="w-4 h-4" /></>
+                  ) : (
+                    <>Enter the Studio <ArrowRight className="w-4 h-4" /></>
+                  )}
+                </button>
+                {connected.length === 0 && (
+                  <button
+                    onClick={handleFinish}
+                    className="px-4 py-3 rounded-xl border border-hive-border text-hive-text-muted hover:text-white hover:border-hive-text-muted transition-colors text-sm"
+                    title="Skip for now"
+                  >
+                    Skip
+                  </button>
+                )}
+              </div>
+              {connected.length > 0 && (
+                <p className="text-center text-xs text-emerald-400 mt-3">
+                  ✓ {connected.length} app{connected.length > 1 ? "s" : ""} connected
+                </p>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
