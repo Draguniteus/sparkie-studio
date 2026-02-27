@@ -1,25 +1,29 @@
 'use client'
 
-import { useState } from 'react'
 import { useAppStore } from '@/store/appStore'
 import {
-  Plus, Search, FolderOpen, Image, MessageSquare,
-  Settings, ChevronLeft, ChevronDown, Trash2, Sparkles, Lock, Zap, Radio, Plug
+  Search, FolderOpen, Image, MessageSquare,
+  Settings, ChevronLeft, Sparkles, Radio, Plug, Zap, Lock
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 
 export function Sidebar() {
   const {
-    sidebarOpen, toggleSidebar, chats, currentChatId,
-    setCurrentChat, createChat, deleteChat, setActiveTab, activeTab, openSettings,
-    userAvatarUrl,
+    sidebarOpen, toggleSidebar,
+    setActiveTab, activeTab, openSettings,
+    userAvatarUrl, getOrCreateSingleChat, setCurrentChat,
+    worklog,
   } = useAppStore()
-  const [historyCollapsed, setHistoryCollapsed] = useState(false)
   const { user, signOut } = useAuth()
 
-  // Derive display name and avatar initial from session
   const displayName = user?.name ?? user?.email?.split('@')[0] ?? 'User'
   const avatarInitial = displayName.charAt(0).toUpperCase()
+
+  const handleOpenChat = () => {
+    const id = getOrCreateSingleChat()
+    setCurrentChat(id)
+    setActiveTab('chat')
+  }
 
   if (!sidebarOpen) {
     return (
@@ -32,15 +36,18 @@ export function Sidebar() {
           <Sparkles size={20} />
         </button>
         <button
-          onClick={() => createChat()}
+          onClick={handleOpenChat}
           className="w-9 h-9 rounded-lg flex items-center justify-center hover:bg-hive-hover text-text-secondary hover:text-honey-500 transition-colors"
-          title="New chat"
+          title="Chat with Sparkie"
         >
-          <Plus size={18} />
+          <MessageSquare size={18} />
         </button>
       </div>
     )
   }
+
+  // Last 6 worklog entries reversed (most recent first)
+  const recentActivity = [...worklog].reverse().slice(0, 6)
 
   return (
     <div className="w-[260px] h-full bg-hive-700 border-r border-hive-border flex flex-col shrink-0">
@@ -60,31 +67,41 @@ export function Sidebar() {
         </button>
       </div>
 
-      {/* New Task Button */}
+      {/* Sparkie Chat — persistent single entry point */}
       <div className="p-3 shrink-0">
         <button
-          onClick={() => { createChat(); setActiveTab('chat') }}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-honey-500/10 border border-honey-500/30 text-honey-500 hover:bg-honey-500/20 transition-all text-sm font-medium"
+          onClick={handleOpenChat}
+          className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl transition-all border font-medium text-sm ${
+            !['assets','images','radio','connectors','corner','journal'].includes(activeTab)
+              ? 'bg-honey-500/15 border-honey-500/40 text-honey-500 shadow-[0_0_12px_-4px_rgba(245,158,11,0.4)]'
+              : 'bg-hive-elevated border-hive-border text-text-secondary hover:bg-hive-hover hover:text-honey-400 hover:border-honey-500/20'
+          }`}
         >
-          <Plus size={15} />
-          New Task
+          <div className="w-7 h-7 rounded-lg bg-honey-500/20 flex items-center justify-center shrink-0">
+            <MessageSquare size={14} className="text-honey-500" />
+          </div>
+          <div className="flex flex-col items-start gap-0 flex-1 min-w-0">
+            <span>Chat with Sparkie</span>
+            <span className="text-[10px] font-normal text-text-muted">Always here</span>
+          </div>
+          <div className="w-2 h-2 rounded-full bg-green-400 shrink-0" title="Active" />
         </button>
       </div>
 
       {/* Quick Nav */}
       <div className="px-2 flex gap-0.5 shrink-0">
         {[
-          { icon: Search, label: 'Search', key: 'search' as const },
-          { icon: FolderOpen, label: 'Assets', key: 'assets' as const },
-          { icon: Image, label: 'Gallery', key: 'images' as const },
-          { icon: Radio, label: 'Radio', key: 'radio' as const },
-          { icon: Plug, label: 'Apps', key: 'connectors' as const },
+          { icon: Search,     label: 'Search',  key: 'search'     },
+          { icon: FolderOpen, label: 'Assets',  key: 'assets'     },
+          { icon: Image,      label: 'Gallery', key: 'images'     },
+          { icon: Radio,      label: 'Radio',   key: 'radio'      },
+          { icon: Plug,       label: 'Apps',    key: 'connectors' },
         ].map(({ icon: Icon, label, key }) => (
           <button
             key={key}
             onClick={() => key !== 'search' && setActiveTab(key === 'images' ? 'images' : key === 'radio' ? 'radio' : key === 'connectors' ? 'connectors' : 'assets')}
             className={`flex-1 flex flex-col items-center gap-1 py-2 rounded-lg transition-colors text-[10px] font-medium ${
-              activeTab === key || (key === 'assets' && activeTab === 'assets') || (key === 'radio' && activeTab === 'radio') || (key === 'connectors' && activeTab === 'connectors')
+              activeTab === key
                 ? 'bg-honey-500/10 text-honey-500'
                 : 'hover:bg-hive-hover text-text-muted hover:text-text-secondary'
             }`}
@@ -96,7 +113,7 @@ export function Sidebar() {
         ))}
       </div>
 
-      {/* Sparkie's Corner + Dream Journal */}
+      {/* Sparkie's Space */}
       <div className="px-3 mt-3 shrink-0 flex flex-col gap-1.5">
         <div className="text-[10px] font-semibold text-text-muted uppercase tracking-wider mb-0.5 px-1">
           Sparkie's Space
@@ -123,44 +140,37 @@ export function Sidebar() {
         </button>
       </div>
 
-      {/* Task History */}
-      <div className="flex-1 overflow-y-auto mt-3 flex flex-col min-h-0">
-        <button
-          onClick={() => setHistoryCollapsed(!historyCollapsed)}
-          className="flex items-center gap-1.5 px-4 py-1.5 text-[10px] font-semibold text-text-muted uppercase tracking-wider hover:text-text-secondary transition-colors w-full text-left shrink-0"
-        >
-          Task History
-          <ChevronDown size={11} className={`ml-auto transition-transform duration-200 ${historyCollapsed ? '-rotate-90' : ''}`} />
-        </button>
-
-        {!historyCollapsed && (
-          <div className="flex-1 overflow-y-auto px-2">
-            {chats.length === 0 ? (
-              <div className="px-3 py-8 text-center text-text-muted text-xs">
-                No tasks yet.<br />Start a new task above.
+      {/* Live Activity — Sparkie's worklog */}
+      <div className="flex-1 overflow-y-auto mt-3 flex flex-col min-h-0 px-3">
+        <div className="text-[10px] font-semibold text-text-muted uppercase tracking-wider mb-2 px-1 flex items-center gap-1.5">
+          <span>Live Activity</span>
+          {recentActivity.length > 0 && (
+            <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+          )}
+        </div>
+        {recentActivity.length === 0 ? (
+          <div className="px-1 py-4 text-center text-text-muted text-xs">
+            Sparkie's activity will appear here as she works.
+          </div>
+        ) : (
+          <div className="flex flex-col gap-1">
+            {recentActivity.map((entry) => (
+              <div key={entry.id} className="flex items-start gap-2 px-2 py-1.5 rounded-lg bg-hive-elevated/50">
+                <span className={`mt-0.5 text-[9px] shrink-0 ${
+                  entry.type === 'error' ? 'text-red-400' :
+                  entry.type === 'result' ? 'text-green-400' :
+                  entry.type === 'code' ? 'text-honey-500' :
+                  entry.type === 'action' ? 'text-blue-400' : 'text-text-muted'
+                }`}>
+                  {entry.type === 'thinking' ? '◌' :
+                   entry.type === 'action' ? '⚡' :
+                   entry.type === 'result' ? '✓' :
+                   entry.type === 'error' ? '✕' :
+                   entry.type === 'code' ? '{}' : '·'}
+                </span>
+                <span className="text-[11px] text-text-secondary truncate">{entry.content.slice(0, 60)}</span>
               </div>
-            ) : (
-              chats.map((chat) => (
-                <div
-                  key={chat.id}
-                  onClick={() => { setCurrentChat(chat.id); setActiveTab('chat') }}
-                  className={`group flex items-center gap-2 px-2.5 py-2 rounded-lg cursor-pointer mb-0.5 transition-colors ${
-                    currentChatId === chat.id
-                      ? 'bg-honey-500/10 text-honey-500'
-                      : 'text-text-secondary hover:bg-hive-hover hover:text-text-primary'
-                  }`}
-                >
-                  <MessageSquare size={13} className="shrink-0" />
-                  <span className="text-[13px] truncate flex-1">{chat.title}</span>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); deleteChat(chat.id) }}
-                    className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-hive-elevated transition-all"
-                  >
-                    <Trash2 size={11} className="text-text-muted hover:text-accent-error" />
-                  </button>
-                </div>
-              ))
-            )}
+            ))}
           </div>
         )}
       </div>
@@ -168,7 +178,6 @@ export function Sidebar() {
       {/* User Profile */}
       <div className="p-3 border-t border-hive-border shrink-0">
         <div className="flex items-center gap-2.5">
-          {/* Avatar: photo if set, else initial */}
           <div className="w-8 h-8 rounded-full overflow-hidden shrink-0 border border-hive-border">
             {userAvatarUrl ? (
               <img src={userAvatarUrl} alt={displayName} className="w-full h-full object-cover" />

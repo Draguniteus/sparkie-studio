@@ -8,12 +8,66 @@ import { CodeEditor } from "@/components/ide/CodeEditor"
 import { Preview } from "@/components/ide/Preview"
 import { LiveCodeView } from "@/components/ide/LiveCodeView"
 import { Terminal } from "@/components/ide/Terminal"
+import { useAppStore } from "@/store/appStore"
 import { Download, ChevronLeft, ChevronRight } from "lucide-react"
+
+
+function WorklogPanel() {
+  const { worklog } = useAppStore()
+  const entries = [...worklog].reverse()
+
+  const typeConfig: Record<string, { icon: string; color: string; bg: string }> = {
+    thinking: { icon: '◌', color: 'text-text-muted', bg: 'bg-hive-elevated/40' },
+    action:   { icon: '⚡', color: 'text-blue-400',   bg: 'bg-blue-500/5'       },
+    result:   { icon: '✓',  color: 'text-green-400',  bg: 'bg-green-500/5'      },
+    error:    { icon: '✕',  color: 'text-red-400',    bg: 'bg-red-500/5'        },
+    code:     { icon: '{}', color: 'text-honey-500',  bg: 'bg-honey-500/5'      },
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-hive-border shrink-0">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-text-primary">Sparkie's Worklog</span>
+          {entries.length > 0 && (
+            <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+          )}
+        </div>
+        <span className="text-[10px] text-text-muted">{entries.length} entries</span>
+      </div>
+      <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-1.5 font-mono text-[11px]">
+        {entries.length === 0 ? (
+          <div className="flex items-center justify-center h-full text-text-muted text-xs">
+            Sparkie's activity appears here as she works
+          </div>
+        ) : (
+          entries.map((entry) => {
+            const cfg = typeConfig[entry.type] ?? typeConfig.thinking
+            const ts = new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+            return (
+              <div key={entry.id} className={`flex items-start gap-2.5 px-3 py-2 rounded-lg ${cfg.bg} border border-white/4`}>
+                <span className={`shrink-0 w-5 text-center ${cfg.color} text-[10px] mt-0.5`}>{cfg.icon}</span>
+                <div className="flex-1 min-w-0">
+                  <span className={`${cfg.color} break-words whitespace-pre-wrap leading-relaxed`}>{entry.content}</span>
+                  {entry.status === 'running' && (
+                    <span className="ml-1 inline-block w-1.5 h-3 bg-honey-500/60 animate-pulse rounded-sm" />
+                  )}
+                </div>
+                <span className="shrink-0 text-text-muted text-[9px] tabular-nums pt-0.5">{ts}</span>
+              </div>
+            )
+          })
+        )}
+      </div>
+    </div>
+  )
+}
 
 export function IDEPanelInner() {
   const {
     ideOpen, ideTab, isExecuting, liveCode, files,
     setIdeTab, containerStatus, clearTerminalOutput, appendTerminalOutput, setContainerStatus,
+    worklog,
   } = useAppStore()
   const { runProject } = useWebContainer()
   const [showExplorer, setShowExplorer] = useState(true)
@@ -117,6 +171,7 @@ export function IDEPanelInner() {
 
   const tabs = [
     { id: 'process',  label: 'Process'  },
+    { id: 'worklog',   label: 'Worklog'   },
     { id: 'files',    label: 'Files'    },
     { id: 'terminal', label: 'Terminal' },
   ] as const
@@ -155,6 +210,9 @@ export function IDEPanelInner() {
 
       {/* Panels */}
       <div className="flex-1 overflow-hidden">
+        {ideTab === 'worklog' && (
+          <WorklogPanel />
+        )}
         {ideTab === 'process' && (
           <div className="h-full">
             {isExecuting ? <LiveCodeView /> : <Preview />}

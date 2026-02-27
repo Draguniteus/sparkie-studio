@@ -132,7 +132,7 @@ export function ChatInput() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const {
-    selectedModel, setSelectedModel, createChat, addMessage,
+    selectedModel, setSelectedModel, createChat, getOrCreateSingleChat, addMessage,
     updateMessage, currentChatId, isStreaming, setStreaming,
     openIDE, setExecuting, setActiveFile, setIDETab, ideOpen,
     clearLiveCode, appendLiveCode, addLiveCodeFile,
@@ -1151,8 +1151,7 @@ export function ChatInput() {
 
   // ── Voice chat: STT → AI → TTS loop ─────────────────────────────────────────
   const sendMessageFromVoice = useCallback(async (userText: string): Promise<string> => {
-    let chatId = currentChatId
-    if (!chatId) chatId = createChat()
+    let chatId = getOrCreateSingleChat()
 
     addMessage(chatId, { role: "user", content: userText })
 
@@ -1291,8 +1290,7 @@ export function ChatInput() {
     }
     // ─── End slash commands ────────────────────────────────────────────────
 
-    let chatId = currentChatId
-    if (!chatId) chatId = createChat()
+    let chatId = getOrCreateSingleChat()
 
     const userContent = input.trim()
     addMessage(chatId, { role: "user", content: userContent })

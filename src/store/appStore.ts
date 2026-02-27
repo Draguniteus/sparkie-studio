@@ -119,6 +119,7 @@ interface AppState {
   setSelectedModel: (model: string) => void
   setStreaming: (v: boolean) => void
   createChat: () => string
+  getOrCreateSingleChat: () => string
   setCurrentChat: (id: string) => void
   deleteChat: (id: string) => void
   sidebarOpen: boolean
@@ -248,12 +249,26 @@ export const useAppStore = create<AppState>((set, get) => ({
   setLastMode: (mode) => set({ lastMode: mode }),
 
   createChat: () => {
+    // In single-chat mode: always return the one persistent chat
+    return get().getOrCreateSingleChat()
+  },
+
+  getOrCreateSingleChat: () => {
+    const existing = get().chats[0]
+    if (existing) {
+      // Make sure it's the current chat
+      if (get().currentChatId !== existing.id) {
+        set({ currentChatId: existing.id, messages: existing.messages, files: existing.files ?? [] })
+      }
+      return existing.id
+    }
+    // First ever session — create the one and only chat
     const id = crypto.randomUUID()
+    try { localStorage.setItem('sparkie_single_chat_id', id) } catch {}
     set((s) => ({
-      chats: [...s.chats, { id, title: 'New Chat', messages: [], createdAt: new Date(), files: [] }],
+      chats: [{ id, title: 'Sparkie', messages: [], createdAt: new Date(), files: [] }],
       currentChatId: id,
       messages: [],
-      // Reset IDE completely for a fresh session
       files: [],
       activeFileId: null,
       liveCode: '',
@@ -388,5 +403,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const profile = profileRaw ? JSON.parse(profileRaw) as UserProfile : null
       if (profile || done) set({ userProfile: profile, onboardingDone: done })
     } catch {}
+    // Auto-initialize single persistent chat
+    setTimeout(() => { get().getOrCreateSingleChat() }, 0)
   },
 }))
