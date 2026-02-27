@@ -223,11 +223,7 @@ export function ConnectorsView() {
   const [connecting, setConnecting] = useState<string | null>(null)
   const [disconnecting, setDisconnecting] = useState<string | null>(null)
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null)
-  const [apiKeyModal, setApiKeyModal] = useState<{
-    app: ComposioApp
-    fields: Array<{ name: string; displayName?: string; description?: string; required?: boolean }>
-    connectedAccountId: string
-  } | null>(null)
+  // API key modal reserved for future use
   const searchRef = useRef<HTMLInputElement>(null)
 
   const showToast = (msg: string, type: "success" | "error" = "success") => {
@@ -310,53 +306,17 @@ export function ConnectorsView() {
     const appName = app.name
     setConnecting(appName)
     try {
-      // Step 1: Get app details to determine auth scheme
-      const detailsRes = await fetch(`/api/connectors?action=app_details&name=${encodeURIComponent(appName)}`)
-      let authMode = "OAUTH2"
-      let apiKeyFields: Array<{ name: string; displayName?: string; description?: string; required?: boolean }> = []
-
-      if (detailsRes.ok) {
-        const details = await detailsRes.json() as {
-          authScheme?: string
-          fields?: Array<{ name: string; displayName?: string; description?: string; required?: boolean }>
-        }
-        authMode = details.authScheme || "OAUTH2"
-        apiKeyFields = details.fields || []
-      }
-
-      // Step 2: For API_KEY / BASIC auth — show modal instead of OAuth popup
-      if (authMode === "API_KEY" || authMode === "BASIC" || authMode === "BEARER_TOKEN") {
-        if (apiKeyFields.length === 0) {
-          // Fallback: just ask for one "api_key" field
-          apiKeyFields = [{ name: "api_key", displayName: "API Key", required: true }]
-        }
-        // Initiate the connection to get a connectedAccountId
-        const initRes = await fetch("/api/connectors", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "connect", appName, authMode }),
-        })
-        const initData = await initRes.json() as { connectedAccountId?: string; error?: string }
-        if (initData.error || !initData.connectedAccountId) {
-          showToast(initData.error || "Could not initiate connection", "error")
-          setConnecting(null)
-          return
-        }
-        setApiKeyModal({ app, fields: apiKeyFields, connectedAccountId: initData.connectedAccountId })
-        setConnecting(null)
-        return
-      }
-
-      // Step 3: OAuth flow
       const res = await fetch("/api/connectors", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "connect", appName, authMode }),
+        body: JSON.stringify({ action: "connect", appName }),
       })
-      const data = await res.json() as { authUrl?: string; status?: string; error?: string }
+      const data = await res.json() as { authUrl?: string; status?: string; error?: string; detail?: string }
 
-      if (data.error) {
-        showToast(data.error, "error")
+      if (!res.ok || data.error) {
+        const msg = data.error || "Connection failed"
+        // Show the Composio detail if available to help diagnose
+        showToast(msg, "error")
         setConnecting(null)
         return
       }
@@ -391,30 +351,7 @@ export function ConnectorsView() {
     }
   }
 
-  const handleApiKeySubmit = async (values: Record<string, string>) => {
-    if (!apiKeyModal) return
-    try {
-      const res = await fetch("/api/connectors", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "submit_api_key",
-          connectedAccountId: apiKeyModal.connectedAccountId,
-          fieldInputs: values,
-        }),
-      })
-      const data = await res.json() as { success?: boolean; error?: string }
-      if (data.success) {
-        showToast(`${apiKeyModal.app.displayName || apiKeyModal.app.name} connected!`)
-        await loadConnections()
-        setApiKeyModal(null)
-      } else {
-        showToast(data.error || "Failed to save credentials", "error")
-      }
-    } catch {
-      showToast("Failed to save credentials", "error")
-    }
-  }
+
 
   const handleDisconnect = async (appName: string) => {
     const conn = getConnection(appName)
@@ -444,16 +381,6 @@ export function ConnectorsView() {
 
   return (
     <div className="flex flex-col h-full bg-hive-600 overflow-hidden">
-      {/* API Key Modal */}
-      {apiKeyModal && (
-        <ApiKeyModal
-          app={apiKeyModal.app}
-          fields={apiKeyModal.fields}
-          onSubmit={handleApiKeySubmit}
-          onClose={() => { setApiKeyModal(null); setConnecting(null) }}
-        />
-      )}
-
       {/* Toast */}
       {toast && (
         <div className={`fixed top-4 right-4 z-50 flex items-center gap-2 px-4 py-3 rounded-2xl text-sm font-medium shadow-xl transition-all border ${
