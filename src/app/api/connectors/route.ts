@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
 
       // Step 1: Get Composio-managed auth config for this app (v3)
       const authConfigRes = await fetch(
-        `${V3}/auth_configs?toolkit_slug=${encodeURIComponent(body.appName)}&is_composio_managed=true&limit=1`,
+        `${V3}/auth_configs?toolkit_slug=${encodeURIComponent(body.appName)}&limit=1`,
         { headers: composioHeaders() }
       )
       if (!authConfigRes.ok) {
@@ -97,7 +97,7 @@ export async function POST(req: NextRequest) {
       const authConfigData = await authConfigRes.json() as { items?: Array<{ id: string; toolkit?: { slug: string } }> }
       const authConfig = authConfigData.items?.[0]
       if (!authConfig) {
-        return NextResponse.json({ error: `No managed auth config found for "${body.appName}". This app may require manual OAuth setup.` }, { status: 404 })
+        return NextResponse.json({ error: `No auth config found for "${body.appName}". This app may not support automated OAuth — check your Composio dashboard.` }, { status: 404 })
       }
 
       // Step 2: Create connected account (v3)
