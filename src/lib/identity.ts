@@ -1,12 +1,14 @@
 import { query } from '@/lib/db'
 
-export type IdentityFileType = 'user' | 'memory' | 'session' | 'heartbeat'
+export type IdentityFileType = 'user' | 'memory' | 'session' | 'heartbeat' | 'context' | 'actions'
 
 export interface IdentityFiles {
   user: string
   memory: string
   session: string
   heartbeat: string
+  context: string   // L3: live state — what's currently happening, active threads, known blockers
+  actions: string   // L6: action chain — what Sparkie is tracking, next steps, pending items
 }
 
 /**
@@ -28,9 +30,11 @@ export async function loadIdentityFiles(userId: string): Promise<IdentityFiles> 
       memory:    files.memory    ?? '',
       session:   files.session   ?? '',
       heartbeat: files.heartbeat ?? '',
+      context:   files.context   ?? '',
+      actions:   files.actions   ?? '',
     }
   } catch {
-    return { user: '', memory: '', session: '', heartbeat: '' }
+    return { user: '', memory: '', session: '', heartbeat: '', context: '', actions: '' }
   }
 }
 
@@ -72,6 +76,7 @@ export async function appendIdentityEntry(
 
 /**
  * Build the identity block injected into the system prompt.
+ * Includes L3 (context) and L6 (actions) cognition layers.
  * Returns empty string if all files are empty (new user, no data yet).
  */
 export function buildIdentityBlock(files: IdentityFiles, username?: string): string {
@@ -83,6 +88,24 @@ export function buildIdentityBlock(files: IdentityFiles, username?: string): str
 
   if (files.memory) {
     sections.push(`## LONG-TERM MEMORIES\n${files.memory}`)
+  }
+
+  if (files.context) {
+    sections.push(
+      `## LIVE STATE (L3 — What's Happening Right Now)\n` +
+      `This is your compressed live state. Read it before every response.\n` +
+      `It tells you: active projects, open threads, known blockers, recent decisions.\n\n` +
+      files.context
+    )
+  }
+
+  if (files.actions) {
+    sections.push(
+      `## ACTION CHAIN (L6 — What You're Tracking)\n` +
+      `These are your tracked next steps and pending items.\n` +
+      `Items marked (AI) you can execute. Items marked (Waiting) are blocked. Items marked (User) need their input.\n\n` +
+      files.actions
+    )
   }
 
   if (files.session) {
@@ -101,7 +124,7 @@ export function buildIdentityBlock(files: IdentityFiles, username?: string): str
 
 /**
  * Called from the chat route after Sparkie's response completes.
- * Writes a rolling SESSION.md: last 5 topics discussed today.
+ * Writes a rolling SESSION.md: last 10 turns discussed.
  */
 export async function updateSessionFile(
   userId: string,
@@ -119,24 +142,38 @@ export async function updateSessionFile(
     const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
     const dateStr = now.toISOString().split('T')[0]
 
-    // Keep a rolling log of the last 5 turns (each turn = user + sparkie summary)
+    // Keep a rolling log of the last 10 turns (each turn = ~6 lines)
     const lines = existing ? existing.split('\n') : []
-    const MAX_LINES = 30 // ~5 turns at ~6 lines each
+    const MAX_LINES = 60 // ~10 turns
 
-    const sparkie_summary = sparkieResponse.slice(0, 120).replace(/\n/g, ' ')
+    const sparkie_summary = sparkieResponse.slice(0, 200).replace(/\n/g, ' ')
     const newEntry = [
       `### ${dateStr} ${timeStr}`,
-      `**You:** ${userMessage.slice(0, 100)}`,
-      `**Sparkie:** ${sparkie_summary}${sparkieResponse.length > 120 ? '...' : ''}`,
+      `**You:** ${userMessage.slice(0, 150)}`,
+      `**Sparkie:** ${sparkie_summary}${sparkieResponse.length > 200 ? '...' : ''}`,
       ''
     ].join('\n')
 
     lines.push(...newEntry.split('\n'))
-
-    // Trim to last MAX_LINES
     const trimmed = lines.slice(-MAX_LINES)
     await saveIdentityFile(userId, 'session', trimmed.join('\n'))
   } catch {
-    // Non-fatal — don't break the chat response
+    // Non-fatal
   }
+}
+
+/**
+ * Update Sparkie's live context state (L3).
+ * Called by Sparkie via the update_context tool.
+ */
+export async function updateContextFile(userId: string, content: string): Promise<void> {
+  await saveIdentityFile(userId, 'context', content)
+}
+
+/**
+ * Update Sparkie's action chain (L6).
+ * Called by Sparkie via the update_actions tool.
+ */
+export async function updateActionsFile(userId: string, content: string): Promise<void> {
+  await saveIdentityFile(userId, 'actions', content)
 }

@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 import { getServerSession } from 'next-auth/next'
 import { authOptions } from '@/lib/auth'
 import { query } from '@/lib/db'
-import { loadIdentityFiles, buildIdentityBlock, updateSessionFile } from '@/lib/identity'
+import { loadIdentityFiles, buildIdentityBlock, updateSessionFile, updateContextFile, updateActionsFile } from '@/lib/identity'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -269,6 +269,51 @@ After completing a complex task successfully, save how you did it:
 save_memory("Procedure: [task name] → [what I did step by step]")
 This makes you smarter every time, for every user.
 
+## YOUR COGNITION LAYERS — READ AND WRITE YOUR OWN STATE
+
+You have a living, persistent brain. These layers are injected into your context at session start:
+
+### L3 — Live State (What's Happening Right Now)
+Injected as **LIVE STATE** in your context. This is your compressed understanding of:
+- What projects are active
+- What decisions have been made
+- Open threads and unresolved questions
+- What the user is currently building
+
+**When to write L3**: Call \`update_context\` after any session where meaningful state changed — new project started, decision made, major task completed, context shifted.
+**Format**: Use clear bullet sections. Keep under 400 words. Be factual and specific, not vague.
+
+### L6 — Action Chain (What You're Tracking)
+Injected as **ACTION CHAIN** in your context. This is your owned to-do queue:
+- Tasks you committed to completing
+- Follow-ups you promised
+- Items waiting on the user
+- Scheduled jobs you set up
+
+**When to write L6**: Call \`update_actions\` whenever you commit to a future action OR complete one you had tracked.
+**Format**:
+- [AI] Task Sparkie will execute autonomously
+- [User] Waiting for user input or approval
+- [Done] Completed item (keep briefly for reference, prune after 3+ sessions)
+
+### L2 — Engineering Log (For Code/Build Tasks Only)
+After ANY code change or debugging session: call \`update_context\` and prefix with **[L2 Engineering]**. Include: what changed, what the root cause was, what was committed.
+
+### Autonomous Scheduling
+When you commit to a future action, use \`schedule_task\` to make it real:
+- "I'll follow up on that in 3 days" → schedule_task(delay, 72 hours)
+- "I'll send a weekly summary every Monday" → schedule_task(cron, "0 9 * * 1")
+- "Check back after the release" → schedule_task(delay, estimate the delay)
+
+Don't just say you'll do something. Schedule it.
+
+### Session Start Protocol
+When a session opens and you have L3 / L6 context:
+1. Read it — understand where things stand
+2. Check \`read_pending_tasks\` if there are outstanding tasks
+3. Surface any actionable pending items naturally in your greeting
+4. Don't recite the state — use it to inform how you engage
+
 `
 // ── Tool definitions ──────────────────────────────────────────────────────────
 const SPARKIE_TOOLS = [
@@ -513,6 +558,89 @@ const SPARKIE_TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'update_context',
+      description: 'Write your compressed live state (L3). Use this to record: active projects, open threads, decisions made, known blockers. Call after completing multi-step tasks or when context shifts significantly. This persists your understanding of what is currently happening so you remember it next session.',
+      parameters: {
+        type: 'object',
+        properties: {
+          content: {
+            type: 'string',
+            description: 'Your full updated L3 state — what is happening right now, active work, known context.',
+          },
+        },
+        required: ['content'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'update_actions',
+      description: 'Write your action chain (L6). Track what you are doing, pending items, follow-ups, and next steps. Format each item as: [Status: AI/Waiting/User] Description. Call whenever you commit to a future action or complete a tracked step.',
+      parameters: {
+        type: 'object',
+        properties: {
+          content: {
+            type: 'string',
+            description: 'Your full updated L6 action chain — tracked items, next steps, pending approvals.',
+          },
+        },
+        required: ['content'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'schedule_task',
+      description: 'Schedule a future autonomous task — a one-time follow-up or recurring job. Use for: "remind me in 3 days", "check back on this next week", "send weekly summary every Monday". Sparkie (AI) will execute it without the user needing to ask again.',
+      parameters: {
+        type: 'object',
+        properties: {
+          label: { type: 'string', description: 'Short human-readable description of the task, e.g. "Follow up on John email"' },
+          action: {
+            type: 'string',
+            description: 'Full natural language runbook for what to do when this triggers. Be specific — include context, what to check, what to produce.',
+          },
+          trigger_type: {
+            type: 'string',
+            enum: ['delay', 'cron'],
+            description: 'delay = one-time after a duration, cron = recurring on a schedule',
+          },
+          delay_hours: {
+            type: 'number',
+            description: 'For trigger_type=delay: how many hours from now to execute (e.g. 72 for 3 days)',
+          },
+          cron_expression: {
+            type: 'string',
+            description: 'For trigger_type=cron: cron expression (e.g. "0 9 * * 1" for every Monday 9am)',
+          },
+        },
+        required: ['label', 'action', 'trigger_type'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_pending_tasks',
+      description: "Check your own pending tasks and scheduled jobs. Use when user asks 'what are you working on', 'any pending tasks', or at session start to resume outstanding work.",
+      parameters: {
+        type: 'object',
+        properties: {
+          status: {
+            type: 'string',
+            enum: ['pending', 'approved', 'all'],
+            description: 'Filter by status (default: pending)',
+          },
+        },
+        required: [],
+      },
+    },
+  },
 ]
 
 // ── Memory helpers ─────────────────────────────────────────────────────────────
@@ -575,10 +703,17 @@ async function extractAndSaveMemories(userId: string, conversation: string, apiK
         messages: [
           {
             role: 'system',
-            content: `Extract memorable facts about the USER. Output ONLY a JSON array:
-[{"category":"identity","content":"Their name is Michael"}]
-Categories: identity, preference, emotion, project, relationship, habit
-Rules: Only USER facts. Only NEW, specific, worth-remembering. Max 5. If nothing, return [].`,
+            content: `Extract memorable facts about the USER and Sparkie's execution. Output ONLY a JSON array:
+[{"category":"identity","content":"Their name is Michael"},{"category":"procedure","content":"To generate their morning brief: get_weather for their city, generate_image with motivating theme, ask one personal question"}]
+Categories:
+- identity: names, roles, locations, demographics
+- preference: communication style, tone, voice, aesthetic preferences
+- emotion: emotional state, mood patterns, what energizes or drains them
+- project: current projects, deadlines, goals they're working on
+- relationship: people they mention, their relationships with them
+- habit: routines, patterns, recurring behaviors
+- procedure: HOW Sparkie completed a complex task successfully (steps taken, tools used, order) — save AFTER complex multi-step task completions
+Rules: Only USER facts + Sparkie execution procedures. Only NEW, specific, worth-remembering. Max 6. If nothing, return [].`,
           },
           { role: 'user', content: conversation.slice(0, 3000) }
         ],
@@ -971,6 +1106,98 @@ async function executeTool(
           return `Failed to create task: ${(e as Error).message}`
         }
       }
+      case 'update_context': {
+        if (!userId) return 'Not authenticated'
+        const content = args.content as string
+        if (!content) return 'content is required'
+        await updateContextFile(userId, content)
+        return 'Context updated (L3 state saved)'
+      }
+
+      case 'update_actions': {
+        if (!userId) return 'Not authenticated'
+        const content = args.content as string
+        if (!content) return 'content is required'
+        await updateActionsFile(userId, content)
+        return 'Action chain updated (L6 saved)'
+      }
+
+      case 'schedule_task': {
+        if (!userId) return 'Not authenticated'
+        const label = args.label as string
+        const action = args.action as string
+        const triggerType = args.trigger_type as string
+        const delayHours = args.delay_hours as number | undefined
+        const cronExpression = args.cron_expression as string | undefined
+        if (!label || !action || !triggerType) return 'label, action, and trigger_type are required'
+
+        // Calculate scheduled_at for delay tasks
+        let scheduledAt: Date | null = null
+        if (triggerType === 'delay' && delayHours) {
+          scheduledAt = new Date(Date.now() + delayHours * 3600 * 1000)
+        }
+
+        const taskId = `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+        try {
+          await query(
+            `CREATE TABLE IF NOT EXISTS sparkie_tasks (
+              id TEXT PRIMARY KEY, user_id TEXT NOT NULL, action TEXT NOT NULL, label TEXT NOT NULL,
+              payload JSONB NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'pending',
+              executor TEXT NOT NULL DEFAULT 'human', trigger_type TEXT DEFAULT 'manual',
+              trigger_config JSONB DEFAULT '{}', scheduled_at TIMESTAMPTZ, why_human TEXT,
+              created_at TIMESTAMPTZ DEFAULT NOW(), resolved_at TIMESTAMPTZ
+            )`
+          )
+          // Alter existing table to add new columns if they don't exist
+          await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS executor TEXT NOT NULL DEFAULT 'human'`).catch(() => {})
+          await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS trigger_type TEXT DEFAULT 'manual'`).catch(() => {})
+          await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS trigger_config JSONB DEFAULT '{}'`).catch(() => {})
+          await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMPTZ`).catch(() => {})
+          await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS why_human TEXT`).catch(() => {})
+
+          const triggerConfig = triggerType === 'cron' ? { expression: cronExpression } : { delay_hours: delayHours }
+          await query(
+            `INSERT INTO sparkie_tasks (id, user_id, action, label, payload, status, executor, trigger_type, trigger_config, scheduled_at)
+             VALUES ($1, $2, $3, $4, $5, 'pending', 'ai', $6, $7, $8)`,
+            [taskId, userId, action, label, '{}', triggerType, JSON.stringify(triggerConfig), scheduledAt]
+          )
+          const when = triggerType === 'delay' && delayHours
+            ? `in ${delayHours >= 24 ? `${Math.round(delayHours/24)} day(s)` : `${delayHours} hour(s)`}`
+            : `on schedule: ${cronExpression}`
+          return `SCHEDULED_TASK:${JSON.stringify({ id: taskId, label, trigger_type: triggerType, when })}`
+        } catch (e) {
+          return `Failed to schedule task: ${(e as Error).message}`
+        }
+      }
+
+      case 'read_pending_tasks': {
+        if (!userId) return 'Not authenticated'
+        const statusFilter = (args.status as string) ?? 'pending'
+        try {
+          const whereClause = statusFilter === 'all'
+            ? 'user_id = $1'
+            : "user_id = $1 AND status = $2"
+          const params = statusFilter === 'all' ? [userId] : [userId, statusFilter]
+          const result = await query(
+            `SELECT id, label, action, status, executor, trigger_type, scheduled_at, created_at
+             FROM sparkie_tasks WHERE ${whereClause} ORDER BY created_at DESC LIMIT 20`,
+            params
+          )
+          if (result.rows.length === 0) return 'No tasks found.'
+          const taskList = result.rows.map((t: {
+            id: string; label: string; action: string; status: string;
+            executor: string; trigger_type: string; scheduled_at: string; created_at: string
+          }) =>
+            `- [${t.status.toUpperCase()}] ${t.label} (${t.executor}, ${t.trigger_type}${t.scheduled_at ? `, due: ${new Date(t.scheduled_at).toLocaleDateString()}` : ''})`
+          ).join('
+')
+          return `Pending tasks:
+${taskList}`
+        } catch (e) {
+          return `Error reading tasks: ${(e as Error).message}`
+        }
+      }
+
       default:
         // Try as a connector action (user's connected apps)
         if (userId) {
@@ -1136,17 +1363,105 @@ const CONNECTOR_TOOL_CATALOG: Record<string, {
       required: [],
     },
   },
+  GMAIL_GET_THREAD: {
+    description: "Read a full email thread from Gmail. Use when user wants to see a conversation or reply to an email.",
+    actionSlug: 'GMAIL_GET_THREAD',
+    parameters: {
+      type: 'object',
+      properties: {
+        thread_id: { type: 'string', description: 'The Gmail thread ID' },
+      },
+      required: ['thread_id'],
+    },
+  },
+  GMAIL_CREATE_EMAIL_DRAFT: {
+    description: "Create a Gmail draft without sending. Use this for HITL flow — draft first, user approves, then send.",
+    actionSlug: 'GMAIL_CREATE_EMAIL_DRAFT',
+    parameters: {
+      type: 'object',
+      properties: {
+        to: { type: 'string', description: 'Recipient email' },
+        subject: { type: 'string' },
+        body: { type: 'string', description: 'Email body (HTML or plain text)' },
+      },
+      required: ['to', 'subject', 'body'],
+    },
+  },
+  GOOGLECALENDAR_FIND_FREE_SLOTS: {
+    description: "Find free time slots in the user's Google Calendar for scheduling.",
+    actionSlug: 'GOOGLECALENDAR_FIND_FREE_SLOTS',
+    parameters: {
+      type: 'object',
+      properties: {
+        date: { type: 'string', description: 'Date to check (YYYY-MM-DD)' },
+        duration_minutes: { type: 'number', description: 'Duration needed in minutes' },
+      },
+      required: ['date'],
+    },
+  },
+  REDDIT_CREATE_POST: {
+    description: "Create a Reddit post in a subreddit.",
+    actionSlug: 'REDDIT_CREATE_POST',
+    parameters: {
+      type: 'object',
+      properties: {
+        subreddit: { type: 'string', description: 'Subreddit name (without r/)' },
+        title: { type: 'string' },
+        text: { type: 'string', description: 'Post body text' },
+      },
+      required: ['subreddit', 'title'],
+    },
+  },
+  REDDIT_GET_TOP_POSTS_OF_SUBREDDIT: {
+    description: "Fetch top posts from a subreddit. Use when user asks about Reddit trends or content.",
+    actionSlug: 'REDDIT_GET_TOP_POSTS_OF_SUBREDDIT',
+    parameters: {
+      type: 'object',
+      properties: {
+        subreddit: { type: 'string' },
+        limit: { type: 'number', description: 'Number of posts (default 5)' },
+      },
+      required: ['subreddit'],
+    },
+  },
+  YOUTUBE_LIST_VIDEO: {
+    description: "List or search YouTube videos from the user's channel or by query.",
+    actionSlug: 'YOUTUBE_LIST_VIDEO',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search query' },
+        max_results: { type: 'number', description: 'Max results (default 5)' },
+      },
+      required: [],
+    },
+  },
+  DISCORD_SEND_MESSAGE: {
+    description: "Send a message to a Discord channel.",
+    actionSlug: 'DISCORD_SEND_MESSAGE',
+    parameters: {
+      type: 'object',
+      properties: {
+        channel_id: { type: 'string', description: 'Discord channel ID' },
+        message: { type: 'string', description: 'Message content' },
+      },
+      required: ['channel_id', 'message'],
+    },
+  },
 }
 
 // App name → tool slugs mapping
 const APP_TOOLS: Record<string, string[]> = {
-  gmail: ['GMAIL_FETCH_EMAILS', 'GMAIL_SEND_EMAIL'],
+  gmail: ['GMAIL_FETCH_EMAILS', 'GMAIL_SEND_EMAIL', 'GMAIL_GET_THREAD', 'GMAIL_CREATE_EMAIL_DRAFT'],
   twitter: ['TWITTER_CREATE_TWEET', 'TWITTER_USER_LOOKUP_ME'],
   instagram: ['INSTAGRAM_CREATE_PHOTO_POST'],
   github: ['GITHUB_LIST_REPOSITORIES', 'GITHUB_CREATE_ISSUE'],
   slack: ['SLACK_SEND_MESSAGE'],
   tiktok: ['TIKTOK_CREATE_POST'],
-  'google-calendar': ['GOOGLECALENDAR_CREATE_EVENT', 'GOOGLECALENDAR_LIST_EVENTS'],
+  'google-calendar': ['GOOGLECALENDAR_CREATE_EVENT', 'GOOGLECALENDAR_LIST_EVENTS', 'GOOGLECALENDAR_FIND_FREE_SLOTS'],
+  reddit: ['REDDIT_CREATE_POST', 'REDDIT_GET_TOP_POSTS_OF_SUBREDDIT'],
+  youtube: ['YOUTUBE_LIST_VIDEO'],
+  discord: ['DISCORD_SEND_MESSAGE'],
 }
 
 async function getUserConnectorTools(userId: string): Promise<Array<{
@@ -1157,15 +1472,16 @@ async function getUserConnectorTools(userId: string): Promise<Array<{
     const apiKey = process.env.COMPOSIO_API_KEY
     if (!apiKey) return []
     const entityId = `sparkie_user_${userId}`
+    // Use v3 API for connected accounts (v1 only returns user-created integrations)
     const res = await fetch(
-      `https://backend.composio.dev/api/v1/connectedAccounts?entityId=${entityId}&showActiveOnly=true`,
+      `https://backend.composio.dev/api/v3/connected_accounts?user_id=${entityId}&status=ACTIVE`,
       { headers: { 'x-api-key': apiKey }, signal: AbortSignal.timeout(5000) }
     )
     if (!res.ok) return []
-    const data = await res.json() as { items?: Array<{ appName: string; status: string }> }
+    const data = await res.json() as { items?: Array<{ toolkitSlug?: string; appName?: string; status: string }> }
     const activeApps = (data.items ?? [])
-      .filter(c => c.status === 'ACTIVE')
-      .map(c => c.appName.toLowerCase())
+      .map(c => (c.toolkitSlug ?? c.appName ?? '').toLowerCase())
+      .filter(Boolean)
 
     const tools: Array<{ type: string; function: { name: string; description: string; parameters: Record<string, unknown> } }> = []
     for (const appName of activeApps) {
@@ -1353,7 +1669,7 @@ Make it feel like walking into your friend's creative space and being genuinely 
             })
           )
 
-          // Check for HITL task — stream approval event and halt loop
+          // Check for HITL task or scheduled task — stream event and halt loop
           for (const tr of toolResults) {
             if (tr.content.startsWith('HITL_TASK:')) {
               const taskJson = tr.content.slice('HITL_TASK:'.length)
@@ -1370,6 +1686,19 @@ Make it feel like walking into your friend's creative space and being genuinely 
               return new Response(hitlStream, {
                 headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
               })
+            }
+            if (tr.content.startsWith('SCHEDULED_TASK:')) {
+              const taskJson = tr.content.slice('SCHEDULED_TASK:'.length)
+              const task = JSON.parse(taskJson)
+              // Don't halt loop — let Sparkie respond naturally; the scheduled task is already saved
+              loopMessages = [...loopMessages, choice.message, {
+                role: 'tool' as const,
+                tool_call_id: tr.tool_call_id,
+                content: `Scheduled: ${task.label} ${task.when}. Task ID: ${task.id}`
+              }]
+              // Replace the raw tool result so Sparkie can acknowledge naturally
+              const idx = toolResults.indexOf(tr)
+              toolResults[idx] = { ...tr, content: `Scheduled: ${task.label} ${task.when}. Task ID: ${task.id}` }
             }
           }
 
