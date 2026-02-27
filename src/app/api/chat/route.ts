@@ -1189,10 +1189,8 @@ async function executeTool(
             executor: string; trigger_type: string; scheduled_at: string; created_at: string
           }) =>
             `- [${t.status.toUpperCase()}] ${t.label} (${t.executor}, ${t.trigger_type}${t.scheduled_at ? `, due: ${new Date(t.scheduled_at).toLocaleDateString()}` : ''})`
-          ).join('
-')
-          return `Pending tasks:
-${taskList}`
+          ).join('\n')
+          return 'Pending tasks:\n' + taskList
         } catch (e) {
           return `Error reading tasks: ${(e as Error).message}`
         }
