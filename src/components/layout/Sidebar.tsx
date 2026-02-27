@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useAppStore } from '@/store/appStore'
 import {
   Plus, Search, FolderOpen, Image, MessageSquare,
-  Settings, ChevronLeft, ChevronDown, Trash2, Sparkles, Bot, Zap, Radio, Plug
+  Settings, ChevronLeft, ChevronDown, Trash2, Sparkles, Lock, Zap, Radio, Plug
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 
@@ -96,17 +96,30 @@ export function Sidebar() {
         ))}
       </div>
 
-      {/* Experts Section */}
-      <div className="px-3 mt-3 shrink-0">
-        <div className="text-[10px] font-semibold text-text-muted uppercase tracking-wider mb-1.5 px-1">
-          Experts
+      {/* Sparkie's Corner + Dream Journal */}
+      <div className="px-3 mt-3 shrink-0 flex flex-col gap-1.5">
+        <div className="text-[10px] font-semibold text-text-muted uppercase tracking-wider mb-0.5 px-1">
+          Sparkie's Space
         </div>
-        <button className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-hive-hover transition-colors group">
-          <div className="w-7 h-7 rounded-lg bg-hive-elevated border border-hive-border flex items-center justify-center shrink-0 group-hover:border-honey-500/30 transition-colors">
-            <Bot size={14} className="text-text-muted group-hover:text-honey-500 transition-colors" />
+        <button
+          onClick={() => setActiveTab('corner')}
+          className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg transition-all group ${activeTab === 'corner' ? 'bg-honey-500/10 border border-honey-500/20' : 'hover:bg-hive-hover border border-transparent'}`}
+        >
+          <div className={`w-7 h-7 rounded-lg border flex items-center justify-center shrink-0 transition-colors ${activeTab === 'corner' ? 'bg-honey-500/20 border-honey-500/40' : 'bg-hive-elevated border-hive-border group-hover:border-honey-500/30'}`}>
+            <Sparkles size={14} className={activeTab === 'corner' ? 'text-honey-500' : 'text-text-muted group-hover:text-honey-500 transition-colors'} />
           </div>
-          <span className="text-sm text-text-secondary group-hover:text-text-primary transition-colors flex-1 text-left">Explore Experts</span>
-          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-honey-500 text-black leading-tight">New</span>
+          <span className={`text-sm transition-colors flex-1 text-left ${activeTab === 'corner' ? 'text-honey-500 font-medium' : 'text-text-secondary group-hover:text-text-primary'}`}>Sparkie's Corner</span>
+          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-violet-500/30 text-violet-300 leading-tight border border-violet-500/20">✦</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('journal')}
+          className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg transition-all group ${activeTab === 'journal' ? 'bg-violet-500/10 border border-violet-500/20' : 'hover:bg-hive-hover border border-transparent'}`}
+        >
+          <div className={`w-7 h-7 rounded-lg border flex items-center justify-center shrink-0 transition-colors ${activeTab === 'journal' ? 'bg-violet-500/20 border-violet-500/40' : 'bg-hive-elevated border-hive-border group-hover:border-violet-500/30'}`}>
+            <Zap size={14} className={activeTab === 'journal' ? 'text-violet-400' : 'text-text-muted group-hover:text-violet-400 transition-colors'} />
+          </div>
+          <span className={`text-sm transition-colors flex-1 text-left ${activeTab === 'journal' ? 'text-violet-300 font-medium' : 'text-text-secondary group-hover:text-text-primary'}`}>Dream Journal</span>
+          <Lock size={11} className="text-text-muted shrink-0" />
         </button>
       </div>
 
