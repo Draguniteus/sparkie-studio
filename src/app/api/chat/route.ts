@@ -252,6 +252,17 @@ ONLY when the request is truly ambiguous AND you cannot make a reasonable choice
 3. Is this a build request? → Produce the full artifact
 4. Is this a creative request? → Create something and show it
 5. Is this a question? → Answer directly and completely
+6. Is this irreversible (email, tweet, delete, deploy)? → Use create_task FIRST — never execute directly
+
+### HITL Guardrails — Irreversible Actions
+For any action that CANNOT BE UNDONE, you MUST call create_task before executing:
+- Sending emails or messages
+- Posting to social media (Twitter, Instagram, Reddit)
+- Deleting files or data
+- Deploying code to production
+
+After calling create_task: respond with a brief message like "I've queued that for your approval — you'll see the card above."
+NEVER execute irreversible actions directly. ALWAYS gate them through create_task.
 
 ### Memory: Learn From What Works
 After completing a complex task successfully, save how you did it:
@@ -475,6 +486,30 @@ const SPARKIE_TOOLS = [
           category: { type: 'string', enum: ['night_dreams', 'vision_board', 'goals', 'custom'], description: 'Which category to file this under' },
         },
         required: ['title', 'content', 'category'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_task',
+      description: 'Queue an irreversible action for user approval before executing. Use this BEFORE sending emails, posting to social media, deleting files, or any action that cannot be undone. The user will see an approval card in the chat.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['send_email', 'post_tweet', 'post_instagram', 'post_reddit', 'delete_file', 'send_message', 'deploy'],
+            description: 'The type of irreversible action to perform',
+          },
+          label: { type: 'string', description: 'Short human-readable label, e.g. "Email John about the meeting"' },
+          payload: {
+            type: 'object',
+            description: 'The data needed to execute the action — e.g. { to, subject, body } for email, { text } for tweet',
+            additionalProperties: true,
+          },
+        },
+        required: ['action', 'label', 'payload'],
       },
     },
   },
@@ -911,6 +946,31 @@ async function executeTool(
         return `✓ Added to your ${category.replace('_', ' ')} journal: "${title}"`
       }
 
+
+      case 'create_task': {
+        if (!userId) return 'Not authenticated'
+        const action = args.action as string
+        const label = args.label as string
+        const payload = (args.payload as Record<string, unknown>) ?? {}
+        if (!action || !label) return 'action and label are required'
+        const taskId = `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+        try {
+          await query(
+            `CREATE TABLE IF NOT EXISTS sparkie_tasks (
+              id TEXT PRIMARY KEY, user_id TEXT NOT NULL, action TEXT NOT NULL, label TEXT NOT NULL,
+              payload JSONB NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'pending',
+              created_at TIMESTAMPTZ DEFAULT NOW(), resolved_at TIMESTAMPTZ
+            )`
+          )
+          await query(
+            `INSERT INTO sparkie_tasks (id, user_id, action, label, payload, status) VALUES ($1, $2, $3, $4, $5, 'pending')`,
+            [taskId, userId, action, label, JSON.stringify(payload)]
+          )
+          return `HITL_TASK:${JSON.stringify({ id: taskId, action, label, payload })}`
+        } catch (e) {
+          return `Failed to create task: ${(e as Error).message}`
+        }
+      }
       default:
         // Try as a connector action (user's connected apps)
         if (userId) {
@@ -1292,6 +1352,26 @@ Make it feel like walking into your friend's creative space and being genuinely 
               return { role: 'tool' as const, tool_call_id: tc.id, content: result }
             })
           )
+
+          // Check for HITL task — stream approval event and halt loop
+          for (const tr of toolResults) {
+            if (tr.content.startsWith('HITL_TASK:')) {
+              const taskJson = tr.content.slice('HITL_TASK:'.length)
+              const task = JSON.parse(taskJson)
+              const encoder = new TextEncoder()
+              const hitlStream = new ReadableStream({
+                start(controller) {
+                  const text = "I've queued that for your approval — check the card below."
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ sparkie_task: task, text })}\n\n`))
+                  controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+                  controller.close()
+                },
+              })
+              return new Response(hitlStream, {
+                headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
+              })
+            }
+          }
 
           // Append assistant message + tool results, continue loop
           loopMessages = [...loopMessages, choice.message, ...toolResults]
