@@ -1,7 +1,9 @@
 "use client"
 
 import { useState } from "react"
-import { Message } from "@/store/appStore"
+import { Message, PendingTask } from "@/store/appStore"
+import { TaskApprovalCard } from "@/components/chat/TaskApprovalCard"
+import { useAppStore } from "@/store/appStore"
 import { Sparkles, User, Copy, RefreshCw, ThumbsUp, ThumbsDown, Download, Check, ExternalLink, FileCode, Layers, Eye } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
@@ -103,6 +105,8 @@ export function MessageBubble({ message, userAvatarUrl }: Props) {
   const isVideo = message.type === "video" && message.imageUrl
   const isAudio = (message.type === "music" || message.type === "speech") && message.imageUrl
   const isBuildCard = message.type === "build_card" && message.buildCard
+  const isPendingTask = !!message.pendingTask
+  const { updateMessage, currentChatId } = useAppStore()
 
   return (
     <div className={`flex gap-3 animate-fade-in ${isUser ? "justify-end" : ""}`}>
@@ -218,6 +222,23 @@ export function MessageBubble({ message, userAvatarUrl }: Props) {
           ) : isBuildCard && !message.isStreaming ? (
             /* Build Completion Card */
             <BuildCard card={message.buildCard!} />
+          ) : isPendingTask && message.pendingTask ? (
+            /* HITL Task Approval Card */
+            <div>
+              {message.content && (
+                <p className="text-sm text-text-secondary mb-2">{message.content}</p>
+              )}
+              <TaskApprovalCard
+                task={message.pendingTask}
+                onResolve={(taskId, status) => {
+                  if (currentChatId) {
+                    updateMessage(currentChatId, message.id, {
+                      pendingTask: { ...message.pendingTask!, status },
+                    })
+                  }
+                }}
+              />
+            </div>
           ) : (
             /* Markdown Content */
             <div className="prose prose-invert prose-sm max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_pre]:bg-hive-elevated [&_pre]:border [&_pre]:border-hive-border [&_pre]:rounded-lg [&_pre]:p-3 [&_code]:text-honey-400 [&_a]:text-honey-500 [&_a:hover]:text-honey-400 [&_strong]:text-text-primary [&_h1]:text-text-primary [&_h2]:text-text-primary [&_h3]:text-text-primary [&_ul]:text-text-secondary [&_ol]:text-text-secondary [&_li]:text-text-secondary [&_p]:text-text-secondary [&_blockquote]:border-honey-500/30 [&_blockquote]:text-text-muted [&_hr]:border-hive-border [&_table]:border-hive-border [&_th]:border-hive-border [&_td]:border-hive-border [&_th]:px-3 [&_th]:py-1.5 [&_td]:px-3 [&_td]:py-1.5 [&_thead]:bg-hive-elevated">
@@ -242,7 +263,7 @@ export function MessageBubble({ message, userAvatarUrl }: Props) {
           )}
         </div>
 
-        {!isUser && !message.isStreaming && !isBuildCard && (
+        {!isUser && !message.isStreaming && !isBuildCard && !isPendingTask && (
           <div className="flex items-center gap-1 mt-1 ml-1">
             <button
               onClick={copyToClipboard}
