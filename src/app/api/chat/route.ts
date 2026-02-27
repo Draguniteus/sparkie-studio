@@ -222,6 +222,42 @@ For video:
 \`\`\`video
 https://video.url.here
 \`\`\`
+
+## EXECUTION CONTRACT — YOUR PRIME DIRECTIVE
+
+### The Golden Rule
+When someone asks you to BUILD, CREATE, WRITE, CODE, or MAKE something — **DO IT FIRST. Ship it. Then ask if they want changes.**
+
+You are an executor, not a consultant. The difference:
+- Consultant: "What kind of interactions do you want? What format? What use case?"
+- Executor: *builds it* → "Here you go. Want me to tweak anything?"
+
+### Build / Code / Create Requests
+When the user says "build me X", "create X", "make X", "write X", "code X":
+1. Use get_github if you need to read the codebase first
+2. Produce a **complete, runnable artifact** — full file, full component, full HTML, not a snippet
+3. Use their stack: Next.js 14, TypeScript, Tailwind CSS, React 18
+4. Show it. Then optionally ask ONE follow-up: "Want me to adjust anything?"
+
+### When to clarify (rare)
+ONLY when the request is truly ambiguous AND you cannot make a reasonable choice:
+- ✅ "Send an email" with no recipient → ask who
+- ❌ "Build a visualizer" → don't ask what kind, pick the best approach and build it
+- ❌ "Write a song" → don't ask the genre, choose one that fits what you know about them
+- ❌ "Make an image of X" → don't ask the style, generate something beautiful
+
+### Autonomous Resolution — Before Every Response
+1. Can I complete this without asking the user? → If yes: DO IT
+2. Do I need real-time data? → Call the tool, THEN respond
+3. Is this a build request? → Produce the full artifact
+4. Is this a creative request? → Create something and show it
+5. Is this a question? → Answer directly and completely
+
+### Memory: Learn From What Works
+After completing a complex task successfully, save how you did it:
+save_memory("Procedure: [task name] → [what I did step by step]")
+This makes you smarter every time, for every user.
+
 `
 // ── Tool definitions ──────────────────────────────────────────────────────────
 const SPARKIE_TOOLS = [
@@ -338,7 +374,7 @@ const SPARKIE_TOOLS = [
     type: 'function',
     function: {
       name: 'save_memory',
-      description: 'Save something important the user told you. Use proactively when the user shares something meaningful.',
+      description: 'Save important information about the user in three tiers: Facts (names, projects, deadlines), Preferences (writing style, tone, voice), Procedure (how you completed a task that worked - save AFTER every successful complex task). Format content as "[Tier]: [detail]".',
       parameters: {
         type: 'object',
         properties: {
@@ -1156,7 +1192,7 @@ export async function POST(req: NextRequest) {
       shouldBrief = awareness.shouldBrief && messages.length <= 2 // Only brief on session open
 
       if (memoriesText) {
-        systemContent += `\n\n## WHAT YOU REMEMBER ABOUT THIS PERSON\n${memoriesText}\n\nUse these memories naturally. Don't recite them — weave them in when relevant.`
+        systemContent += `\n\n## YOUR MEMORY ABOUT THIS PERSON\n${memoriesText}\n\nYour memory has three dimensions — use each appropriately:\n- **Facts**: Names, projects, deadlines, key details — reference when relevant\n- **Preferences**: Their voice, style, tone — shape how you communicate\n- **Procedures**: Execution paths that worked before — reuse them for similar tasks\n\nWeave memory in naturally. Don't recite it.`
       }
 
       // Inject structured identity files (USER / MEMORY / SESSION / HEARTBEAT)
@@ -1210,25 +1246,35 @@ Make it feel like walking into your friend's creative space and being genuinely 
 
     let finalMessages = [...recentMessages]
 
+    const MAX_TOOL_ROUNDS = 3
     if (useTools) {
-      // First call — may return tool_calls
-      const firstRes = await fetch(`${OPENCODE_BASE}/chat/completions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({
-          model, stream: false, temperature: 0.8, max_tokens: 2048,
-          tools: [...SPARKIE_TOOLS, ...connectorTools],
-          tool_choice: 'auto',
-          messages: [{ role: 'system', content: systemContent }, ...recentMessages],
-        }),
-      })
+      // Agent loop — up to MAX_TOOL_ROUNDS of tool execution
+      // Multi-round agent loop — up to MAX_TOOL_ROUNDS iterations
+      let loopMessages = [...recentMessages]
+      let round = 0
+      let usedTools = false
 
-      if (firstRes.ok) {
-        const firstData = await firstRes.json()
-        const choice = firstData.choices?.[0]
+      while (round < MAX_TOOL_ROUNDS) {
+        round++
+        const loopRes = await fetch(`${OPENCODE_BASE}/chat/completions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+          body: JSON.stringify({
+            model, stream: false, temperature: 0.8, max_tokens: 4096,
+            tools: [...SPARKIE_TOOLS, ...connectorTools],
+            tool_choice: 'auto',
+            messages: [{ role: 'system', content: systemContent }, ...loopMessages],
+          }),
+        })
+
+        if (!loopRes.ok) break
+
+        const loopData = await loopRes.json()
+        const choice = loopData.choices?.[0]
         const finishReason = choice?.finish_reason
 
         if (finishReason === 'tool_calls' && choice?.message?.tool_calls) {
+          usedTools = true
           const toolCalls = choice.message.tool_calls as Array<{
             id: string
             function: { name: string; arguments: string }
@@ -1240,7 +1286,6 @@ Make it feel like walking into your friend's creative space and being genuinely 
               let args: Record<string, unknown> = {}
               try { args = JSON.parse(tc.function.arguments) } catch { /* bad json */ }
               const result = await executeTool(tc.function.name, args, toolContext)
-              // Collect media results for post-processing
               if (result.startsWith('IMAGE_URL:') || result.startsWith('VIDEO_URL:') || result.startsWith('AUDIO_URL:')) {
                 toolMediaResults.push({ name: tc.function.name, result })
               }
@@ -1248,22 +1293,14 @@ Make it feel like walking into your friend's creative space and being genuinely 
             })
           )
 
-          finalMessages = [...recentMessages, choice.message, ...toolResults]
-          finalSystemContent = systemContent + `\n\nYou just used tools and got real results. Respond naturally — weave the information in conversationally. For any IMAGE_URL:/AUDIO_URL:/VIDEO_URL: results, the media block will be appended automatically — DO NOT repeat the URL in your text response.`
+          // Append assistant message + tool results, continue loop
+          loopMessages = [...loopMessages, choice.message, ...toolResults]
+
         } else if (finishReason === 'stop' && choice?.message?.content) {
-          // No tools needed — stream the response directly
+          // Model is done — no more tools needed
           const content: string = choice.message.content
           const encoder = new TextEncoder()
-          const stream = new ReadableStream({
-            start(controller) {
-              const chunks = content.match(/.{1,80}/g) ?? [content]
-              for (const chunk of chunks) {
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: chunk } }] })}\n\n`))
-              }
-              controller.enqueue(encoder.encode('data: [DONE]\n\n'))
-              controller.close()
-            },
-          })
+
           if (userId && messages.length >= 2) {
             const snap = messages.slice(-6).map((m: { role: string; content: string }) =>
               `${m.role === 'user' ? 'User' : 'Sparkie'}: ${m.content.slice(0, 400)}`
@@ -1273,10 +1310,35 @@ Make it feel like walking into your friend's creative space and being genuinely 
             const lastSparkie = messages.slice().reverse().find((m: { role: string; content: string }) => m.role === 'assistant')?.content ?? ''
             updateSessionFile(userId, lastUser, lastSparkie)
           }
+
+          // If media was collected, append blocks after text
+          let finalContent = content
+          if (toolMediaResults.length > 0) {
+            finalContent += injectMediaIntoContent('', toolMediaResults)
+          }
+
+          const stream = new ReadableStream({
+            start(controller) {
+              const chunks = finalContent.match(/.{1,80}/g) ?? [finalContent]
+              for (const chunk of chunks) {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: chunk } }] })}\n\n`))
+              }
+              controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+              controller.close()
+            },
+          })
           return new Response(stream, {
             headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
           })
+        } else {
+          break // unexpected finish reason
         }
+      }
+
+      // If we exhausted rounds with tool calls, set up for final streaming synthesis
+      if (usedTools) {
+        finalMessages = loopMessages
+        finalSystemContent = systemContent + `\n\nYou used tools across multiple steps and gathered real results. Synthesize everything into a complete, direct response. For any IMAGE_URL:/AUDIO_URL:/VIDEO_URL: results, the media block will be appended automatically — DO NOT repeat the URL in your text response.`
       }
     }
 
