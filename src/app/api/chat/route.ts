@@ -879,6 +879,7 @@ Make it feel like walking into your friend's creative space and being genuinely 
 
     // Await user's connector tools (was started in parallel with system prompt build)
     const connectorTools = await connectorToolsPromise
+    let finalSystemContent = systemContent
     if (connectorTools.length > 0) {
       const connectedAppNames = [...new Set(connectorTools.map((t) => t.function.name.split('_')[0].toLowerCase()))]
       finalSystemContent += `\n\n## USER'S CONNECTED APPS\nThis user has connected: ${connectedAppNames.join(', ')}. You have real tools to act on their behalf — read emails, post to their social, check their calendar. Use when they ask, or proactively when it would genuinely help.`
@@ -888,7 +889,6 @@ Make it feel like walking into your friend's creative space and being genuinely 
     const toolContext = { userId, tavilyKey, apiKey, doKey, baseUrl }
     const toolMediaResults: Array<{ name: string; result: string }> = []
 
-    let finalSystemContent = systemContent
     let finalMessages = [...recentMessages]
 
     if (useTools) {
