@@ -102,7 +102,7 @@ export type WorklogEntry = {
   duration?: number
 }
 
-export type IDETab = 'process' | 'files' | 'terminal' | 'worklog'
+export type IDETab = 'process' | 'files' | 'terminal' | 'worklog' | 'tasks'
 
 export type ContainerStatus =
   | 'idle'
