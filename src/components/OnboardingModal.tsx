@@ -121,6 +121,20 @@ export function OnboardingModal() {
       completedAt: new Date().toISOString(),
     }
     setUserProfile(profile)
+
+    // Persist to USER.md identity file — Sparkie reads this on every conversation
+    const userMd = [
+      `Name: ${profile.name}`,
+      `Role: ${profile.role}`,
+      `Building: ${profile.goals}`,
+      `Experience: ${profile.experience}`,
+      `Joined: ${new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" })}`,
+    ].join("\n")
+    fetch("/api/identity?type=user", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: userMd }),
+    }).catch(() => {/* non-fatal */})
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
