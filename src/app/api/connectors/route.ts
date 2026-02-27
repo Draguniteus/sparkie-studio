@@ -28,19 +28,18 @@ export async function GET(req: NextRequest) {
     const { searchParams } = req.nextUrl
     const action = searchParams.get('action') ?? 'apps'
 
+    // List user's active connections
     if (action === 'status') {
       const res = await fetch(
         `${COMPOSIO_BASE}/connectedAccounts?entityId=${entityId(userId)}&showActiveOnly=true`,
         { headers: composioHeaders() }
       )
-      if (!res.ok) {
-        return NextResponse.json({ connections: [] })
-      }
+      if (!res.ok) return NextResponse.json({ connections: [] })
       const data = await res.json() as { items?: Array<{ id: string; appName: string; status: string; createdAt: string }> }
       return NextResponse.json({ connections: data.items ?? [] })
     }
 
-    // action === 'apps' — browse/search the catalog
+    // Browse/search the app catalog
     const q = searchParams.get('q') ?? ''
     const cursor = searchParams.get('cursor') ?? ''
 
@@ -53,8 +52,7 @@ export async function GET(req: NextRequest) {
       const text = await res.text()
       return NextResponse.json({ error: `Composio error: ${res.status}`, detail: text }, { status: 500 })
     }
-    const data = await res.json()
-    return NextResponse.json(data)
+    return NextResponse.json(await res.json())
   } catch (err) {
     console.error('[connectors GET]', err)
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })
@@ -79,29 +77,44 @@ export async function POST(req: NextRequest) {
     if (body.action === 'connect') {
       if (!body.appName) return NextResponse.json({ error: 'appName required' }, { status: 400 })
 
+      // Step 1: Resolve integrationId for this app
+      const intRes = await fetch(
+        `${COMPOSIO_BASE}/integrations?appName=${encodeURIComponent(body.appName)}&limit=1`,
+        { headers: composioHeaders() }
+      )
+      if (!intRes.ok) {
+        const text = await intRes.text()
+        return NextResponse.json({ error: `Could not find integration for ${body.appName}: ${intRes.status}`, detail: text }, { status: intRes.status })
+      }
+      const intData = await intRes.json() as { items?: Array<{ id: string; name: string }> }
+      const integration = intData.items?.[0]
+      if (!integration) {
+        return NextResponse.json({ error: `No integration found for ${body.appName}` }, { status: 404 })
+      }
+
+      // Step 2: Create the connected account
       const host = req.headers.get('host') ?? 'localhost:3000'
       const proto = req.headers.get('x-forwarded-proto') ?? 'https'
       const redirectUri = `${proto}://${host}/connectors/callback`
 
-      // Let Composio pick the auth mode — don't specify authMode, it will default correctly per app
-      const res = await fetch(`${COMPOSIO_BASE}/connectedAccounts`, {
+      const connectRes = await fetch(`${COMPOSIO_BASE}/connectedAccounts`, {
         method: 'POST',
         headers: composioHeaders(),
         body: JSON.stringify({
-          appName: body.appName,
+          integrationId: integration.id,
           entityId: entityId(userId),
           redirectUri,
         }),
       })
 
-      if (!res.ok) {
-        const text = await res.text()
+      if (!connectRes.ok) {
+        const text = await connectRes.text()
         let detail = text
         try { detail = JSON.stringify(JSON.parse(text)) } catch {}
-        return NextResponse.json({ error: `Connection failed: ${res.status}`, detail }, { status: res.status })
+        return NextResponse.json({ error: `Connection failed: ${connectRes.status}`, detail }, { status: connectRes.status })
       }
 
-      const data = await res.json() as {
+      const data = await connectRes.json() as {
         redirectUrl?: string
         connectedAccountId?: string
         connectionStatus?: string
