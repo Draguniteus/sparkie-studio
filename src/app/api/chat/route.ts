@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import { getServerSession } from 'next-auth/next'
 import { authOptions } from '@/lib/auth'
 import { query } from '@/lib/db'
+import { loadIdentityFiles, buildIdentityBlock, updateSessionFile } from '@/lib/identity'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -1079,11 +1080,21 @@ export async function POST(req: NextRequest) {
     let shouldBrief = false
 
     if (userId) {
-      const [memoriesText, awareness] = await Promise.all([loadMemories(userId), getAwareness(userId)])
+      const [memoriesText, awareness, identityFiles] = await Promise.all([
+        loadMemories(userId),
+        getAwareness(userId),
+        loadIdentityFiles(userId),
+      ])
       shouldBrief = awareness.shouldBrief && messages.length <= 2 // Only brief on session open
 
       if (memoriesText) {
         systemContent += `\n\n## WHAT YOU REMEMBER ABOUT THIS PERSON\n${memoriesText}\n\nUse these memories naturally. Don't recite them — weave them in when relevant.`
+      }
+
+      // Inject structured identity files (USER / MEMORY / SESSION / HEARTBEAT)
+      const identityBlock = buildIdentityBlock(identityFiles, session?.user?.name ?? undefined)
+      if (identityBlock) {
+        systemContent += identityBlock
       }
 
       systemContent += `\n\n## RIGHT NOW\n- Time of day: ${awareness.timeLabel}\n- Sessions together: ${awareness.sessionCount}\n- Days since last visit: ${awareness.daysSince === 0 ? 'same day' : `${awareness.daysSince} day${awareness.daysSince === 1 ? '' : 's'} ago`}`
@@ -1190,6 +1201,9 @@ Make it feel like walking into your friend's creative space and being genuinely 
               `${m.role === 'user' ? 'User' : 'Sparkie'}: ${m.content.slice(0, 400)}`
             ).join('\n')
             extractAndSaveMemories(userId, snap, apiKey)
+            const lastUser = messages.slice().reverse().find((m: { role: string; content: string }) => m.role === 'user')?.content ?? ''
+            const lastSparkie = messages.slice().reverse().find((m: { role: string; content: string }) => m.role === 'assistant')?.content ?? ''
+            updateSessionFile(userId, lastUser, lastSparkie)
           }
           return new Response(stream, {
             headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
@@ -1221,6 +1235,9 @@ Make it feel like walking into your friend's creative space and being genuinely 
         `${m.role === 'user' ? 'User' : 'Sparkie'}: ${m.content.slice(0, 400)}`
       ).join('\n')
       extractAndSaveMemories(userId, snap, apiKey)
+      const lastUserMsg = messages.slice().reverse().find((m: { role: string; content: string }) => m.role === 'user')?.content ?? ''
+      const lastSparkieMsg = messages.slice().reverse().find((m: { role: string; content: string }) => m.role === 'assistant')?.content ?? ''
+      updateSessionFile(userId, lastUserMsg, lastSparkieMsg)
     }
 
     // If there are media results, we need to append them after the stream completes
