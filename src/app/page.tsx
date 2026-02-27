@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import { IDEPanel } from '@/components/layout/IDEPanel'
@@ -10,6 +10,7 @@ import { useAppStore } from '@/store/appStore'
 import { OnboardingModal } from '@/components/OnboardingModal'
 import { SettingsModal } from '@/components/layout/SettingsModal'
 import { applyTheme, loadTheme } from '@/utils/themeUtils'
+import { useSparkieOutreach } from '@/hooks/useSparkieOutreach'
 
 const MIN_IDE_WIDTH = 280
 const MAX_IDE_FRACTION = 0.75
@@ -33,6 +34,9 @@ export default function Home() {
       router.replace('/auth/signin')
     }
   }, [status, router])
+
+  // Sparkie proactive outreach — polls /api/agent every 60s when tab is focused
+  useSparkieOutreach(status === 'authenticated')
 
   const [ideWidth, setIdeWidth] = useState(DEFAULT_IDE_WIDTH)
   const [isDragging, setIsDragging] = useState(false)
