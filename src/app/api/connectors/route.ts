@@ -37,7 +37,6 @@ export async function GET(req: NextRequest) {
       )
       if (!res.ok) return NextResponse.json({ connections: [] })
       const data = await res.json() as { items?: Array<{ id: string; toolkit?: { slug: string; name: string }; status: string; created_at: string }> }
-      // Normalize to the shape the frontend expects
       const connections = (data.items ?? []).map(item => ({
         id: item.id,
         appName: item.toolkit?.slug ?? '',
@@ -47,7 +46,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ connections })
     }
 
-    // Browse/search the app catalog (v1 — still the correct catalog endpoint)
+    // Browse/search the app catalog (v1)
     const q = searchParams.get('q') ?? ''
     const cursor = searchParams.get('cursor') ?? ''
 
@@ -85,19 +84,33 @@ export async function POST(req: NextRequest) {
     if (body.action === 'connect') {
       if (!body.appName) return NextResponse.json({ error: 'appName required' }, { status: 400 })
 
-      // Step 1: Get Composio-managed auth config for this app (v3)
+      // Step 1: Find auth config for this app (v3)
+      // NOTE: Do NOT use &is_composio_managed=true — that filter excludes custom auth configs.
+      // Composio provides managed configs for Gmail, Notion, Slack, HubSpot etc.
+      // GitHub and Twitter REQUIRE custom configs (Twitter managed creds were removed by Composio).
+      // Without the filter, we get whichever config exists — managed or custom.
       const authConfigRes = await fetch(
-        `${V3}/auth_configs?toolkit_slug=${encodeURIComponent(body.appName)}&is_composio_managed=true&limit=1`,
+        `${V3}/auth_configs?toolkit_slug=${encodeURIComponent(body.appName)}&limit=1`,
         { headers: composioHeaders() }
       )
       if (!authConfigRes.ok) {
         const text = await authConfigRes.text()
-        return NextResponse.json({ error: `Could not find auth config for ${body.appName}`, detail: text }, { status: authConfigRes.status })
+        return NextResponse.json(
+          { error: `Could not fetch auth config for ${body.appName}`, detail: text },
+          { status: authConfigRes.status }
+        )
       }
-      const authConfigData = await authConfigRes.json() as { items?: Array<{ id: string; toolkit?: { slug: string } }> }
+      const authConfigData = await authConfigRes.json() as { items?: Array<{ id: string; toolkit?: { slug: string }; is_composio_managed?: boolean }> }
       const authConfig = authConfigData.items?.[0]
       if (!authConfig) {
-        return NextResponse.json({ error: `No auth config found for "${body.appName}". This app may not support automated OAuth — check your Composio dashboard.` }, { status: 404 })
+        // No config found — this app needs a custom auth config created in the Composio dashboard
+        return NextResponse.json(
+          {
+            error: `No auth config found for "${body.appName}".`,
+            detail: `This app requires a custom OAuth app. Go to https://app.composio.dev, find the ${body.appName} toolkit, and create an auth config using your own OAuth Client ID + Secret. The callback URL to use is: https://backend.composio.dev/api/v3/toolkits/auth/callback`,
+          },
+          { status: 404 }
+        )
       }
 
       // Step 2: Create connected account (v3)
@@ -120,8 +133,11 @@ export async function POST(req: NextRequest) {
       if (!connectRes.ok) {
         const text = await connectRes.text()
         let detail = text
-        try { detail = JSON.stringify(JSON.parse(text)) } catch {}
-        return NextResponse.json({ error: `Connection failed: ${connectRes.status}`, detail }, { status: connectRes.status })
+        try { detail = JSON.stringify(JSON.parse(text)) } catch { /* keep raw */ }
+        return NextResponse.json(
+          { error: `Connection failed: ${connectRes.status}`, detail },
+          { status: connectRes.status }
+        )
       }
 
       const data = await connectRes.json() as {
@@ -144,14 +160,17 @@ export async function POST(req: NextRequest) {
         headers: composioHeaders(),
       })
       if (!res.ok) {
-        // Fallback: try v1
+        // Fallback: v1
         const resV1 = await fetch(`${V1}/connectedAccounts/${body.connectedAccountId}`, {
           method: 'DELETE',
           headers: composioHeaders(),
         })
         if (!resV1.ok) {
           const text = await resV1.text()
-          return NextResponse.json({ error: `Disconnect failed: ${resV1.status}`, detail: text }, { status: resV1.status })
+          return NextResponse.json(
+            { error: `Disconnect failed: ${resV1.status}`, detail: text },
+            { status: resV1.status }
+          )
         }
       }
       return NextResponse.json({ success: true })
