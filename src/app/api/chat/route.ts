@@ -1562,25 +1562,25 @@ async function executeConnectorTool(
       GOOGLECALENDAR_DELETE_EVENT: `Delete calendar event: "${args.event_id ?? ''}"`,
     }
     const taskLabel = labelMap[actionSlug] ?? actionSlug
-    const taskId = \`task_\${Date.now()}_\${Math.random().toString(36).slice(2, 8)}\`
+    const taskId = `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
     try {
       await query(
-        \`INSERT INTO sparkie_tasks (id, user_id, action, label, payload, status, executor, trigger_type)
-         VALUES ($1, $2, $3, $4, $5, 'pending', 'human', 'manual')\`,
+        `INSERT INTO sparkie_tasks (id, user_id, action, label, payload, status, executor, trigger_type)
+         VALUES ($1, $2, $3, $4, $5, 'pending', 'human', 'manual')`,
         [taskId, userId, actionSlug, taskLabel, JSON.stringify(args)]
       )
-      return \`HITL_TASK:\${JSON.stringify({ id: taskId, action: actionSlug, label: taskLabel, payload: args })}\`
+      return `HITL_TASK:${JSON.stringify({ id: taskId, action: actionSlug, label: taskLabel, payload: args })}`
     } catch (e) {
-      return \`Failed to queue task: \${(e as Error).message}\`
+      return `Failed to queue task: ${(e as Error).message}`
     }
   }
 
   try {
     const apiKey = process.env.COMPOSIO_API_KEY
     if (!apiKey) return 'Connector not available'
-    const entityId = \`sparkie_user_\${userId}\`
+    const entityId = `sparkie_user_${userId}`
     const res = await fetch(
-      \`https://backend.composio.dev/api/v1/actions/execute/\${actionSlug}\`,
+      `https://backend.composio.dev/api/v1/actions/execute/${actionSlug}`,
       {
         method: 'POST',
         headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json' },
@@ -1590,18 +1590,17 @@ async function executeConnectorTool(
     )
     if (!res.ok) {
       const text = await res.text()
-      return \`Action failed (\${res.status}): \${text.slice(0, 200)}\`
+      return `Action failed (${res.status}): ${text.slice(0, 200)}`
     }
     const data = await res.json() as Record<string, unknown>
     return formatConnectorResponse(actionSlug, data)
   } catch (e) {
-    return \`Connector error: \${String(e)}\`
+    return `Connector error: ${String(e)}`
   }
 }
 
 function formatConnectorResponse(actionSlug: string, data: Record<string, unknown>): string {
   try {
-    // Gmail fetch emails
     if (actionSlug === 'GMAIL_FETCH_EMAILS') {
       const messages = (data?.data as Record<string,unknown>)?.messages as Array<Record<string,unknown>> ?? []
       if (!messages.length) return 'No emails found.'
@@ -1610,10 +1609,9 @@ function formatConnectorResponse(actionSlug: string, data: Record<string, unknow
         const from = m.sender ?? m.from ?? m.From ?? 'Unknown'
         const snippet = m.snippet ?? m.body ?? ''
         const date = m.date ?? m.Date ?? ''
-        return \`\${i+1}. **\${subj}**\n   From: \${from} | \${date}\n   \${String(snippet).slice(0, 120)}\`
+        return `${i+1}. **${subj}**\n   From: ${from} | ${date}\n   ${String(snippet).slice(0, 120)}`
       }).join('\n\n').slice(0, 3000)
     }
-    // Gmail get thread
     if (actionSlug === 'GMAIL_GET_THREAD') {
       const messages = (data?.data as Record<string,unknown>)?.messages as Array<Record<string,unknown>> ?? []
       if (!messages.length) return 'Thread not found.'
@@ -1621,32 +1619,28 @@ function formatConnectorResponse(actionSlug: string, data: Record<string, unknow
         const from = m.sender ?? m.from ?? 'Unknown'
         const body = m.body ?? m.snippet ?? ''
         const date = m.date ?? ''
-        return \`--- Message \${i+1} | \${from} | \${date} ---\n\${String(body).slice(0, 500)}\`
+        return `--- Message ${i+1} | ${from} | ${date} ---\n${String(body).slice(0, 500)}`
       }).join('\n\n').slice(0, 4000)
     }
-    // Gmail create draft
     if (actionSlug === 'GMAIL_CREATE_EMAIL_DRAFT') {
       const draftId = (data?.data as Record<string,unknown>)?.draft_id ?? (data?.data as Record<string,unknown>)?.id ?? 'created'
-      return \`Draft created. Draft ID: \${draftId}. The user can review and send from Gmail.\`
+      return `Draft created. Draft ID: ${draftId}. The user can review and send from Gmail.`
     }
-    // Calendar list events
     if (actionSlug === 'GOOGLECALENDAR_LIST_EVENTS') {
       const events = (data?.data as Record<string,unknown>)?.events as Array<Record<string,unknown>> ?? []
       if (!events.length) return 'No upcoming events found.'
       return events.map((e, i) => {
         const title = e.summary ?? e.title ?? '(untitled)'
-        const start = e.start?.dateTime ?? e.start?.date ?? e.startTime ?? ''
-        const loc = e.location ? \` @ \${e.location}\` : ''
-        return \`\${i+1}. **\${title}** — \${start}\${loc}\`
+        const start = (e.start as Record<string,unknown>)?.dateTime ?? (e.start as Record<string,unknown>)?.date ?? e.startTime ?? ''
+        const loc = e.location ? ` @ ${e.location}` : ''
+        return `${i+1}. **${title}** — ${start}${loc}`
       }).join('\n').slice(0, 2000)
     }
-    // Calendar find free slots
     if (actionSlug === 'GOOGLECALENDAR_FIND_FREE_SLOTS') {
       const slots = (data?.data as Record<string,unknown>)?.free_slots as Array<Record<string,unknown>> ?? []
       if (!slots.length) return 'No free slots found for that day.'
-      return 'Free slots:\n' + (slots as Array<Record<string,unknown>>).map((s: Record<string,unknown>) => \`  • \${s.start ?? ''} – \${s.end ?? ''}\`).join('\n')
+      return 'Free slots:\n' + slots.map((s) => `  • ${s.start ?? ''} – ${s.end ?? ''}`).join('\n')
     }
-    // Default: clean JSON with depth limit
     return JSON.stringify(data, null, 2).slice(0, 2000)
   } catch {
     return JSON.stringify(data).slice(0, 2000)
