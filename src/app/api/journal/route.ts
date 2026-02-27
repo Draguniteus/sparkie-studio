@@ -2,11 +2,21 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { query } from '@/lib/db'
-import bcrypt from 'bcryptjs'
+import crypto from 'crypto'
 
 export const runtime = 'nodejs'
 
-// Auto-create table on first use
+// PBKDF2-based passcode hashing — no external dependencies
+function hashPasscode(passcode: string): string {
+  const salt = 'sparkie_journal_salt_v1'
+  return crypto.pbkdf2Sync(passcode, salt, 100000, 32, 'sha256').toString('hex')
+}
+
+function verifyPasscode(passcode: string, hash: string): boolean {
+  return hashPasscode(passcode) === hash
+}
+
+// Auto-create tables on first use
 async function ensureTable() {
   await query(`
     CREATE TABLE IF NOT EXISTS dream_journal (
@@ -52,7 +62,7 @@ export async function GET(req: Request) {
   return NextResponse.json({ entries: res.rows })
 }
 
-// POST /api/journal — action: create | set_passcode | verify_passcode | delete
+// POST /api/journal — action: create | set_passcode | verify_passcode | delete | update | remove_passcode
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions)
   if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -62,10 +72,10 @@ export async function POST(req: Request) {
 
   if (action === 'set_passcode') {
     const { passcode } = body
-    if (!passcode || passcode.length < 4 || passcode.length > 6) {
+    if (!passcode || String(passcode).length < 4 || String(passcode).length > 6) {
       return NextResponse.json({ error: 'Passcode must be 4-6 digits' }, { status: 400 })
     }
-    const hash = await bcrypt.hash(passcode, 10)
+    const hash = hashPasscode(String(passcode))
     await query(
       `INSERT INTO dream_journal_lock (user_id, passcode_hash) VALUES ($1, $2)
        ON CONFLICT (user_id) DO UPDATE SET passcode_hash = $2`,
@@ -81,7 +91,7 @@ export async function POST(req: Request) {
       [session.user.email]
     )
     if (!res.rows.length) return NextResponse.json({ valid: false })
-    const valid = await bcrypt.compare(String(passcode), res.rows[0].passcode_hash)
+    const valid = verifyPasscode(String(passcode), res.rows[0].passcode_hash)
     return NextResponse.json({ valid })
   }
 
@@ -92,7 +102,7 @@ export async function POST(req: Request) {
       [session.user.email]
     )
     if (!res.rows.length) return NextResponse.json({ error: 'No passcode set' }, { status: 400 })
-    const valid = await bcrypt.compare(String(passcode), res.rows[0].passcode_hash)
+    const valid = verifyPasscode(String(passcode), res.rows[0].passcode_hash)
     if (!valid) return NextResponse.json({ error: 'Wrong passcode' }, { status: 403 })
     await query('DELETE FROM dream_journal_lock WHERE user_id = $1', [session.user.email])
     return NextResponse.json({ success: true })
