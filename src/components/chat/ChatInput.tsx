@@ -26,6 +26,8 @@ const SLASH_COMMANDS = [
   { cmd: '/startradio', desc: 'Start Sparkie Radio' },
   { cmd: '/stopradio',  desc: 'Stop the radio' },
   { cmd: '/weather',    desc: 'Get your local weather forecast' },
+  { cmd: '/journal',    desc: 'Search or discuss your Dream Journal entries' },
+  { cmd: '/dream',      desc: 'Add a dream or entry to your Dream Journal' },
 ] as const
 
 const MODELS = [

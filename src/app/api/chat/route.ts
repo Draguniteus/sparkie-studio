@@ -411,6 +411,37 @@ const SPARKIE_TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'journal_search',
+      description: "Search the user's Dream Journal entries. Use when the user asks Sparkie to recall, discuss, or pull something from their journal. Can search by title, content keywords, or filter by category (night_dreams, vision_board, goals, custom).",
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Keywords to search for in title or content' },
+          category: { type: 'string', enum: ['night_dreams', 'vision_board', 'goals', 'custom', ''], description: 'Filter by category (optional)' },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'journal_add',
+      description: "Add a new entry to the user's Dream Journal on their behalf. Use when the user asks Sparkie to add, record, or log something to their journal from chat.",
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Entry title (required)' },
+          content: { type: 'string', description: 'Entry body text' },
+          category: { type: 'string', enum: ['night_dreams', 'vision_board', 'goals', 'custom'], description: 'Which category to file this under' },
+        },
+        required: ['title', 'content', 'category'],
+      },
+    },
+  },
 ]
 
 // ── Memory helpers ─────────────────────────────────────────────────────────────
@@ -805,6 +836,43 @@ async function executeTool(
         const d = await res.json()
         const results = (d.results ?? []).slice(0, 5) as Array<{ title: string; content: string; url: string }>
         return results.map((r) => `${r.title}\n${r.content.slice(0, 200)}\n${r.url}`).join('\n\n')
+      }
+
+
+      case 'journal_search': {
+        if (!userId) return 'Dream Journal not available — user not logged in'
+        const q = (args.query as string | undefined) || ''
+        const cat = (args.category as string | undefined) || ''
+        let sql = `SELECT id, title, content, category, created_at FROM dream_journal WHERE user_id = $1`
+        const params: string[] = [userId]
+        if (q) {
+          params.push(`%${q}%`)
+          sql += ` AND (LOWER(title) LIKE LOWER($${params.length}) OR LOWER(content) LIKE LOWER($${params.length}))`
+        }
+        if (cat) {
+          params.push(cat)
+          sql += ` AND category = $${params.length}`
+        }
+        sql += ` ORDER BY created_at DESC LIMIT 5`
+        const res = await query<{ id: string; title: string; content: string; category: string; created_at: string }>(sql, params)
+        if (!res.rows.length) return q ? `No journal entries found matching "${q}".` : 'No journal entries yet.'
+        const stripHtml = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+        return res.rows.map((e, i) =>
+          `[${i + 1}] "${e.title}" (${e.category.replace('_', ' ')}) — ${new Date(e.created_at).toLocaleDateString()}\n${stripHtml(e.content).slice(0, 400)}`
+        ).join('\n\n')
+      }
+
+      case 'journal_add': {
+        if (!userId) return 'Dream Journal not available — user not logged in'
+        const title = (args.title as string)?.trim()
+        const content = (args.content as string)?.trim()
+        const category = (args.category as string) || 'night_dreams'
+        if (!title || !content) return 'Title and content are both required to add a journal entry.'
+        await query(
+          `INSERT INTO dream_journal (user_id, title, content, category) VALUES ($1, $2, $3, $4)`,
+          [userId, title, content, category]
+        )
+        return `✓ Added to your ${category.replace('_', ' ')} journal: "${title}"`
       }
 
       default:
