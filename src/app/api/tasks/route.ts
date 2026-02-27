@@ -13,10 +13,19 @@ async function ensureTable() {
     label TEXT NOT NULL,
     payload JSONB NOT NULL DEFAULT '{}',
     status TEXT NOT NULL DEFAULT 'pending',
+    executor TEXT NOT NULL DEFAULT 'human',
+    trigger_type TEXT DEFAULT 'manual',
+    trigger_config JSONB DEFAULT '{}',
+    scheduled_at TIMESTAMPTZ,
+    why_human TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     resolved_at TIMESTAMPTZ
   )`)
   await query(`CREATE INDEX IF NOT EXISTS idx_sparkie_tasks_user ON sparkie_tasks(user_id, status)`)
+  // Add missing columns to existing tables gracefully
+  await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS executor TEXT NOT NULL DEFAULT 'human'`).catch(() => {})
+  await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS trigger_type TEXT DEFAULT 'manual'`).catch(() => {})
+  await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMPTZ`).catch(() => {})
 }
 
 // POST /api/tasks — create a new pending task
@@ -45,7 +54,8 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// GET /api/tasks?id=xxx — get task status
+// GET /api/tasks?id=xxx — get single task
+// GET /api/tasks?status=all|pending&limit=N — list tasks for TaskQueuePanel
 export async function GET(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
@@ -54,20 +64,49 @@ export async function GET(req: NextRequest) {
 
     await ensureTable()
     const id = req.nextUrl.searchParams.get('id')
-    if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
+    const statusFilter = req.nextUrl.searchParams.get('status')
+    const limit = Math.min(parseInt(req.nextUrl.searchParams.get('limit') ?? '30'), 100)
 
-    const res = await query<{ id: string; status: string; action: string; label: string; payload: unknown }>(
-      `SELECT id, status, action, label, payload FROM sparkie_tasks WHERE id = $1 AND user_id = $2`,
-      [id, userId]
+    // Single task lookup
+    if (id) {
+      const res = await query<{ id: string; status: string; action: string; label: string; payload: unknown }>(
+        `SELECT id, status, action, label, payload FROM sparkie_tasks WHERE id = $1 AND user_id = $2`,
+        [id, userId]
+      )
+      if (res.rows.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+      return NextResponse.json(res.rows[0])
+    }
+
+    // List tasks for queue panel
+    let whereClause = 'user_id = $1'
+    const params: unknown[] = [userId]
+
+    if (statusFilter && statusFilter !== 'all') {
+      whereClause += ' AND status = $2'
+      params.push(statusFilter)
+    } else {
+      // Default: show recent tasks (all statuses, last 7 days)
+      whereClause += ` AND created_at > NOW() - INTERVAL '7 days'`
+    }
+
+    const res = await query(
+      `SELECT id, label, action, status, executor, trigger_type, scheduled_at, created_at, resolved_at, payload
+       FROM sparkie_tasks WHERE ${whereClause}
+       ORDER BY
+         CASE status WHEN 'pending' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END,
+         created_at DESC
+       LIMIT $${params.length + 1}`,
+      [...params, limit]
     )
-    if (res.rows.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-    return NextResponse.json(res.rows[0])
+
+    return NextResponse.json({ tasks: res.rows })
   } catch (e) {
+    console.error('tasks GET error:', e)
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })
   }
 }
 
-// PATCH /api/tasks — respond to a task (approve/reject)
+// PATCH /api/tasks — respond to a task (approve/reject) or update status
 export async function PATCH(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
@@ -75,20 +114,27 @@ export async function PATCH(req: NextRequest) {
     if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     await ensureTable()
-    const { id, status } = await req.json() as { id: string; status: 'approved' | 'rejected' }
-    if (!id || !['approved', 'rejected'].includes(status)) {
-      return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
+    const { id, status } = await req.json() as { id: string; status: string }
+    if (!id || !status) return NextResponse.json({ error: 'Missing id or status' }, { status: 400 })
+
+    const validStatuses = ['approved', 'rejected', 'completed', 'failed', 'skipped', 'pending']
+    if (!validStatuses.includes(status)) {
+      return NextResponse.json({ error: 'Invalid status' }, { status: 400 })
     }
 
-    const res = await query(
-      `UPDATE sparkie_tasks SET status = $1, resolved_at = NOW()
-       WHERE id = $2 AND user_id = $3 AND status = 'pending'
-       RETURNING id, status, action, label, payload`,
-      [status, id, userId]
+    // Map approved → completed for human tasks
+    const resolvedStatus = status === 'approved' ? 'completed' : status === 'rejected' ? 'skipped' : status
+    const setResolved = ['completed', 'skipped', 'failed'].includes(resolvedStatus)
+
+    await query(
+      `UPDATE sparkie_tasks SET status = $1 ${setResolved ? ', resolved_at = NOW()' : ''}
+       WHERE id = $2 AND user_id = $3`,
+      [resolvedStatus, id, userId]
     )
-    if (res.rows.length === 0) return NextResponse.json({ error: 'Task not found or already resolved' }, { status: 404 })
-    return NextResponse.json(res.rows[0])
+
+    return NextResponse.json({ ok: true, status: resolvedStatus })
   } catch (e) {
+    console.error('tasks PATCH error:', e)
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })
   }
 }
