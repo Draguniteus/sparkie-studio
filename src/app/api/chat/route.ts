@@ -1443,17 +1443,56 @@ const CONNECTOR_TOOL_CATALOG: Record<string, {
       required: ['channel_id', 'message'],
     },
   },
+  GMAIL_REPLY_EMAIL: {
+    description: "Reply to an existing Gmail email thread. HITL-gated — queues for user approval before sending.",
+    actionSlug: 'GMAIL_REPLY_EMAIL',
+    parameters: {
+      type: 'object',
+      properties: {
+        thread_id: { type: 'string', description: 'Gmail thread ID to reply to' },
+        body: { type: 'string', description: 'Reply body (plain text or HTML)' },
+        subject: { type: 'string', description: 'Subject line (optional — usually inherited from thread)' },
+      },
+      required: ['thread_id', 'body'],
+    },
+  },
+  GOOGLECALENDAR_UPDATE_EVENT: {
+    description: "Update an existing Google Calendar event. HITL-gated — queues for user approval.",
+    actionSlug: 'GOOGLECALENDAR_UPDATE_EVENT',
+    parameters: {
+      type: 'object',
+      properties: {
+        event_id: { type: 'string', description: 'Google Calendar event ID' },
+        summary: { type: 'string', description: 'New event title' },
+        start_datetime: { type: 'string', description: 'New start time in ISO 8601 format' },
+        end_datetime: { type: 'string', description: 'New end time in ISO 8601 format' },
+        description: { type: 'string', description: 'Updated description' },
+      },
+      required: ['event_id'],
+    },
+  },
+  GOOGLECALENDAR_DELETE_EVENT: {
+    description: "Delete a Google Calendar event. HITL-gated — queues for user approval before deleting.",
+    actionSlug: 'GOOGLECALENDAR_DELETE_EVENT',
+    parameters: {
+      type: 'object',
+      properties: {
+        event_id: { type: 'string', description: 'Google Calendar event ID to delete' },
+      },
+      required: ['event_id'],
+    },
+  },
 }
 
 // App name → tool slugs mapping
 const APP_TOOLS: Record<string, string[]> = {
-  gmail: ['GMAIL_FETCH_EMAILS', 'GMAIL_SEND_EMAIL', 'GMAIL_GET_THREAD', 'GMAIL_CREATE_EMAIL_DRAFT'],
+  gmail: ['GMAIL_FETCH_EMAILS', 'GMAIL_SEND_EMAIL', 'GMAIL_REPLY_EMAIL', 'GMAIL_GET_THREAD', 'GMAIL_CREATE_EMAIL_DRAFT'],
   twitter: ['TWITTER_CREATE_TWEET', 'TWITTER_USER_LOOKUP_ME'],
   instagram: ['INSTAGRAM_CREATE_PHOTO_POST'],
   github: ['GITHUB_LIST_REPOSITORIES', 'GITHUB_CREATE_ISSUE'],
   slack: ['SLACK_SEND_MESSAGE'],
   tiktok: ['TIKTOK_CREATE_POST'],
-  'google-calendar': ['GOOGLECALENDAR_CREATE_EVENT', 'GOOGLECALENDAR_LIST_EVENTS', 'GOOGLECALENDAR_FIND_FREE_SLOTS'],
+  'google-calendar': ['GOOGLECALENDAR_CREATE_EVENT', 'GOOGLECALENDAR_UPDATE_EVENT', 'GOOGLECALENDAR_DELETE_EVENT', 'GOOGLECALENDAR_LIST_EVENTS', 'GOOGLECALENDAR_FIND_FREE_SLOTS'],
   reddit: ['REDDIT_CREATE_POST', 'REDDIT_GET_TOP_POSTS_OF_SUBREDDIT'],
   youtube: ['YOUTUBE_LIST_VIDEO'],
   discord: ['DISCORD_SEND_MESSAGE'],
@@ -1499,17 +1538,49 @@ async function getUserConnectorTools(userId: string): Promise<Array<{
   } catch { return [] }
 }
 
+// Tools that must go through HITL (create_task) — never execute directly
+const HITL_GATED_CONNECTOR_TOOLS = new Set([
+  'GMAIL_SEND_EMAIL',
+  'GMAIL_REPLY_EMAIL',
+  'GOOGLECALENDAR_CREATE_EVENT',
+  'GOOGLECALENDAR_UPDATE_EVENT',
+  'GOOGLECALENDAR_DELETE_EVENT',
+])
+
 async function executeConnectorTool(
   actionSlug: string,
   args: Record<string, unknown>,
   userId: string
 ): Promise<string> {
+  // Gate irreversible actions through HITL
+  if (HITL_GATED_CONNECTOR_TOOLS.has(actionSlug)) {
+    const labelMap: Record<string, string> = {
+      GMAIL_SEND_EMAIL: `Send email to ${args.to ?? 'recipient'}: "${args.subject ?? ''}"`,
+      GMAIL_REPLY_EMAIL: `Reply to email thread: "${args.subject ?? args.thread_id ?? ''}"`,
+      GOOGLECALENDAR_CREATE_EVENT: `Create calendar event: "${args.summary ?? ''}" on ${args.start_datetime ?? ''}`,
+      GOOGLECALENDAR_UPDATE_EVENT: `Update calendar event: "${args.summary ?? args.event_id ?? ''}"`,
+      GOOGLECALENDAR_DELETE_EVENT: `Delete calendar event: "${args.event_id ?? ''}"`,
+    }
+    const taskLabel = labelMap[actionSlug] ?? actionSlug
+    const taskId = \`task_\${Date.now()}_\${Math.random().toString(36).slice(2, 8)}\`
+    try {
+      await query(
+        \`INSERT INTO sparkie_tasks (id, user_id, action, label, payload, status, executor, trigger_type)
+         VALUES ($1, $2, $3, $4, $5, 'pending', 'human', 'manual')\`,
+        [taskId, userId, actionSlug, taskLabel, JSON.stringify(args)]
+      )
+      return \`HITL_TASK:\${JSON.stringify({ id: taskId, action: actionSlug, label: taskLabel, payload: args })}\`
+    } catch (e) {
+      return \`Failed to queue task: \${(e as Error).message}\`
+    }
+  }
+
   try {
     const apiKey = process.env.COMPOSIO_API_KEY
     if (!apiKey) return 'Connector not available'
-    const entityId = `sparkie_user_${userId}`
+    const entityId = \`sparkie_user_\${userId}\`
     const res = await fetch(
-      `https://backend.composio.dev/api/v1/actions/execute/${actionSlug}`,
+      \`https://backend.composio.dev/api/v1/actions/execute/\${actionSlug}\`,
       {
         method: 'POST',
         headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json' },
@@ -1519,12 +1590,66 @@ async function executeConnectorTool(
     )
     if (!res.ok) {
       const text = await res.text()
-      return `Action failed (${res.status}): ${text.slice(0, 200)}`
+      return \`Action failed (\${res.status}): \${text.slice(0, 200)}\`
     }
-    const data = await res.json()
-    return JSON.stringify(data).slice(0, 2000)
+    const data = await res.json() as Record<string, unknown>
+    return formatConnectorResponse(actionSlug, data)
   } catch (e) {
-    return `Connector error: ${String(e)}`
+    return \`Connector error: \${String(e)}\`
+  }
+}
+
+function formatConnectorResponse(actionSlug: string, data: Record<string, unknown>): string {
+  try {
+    // Gmail fetch emails
+    if (actionSlug === 'GMAIL_FETCH_EMAILS') {
+      const messages = (data?.data as Record<string,unknown>)?.messages as Array<Record<string,unknown>> ?? []
+      if (!messages.length) return 'No emails found.'
+      return messages.map((m, i) => {
+        const subj = m.subject ?? m.Subject ?? '(no subject)'
+        const from = m.sender ?? m.from ?? m.From ?? 'Unknown'
+        const snippet = m.snippet ?? m.body ?? ''
+        const date = m.date ?? m.Date ?? ''
+        return \`\${i+1}. **\${subj}**\n   From: \${from} | \${date}\n   \${String(snippet).slice(0, 120)}\`
+      }).join('\n\n').slice(0, 3000)
+    }
+    // Gmail get thread
+    if (actionSlug === 'GMAIL_GET_THREAD') {
+      const messages = (data?.data as Record<string,unknown>)?.messages as Array<Record<string,unknown>> ?? []
+      if (!messages.length) return 'Thread not found.'
+      return messages.map((m, i) => {
+        const from = m.sender ?? m.from ?? 'Unknown'
+        const body = m.body ?? m.snippet ?? ''
+        const date = m.date ?? ''
+        return \`--- Message \${i+1} | \${from} | \${date} ---\n\${String(body).slice(0, 500)}\`
+      }).join('\n\n').slice(0, 4000)
+    }
+    // Gmail create draft
+    if (actionSlug === 'GMAIL_CREATE_EMAIL_DRAFT') {
+      const draftId = (data?.data as Record<string,unknown>)?.draft_id ?? (data?.data as Record<string,unknown>)?.id ?? 'created'
+      return \`Draft created. Draft ID: \${draftId}. The user can review and send from Gmail.\`
+    }
+    // Calendar list events
+    if (actionSlug === 'GOOGLECALENDAR_LIST_EVENTS') {
+      const events = (data?.data as Record<string,unknown>)?.events as Array<Record<string,unknown>> ?? []
+      if (!events.length) return 'No upcoming events found.'
+      return events.map((e, i) => {
+        const title = e.summary ?? e.title ?? '(untitled)'
+        const start = e.start?.dateTime ?? e.start?.date ?? e.startTime ?? ''
+        const loc = e.location ? \` @ \${e.location}\` : ''
+        return \`\${i+1}. **\${title}** — \${start}\${loc}\`
+      }).join('\n').slice(0, 2000)
+    }
+    // Calendar find free slots
+    if (actionSlug === 'GOOGLECALENDAR_FIND_FREE_SLOTS') {
+      const slots = (data?.data as Record<string,unknown>)?.free_slots as Array<Record<string,unknown>> ?? []
+      if (!slots.length) return 'No free slots found for that day.'
+      return 'Free slots:\n' + (slots as Array<Record<string,unknown>>).map((s: Record<string,unknown>) => \`  • \${s.start ?? ''} – \${s.end ?? ''}\`).join('\n')
+    }
+    // Default: clean JSON with depth limit
+    return JSON.stringify(data, null, 2).slice(0, 2000)
+  } catch {
+    return JSON.stringify(data).slice(0, 2000)
   }
 }
 
