@@ -4,7 +4,8 @@ import { authOptions } from '@/lib/auth'
 
 export const runtime = 'nodejs'
 
-const COMPOSIO_BASE = 'https://backend.composio.dev/api/v1'
+const V1 = 'https://backend.composio.dev/api/v1'
+const V3 = 'https://backend.composio.dev/api/v3'
 
 function composioHeaders() {
   return {
@@ -28,22 +29,29 @@ export async function GET(req: NextRequest) {
     const { searchParams } = req.nextUrl
     const action = searchParams.get('action') ?? 'apps'
 
-    // List user's active connections
+    // List user's active connections (v3)
     if (action === 'status') {
       const res = await fetch(
-        `${COMPOSIO_BASE}/connectedAccounts?entityId=${entityId(userId)}&showActiveOnly=true`,
+        `${V3}/connected_accounts?user_id=${entityId(userId)}&status=ACTIVE`,
         { headers: composioHeaders() }
       )
       if (!res.ok) return NextResponse.json({ connections: [] })
-      const data = await res.json() as { items?: Array<{ id: string; appName: string; status: string; createdAt: string }> }
-      return NextResponse.json({ connections: data.items ?? [] })
+      const data = await res.json() as { items?: Array<{ id: string; toolkit?: { slug: string; name: string }; status: string; created_at: string }> }
+      // Normalize to the shape the frontend expects
+      const connections = (data.items ?? []).map(item => ({
+        id: item.id,
+        appName: item.toolkit?.slug ?? '',
+        status: item.status,
+        createdAt: item.created_at,
+      }))
+      return NextResponse.json({ connections })
     }
 
-    // Browse/search the app catalog
+    // Browse/search the app catalog (v1 — still the correct catalog endpoint)
     const q = searchParams.get('q') ?? ''
     const cursor = searchParams.get('cursor') ?? ''
 
-    let url = `${COMPOSIO_BASE}/apps?limit=50`
+    let url = `${V1}/apps?limit=50`
     if (q) url += `&query=${encodeURIComponent(q)}`
     if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`
 
@@ -60,7 +68,7 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/connectors
-// body: { action: 'connect', appName: 'gmail' }
+// body: { action: 'connect', appName: 'github' }
 //     | { action: 'disconnect', connectedAccountId: 'xxx' }
 export async function POST(req: NextRequest) {
   try {
@@ -77,33 +85,35 @@ export async function POST(req: NextRequest) {
     if (body.action === 'connect') {
       if (!body.appName) return NextResponse.json({ error: 'appName required' }, { status: 400 })
 
-      // Step 1: Resolve integrationId for this app
-      const intRes = await fetch(
-        `${COMPOSIO_BASE}/integrations?appName=${encodeURIComponent(body.appName)}&limit=1`,
+      // Step 1: Get Composio-managed auth config for this app (v3)
+      const authConfigRes = await fetch(
+        `${V3}/auth_configs?toolkit_slug=${encodeURIComponent(body.appName)}&is_composio_managed=true&limit=1`,
         { headers: composioHeaders() }
       )
-      if (!intRes.ok) {
-        const text = await intRes.text()
-        return NextResponse.json({ error: `Could not find integration for ${body.appName}: ${intRes.status}`, detail: text }, { status: intRes.status })
+      if (!authConfigRes.ok) {
+        const text = await authConfigRes.text()
+        return NextResponse.json({ error: `Could not find auth config for ${body.appName}`, detail: text }, { status: authConfigRes.status })
       }
-      const intData = await intRes.json() as { items?: Array<{ id: string; name: string }> }
-      const integration = intData.items?.[0]
-      if (!integration) {
-        return NextResponse.json({ error: `No integration found for ${body.appName}` }, { status: 404 })
+      const authConfigData = await authConfigRes.json() as { items?: Array<{ id: string; toolkit?: { slug: string } }> }
+      const authConfig = authConfigData.items?.[0]
+      if (!authConfig) {
+        return NextResponse.json({ error: `No managed auth config found for "${body.appName}". This app may require manual OAuth setup.` }, { status: 404 })
       }
 
-      // Step 2: Create the connected account
+      // Step 2: Create connected account (v3)
       const host = req.headers.get('host') ?? 'localhost:3000'
       const proto = req.headers.get('x-forwarded-proto') ?? 'https'
       const redirectUri = `${proto}://${host}/connectors/callback`
 
-      const connectRes = await fetch(`${COMPOSIO_BASE}/connectedAccounts`, {
+      const connectRes = await fetch(`${V3}/connected_accounts`, {
         method: 'POST',
         headers: composioHeaders(),
         body: JSON.stringify({
-          integrationId: integration.id,
-          entityId: entityId(userId),
-          redirectUri,
+          auth_config: { id: authConfig.id },
+          connection: {
+            user_id: entityId(userId),
+            redirect_uri: redirectUri,
+          },
         }),
       })
 
@@ -115,26 +125,34 @@ export async function POST(req: NextRequest) {
       }
 
       const data = await connectRes.json() as {
-        redirectUrl?: string
-        connectedAccountId?: string
-        connectionStatus?: string
+        redirect_url?: string
+        id?: string
+        status?: string
       }
       return NextResponse.json({
-        authUrl: data.redirectUrl,
-        connectedAccountId: data.connectedAccountId,
-        status: data.connectionStatus,
+        authUrl: data.redirect_url,
+        connectedAccountId: data.id,
+        status: data.status,
       })
     }
 
     if (body.action === 'disconnect') {
       if (!body.connectedAccountId) return NextResponse.json({ error: 'connectedAccountId required' }, { status: 400 })
-      const res = await fetch(`${COMPOSIO_BASE}/connectedAccounts/${body.connectedAccountId}`, {
+      // v3 delete
+      const res = await fetch(`${V3}/connected_accounts/${body.connectedAccountId}`, {
         method: 'DELETE',
         headers: composioHeaders(),
       })
       if (!res.ok) {
-        const text = await res.text()
-        return NextResponse.json({ error: `Disconnect failed: ${res.status}`, detail: text }, { status: res.status })
+        // Fallback: try v1
+        const resV1 = await fetch(`${V1}/connectedAccounts/${body.connectedAccountId}`, {
+          method: 'DELETE',
+          headers: composioHeaders(),
+        })
+        if (!resV1.ok) {
+          const text = await resV1.text()
+          return NextResponse.json({ error: `Disconnect failed: ${resV1.status}`, detail: text }, { status: resV1.status })
+        }
       }
       return NextResponse.json({ success: true })
     }
