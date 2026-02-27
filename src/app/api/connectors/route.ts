@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
 
       // Step 1: Get Composio-managed auth config for this app (v3)
       const authConfigRes = await fetch(
-        `${V3}/auth_configs?toolkit_slug=${encodeURIComponent(body.appName)}&limit=1`,
+        `${V3}/auth_configs?toolkit_slug=${encodeURIComponent(body.appName)}&is_composio_managed=true&limit=1`,
         { headers: composioHeaders() }
       )
       if (!authConfigRes.ok) {
