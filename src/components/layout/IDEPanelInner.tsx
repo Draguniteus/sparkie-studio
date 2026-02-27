@@ -9,6 +9,7 @@ import { Preview } from "@/components/ide/Preview"
 import { LiveCodeView } from "@/components/ide/LiveCodeView"
 import { Terminal } from "@/components/ide/Terminal"
 import { Download, ChevronLeft, ChevronRight } from "lucide-react"
+import { TaskQueuePanel } from "@/components/ide/TaskQueuePanel"
 
 
 function WorklogPanel() {
@@ -170,7 +171,8 @@ export function IDEPanelInner() {
 
   const tabs = [
     { id: 'process',  label: 'Process'  },
-    { id: 'worklog',   label: 'Worklog'   },
+    { id: 'worklog',  label: 'Worklog'  },
+    { id: 'tasks',    label: 'Tasks'    },
     { id: 'files',    label: 'Files'    },
     { id: 'terminal', label: 'Terminal' },
   ] as const
@@ -211,6 +213,9 @@ export function IDEPanelInner() {
       <div className="flex-1 overflow-hidden">
         {ideTab === 'worklog' && (
           <WorklogPanel />
+        )}
+        {ideTab === 'tasks' && (
+          <TaskQueuePanel />
         )}
         {ideTab === 'process' && (
           <div className="h-full">
