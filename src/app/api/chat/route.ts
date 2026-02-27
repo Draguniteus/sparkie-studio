@@ -208,19 +208,19 @@ This should feel like a real friend catching up, not a dashboard report.
 When you generate or display media, use these exact formats in your response:
 
 For images:
-\\`\\`\\`image
+\`\`\`image
 https://image.url.here
-\\`\\`\\`
+\`\`\`
 
 For audio/music:
-\\`\\`\\`audio
+\`\`\`audio
 https://audio.url.here|Track Title — Artist
-\\`\\`\\`
+\`\`\`
 
 For video:
-\\`\\`\\`video
+\`\`\`video
 https://video.url.here
-\\`\\`\\`
+\`\`\`
 `
 // ── Tool definitions ──────────────────────────────────────────────────────────
 const SPARKIE_TOOLS = [
