@@ -960,7 +960,35 @@ const SPARKIE_TOOLS = [
 ]
 
 // ── Memory helpers ─────────────────────────────────────────────────────────────
-async function loadMemories(userId: string): Promise<string> {
+async function loadMemories(userId: string, queryText?: string): Promise<string> {
+  // ── Supermemory semantic retrieval (if configured) ──────────────────────────
+  const smKey = process.env.SUPERMEMORY_API_KEY
+  if (smKey && queryText) {
+    try {
+      const smRes = await fetch('https://api.supermemory.ai/v3/profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${smKey}` },
+        body: JSON.stringify({ containerTag: userId, q: queryText }),
+        signal: AbortSignal.timeout(4000),
+      })
+      if (smRes.ok) {
+        const sm = await smRes.json() as {
+          profile?: { static?: string[]; dynamic?: string[] }
+          searchResults?: { results?: Array<{ memory?: string }> }
+        }
+        const parts: string[] = []
+        const staticFacts = sm.profile?.static?.filter(Boolean) ?? []
+        const dynamicCtx  = sm.profile?.dynamic?.filter(Boolean) ?? []
+        const relevant    = sm.searchResults?.results?.slice(0, 8).map(r => r.memory).filter(Boolean) ?? []
+        if (staticFacts.length) parts.push('### Who they are\n' + staticFacts.join('\n'))
+        if (dynamicCtx.length)  parts.push('### Current context\n' + dynamicCtx.join('\n'))
+        if (relevant.length)    parts.push('### Most relevant to this conversation\n' + relevant.join('\n'))
+        if (parts.length) return parts.join('\n\n')
+      }
+    } catch { /* fall through to SQL */ }
+  }
+
+  // ── SQL fallback ─────────────────────────────────────────────────────────────
   try {
     await query(`CREATE TABLE IF NOT EXISTS user_memories (
       id SERIAL PRIMARY KEY, user_id TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'general',
@@ -979,7 +1007,6 @@ async function loadMemories(userId: string): Promise<string> {
     return res.rows.map((r) => `[${r.category}] ${r.content}`).join('\n')
   } catch { return '' }
 }
-
 async function getAwareness(userId: string): Promise<{ daysSince: number; sessionCount: number; timeLabel: string; shouldBrief: boolean }> {
   try {
     const now = new Date()
@@ -1050,7 +1077,32 @@ Rules: Only USER facts + Sparkie execution procedures. Only NEW, specific, worth
         }
       }
     }
+    // Push full conversation snapshot to Supermemory (fire-and-forget)
+    pushConversationToSupermemory(userId, conversation.slice(0, 2000))
   } catch { /* non-fatal */ }
+}
+
+
+// ── Supermemory: push a single memory entry (fire-and-forget) ──────────────────
+function pushToSupermemory(userId: string, content: string): void {
+  const smKey = process.env.SUPERMEMORY_API_KEY
+  if (!smKey || !content.trim()) return
+  fetch('https://api.supermemory.ai/v3/memories', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${smKey}` },
+    body: JSON.stringify({ content, containerTag: userId }),
+  }).catch(() => {})
+}
+
+// ── Supermemory: push a full conversation snapshot ─────────────────────────────
+function pushConversationToSupermemory(userId: string, conversation: string): void {
+  const smKey = process.env.SUPERMEMORY_API_KEY
+  if (!smKey || !conversation.trim()) return
+  fetch('https://api.supermemory.ai/v3/memories', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${smKey}` },
+    body: JSON.stringify({ content: conversation, containerTag: userId }),
+  }).catch(() => {})
 }
 
 // ── Tool executor ─────────────────────────────────────────────────────────────
@@ -1356,6 +1408,7 @@ async function executeTool(
         const existing = await query('SELECT id FROM user_memories WHERE user_id = $1 AND content ILIKE $2', [userId, `%${content.slice(0, 40)}%`])
         if (existing.rows.length > 0) return `Already remembered: "${content}"`
         await query('INSERT INTO user_memories (user_id, category, content) VALUES ($1, $2, $3)', [userId, category, content])
+        pushToSupermemory(userId, `[${category}] ${content}`)
         return `Saved to memory: [${category}] ${content}`
       }
 
@@ -2303,7 +2356,7 @@ export async function POST(req: NextRequest) {
 
     if (userId) {
       const [memoriesText, awareness, identityFiles] = await Promise.all([
-        loadMemories(userId),
+        loadMemories(userId, messages.filter((m: { role: string; content: string }) => m.role === 'user').at(-1)?.content?.slice(0, 200)),
         getAwareness(userId),
         loadIdentityFiles(userId),
       ])
