@@ -64,7 +64,25 @@ function loadPrefs(): Prefs {
   try { const raw = localStorage.getItem('sparkie_prefs'); if (raw) return { ...DEFAULT_PREFS, ...JSON.parse(raw) } } catch {}
   return DEFAULT_PREFS
 }
-function savePrefs(p: Prefs) { try { localStorage.setItem('sparkie_prefs', JSON.stringify(p)) } catch {} }
+function savePrefs(p: Prefs) {
+  try { localStorage.setItem('sparkie_prefs', JSON.stringify(p)) } catch {}
+  // Persist to DB (fire-and-forget — survives cross-device/browser)
+  fetch('/api/user/preferences', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(p),
+  }).catch(() => {})
+}
+async function loadPrefsFromDB(): Promise<Partial<Prefs>> {
+  try {
+    const res = await fetch('/api/user/preferences')
+    if (res.ok) {
+      const { preferences } = await res.json() as { preferences: Partial<Prefs> }
+      return preferences ?? {}
+    }
+  } catch {}
+  return {}
+}
 
 // ── Theme tokens — all colors computed from theme, never from CSS vars inside JSX ──
 // This ensures the modal always re-renders with correct colors when theme changes.
@@ -206,7 +224,20 @@ export function SettingsModal() {
   const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS)
 
   useEffect(() => {
-    if (settingsOpen) { const p = loadPrefs(); setPrefs(p); applyTheme(p.theme) }
+    if (settingsOpen) {
+      const p = loadPrefs()
+      setPrefs(p)
+      applyTheme(p.theme)
+      // Merge DB prefs on top (DB wins — cross-device sync)
+      loadPrefsFromDB().then(dbPrefs => {
+        if (dbPrefs && Object.keys(dbPrefs).length > 0) {
+          const merged = { ...DEFAULT_PREFS, ...p, ...dbPrefs } as Prefs
+          setPrefs(merged)
+          applyTheme(merged.theme)
+          try { localStorage.setItem('sparkie_prefs', JSON.stringify(merged)) } catch {}
+        }
+      })
+    }
   }, [settingsOpen])
 
   useEffect(() => {
