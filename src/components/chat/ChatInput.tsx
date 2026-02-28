@@ -919,7 +919,7 @@ export function ChatInput() {
       // Cancel any in-flight agent request before starting a new one
       agentAbortRef.current?.abort()
       agentAbortRef.current = new AbortController()
-      const response = await fetch('/api/agent', {
+      const response = await fetch('/api/build', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: [...apiMessages, { role: 'user', content: apiUserContent }], currentFiles: currentFilesPayload, model: selectedModel, userProfile: useAppStore.getState().userProfile }),
@@ -959,6 +959,7 @@ export function ChatInput() {
             if (parsed.event === 'thinking') {
               lastThinkingText = parsed.text
               updateMessage(chatId, thinkingMsgId, { content: lastThinkingText, isStreaming: true })
+              addWorklogEntry({ type: 'thinking', content: parsed.text, status: 'running' })
             } else if (parsed.event === 'delta' && parsed.content) {
               fullBuild += parsed.content
               appendLiveCode(parsed.content)
@@ -980,6 +981,7 @@ export function ChatInput() {
                   const fileId = upsertFile(file.name, file.content, getLanguageFromFilename(file.name))
                   if (filesCreated === 0) setActiveFile(fileId)
                   addLiveCodeFile(file.name)
+                  addWorklogEntry({ type: 'code', content: `Writing ${file.name}`, status: 'running' })
                   // Track in assets
                   const chatTitle = useAppStore.getState().chats.find(c => c.id === chatId)?.title || 'New Chat'
                   addAsset({ name: file.name, language: getLanguageFromFilename(file.name), content: file.content, chatId, chatTitle, fileId, assetType: detectAssetTypeFromName(file.name), source: 'agent' as const })
@@ -1014,6 +1016,7 @@ export function ChatInput() {
             } else if (parsed.event === 'error') {
               updateMessage(chatId, ackMsgId, { content: `❌ ${parsed.message}`, isStreaming: false })
               if (buildMsgId) updateMessage(chatId, buildMsgId, { content: '', isStreaming: false })
+              addWorklogEntry({ type: 'error', content: parsed.message, status: 'error' })
             }
           } catch { /* skip */ }
         }
@@ -1027,6 +1030,7 @@ export function ChatInput() {
         const fileNames = Array.from(createdFileNames).join(', ')
         const description = `✨ Built ${fileNames} — preview ready →`
         if (buildMsgId) updateMessage(chatId, buildMsgId, { content: description, isStreaming: false })
+        addWorklogEntry({ type: 'result', content: `Built ${filesCreated} file${filesCreated > 1 ? 's' : ''}: ${fileNames}`, status: 'done' })
 
         // Natural post-build wrap-up message (like competitors do)
         const WRAP_PHRASES = [
