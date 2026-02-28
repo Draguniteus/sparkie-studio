@@ -28,7 +28,7 @@ async function ensureTables() {
 
 /**
  * Compute next scheduled_at from a 5-field cron expression (no npm needed).
- * Handles: exact values, wildcards, step (*/n), comma lists, ranges.
+ * Handles: exact values, wildcards, step expressions (e.g. every-n), comma lists, ranges.
  * Scans forward minute-by-minute up to 1 year; falls back to +24h if nothing found.
  */
 function nextCronTime(expression: string, after: Date = new Date()): Date {
