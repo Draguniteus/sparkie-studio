@@ -349,14 +349,34 @@ export const useAppStore = create<AppState>((set, get) => ({
   assets: [],
   addAsset: (asset) => {
     const id = crypto.randomUUID()
-    set((s) => ({ assets: [...s.assets, { ...asset, assetType: asset.assetType ?? 'other', source: asset.source ?? 'agent', id, createdAt: new Date() }] }))
+    const full = { ...asset, assetType: asset.assetType ?? 'other', source: asset.source ?? 'agent', id, createdAt: new Date() }
+    set((s) => ({ assets: [...s.assets, full] }))
+    // Fire-and-forget persist to DB (no-op if not logged in)
+    fetch('/api/assets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: full.name,
+        content: full.content,
+        assetType: full.assetType,
+        source: full.source,
+        chatId: full.chatId,
+        chatTitle: full.chatTitle,
+        fileId: full.fileId,
+        language: full.language ?? '',
+      }),
+    }).catch(() => {})
   },
   updateAsset: (fileId, content) => {
     set((s) => ({
       assets: s.assets.map(a => a.fileId === fileId ? { ...a, content } : a)
     }))
   },
-  clearAssets: () => set({ assets: [] }),
+  clearAssets: () => {
+    set({ assets: [] })
+    // Clear from DB too
+    fetch('/api/assets', { method: 'DELETE' }).catch(() => {})
+  },
 
   worklog: [],
   addWorklogEntry: (entry) => {
@@ -429,6 +449,16 @@ export const useAppStore = create<AppState>((set, get) => ({
           }
         }
       } catch { /* history load failed — start fresh */ }
+      // Load persisted assets from DB
+      try {
+        const ar = await fetch('/api/assets')
+        if (ar.ok) {
+          const { assets } = await ar.json() as { assets: Asset[] }
+          if (assets && assets.length > 0) {
+            set({ assets: assets.map(a => ({ ...a, createdAt: new Date(a.createdAt) })) })
+          }
+        }
+      } catch { /* assets load failed — start fresh */ }
     }, 0)
   },
 }))
