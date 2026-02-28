@@ -72,6 +72,7 @@ function ApiKeyModal({ app, fields, onSubmit, onClose }: {
 }) {
   const [values, setValues] = useState<Record<string, string>>({})
   const [submitting, setSubmitting] = useState(false)
+  const [showValues, setShowValues] = useState<Record<string, boolean>>({})
 
   const handleSubmit = async () => {
     setSubmitting(true)
@@ -79,57 +80,114 @@ function ApiKeyModal({ app, fields, onSubmit, onClose }: {
     setSubmitting(false)
   }
 
-  const allFilled = fields.filter(f => f.required !== false).every(f => values[f.name]?.trim())
+  const requiredFields = fields.filter(f => f.required !== false)
+  const allFilled = requiredFields.every(f => values[f.name]?.trim())
+  const isApiKey = (name: string) =>
+    name.toLowerCase().includes('key') || name.toLowerCase().includes('secret') || name.toLowerCase().includes('token')
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-sm mx-4 bg-hive-600 border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md">
+      <div className="w-full max-w-md mx-4 bg-[#1a1a2e] border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
         {/* Header */}
-        <div className="flex items-center gap-3 px-5 py-4 border-b border-white/8">
+        <div className="flex items-center gap-4 px-6 py-5 border-b border-white/8 bg-gradient-to-r from-honey-500/10 to-transparent">
           {app.logo ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={app.logo} alt={app.displayName} className="w-8 h-8 rounded-lg object-contain bg-white/5" />
+            <img src={app.logo} alt={app.displayName} className="w-10 h-10 rounded-xl object-contain bg-white/8 border border-white/10 p-1.5" />
           ) : (
-            <div className="w-8 h-8 rounded-lg bg-honey-500/15 flex items-center justify-center">
-              <Key size={14} className="text-honey-500" />
+            <div className="w-10 h-10 rounded-xl bg-honey-500/15 border border-honey-500/25 flex items-center justify-center">
+              <Key size={16} className="text-honey-500" />
             </div>
           )}
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-white">{app.displayName || app.name}</p>
-            <p className="text-[11px] text-text-muted">Enter your credentials to connect</p>
+            <p className="text-[15px] font-semibold text-white leading-tight">{app.displayName || app.name}</p>
+            <p className="text-xs text-text-muted mt-0.5">Connect with your API credentials</p>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/8 text-text-muted hover:text-white transition-colors">
-            <X size={14} />
+          <button
+            onClick={onClose}
+            className="p-2 rounded-xl hover:bg-white/8 text-text-muted hover:text-white transition-colors"
+          >
+            <X size={16} />
           </button>
         </div>
+
         {/* Fields */}
-        <div className="px-5 py-4 space-y-3">
-          {fields.map(f => (
-            <div key={f.name} className="space-y-1.5">
-              <label className="text-[11px] font-semibold text-text-secondary uppercase tracking-wide">
-                {f.displayName || f.name}
-              </label>
-              {f.description && <p className="text-[10px] text-text-muted">{f.description}</p>}
-              <input
-                type={f.name.toLowerCase().includes("secret") || f.name.toLowerCase().includes("key") || f.name.toLowerCase().includes("token") ? "password" : "text"}
-                placeholder={`Enter ${f.displayName || f.name}…`}
-                value={values[f.name] || ""}
-                onChange={e => setValues(prev => ({ ...prev, [f.name]: e.target.value }))}
-                className="w-full px-3 py-2 text-sm bg-hive-elevated border border-white/10 rounded-lg text-white placeholder-text-muted focus:outline-none focus:border-honey-500/50 focus:ring-1 focus:ring-honey-500/20"
-              />
+        <div className="px-6 py-5 space-y-4">
+          {fields.length === 0 ? (
+            <div className="flex items-center gap-3 py-4 px-4 rounded-xl bg-white/4 border border-white/8">
+              <Loader2 size={16} className="text-honey-500 animate-spin shrink-0" />
+              <p className="text-sm text-text-muted">Loading credential fields…</p>
             </div>
-          ))}
+          ) : (
+            fields.map(f => {
+              const secret = isApiKey(f.name)
+              const visible = showValues[f.name]
+              return (
+                <div key={f.name} className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold text-text-secondary uppercase tracking-widest">
+                      {f.displayName || f.name}
+                      {f.required !== false && <span className="text-honey-500 ml-1">*</span>}
+                    </label>
+                    {secret && (
+                      <button
+                        type="button"
+                        onClick={() => setShowValues(p => ({ ...p, [f.name]: !p[f.name] }))}
+                        className="text-[10px] text-text-muted hover:text-white transition-colors"
+                      >
+                        {visible ? "Hide" : "Show"}
+                      </button>
+                    )}
+                  </div>
+                  {f.description && (
+                    <p className="text-[11px] text-text-muted leading-relaxed">{f.description}</p>
+                  )}
+                  <input
+                    type={secret && !visible ? "password" : "text"}
+                    placeholder={secret ? "sk-••••••••••••••••••••••" : `Enter ${f.displayName || f.name}…`}
+                    value={values[f.name] || ""}
+                    onChange={e => setValues(prev => ({ ...prev, [f.name]: e.target.value }))}
+                    onKeyDown={e => { if (e.key === "Enter" && allFilled && !submitting) handleSubmit() }}
+                    className="w-full px-4 py-3 text-sm bg-white/4 border border-white/10 rounded-xl text-white placeholder-text-muted/50 focus:outline-none focus:border-honey-500/60 focus:ring-2 focus:ring-honey-500/15 transition-all font-mono"
+                    autoFocus={f === fields[0]}
+                  />
+                </div>
+              )
+            })
+          )}
         </div>
-        <div className="px-5 pb-5 flex gap-2">
-          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-white/10 text-text-muted text-sm hover:text-white hover:border-white/20 transition-all">
+
+        {/* Security note */}
+        <div className="mx-6 mb-4 flex items-start gap-2.5 px-3.5 py-2.5 rounded-xl bg-white/3 border border-white/6">
+          <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0 mt-1.5" />
+          <p className="text-[11px] text-text-muted leading-relaxed">
+            Your key is stored securely and only used to authenticate requests on your behalf. It is never shared or logged.
+          </p>
+        </div>
+
+        {/* Actions */}
+        <div className="px-6 pb-6 flex gap-2.5">
+          <button
+            onClick={onClose}
+            className="flex-1 py-3 rounded-xl border border-white/10 text-text-muted text-sm font-medium hover:text-white hover:border-white/20 transition-all"
+          >
             Cancel
           </button>
           <button
             onClick={handleSubmit}
-            disabled={!allFilled || submitting}
-            className="flex-1 py-2.5 rounded-xl bg-honey-500 hover:bg-honey-400 text-black font-semibold text-sm disabled:opacity-40 transition-all"
+            disabled={!allFilled || submitting || fields.length === 0}
+            className="flex-1 py-3 rounded-xl bg-honey-500 hover:bg-honey-400 disabled:opacity-40 disabled:cursor-not-allowed text-black font-semibold text-sm transition-all flex items-center justify-center gap-2"
           >
-            {submitting ? <Loader2 size={14} className="animate-spin mx-auto" /> : "Connect"}
+            {submitting ? (
+              <>
+                <Loader2 size={14} className="animate-spin" />
+                Connecting…
+              </>
+            ) : (
+              <>
+                <Zap size={14} />
+                Connect
+              </>
+            )}
           </button>
         </div>
       </div>
