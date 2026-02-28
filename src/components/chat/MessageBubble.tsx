@@ -121,7 +121,7 @@ export function MessageBubble({ message, userAvatarUrl }: Props) {
         </div>
       )}
 
-      <div className={`max-w-[80%] ${isUser ? "order-first" : ""}`}>
+      <div className={`max-w-[90%] md:max-w-[80%] ${isUser ? "order-first" : ""}`}>
         <div
           className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
             isUser
