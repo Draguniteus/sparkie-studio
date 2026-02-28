@@ -179,12 +179,12 @@ export function SparkiesCorner() {
       <canvas ref={particlesRef} className="absolute inset-0 w-full h-full pointer-events-none" />
 
       {/* Content */}
-      <div className="relative z-10 flex flex-col items-center justify-center h-full px-8 gap-8">
+      <div className="relative z-10 flex flex-col items-center justify-center h-full px-4 md:px-8 gap-5 md:gap-8">
 
         {/* Sparkie orb */}
         <div className={`relative flex items-center justify-center`}>
-          <div className={`w-24 h-24 rounded-full ${mood.orb} ${mood.glow} flex items-center justify-center ring-4 ${mood.ring} transition-all duration-1000`}>
-            <Sparkles size={36} className="text-white drop-shadow-lg" />
+          <div className={`w-20 h-20 md:w-24 md:h-24 rounded-full ${mood.orb} ${mood.glow} flex items-center justify-center ring-4 ${mood.ring} transition-all duration-1000`}>
+            <Sparkles size={30} className="text-white drop-shadow-lg" />
           </div>
           {/* Status indicator */}
           <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-emerald-400 border-2 border-hive-600 shadow-lg" />
@@ -192,7 +192,7 @@ export function SparkiesCorner() {
 
         {/* Sparkie name + mood label */}
         <div className="text-center">
-          <h2 className="text-2xl font-bold text-white tracking-tight">Sparkie's Corner</h2>
+          <h2 className="text-xl md:text-2xl font-bold text-white tracking-tight">Sparkie's Corner</h2>
           <p className="text-sm text-text-muted mt-1 flex items-center gap-1.5 justify-center">
             <span className={`w-1.5 h-1.5 rounded-full bg-emerald-400 ${mood.pulse}`} />
             {mood.label}
