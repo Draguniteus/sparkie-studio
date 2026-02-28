@@ -3,7 +3,7 @@
 import { useAppStore } from '@/store/appStore'
 import {
   Search, FolderOpen, Image, MessageSquare,
-  Settings, ChevronLeft, Sparkles, Radio, Plug, Zap, Lock
+  Settings, ChevronLeft, Sparkles, Radio, Plug, Zap, Lock, Rss, BookOpen
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 
@@ -72,7 +72,7 @@ export function Sidebar() {
         <button
           onClick={handleOpenChat}
           className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl transition-all border font-medium text-sm ${
-            !['assets','images','radio','connectors','corner','journal'].includes(activeTab)
+            !['assets','images','radio','connectors','corner','journal','feed','skills'].includes(activeTab)
               ? 'bg-honey-500/15 border-honey-500/40 text-honey-500 shadow-[0_0_12px_-4px_rgba(245,158,11,0.4)]'
               : 'bg-hive-elevated border-hive-border text-text-secondary hover:bg-hive-hover hover:text-honey-400 hover:border-honey-500/20'
           }`}
@@ -96,10 +96,12 @@ export function Sidebar() {
           { icon: Image,      label: 'Gallery', key: 'images'     },
           { icon: Radio,      label: 'Radio',   key: 'radio'      },
           { icon: Plug,       label: 'Apps',    key: 'connectors' },
+          { icon: Rss,        label: 'Feed',    key: 'feed'       },
+          { icon: BookOpen,   label: 'Skills',  key: 'skills'     },
         ].map(({ icon: Icon, label, key }) => (
           <button
             key={key}
-            onClick={() => key !== 'search' && setActiveTab(key === 'images' ? 'images' : key === 'radio' ? 'radio' : key === 'connectors' ? 'connectors' : 'assets')}
+            onClick={() => key !== 'search' && setActiveTab(key as string)}
             className={`flex-1 flex flex-col items-center gap-1 py-2 rounded-lg transition-colors text-[10px] font-medium ${
               activeTab === key
                 ? 'bg-honey-500/10 text-honey-500'
