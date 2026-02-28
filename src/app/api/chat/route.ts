@@ -1679,10 +1679,10 @@ async function executeTool(
               [postContent, mediaUrl ?? null, mediaType, mood, codeHtml ?? null, codeTitle ?? null]
             )
           })
-          const preview = codeTitle ? \` with live code preview: "\${codeTitle}"\` : ''
-          return \`✅ Posted to Sparkie's Feed\${preview}! Content: "\${postContent.slice(0, 80)}\${postContent.length > 80 ? '...' : ''}" — all users can see this.\`
+          const preview = codeTitle ? ` with live code preview: "${codeTitle}"` : ''
+          return `✅ Posted to Sparkie's Feed${preview}! Content: "${postContent.slice(0, 80)}${postContent.length > 80 ? '...' : ''}" — all users can see this.`
         } catch (e) {
-          return \`post_to_feed error: \${String(e)}\`
+          return `post_to_feed error: ${String(e)}`
         }
       }
 
