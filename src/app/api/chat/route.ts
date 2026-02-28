@@ -349,14 +349,14 @@ const SPARKIE_TOOLS = [
     type: 'function',
     function: {
       name: 'get_github',
-      description: 'Read files or get info from a GitHub repository.',
+      description: 'Read files, list directories, or get repo info from GitHub. If no repo is specified, lists the user\'s own repositories. For private repos, uses the user\'s connected GitHub account.',
       parameters: {
         type: 'object',
         properties: {
-          repo: { type: 'string', description: 'Repository in format "owner/repo"' },
-          path: { type: 'string', description: 'File path within the repo. Leave empty for repo overview.' },
+          repo: { type: 'string', description: 'Repository in format "owner/repo". Omit to list the user\'s own repositories.' },
+          path: { type: 'string', description: 'File or directory path within the repo. Leave empty for repo overview. Use a directory path to list files.' },
         },
-        required: ['repo'],
+        required: [],
       },
     },
   },
@@ -771,24 +771,56 @@ async function executeTool(
       }
 
       case 'get_github': {
-        const repo = args.repo as string
+        const repo = args.repo as string | undefined
         const path = args.path as string | undefined
+        const ghToken = process.env.GITHUB_TOKEN
+        const ghHeaders: Record<string, string> = {
+          'Accept': 'application/vnd.github.v3+json',
+          'User-Agent': 'SparkieStudio/2.0',
+        }
+        if (ghToken) ghHeaders['Authorization'] = `Bearer ${ghToken}`
+
+        // If no repo specified, list user's repos via Composio connector (authenticated)
+        if (!repo) {
+          if (userId) {
+            const listResult = await executeConnectorTool('GITHUB_LIST_REPOSITORIES', { type: 'all' }, userId)
+            return listResult
+          }
+          return 'No repo specified and not authenticated'
+        }
+
+        // List directory contents if path is a directory-like (no extension)
         const ghUrl = path
-          ? `https://api.github.com/repos/${repo}/contents/${path}`
+          ? `https://api.github.com/repos/${repo}/contents/${path.replace(/^\//, '')}`
           : `https://api.github.com/repos/${repo}`
         const res = await fetch(ghUrl, {
-          headers: { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'SparkieStudio/2.0' },
+          headers: ghHeaders,
           signal: AbortSignal.timeout(8000),
         })
-        if (!res.ok) return `GitHub fetch failed: ${res.status}`
-        const d = await res.json() as Record<string, unknown>
-        if (path && d.content) {
-          const content = Buffer.from(d.content as string, 'base64').toString('utf-8')
-          return `File: ${path}\n\n${content.slice(0, 3000)}${content.length > 3000 ? '\n...(truncated)' : ''}`
+        if (!res.ok) {
+          if (res.status === 404) return `Repository or path not found: ${repo}${path ? '/' + path : ''}. Check the repo name (format: owner/repo).`
+          if (res.status === 403) return `GitHub rate limit or access denied. ${ghToken ? 'Token provided but insufficient permissions.' : 'No GitHub token — private repos require authentication.'}`
+          return `GitHub fetch failed: ${res.status}`
         }
+        const d = await res.json() as Record<string, unknown> | Array<Record<string, unknown>>
+
+        // Directory listing
+        if (Array.isArray(d)) {
+          const listing = d.slice(0, 30).map((f: Record<string, unknown>) => `${f.type === 'dir' ? '📁' : '📄'} ${f.name}`).join('\n')
+          return `Contents of ${repo}/${path}:\n${listing}`
+        }
+
+        // File content
+        if ((d as Record<string, unknown>).content) {
+          const content = Buffer.from((d as Record<string, unknown>).content as string, 'base64').toString('utf-8')
+          return `File: ${path}\n\n${content.slice(0, 4000)}${content.length > 4000 ? '\n...(truncated)' : ''}`
+        }
+
+        // Repo overview
         return JSON.stringify({
           name: d.name, description: d.description, stars: d.stargazers_count,
           language: d.language, updated_at: d.updated_at, open_issues: d.open_issues_count,
+          default_branch: d.default_branch, visibility: d.visibility,
         })
       }
 
@@ -1820,8 +1852,53 @@ Make it feel like walking into your friend's creative space and being genuinely 
           loopMessages = [...loopMessages, choice.message, ...toolResults]
 
         } else if (finishReason === 'stop' && choice?.message?.content) {
-          // Model is done — no more tools needed
-          const content: string = choice.message.content
+          // Check for XML-format tool calls (some models like MiniMax emit these instead of tool_calls)
+          const rawContent: string = choice.message.content
+          const xmlToolPattern = /<invoke\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)<\/invoke>|<parameter\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)<\/parameter>/g
+          const hasXmlToolCall = /minimax:tool_call|<invoke\s+name=|<\/invoke>/.test(rawContent)
+
+          if (hasXmlToolCall && round < MAX_TOOL_ROUNDS) {
+            // Parse XML tool calls and execute them
+            const invokePattern = /<invoke\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)<\/invoke>/g
+            const paramPattern = /<parameter\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)<\/parameter>/g
+            let invokeMatch
+            const xmlToolResults: Array<{ role: 'tool'; tool_call_id: string; content: string }> = []
+            const fakeAssistantCalls: Array<{ id: string; type: string; function: { name: string; arguments: string } }> = []
+
+            while ((invokeMatch = invokePattern.exec(rawContent)) !== null) {
+              const toolName = invokeMatch[1]
+              const paramsBlock = invokeMatch[2]
+              const params: Record<string, string> = {}
+              let paramMatch
+              const paramPatternLocal = /<parameter\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)<\/parameter>/g
+              while ((paramMatch = paramPatternLocal.exec(paramsBlock)) !== null) {
+                params[paramMatch[1]] = paramMatch[2].trim()
+              }
+              const fakeId = `xml_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+              fakeAssistantCalls.push({ id: fakeId, type: 'function', function: { name: toolName, arguments: JSON.stringify(params) } })
+              const result = await executeTool(toolName, params, toolContext)
+              xmlToolResults.push({ role: 'tool' as const, tool_call_id: fakeId, content: result })
+            }
+
+            if (xmlToolResults.length > 0) {
+              // Inject as proper tool_calls format and continue loop
+              const assistantMsg = {
+                role: 'assistant' as const,
+                content: null,
+                tool_calls: fakeAssistantCalls,
+              }
+              loopMessages = [...loopMessages, assistantMsg, ...xmlToolResults]
+              usedTools = true
+              continue // Go to next loop round with tool results
+            }
+          }
+
+          // Strip any residual XML tool call markup from final content before streaming
+          const content: string = rawContent
+            .replace(/minimax:tool_call\s*<invoke[\s\S]*?<\/invoke>\s*<\/minimax:tool_call>/g, '')
+            .replace(/<invoke\s+name=["'][^"']+["'][^>]*>[\s\S]*?<\/invoke>/g, '')
+            .replace(/<\/minimax:tool_call>/g, '')
+            .trim()
           const encoder = new TextEncoder()
 
           if (userId && messages.length >= 2) {
@@ -1863,6 +1940,16 @@ Make it feel like walking into your friend's creative space and being genuinely 
         finalMessages = loopMessages
         finalSystemContent = systemContent + `\n\nYou used tools across multiple steps and gathered real results. Synthesize everything into a complete, direct response. For any IMAGE_URL:/AUDIO_URL:/VIDEO_URL: results, the media block will be appended automatically — DO NOT repeat the URL in your text response.`
       }
+    }
+
+    // Helper: strip XML tool call artifacts from model output
+    function sanitizeContent(text: string): string {
+      return text
+        .replace(/minimax:tool_call\s*<invoke[\s\S]*?<\/invoke>\s*<\/minimax:tool_call>/g, '')
+        .replace(/<invoke\s+name=["'][^"']+["'][^>]*>[\s\S]*?<\/invoke>/g, '')
+        .replace(/<\/minimax:tool_call>/g, '')
+        .replace(/<minimax:tool_call>/g, '')
+        .trim()
     }
 
     // Final streaming call
@@ -1920,7 +2007,45 @@ Make it feel like walking into your friend's creative space and being genuinely 
       })
     }
 
-    return new Response(streamRes.body, {
+    // Sanitizing stream wrapper — strips XML tool call artifacts from final output
+    const encoder2 = new TextEncoder()
+    const reader = streamRes.body!.getReader()
+    const decoder = new TextDecoder()
+    const sanitizingStream = new ReadableStream({
+      async start(controller) {
+        let buffer = ''
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) {
+            controller.enqueue(encoder2.encode('data: [DONE]\n\n'))
+            controller.close()
+            break
+          }
+          const text = decoder.decode(value, { stream: true })
+          // Parse SSE chunks and sanitize content
+          const lines = (buffer + text).split('\n')
+          buffer = lines.pop() ?? ''
+          for (const line of lines) {
+            if (!line.startsWith('data: ') || line === 'data: [DONE]') {
+              if (line !== '') controller.enqueue(encoder2.encode(line + '\n'))
+              continue
+            }
+            try {
+              const parsed = JSON.parse(line.slice(6))
+              const content = parsed?.choices?.[0]?.delta?.content
+              if (content && (content.includes('<invoke') || content.includes('minimax:tool_call'))) {
+                // Buffer until we have enough to check for full XML block — skip it
+                continue
+              }
+              controller.enqueue(encoder2.encode(line + '\n'))
+            } catch {
+              controller.enqueue(encoder2.encode(line + '\n'))
+            }
+          }
+        }
+      },
+    })
+    return new Response(sanitizingStream, {
       headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
     })
   } catch {
