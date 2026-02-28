@@ -413,7 +413,7 @@ export function RadioPlayer() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-hive-700 rounded-xl border border-hive-border overflow-hidden">
+    <div className="flex flex-col h-full bg-hive-700 md:rounded-xl border border-hive-border overflow-hidden">
       {/* Hidden audio element */}
       <audio
         ref={audioRef}
