@@ -412,7 +412,23 @@ export const useAppStore = create<AppState>((set, get) => ({
       const profile = profileRaw ? JSON.parse(profileRaw) as UserProfile : null
       if (profile || done) set({ userProfile: profile, onboardingDone: done })
     } catch {}
-    // Auto-initialize single persistent chat
-    setTimeout(() => { get().getOrCreateSingleChat() }, 0)
+    // Initialize the single persistent chat, then load history from DB
+    setTimeout(async () => {
+      const chatId = get().getOrCreateSingleChat()
+      try {
+        const res = await fetch('/api/messages')
+        if (res.ok) {
+          const { messages } = await res.json() as { messages: Message[] }
+          if (messages && messages.length > 0) {
+            set((s) => ({
+              chats: s.chats.map((c) =>
+                c.id === chatId ? { ...c, messages } : c
+              ),
+              messages,
+            }))
+          }
+        }
+      } catch { /* history load failed — start fresh */ }
+    }, 0)
   },
 }))
