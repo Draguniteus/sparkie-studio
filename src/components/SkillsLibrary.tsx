@@ -148,7 +148,7 @@ export function SkillsLibrary() {
   return (
     <div className="h-full flex flex-col bg-hive-600">
       {/* Header */}
-      <div className="flex items-center gap-2.5 px-4 py-3 border-b border-hive-border shrink-0">
+      <div className="flex items-center gap-2.5 px-3 md:px-4 py-3 border-b border-hive-border shrink-0">
         <div className="w-8 h-8 rounded-lg bg-violet-500/20 flex items-center justify-center">
           <Zap size={16} className="text-violet-400" />
         </div>
