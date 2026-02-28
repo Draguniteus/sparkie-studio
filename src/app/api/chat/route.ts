@@ -2365,7 +2365,7 @@ type ModelTier = typeof MODELS[keyof typeof MODELS]
 interface ModelSelection {
   primary: ModelTier
   fallbacks: ModelTier[]
-  tier: 'conversational' | 'capable' | 'deep'
+  tier: 'conversational' | 'capable' | 'ember' | 'deep' | 'trinity'
   needsTools: boolean
 }
 
