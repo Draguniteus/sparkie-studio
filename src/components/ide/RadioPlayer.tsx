@@ -27,11 +27,28 @@ function loadTracks(): RadioTrack[] {
   } catch { return [] }
 }
 
+async function loadTracksFromDB(): Promise<RadioTrack[]> {
+  try {
+    const res = await fetch('/api/radio/tracks')
+    if (res.ok) {
+      const { tracks } = await res.json() as { tracks: RadioTrack[] }
+      return (tracks ?? []).map(t => ({ ...t, addedAt: new Date(t.addedAt ?? Date.now()) }))
+    }
+  } catch {}
+  return []
+}
+
 function saveTracks(tracks: RadioTrack[]) {
   try {
     // Only persist URL tracks (not data: blobs — too large for localStorage)
     const toSave = tracks.filter(t => t.type === "url")
     localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave))
+    // Sync to DB (fire-and-forget)
+    fetch('/api/radio/tracks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tracks: toSave }),
+    }).catch(() => {})
   } catch {}
 }
 
@@ -73,9 +90,16 @@ export function RadioPlayer() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Hydrate from localStorage on mount
+  // Hydrate from localStorage on mount, then merge DB tracks (DB wins for cross-device)
   useEffect(() => {
-    setTracks(loadTracks())
+    const localTracks = loadTracks()
+    setTracks(localTracks)
+    loadTracksFromDB().then(dbTracks => {
+      if (dbTracks.length > 0) {
+        setTracks(dbTracks)
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(dbTracks)) } catch {}
+      }
+    })
   }, [])
 
   // Save URL tracks when tracks change
