@@ -71,7 +71,12 @@ export function TaskQueuePanel() {
     }
   }, [])
 
-  useEffect(() => { fetchTasks() }, [fetchTasks])
+  // Auto-poll every 10s so new tasks appear live without manual refresh
+  useEffect(() => {
+    fetchTasks()
+    const interval = setInterval(fetchTasks, 10_000)
+    return () => clearInterval(interval)
+  }, [fetchTasks])
 
   const handleAction = async (taskId: string, action: 'approved' | 'rejected') => {
     setActioning(taskId)
@@ -108,13 +113,16 @@ export function TaskQueuePanel() {
             </span>
           )}
         </div>
-        <button
-          onClick={fetchTasks}
-          className="p-1 rounded hover:bg-white/5 text-text-secondary hover:text-text-primary transition-colors"
-          title="Refresh"
-        >
-          <RefreshCw className="w-3 h-3" />
-        </button>
+        <div className="flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-green-500/60 animate-pulse" title="Live — refreshing every 10s" />
+          <button
+            onClick={fetchTasks}
+            className="p-1 rounded hover:bg-white/5 text-text-secondary hover:text-text-primary transition-colors"
+            title="Refresh now"
+          >
+            <RefreshCw className="w-3 h-3" />
+          </button>
+        </div>
       </div>
 
       {/* Filter tabs */}
