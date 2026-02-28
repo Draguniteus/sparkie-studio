@@ -2732,6 +2732,88 @@ Make it feel like walking into your friend's creative space and being genuinely 
       const tierKey = modelSelection.tier as string
       if (HIVE_TIER[tierKey]) hiveLog.push(pickHive(HIVE_TIER[tierKey]))
 
+      // ── TWO-PHASE AGENT LOOP: Flame Plans → Atlas Executes ─────────────────────
+      // Activates for Atlas (deep) and complex Flame (capable) tasks.
+      // Phase 1: Flame creates a structured execution plan (fast, ~500 tokens, no tools).
+      // Phase 2: Atlas (or Flame for capable tier) executes against that plan with full tool access.
+      const shouldTwoPhase = (
+        modelSelection.tier === 'deep' ||
+        modelSelection.tier === 'ember' ||
+        (modelSelection.tier === 'capable' && (
+          /\b(build|create|write|fix|refactor|rewrite|deploy|implement|add|update|edit|generate|setup|integrate)\b/i.test(loopMessages.slice(-1)[0]?.content ?? '') &&
+          (loopMessages.slice(-1)[0]?.content ?? '').length > 120
+        ))
+      )
+
+      if (shouldTwoPhase) {
+        try {
+          const planningMsg = modelSelection.tier === 'ember'
+            ? "🗺️ Flame Has The Blueprint — Briefing Ember For Stealth Execution..."
+            : modelSelection.tier === 'deep'
+            ? "🗺️ Flame Has The Blueprint — Briefing Atlas For Deep Execution..."
+            : "🗺️ Flame Planning — Structured Mission Brief Incoming..."
+          hiveLog.push(planningMsg)
+          const planningSystemPrompt = `You are Flame, the Hive's master planner. Your ONLY job is to break down the user's task into a structured execution plan.
+
+Output ONLY valid JSON in this exact shape — nothing else, no markdown, no explanation:
+{
+  "goal": "one-line summary of what we're achieving",
+  "steps": [
+    { "id": 1, "action": "concrete step description", "tool": "tool_name_if_applicable_or_null", "depends_on": [] }
+  ],
+  "complexity": "low|medium|high",
+  "estimated_rounds": 2
+}
+
+Rules:
+- 3–7 steps maximum
+- Each step must be concrete and executable
+- tool field: use exact tool name from available tools, or null
+- depends_on: list of step IDs this step needs to complete first
+- complexity: low = 1 tool call, medium = 2-4 steps, high = 5+ or multi-file
+- No commentary. JSON only.`
+
+          const planMessages = [
+            { role: 'system' as const, content: planningSystemPrompt },
+            ...loopMessages.slice(-4),
+          ]
+
+          const flamePlanRes = await fetch(
+            `${OPENCODE_BASE}/chat/completions`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+              body: JSON.stringify({
+                model: 'kimi-k2.5-free',
+                stream: false,
+                temperature: 0.3,
+                max_tokens: 600,
+                messages: planMessages,
+              }),
+            }
+          )
+
+          if (flamePlanRes.ok) {
+            const planData = await flamePlanRes.json()
+            const planRaw = planData.choices?.[0]?.message?.content ?? ''
+            const jsonMatch = planRaw.match(/\{[\s\S]*\}/)
+            if (jsonMatch) {
+              try {
+                const plan = JSON.parse(jsonMatch[0])
+                if (plan.steps?.length > 0) {
+                  const planSummary = plan.steps.map((s: { id: number; action: string; tool: string | null }) =>
+                    `  Step ${s.id}: ${s.action}${s.tool ? ` [tool: ${s.tool}]` : ''}`
+                  ).join('\n')
+                  systemContent = systemContent + `\n\n## FLAME'S EXECUTION PLAN\nGoal: ${plan.goal}\nComplexity: ${plan.complexity}\n\nSteps:\n${planSummary}\n\nExecute this plan step by step using the tools available. Follow the order, use the suggested tools, and report clearly.`
+                  finalSystemContent = systemContent
+                  hiveLog.push(`⚡ Plan Locked — ${plan.steps.length} Steps, ${plan.complexity} Complexity — Atlas Executing...`)
+                }
+              } catch { /* plan parse failed — continue without it */ }
+            }
+          }
+        } catch { /* planning call failed — continue without plan */ }
+      }
+
       while (round < MAX_TOOL_ROUNDS) {
         round++
         hiveLog.push(pickHive(HIVE_ROUND[round] ?? HIVE_ROUND[3]))
