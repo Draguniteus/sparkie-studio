@@ -787,9 +787,10 @@ export function ChatInput() {
           if (data === "[DONE]") continue
           try {
             const parsed = JSON.parse(data)
-            // Hive status update — show as animated status pill
+            // Hive status update — show as animated status pill + log to worklog
             if (parsed.hive_status) {
               setHiveStatus(parsed.hive_status)
+              addWorklogEntry({ type: 'action', content: parsed.hive_status, status: 'running' })
               continue
             }
             // HITL task approval event
