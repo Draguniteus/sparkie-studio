@@ -59,6 +59,14 @@ function SkeletonCard() {
         <div className="h-2 bg-white/4 rounded w-3/4" />
       </div>
       <div className="h-7 bg-white/4 rounded-lg mt-1" />
+      {apiKeyPending && (
+        <ApiKeyModal
+          app={apiKeyPending.app}
+          fields={apiKeyPending.fields}
+          onSubmit={handleApiKeySubmit}
+          onClose={() => setApiKeyPending(null)}
+        />
+      )}
     </div>
   )
 }
@@ -223,7 +231,10 @@ export function ConnectorsView() {
   const [connecting, setConnecting] = useState<string | null>(null)
   const [disconnecting, setDisconnecting] = useState<string | null>(null)
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null)
-  // API key modal reserved for future use
+  const [apiKeyPending, setApiKeyPending] = useState<{
+    app: ComposioApp
+    fields: Array<{ name: string; displayName?: string; description?: string; required?: boolean }>
+  } | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
 
   const showToast = (msg: string, type: "success" | "error" = "success") => {
@@ -311,13 +322,26 @@ export function ConnectorsView() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "connect", appName }),
       })
-      const data = await res.json() as { authUrl?: string; status?: string; error?: string; detail?: string }
+      const data = await res.json() as {
+        authUrl?: string
+        status?: string
+        error?: string
+        detail?: string
+        authScheme?: string
+        fields?: Array<{ name: string; displayName?: string; description?: string; required?: boolean }>
+      }
 
-      if (!res.ok || data.error) {
+      if (!res.ok && data.authScheme !== "API_KEY") {
         const msg = data.error || "Connection failed"
-        // Show the Composio detail if available to help diagnose
         showToast(msg, "error")
         setConnecting(null)
+        return
+      }
+
+      // API key auth — show modal for user to enter their key
+      if (data.authScheme === "API_KEY") {
+        setConnecting(null)
+        setApiKeyPending({ app, fields: data.fields ?? [] })
         return
       }
 
@@ -347,6 +371,32 @@ export function ConnectorsView() {
       }
     } catch {
       showToast("Connection failed", "error")
+      setConnecting(null)
+    }
+  }
+
+  const handleApiKeySubmit = async (values: Record<string, string>) => {
+    if (!apiKeyPending) return
+    const { app } = apiKeyPending
+    const appName = app.name
+    setConnecting(appName)
+    setApiKeyPending(null)
+    try {
+      const res = await fetch("/api/connectors", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "connect", appName, credentials: values }),
+      })
+      const data = await res.json() as { status?: string; error?: string; detail?: string }
+      if (!res.ok || data.error) {
+        showToast(data.error || "Connection failed", "error")
+      } else {
+        showToast(`${app.displayName || appName} connected!`)
+        await loadConnections()
+      }
+    } catch {
+      showToast("Connection failed", "error")
+    } finally {
       setConnecting(null)
     }
   }
