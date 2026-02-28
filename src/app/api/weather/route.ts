@@ -40,121 +40,116 @@ function cToF(c: number): number {
 
 export async function GET(req: Request) {
   try {
-    // 1. Get user location — prefer browser-supplied lat/lon, fall back to IP
+    // 1. Get user location — browser-supplied lat/lon required
     const { searchParams } = new URL(req.url)
     const qLat = searchParams.get('lat')
     const qLon = searchParams.get('lon')
 
-    let lat = 36.8529, lon = -75.9780, city = 'Virginia Beach', region = 'VA', country = 'US'
-
-    if (qLat && qLon) {
-      // Browser geolocation — accurate
-      lat = parseFloat(qLat)
-      lon = parseFloat(qLon)
-      // Reverse-geocode to get city name
-      try {
-        const rgRes = await fetch(
-          `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`,
-          { headers: { 'User-Agent': 'SparkyStudio/1.0' } }
-        )
-        const rg = await rgRes.json()
-        city = rg.address?.city || rg.address?.town || rg.address?.village || rg.address?.county || 'Your area'
-        region = rg.address?.state || ''
-        country = rg.address?.country_code?.toUpperCase() || ''
-      } catch { /* use defaults */ }
-    } else {
-      // Fallback: IP-based geolocation
-      const forwarded = req.headers.get('x-forwarded-for')
-      const ip = forwarded ? forwarded.split(',')[0].trim() : null
-      if (ip && ip !== '127.0.0.1' && !ip.startsWith('::')) {
-        try {
-          const geoRes = await fetch(`http://ip-api.com/json/${ip}?fields=lat,lon,city,regionName,countryCode`)
-          const geo = await geoRes.json()
-          if (geo.lat) {
-            lat = geo.lat; lon = geo.lon
-            city = geo.city; region = geo.regionName; country = geo.countryCode
-          }
-        } catch { /* fallback to default */ }
-      }
+    if (!qLat || !qLon) {
+      return NextResponse.json(
+        { error: 'Location required. Please allow location access in your browser.' },
+        { status: 400 }
+      )
     }
 
+    let lat = parseFloat(qLat)
+    let lon = parseFloat(qLon)
+    let city = 'Your area', region = '', country = ''
+
+    if (isNaN(lat) || isNaN(lon)) {
+      return NextResponse.json(
+        { error: 'Invalid coordinates supplied.' },
+        { status: 400 }
+      )
+    }
+
+    // Reverse-geocode to get city name
+    try {
+      const rgRes = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`,
+        { headers: { 'User-Agent': 'SparkyStudio/1.0' } }
+      )
+      const rg = await rgRes.json()
+      city = rg.address?.city || rg.address?.town || rg.address?.village || rg.address?.county || 'Your area'
+      region = rg.address?.state || ''
+      country = rg.address?.country_code?.toUpperCase() || ''
+    } catch { /* use 'Your area' default */ }
+
     // 2. Fetch weather from open-meteo (free, no API key)
-    const weatherUrl = `https://api.open-meteo.com/v1/forecast?` +
-      `latitude=${lat}&longitude=${lon}` +
-      `&current=temperature_2m,apparent_temperature,relative_humidity_2m,` +
-      `precipitation,weather_code,wind_speed_10m,wind_direction_10m,` +
-      `surface_pressure,visibility,uv_index` +
-      `&hourly=precipitation_probability` +
-      `&temperature_unit=celsius` +
-      `&wind_speed_unit=mph` +
-      `&precipitation_unit=inch` +
-      `&forecast_days=1`
+    const weatherUrl = new URL('https://api.open-meteo.com/v1/forecast')
+    weatherUrl.searchParams.set('latitude',  String(lat))
+    weatherUrl.searchParams.set('longitude', String(lon))
+    weatherUrl.searchParams.set('current', [
+      'temperature_2m', 'apparent_temperature', 'relative_humidity_2m',
+      'weather_code', 'wind_speed_10m', 'wind_direction_10m',
+      'uv_index', 'precipitation', 'cloud_cover',
+    ].join(','))
+    weatherUrl.searchParams.set('hourly', 'temperature_2m,precipitation_probability,weather_code')
+    weatherUrl.searchParams.set('daily', [
+      'weather_code', 'temperature_2m_max', 'temperature_2m_min',
+      'precipitation_sum', 'wind_speed_10m_max', 'sunrise', 'sunset',
+    ].join(','))
+    weatherUrl.searchParams.set('temperature_unit', 'celsius')
+    weatherUrl.searchParams.set('wind_speed_unit', 'mph')
+    weatherUrl.searchParams.set('precipitation_unit', 'inch')
+    weatherUrl.searchParams.set('timezone', 'auto')
+    weatherUrl.searchParams.set('forecast_days', '7')
 
-    const wRes = await fetch(weatherUrl)
-    const w = await wRes.json()
-    const c = w.current
+    const wxRes = await fetch(weatherUrl.toString())
+    if (!wxRes.ok) throw new Error(`open-meteo ${wxRes.status}`)
+    const wx = await wxRes.json()
 
-    const tempC = Math.round(c.temperature_2m)
-    const tempF = cToF(tempC)
-    const feelsC = Math.round(c.apparent_temperature)
-    const feelsF = cToF(feelsC)
-    const humidity = Math.round(c.relative_humidity_2m)
-    const windSpeed = Math.round(c.wind_speed_10m)
-    const windDir = windDirection(c.wind_direction_10m)
-    const pressure = (c.surface_pressure * 0.02953).toFixed(2)  // hPa → inHg
-    const pressureHpa = Math.round(c.surface_pressure)
-    const visibilityMi = Math.round((c.visibility ?? 10000) / 1000 * 0.621)
-    const uv = (c.uv_index ?? 0).toFixed(1)
-    const condition = wmoDescription(c.weather_code)
-    const precip = c.precipitation > 0 ? `${c.precipitation}"` : 'None'
+    const cur = wx.current
+    const daily = wx.daily
+    const hourly = wx.hourly
 
-    // Get next-hour precip probability
-    const now = new Date()
-    const hourIndex = now.getHours()
-    const precipProb = w.hourly?.precipitation_probability?.[hourIndex] ?? 0
+    // Build 7-day forecast
+    const forecast = (daily.time as string[]).map((date: string, i: number) => ({
+      date,
+      high: cToF(daily.temperature_2m_max[i]),
+      low:  cToF(daily.temperature_2m_min[i]),
+      condition: wmoDescription(daily.weather_code[i]),
+      precipitation: daily.precipitation_sum[i],
+      windMax: daily.wind_speed_10m_max[i],
+      sunrise: daily.sunrise[i],
+      sunset:  daily.sunset[i],
+    }))
 
-    // Format local time
-    const localTime = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+    // Build next 12h hourly
+    const nowHour = new Date().getHours()
+    const hourlySlice = (hourly.time as string[])
+      .map((t: string, i: number) => ({
+        time: t,
+        temp: cToF(hourly.temperature_2m[i]),
+        pop:  hourly.precipitation_probability[i],
+        condition: wmoDescription(hourly.weather_code[i]),
+      }))
+      .filter((_: {time: string; temp: number; pop: number; condition: string}, i: number) => {
+        const h = new Date(hourly.time[i]).getHours()
+        return i < 24 // next 24 hours
+      })
+      .slice(0, 12)
 
-    // ─── Reporter-style report ───────────────────────────────────────────────
-    const report = `**${city}, ${region} Weather Update** — brought to you by Sparkie Studio — ${localTime} local time.
-
-🌡️ **Temperature:** ${tempF}°F (${tempC}°C), feels like ${feelsF}°F
-🌤️ **Sky:** ${condition.charAt(0).toUpperCase() + condition.slice(1)}
-🌧️ **Precipitation:** ${precip === 'None' ? 'None right now' : precip}${precipProb > 20 ? `; ${precipProb}% chance in the next hour` : ''}
-💧 **Humidity:** ${humidity}%
-💨 **Wind:** ${windDir} at ${windSpeed} mph
-🔵 **Pressure:** ${pressure} inHg (${pressureHpa} hPa)
-👁️ **Visibility:** ${visibilityMi} mile${visibilityMi !== 1 ? 's' : ''}
-☀️ **UV Index:** ${uv} (${uvRisk(parseFloat(uv))})
-
-${getOutfitTip(tempF, condition, precipProb)}`
-
-    return NextResponse.json({ report, city, region, tempF, tempC, condition })
-
-  } catch (err) {
-    console.error('[weather]', err)
-    return NextResponse.json(
-      { report: "Couldn't fetch weather right now. Try again in a moment.", error: true },
-      { status: 500 }
-    )
+    return NextResponse.json({
+      location: { city, region, country, lat, lon },
+      current: {
+        tempF:         cToF(cur.temperature_2m),
+        feelsLikeF:    cToF(cur.apparent_temperature),
+        humidity:      cur.relative_humidity_2m,
+        condition:     wmoDescription(cur.weather_code),
+        windMph:       cur.wind_speed_10m,
+        windDir:       windDirection(cur.wind_direction_10m),
+        uvIndex:       cur.uv_index,
+        uvRisk:        uvRisk(cur.uv_index),
+        precipitation: cur.precipitation,
+        cloudCover:    cur.cloud_cover,
+      },
+      forecast,
+      hourly: hourlySlice,
+      timezone: wx.timezone,
+    })
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Unknown error'
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
-}
-
-function getOutfitTip(tempF: number, condition: string, precipProb: number): string {
-  const tips: string[] = []
-  if (precipProb > 40 || condition.includes('rain') || condition.includes('drizzle')) {
-    tips.push("☂️ Grab an umbrella — rain is likely.")
-  } else if (precipProb > 20) {
-    tips.push("🌂 Light jacket recommended — some showers possible.")
-  }
-  if (tempF <= 32) tips.push("🧥 Bundle up — it's freezing out there!")
-  else if (tempF <= 50) tips.push("🧣 Keep a jacket handy.")
-  else if (tempF <= 65) tips.push("🧥 Light jacket weather.")
-  else if (tempF >= 90) tips.push("🥤 Stay hydrated — it's hot!")
-
-  if (condition.includes('snow')) tips.push("❄️ Watch for slippery roads.")
-  if (condition.includes('thunder')) tips.push("⚡ Stay indoors if possible.")
-
-  return tips.length > 0 ? tips.join(' ') : "✅ Looks like a nice day out there!"
 }
