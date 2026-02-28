@@ -2498,8 +2498,21 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    const session = await getServerSession(authOptions)
-    const userId = (session?.user as { id?: string } | undefined)?.id ?? null
+    // ── Internal auth bypass for heartbeat scheduler ────────────────────────
+    // Scheduler calls /api/chat with x-internal-user-id + x-internal-secret
+    // so tasks run with full user context (memory, identity, tools) without a session.
+    const internalSecret = process.env.SPARKIE_INTERNAL_SECRET
+    const internalUserId = req.headers.get('x-internal-user-id')
+    const internalReqSecret = req.headers.get('x-internal-secret')
+    const isInternalCall =
+      !!internalSecret &&
+      !!internalUserId &&
+      internalReqSecret === internalSecret
+
+    const session = isInternalCall ? null : await getServerSession(authOptions)
+    const userId = isInternalCall
+      ? internalUserId
+      : (session?.user as { id?: string } | undefined)?.id ?? null
     const host = req.headers.get('host') ?? 'localhost:3000'
     const proto = req.headers.get('x-forwarded-proto') ?? 'https'
     const baseUrl = `${proto}://${host}`
