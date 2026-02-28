@@ -1,1 +1,1669 @@
-placeholder_input
+"use client"
+
+import { useState, useRef, useCallback, useEffect } from "react"
+import { useAppStore } from "@/store/appStore"
+import { parseAIResponse, getLanguageFromFilename, deriveProjectName } from "@/lib/fileParser"
+import { Paperclip, ArrowUp, Sparkles, ChevronDown, Image as ImageIcon, Video, Music, Mic, MicOff, FileText, Headphones, Phone, Film, X } from "lucide-react"
+import { VoiceChat } from "@/components/chat/VoiceChat"
+
+// ── Asset type detection helper (for AssetsTab categories) ─────────────────
+function detectAssetTypeFromName(name: string): import('@/store/appStore').AssetType {
+  const ext = name.split('.').pop()?.toLowerCase() || ''
+  if (['html', 'htm'].includes(ext)) return 'website'
+  if (['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp', 'ico', 'bmp'].includes(ext)) return 'image'
+  if (['mp3', 'wav', 'ogg', 'aac', 'flac', 'm4a'].includes(ext)) return 'audio'
+  if (['mp4', 'webm', 'mov', 'avi', 'mkv'].includes(ext)) return 'video'
+  if (['xlsx', 'xls', 'csv'].includes(ext)) return 'excel'
+  if (['pptx', 'ppt'].includes(ext)) return 'ppt'
+  if (['pdf', 'doc', 'docx', 'txt', 'md'].includes(ext)) return 'document'
+  if (['js', 'ts', 'jsx', 'tsx', 'py', 'css', 'json'].includes(ext)) return 'website'
+  return 'other'
+}
+
+
+// ─── Slash commands registry ─────────────────────────────────────────────────
+const SLASH_COMMANDS = [
+  { cmd: '/startradio', desc: 'Start Sparkie Radio' },
+  { cmd: '/stopradio',  desc: 'Stop the radio' },
+  { cmd: '/weather',    desc: 'Get your local weather forecast' },
+  { cmd: '/journal',    desc: 'Search or discuss your Dream Journal entries' },
+  { cmd: '/dream',      desc: 'Add a dream or entry to your Dream Journal' },
+] as const
+
+// Chat model routing is handled server-side — Sparkie auto-selects the best model.
+// Users see "Sparkie" as the model name; the actual tier (fast/capable/deep) is invisible.
+const MODELS = [
+  { id: "auto", name: "Sparkie", tag: "AI", type: "chat" },
+]
+
+const IMAGE_MODELS = [
+  { id: "flux", name: "Flux", tag: "Free", desc: "Fast high-quality" },
+  { id: "zimage", name: "Z-Image", tag: "Free", desc: "Turbo with 2x upscale" },
+  { id: "klein", name: "Klein 4B", tag: "Free", desc: "FLUX.2 fast" },
+  { id: "klein-large", name: "Klein 9B", tag: "Free", desc: "FLUX.2 high quality" },
+  { id: "gptimage", name: "GPT Image", tag: "Free", desc: "OpenAI image gen" },
+  { id: "image-01", name: "MiniMax Image", tag: "Paid", desc: "$0.0035/image — high quality" },
+]
+
+const VIDEO_MODELS = [
+  { id: "MiniMax-Hailuo-2.3", name: "Hailuo 2.3", tag: "Paid", desc: "$0.28 / 768P 6s — best quality" },
+  { id: "MiniMax-Hailuo-02", name: "Hailuo 02", tag: "Paid", desc: "$0.10 / 512P 6s — balanced" },
+  { id: "T2V-01-Director", name: "T2V Director", tag: "Paid", desc: "Camera control commands" },
+  { id: "T2V-01", name: "T2V-01", tag: "Paid", desc: "Standard text-to-video" },
+]
+
+const MUSIC_MODELS = [
+  { id: "music-2.5", name: "Music-2.5", tag: "Paid", desc: "$0.15 / 5 min — high quality" },
+  { id: "music-2.0", name: "Music-2.0", tag: "Paid", desc: "$0.03 / 5 min — fast" },
+  { id: "ace-step-free", name: "ACE-Step 1.5", tag: "Free", desc: "Unlimited free music — no credits" },
+]
+
+const LYRICS_MODELS = [
+  { id: "music-01", name: "Lyrics-2.5", tag: "Paid", desc: "AI lyrics generation" },
+]
+
+// Speech model picker (quality/cost tier)
+const SPEECH_MODELS = [
+  { id: "speech-02-turbo", name: "Speech Turbo", tag: "Paid", desc: "$60 / M chars — fastest" },
+  { id: "speech-02-hd", name: "Speech HD", tag: "Paid", desc: "$100 / M chars — highest quality" },
+]
+
+// Voice options for speech generation — all English voices from platform.minimax.io/docs/faq/system-voice-id
+const SPEECH_VOICES = [
+  // Girls
+  { id: "English_radiant_girl",        name: "Radiant Girl",        tag: "Girl",  desc: "Bright, cheerful energy" },
+  { id: "English_PlayfulGirl",         name: "Playful Girl",        tag: "Girl",  desc: "Fun, lively" },
+  { id: "English_LovelyGirl",          name: "Lovely Girl",         tag: "Girl",  desc: "Sweet, likeable" },
+  { id: "English_Kind-heartedGirl",    name: "Kind-Hearted Girl",   tag: "Girl",  desc: "Warm, caring" },
+  { id: "English_WhimsicalGirl",       name: "Whimsical Girl",      tag: "Girl",  desc: "Dreamy, imaginative" },
+  { id: "English_Soft-spokenGirl",     name: "Soft-Spoken Girl",    tag: "Girl",  desc: "Gentle, quiet" },
+  { id: "English_Whispering_girl",     name: "Whispering Girl",     tag: "Girl",  desc: "Soft, intimate" },
+  { id: "English_UpsetGirl",           name: "Upset Girl",          tag: "Girl",  desc: "Emotional, expressive" },
+  { id: "English_AnimeCharacter",      name: "Anime Girl",          tag: "Girl",  desc: "Animated female narrator" },
+  // Women
+  { id: "English_CalmWoman",           name: "Calm Woman",          tag: "Woman", desc: "Soothing, measured" },
+  { id: "English_Upbeat_Woman",        name: "Upbeat Woman",        tag: "Woman", desc: "Positive, energetic" },
+  { id: "English_SereneWoman",         name: "Serene Woman",        tag: "Woman", desc: "Peaceful, composed" },
+  { id: "English_ConfidentWoman",      name: "Confident Woman",     tag: "Woman", desc: "Bold, clear" },
+  { id: "English_AssertiveQueen",      name: "Assertive Queen",     tag: "Woman", desc: "Powerful, decisive" },
+  { id: "English_ImposingManner",      name: "Imposing Queen",      tag: "Woman", desc: "Commanding, regal" },
+  { id: "English_WiseladyWise",        name: "Wise Lady",           tag: "Woman", desc: "Thoughtful, assured" },
+  { id: "English_Graceful_Lady",       name: "Graceful Lady",       tag: "Woman", desc: "Elegant, poised" },
+  { id: "English_compelling_lady1",    name: "Compelling Lady",     tag: "Woman", desc: "Persuasive, strong" },
+  { id: "English_captivating_female1", name: "Captivating Female",  tag: "Woman", desc: "Alluring, engaging" },
+  { id: "English_MaturePartner",       name: "Mature Partner",      tag: "Woman", desc: "Warm, experienced" },
+  { id: "English_MatureBoss",          name: "Bossy Lady",          tag: "Woman", desc: "Authoritative, direct" },
+  { id: "English_SentimentalLady",     name: "Sentimental Lady",    tag: "Woman", desc: "Emotional depth" },
+  { id: "English_StressedLady",        name: "Stressed Lady",       tag: "Woman", desc: "Tense, urgent tone" },
+]
+
+
+const PROMPT_TEMPLATES = [
+  { label: "Landing page", prompt: "Build a stunning landing page with hero section, features grid, and CTA. Dark theme, honey gold accents, plain CSS.", icon: "🌐" },
+  { label: "REST API", prompt: "Build a full Express.js REST API with CRUD endpoints, input validation, and proper error handling. Include package.json.", icon: "⚡" },
+  { label: "Dashboard", prompt: "Build an analytics dashboard with charts, stat cards, and a sidebar. Dark theme with honey gold data visualizations.", icon: "📊" },
+  { label: "Todo app", prompt: "Build a beautiful todo app with add, complete, delete, and filter by status. Dark theme, smooth animations, plain CSS.", icon: "✅" },
+  { label: "Auth UI", prompt: "Build a sign in / sign up UI with form validation, password strength meter, and animated transitions. Dark theme.", icon: "🔐" },
+  { label: "Chat UI", prompt: "Build a chat interface with message bubbles, timestamps, typing indicator, and smooth animations. Dark theme.", icon: "💬" },
+]
+
+type GenMode = "chat" | "image" | "video" | "music" | "lyrics" | "speech"
+
+export function ChatInput() {
+  // ── Persist a message to DB (fire-and-forget, never blocks UI) ──────────
+  const saveMessage = (role: 'user' | 'assistant', content: string) => {
+    if (!content?.trim()) return
+    fetch('/api/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role, content }),
+    }).catch(() => { /* silent — history is best-effort */ })
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const [input, setInput] = useState("")
+  const [showModels, setShowModels] = useState(false)
+  const [genMode, setGenMode] = useState<GenMode>("chat")
+  const [slashSuggestions, setSlashSuggestions] = useState<Array<{ cmd: string; desc: string }>>([])
+  const [selectedImageModel, setSelectedImageModel] = useState("flux")
+  const [selectedVideoModel, setSelectedVideoModel] = useState("MiniMax-Hailuo-2.3")
+  const [videoFrameImage, setVideoFrameImage] = useState<string | null>(null)  // I2V: base64 data URL
+  const [selectedMusicModel, setSelectedMusicModel] = useState("music-2.5")
+  const [selectedLyricsModel, setSelectedLyricsModel] = useState("music-2.5")
+  const [selectedSpeechModel, setSelectedSpeechModel] = useState("speech-02-turbo")
+  const [selectedVoiceId, setSelectedVoiceId] = useState("English_CalmWoman")
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const videoFileRef = useRef<HTMLInputElement>(null)
+  const agentAbortRef = useRef<AbortController | null>(null)
+  const [isRecording, setIsRecording] = useState(false)
+  const [isTranscribing, setIsTranscribing] = useState(false)
+  const [isVoiceChatOpen, setIsVoiceChatOpen] = useState(false)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
+  const {
+    selectedModel, setSelectedModel, createChat, getOrCreateSingleChat, addMessage,
+    updateMessage, currentChatId, isStreaming, setStreaming,
+    openIDE, setExecuting, setActiveFile, setIDETab, ideOpen,
+    clearLiveCode, appendLiveCode, addLiveCodeFile,
+    addWorklogEntry, updateWorklogEntry, clearWorklog,
+    setContainerStatus, setPreviewUrl, saveChatFiles, addAsset, updateAsset,
+    setLastMode,
+  } = useAppStore()
+
+  // Upsert a file with a potentially nested path (e.g. "public/index.html")
+  // into the Zustand files tree, creating intermediate folder nodes as needed.
+  const upsertFile = useCallback((filePath: string, content: string, language?: string): string => {
+    const parts = filePath.split('/').filter(Boolean)
+    const store = useAppStore.getState()
+
+    if (parts.length === 1) {
+      // Flat file — only search non-archive top-level nodes
+      const isArchivedNode = (f: import('@/store/appStore').FileNode) => f.type === 'archive'
+      const fresh = useAppStore.getState()
+      const existing = fresh.files.find(f => f.type === 'file' && f.name === parts[0] && !isArchivedNode(f))
+      if (existing) {
+        fresh.updateFileContent(existing.id, content)
+        return existing.id
+      }
+      return fresh.addFile({ name: parts[0], type: 'file', content, language })
+    }
+
+    // Nested path — build/update tree (exclude archive folders from merge target)
+    const isArchivedNode = (f: import('@/store/appStore').FileNode) => f.type === 'archive'
+    const setFiles = store.setFiles
+    const archiveNodes = store.files.filter(isArchivedNode)
+    const currentFiles = store.files.filter(f => !isArchivedNode(f))
+
+    function upsertInTree(nodes: import('@/store/appStore').FileNode[], pathParts: string[], fileContent: string, lang?: string): [import('@/store/appStore').FileNode[], string] {
+      const [head, ...rest] = pathParts
+      let resultId = ''
+
+      if (rest.length === 0) {
+        // Leaf — file node
+        const existingIdx = nodes.findIndex(n => n.type === 'file' && n.name === head)
+        if (existingIdx >= 0) {
+          const updated = [...nodes]
+          resultId = updated[existingIdx].id
+          updated[existingIdx] = { ...updated[existingIdx], content: fileContent, language: lang }
+          return [updated, resultId]
+        }
+        resultId = crypto.randomUUID()
+        return [[...nodes, { id: resultId, name: head, type: 'file' as const, content: fileContent, language: lang }], resultId]
+      }
+
+      // Directory node
+      const existingFolderIdx = nodes.findIndex(n => n.type === 'folder' && n.name === head)
+      if (existingFolderIdx >= 0) {
+        const folder = nodes[existingFolderIdx]
+        const [updatedChildren, id] = upsertInTree(folder.children ?? [], rest, fileContent, lang)
+        const updated = [...nodes]
+        updated[existingFolderIdx] = { ...folder, children: updatedChildren }
+        return [updated, id]
+      }
+
+      // New folder
+      const [children, id] = upsertInTree([], rest, fileContent, lang)
+      return [[...nodes, { id: crypto.randomUUID(), name: head, type: 'folder' as const, content: '', children }], id]
+    }
+
+    const [newTree, leafId] = upsertInTree(currentFiles, parts, content, language)
+    setFiles([...archiveNodes, ...newTree])
+    return leafId
+  }, [])
+
+  const streamChat = useCallback(async (chatId: string, userContent: string) => {
+    const chat = useAppStore.getState().chats.find((c) => c.id === chatId)
+    if (!chat) return
+    const projectName = deriveProjectName(chat?.title || 'New Chat')
+
+    const apiMessages = chat.messages
+      .filter((m) => m.type !== "image" && m.type !== "video")
+      .map((m) => ({ role: m.role, content: m.content }))
+
+    // ── Inject current workspace context for fix/modify requests ──────────────
+    // If there are active files, append them as a system context message so the
+    // AI can do proper targeted edits rather than starting from scratch.
+    const activeFilesForContext = useAppStore.getState().files.filter(f => f.type !== 'archive')
+    if (activeFilesForContext.length > 0) {
+      const fileContext = activeFilesForContext
+        .filter(f => f.type === 'file' && f.content)
+        .map(f => `---FILE: ${f.name}---\n${f.content}\n---END FILE---`)
+        .join('\n\n')
+      if (fileContext) {
+        apiMessages.push({
+          role: 'user' as const,
+          content: `[CURRENT WORKSPACE — these are the files currently in the IDE. When asked to fix or modify, update these exact files and return them complete with ---FILE:--- markers]\n\n${fileContext}`,
+        })
+        apiMessages.push({
+          role: 'assistant' as const,
+          content: `Understood. I have the current workspace loaded. I'll make targeted fixes and return the complete updated file(s).`,
+        })
+      }
+    }
+    // ── End workspace context ──────────────────────────────────────────────────
+
+    // ── Archive FIRST — before any state resets that could race with setFiles ──
+    // Read files synchronously right now, before any async state changes.
+    const currentFiles = useAppStore.getState().files
+    const isArchived = (f: import('@/store/appStore').FileNode) => f.type === 'archive'
+    const activeFiles = currentFiles.filter(f => !isArchived(f))
+    const existingArchives = currentFiles.filter(isArchived)
+
+    if (activeFiles.length > 0) {
+      // Name the folder after the most recent substantial user coding task.
+      // The NEW userContent (current submit) is NOT yet in the messages store,
+      // so look backwards through messages for the last user message with >4 words
+      // (skipping short conversational messages like "good job", "thanks", etc.)
+      const allUserMsgs = (useAppStore.getState().chats.find(c => c.id === chatId)?.messages ?? []).filter(m => m.role === 'user')
+      const prevCodingMsg = allUserMsgs.slice().reverse().find(m => m.content.trim().split(/\s+/).length > 4)
+      const nameSource = prevCodingMsg?.content || activeFiles[0]?.name || 'project'
+      const folderName = nameSource
+        .replace(/[^a-zA-Z0-9 ]/g, '')
+        .trim()
+        .split(/\s+/)
+        .slice(0, 5)
+        .join('-')
+        .toLowerCase() || 'project'
+      const timestamp = new Date()
+        .toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+        .replace(':', '')
+      const archiveName = `${folderName}-${timestamp}`
+
+      const deepCloneWithNewIds = (node: import('@/store/appStore').FileNode): import('@/store/appStore').FileNode => ({
+        ...node,
+        id: crypto.randomUUID(),
+        children: node.children?.map(deepCloneWithNewIds),
+      })
+
+      const archiveFolder: import('@/store/appStore').FileNode = {
+        id: crypto.randomUUID(),
+        name: archiveName,
+        type: 'archive',
+        content: '',
+        children: activeFiles.map(f => deepCloneWithNewIds(f)),
+      }
+
+      // Single atomic setFiles call — archives preserved, active workspace cleared
+      useAppStore.getState().setFiles([...existingArchives, archiveFolder])
+    } else {
+      useAppStore.getState().setFiles([])
+    }
+    // ── End archive ──────────────────────────────────────────────────────────
+
+    // Chat shows brief placeholder — code goes to LiveCodeView
+    const assistantMsgId = addMessage(chatId, {
+      role: "assistant", content: "⚡ Working on it...", model: selectedModel, isStreaming: true,
+    })
+
+    setStreaming(true)
+    setExecuting(true)
+    clearLiveCode()
+    // Reset WebContainer state so the new task gets a fresh Preview
+    setContainerStatus('idle')
+    setPreviewUrl(null)
+
+    // Open IDE to Current Process — will show LiveCodeView since isExecuting=true
+    if (!ideOpen) openIDE()
+    setIDETab("process")
+
+    try {
+      const userProfile = useAppStore.getState().userProfile
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: apiMessages, model: selectedModel, userProfile }),
+      })
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({ error: "Unknown error" }))
+        updateMessage(chatId, assistantMsgId, { content: `Error: ${err.error || response.statusText}`, isStreaming: false })
+        setStreaming(false); setExecuting(false)
+        return
+      }
+
+      const reader = response.body?.getReader()
+      const decoder = new TextDecoder()
+
+      if (!reader) {
+        updateMessage(chatId, assistantMsgId, { content: "Error: No response stream", isStreaming: false })
+        setStreaming(false); setExecuting(false)
+        return
+      }
+
+      let buffer = ""
+      let fullContent = ""
+      let filesCreated = 0
+      const createdFileNames = new Set<string>()
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split("\n")
+        buffer = lines.pop() || ""
+
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed || !trimmed.startsWith("data: ")) continue
+          const data = trimmed.slice(6)
+          if (data === "[DONE]") continue
+          try {
+            const parsed = JSON.parse(data)
+            const delta = parsed.choices?.[0]?.delta
+            if (delta?.content) {
+              fullContent += delta.content
+              // Stream directly to LiveCodeView
+              appendLiveCode(delta.content)
+            }
+          } catch { /* skip */ }
+        }
+
+        // Incrementally detect completed file blocks
+        const partialParse = parseAIResponse(fullContent, projectName)
+        for (const file of partialParse.files) {
+          if (!createdFileNames.has(file.name)) {
+            createdFileNames.add(file.name)
+
+            // Clear old non-archive files on first file creation
+            if (filesCreated === 0) {
+              const isArchivedNode = (f: import('@/store/appStore').FileNode) => f.type === 'archive'
+              const oldFiles = useAppStore.getState().files.filter(f => !isArchivedNode(f))
+              oldFiles.forEach(f => useAppStore.getState().deleteFile(f.id))
+            }
+
+            const fileId = upsertFile(file.name, file.content, getLanguageFromFilename(file.name))
+
+            if (filesCreated === 0) setActiveFile(fileId)
+            filesCreated++
+
+            // Show file badge in LiveCodeView header
+            addLiveCodeFile(file.name)
+          } else {
+            // Update existing file content as it grows
+            // Update with complete final content (handles folder-prefixed paths)
+            upsertFile(file.name, file.content, getLanguageFromFilename(file.name))
+          }
+        }
+      }
+
+      // Final parse
+      const finalParse = parseAIResponse(fullContent, projectName)
+      for (const file of finalParse.files) {
+        if (!createdFileNames.has(file.name)) {
+          createdFileNames.add(file.name)
+          if (filesCreated === 0) {
+            const isArchivedNode = (f: import('@/store/appStore').FileNode) => f.type === 'archive'
+            const oldFiles = useAppStore.getState().files.filter(f => !isArchivedNode(f))
+            oldFiles.forEach(f => useAppStore.getState().deleteFile(f.id))
+          }
+          const fileId = upsertFile(file.name, file.content, getLanguageFromFilename(file.name))
+          if (filesCreated === 0) setActiveFile(fileId)
+          filesCreated++
+          addLiveCodeFile(file.name)
+        } else {
+          // Update with complete final content (handles folder-prefixed paths)
+          upsertFile(file.name, file.content, getLanguageFromFilename(file.name))
+        }
+      }
+
+      // Update chat with description only
+      if (filesCreated > 0) {
+        const description = finalParse.text || `✨ Created ${filesCreated} file(s). Check the preview →`
+        updateMessage(chatId, assistantMsgId, { content: description, isStreaming: false })
+        saveMessage('assistant', description)
+      } else {
+        // AI responded with text only (no file blocks) — restore the most recent archive back
+        // to the active workspace so the preview doesn't go blank
+        const currentState = useAppStore.getState()
+        const archives = currentState.files.filter(f => f.type === 'archive')
+        if (archives.length > 0) {
+          // Pop the most recent archive back out as active files
+          const latest = archives[archives.length - 1]
+          const olderArchives = archives.slice(0, -1)
+          const restored = latest.children ?? []
+          useAppStore.getState().setFiles([...olderArchives, ...restored])
+        }
+        const finalText = fullContent || "The model used all tokens for reasoning. Try a simpler prompt."
+        updateMessage(chatId, assistantMsgId, {
+          content: finalText,
+          isStreaming: false,
+        })
+        saveMessage('assistant', finalText)
+      }
+    } catch (error) {
+      console.error("Stream error:", error)
+      updateMessage(chatId, assistantMsgId, { content: "Connection error. Please try again.", isStreaming: false })
+    } finally {
+      // Stop executing — IDEPanel will swap from LiveCodeView to Preview
+      setStreaming(false)
+      setExecuting(false)
+      // Persist current workspace back to this chat so switching chats restores it
+      saveChatFiles(chatId, useAppStore.getState().files)
+    }
+  }, [selectedModel, addMessage, updateMessage, setStreaming, setExecuting, openIDE, setIDETab, ideOpen, upsertFile, setActiveFile, clearLiveCode, appendLiveCode, addLiveCodeFile, addWorklogEntry, updateWorklogEntry, setContainerStatus, setPreviewUrl, saveChatFiles])
+
+  const generateMedia = useCallback(async (chatId: string, prompt: string, mediaType: "image" | "video" | "music" | "lyrics" | "speech") => {
+    const model = mediaType === "video" ? selectedVideoModel : mediaType === "music" ? selectedMusicModel : mediaType === "lyrics" ? selectedLyricsModel : mediaType === "speech" ? selectedSpeechModel : selectedImageModel
+    const emoji = mediaType === "video" ? "\ud83c\udfac" : mediaType === "music" ? "\ud83c\udfb5" : mediaType === "lyrics" ? "\u270d\ufe0f" : mediaType === "speech" ? "\ud83c\udfa4" : "\ud83c\udfa8"
+
+    const assistantMsgId = addMessage(chatId, {
+      role: "assistant", content: `${emoji} Generating ${mediaType}...`, isStreaming: true, type: (mediaType === "lyrics" ? "text" : mediaType) as "text" | "image" | "video" | "music" | "speech",
+    })
+
+    setStreaming(true)
+    if (!ideOpen) openIDE()
+    setIDETab("process")
+
+    const logId = addWorklogEntry({ type: "action", content: `Generating ${mediaType} with ${model}: "${prompt.slice(0, 60)}..."`, status: "running" })
+    const startTime = Date.now()
+
+    try {
+      const body: Record<string, unknown> = mediaType === "speech" ? { text: prompt, model, voice_id: selectedVoiceId } : { prompt, model }
+      if (mediaType === "video") {
+        body.duration = 6
+        if (videoFrameImage) body.first_frame_image = videoFrameImage
+      }
+
+      const endpoint = mediaType === "music" ? "/api/music" : mediaType === "lyrics" ? "/api/lyrics" : mediaType === "speech" ? "/api/speech" : mediaType === "video" ? "/api/video" : "/api/image"
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({ error: "Unknown" }))
+        updateMessage(chatId, assistantMsgId, {
+          content: `${mediaType} generation failed: ${err.error || response.status}`,
+          isStreaming: false, type: "text",
+        })
+        updateWorklogEntry(logId, { status: "error", duration: Date.now() - startTime })
+        setStreaming(false)
+        return
+      }
+
+      // SSE stream (MiniMax models): read event stream, show progress dots while waiting
+      if (response.headers.get("content-type")?.includes("text/event-stream")) {
+        const reader = response.body!.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ""
+        const dots = [".", "..", "..."]
+        let dotIdx = 0
+
+        const tickInterval = setInterval(() => {
+          dotIdx = (dotIdx + 1) % 3
+          const elapsed = Math.round((Date.now() - startTime) / 1000)
+          updateMessage(chatId, assistantMsgId, {
+            content: `🎵 Generating music${dots[dotIdx]} (${elapsed}s)`,
+            isStreaming: true,
+          })
+        }, 1500)
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            buffer += decoder.decode(value, { stream: true })
+            const lines = buffer.split("\n")
+            buffer = lines.pop() ?? ""
+            for (const line of lines) {
+              if (!line.startsWith("data:")) continue
+              const json = line.slice(5).trim()
+              if (!json) continue
+              try {
+                const sseData = JSON.parse(json)
+                clearInterval(tickInterval)
+                if (sseData.error) {
+                  updateMessage(chatId, assistantMsgId, {
+                    content: `music generation failed: ${sseData.error}`,
+                    isStreaming: false, type: "text",
+                  })
+                  updateWorklogEntry(logId, { status: "error", duration: Date.now() - startTime })
+                  setStreaming(false)
+                  return
+                }
+                if (sseData.url) {
+                  updateMessage(chatId, assistantMsgId, {
+                    content: prompt,
+                    imageUrl: sseData.url,
+                    imagePrompt: prompt,
+                    isStreaming: false,
+                    type: "music",
+                    model: model,
+                  })
+                  const mediaChatTitle = useAppStore.getState().chats.find(c => c.id === chatId)?.title || "New Chat"
+                  const safePrompt = prompt.slice(0, 40).replace(/[^a-z0-9 ]/gi, "").trim().replace(/\s+/g, "-") || "music"
+                  addAsset({
+                    name: `${safePrompt}.mp3`,
+                    language: "",
+                    content: sseData.url,
+                    chatId,
+                    chatTitle: mediaChatTitle,
+                    fileId: assistantMsgId,
+                    assetType: "audio" as import("@/store/appStore").AssetType,
+                    source: "agent" as const,
+                  })
+                  updateWorklogEntry(logId, { status: "done", duration: Date.now() - startTime })
+                  setStreaming(false)
+                  return
+                }
+              } catch { /* malformed SSE line, skip */ }
+            }
+          }
+        } finally {
+          clearInterval(tickInterval)
+          reader.cancel().catch(() => {})
+        }
+        setStreaming(false)
+        return
+      }
+
+      const data = await response.json()
+
+      // Async task path: server returns taskId (music ACE-Step or video MiniMax)
+      if (data.taskId && data.status === "queued") {
+        const taskId = data.taskId
+        const isVideoTask = mediaType === "video"
+        const taskEmoji = isVideoTask ? "🎬" : "🎵"
+        const taskLabel = isVideoTask ? "video" : "music"
+        const pollEndpoint = isVideoTask ? `/api/video?taskId=${taskId}` : `/api/music?taskId=${taskId}`
+        const dots = [".", "..", "..."]
+        let dotIdx = 0
+        let pollCount = 0
+        const MAX_POLLS = 120 // 10 minutes max (120 × 5s)
+
+        updateMessage(chatId, assistantMsgId, {
+          content: `${taskEmoji} Generating ${taskLabel}… this takes 2-5 minutes`,
+          isStreaming: true,
+        })
+
+        const pollInterval = setInterval(async () => {
+          pollCount++
+          dotIdx = (dotIdx + 1) % 3
+
+          if (pollCount > MAX_POLLS) {
+            clearInterval(pollInterval)
+            updateMessage(chatId, assistantMsgId, {
+              content: `${taskLabel.charAt(0).toUpperCase() + taskLabel.slice(1)} generation timed out after 10 minutes. Please try again.`,
+              isStreaming: false, type: "text",
+            })
+            updateWorklogEntry(logId, { status: "error", duration: Date.now() - startTime })
+            setStreaming(false)
+            return
+          }
+
+          try {
+            const statusRes = await fetch(pollEndpoint)
+            if (!statusRes.ok) return // network blip, keep polling
+
+            const statusData = await statusRes.json()
+
+            if (statusData.status === "done" && statusData.url) {
+              clearInterval(pollInterval)
+              updateMessage(chatId, assistantMsgId, {
+                content: prompt,
+                imageUrl: statusData.url,
+                imagePrompt: prompt,
+                isStreaming: false,
+                type: isVideoTask ? "video" : "music",
+                model: model,
+              })
+              const mediaChatTitle = useAppStore.getState().chats.find(c => c.id === chatId)?.title || "New Chat"
+              const safePrompt = prompt.slice(0, 40).replace(/[^a-z0-9 ]/gi, "").trim().replace(/\s+/g, "-") || taskLabel
+              const fileExt = isVideoTask ? "mp4" : "mp3"
+              const assetType = isVideoTask ? "video" : "audio"
+              addAsset({
+                name: `${safePrompt}.${fileExt}`,
+                language: "",
+                content: statusData.url,
+                chatId,
+                chatTitle: mediaChatTitle,
+                fileId: assistantMsgId,
+                assetType: assetType as import("@/store/appStore").AssetType,
+                source: "agent" as const,
+              })
+              updateWorklogEntry(logId, { status: "done", duration: Date.now() - startTime })
+              setStreaming(false)
+            } else if (statusData.status === "error") {
+              clearInterval(pollInterval)
+              updateMessage(chatId, assistantMsgId, {
+                content: `${taskLabel.charAt(0).toUpperCase() + taskLabel.slice(1)} generation failed: ${statusData.error || "Unknown error"}`,
+                isStreaming: false, type: "text",
+              })
+              updateWorklogEntry(logId, { status: "error", duration: Date.now() - startTime })
+              setStreaming(false)
+            } else {
+              // Still pending — update dots animation
+              const elapsed = Math.round((Date.now() - startTime) / 1000)
+              updateMessage(chatId, assistantMsgId, {
+                content: `${taskEmoji} Generating ${taskLabel}${dots[dotIdx]} (${elapsed}s)`,
+                isStreaming: true,
+              })
+            }
+          } catch {
+            // Poll failed — keep trying
+          }
+        }, 5000)
+
+        return // don't call setStreaming(false) yet — interval handles it
+      }
+
+      // Synchronous result (MiniMax models)
+      const isTextResult = mediaType === "lyrics"
+      updateMessage(chatId, assistantMsgId, {
+        content: isTextResult ? (data.title ? `**${data.title}**\n\n${data.lyrics}` : data.lyrics) : prompt,
+        imageUrl: isTextResult ? undefined : data.url,
+        imagePrompt: isTextResult ? undefined : prompt,
+        isStreaming: false,
+        type: isTextResult ? "text" : mediaType,
+        model: model,
+      })
+      const mediaChatTitle = useAppStore.getState().chats.find(c => c.id === chatId)?.title || "New Chat"
+      const mediaExt = mediaType === "video" ? "mp4" : mediaType === "music" ? "mp3" : "png"
+      const mediaAssetType = (mediaType === "music" || mediaType === "speech") ? "audio" : mediaType === "lyrics" ? "other" : mediaType
+      const safePrompt = prompt.slice(0, 40).replace(/[^a-z0-9 ]/gi, "").trim().replace(/\s+/g, "-") || mediaType
+      if (data.url) {
+        addAsset({
+          name: `${safePrompt}.${mediaExt}`,
+          language: "",
+          content: data.url,
+          chatId,
+          chatTitle: mediaChatTitle,
+          fileId: assistantMsgId,
+          assetType: mediaAssetType as import("@/store/appStore").AssetType,
+          source: "agent" as const,
+        })
+      }
+      updateWorklogEntry(logId, { status: "done", duration: Date.now() - startTime })
+    } catch (error) {
+      console.error(`${mediaType} gen error:`, error)
+      updateMessage(chatId, assistantMsgId, { content: `${mediaType} generation failed`, isStreaming: false, type: "text" })
+      updateWorklogEntry(logId, { status: "error", duration: Date.now() - startTime })
+    } finally {
+      setStreaming(false)
+    }
+  }, [selectedImageModel, selectedVideoModel, selectedMusicModel, selectedLyricsModel, selectedSpeechModel, selectedVoiceId, addMessage, updateMessage, setStreaming, addWorklogEntry, updateWorklogEntry, openIDE, setIDETab, ideOpen])
+
+  // Detect conversational/non-coding messages that shouldn't trigger the IDE
+  // Fast synchronous pre-filter — catches obvious cases without a network call.
+  // Returns true (chat), false (build), or null (ambiguous → let LLM decide).
+  const quickClassify = useCallback((text: string): boolean | null => {
+    const t = text.trim().toLowerCase()
+    const words = t.split(/\s+/).filter(Boolean)
+
+    // Explicit mode overrides
+    if (/\b(cancel|stop building|just chat|forget it)\b/.test(t)) return true
+
+    // Build/code intent — high-confidence signals
+    const BUILD_KEYWORDS = /^(build|create|make|write|generate|implement|deploy|refactor|debug|fix|install)\b/
+    const BUILD_PHRASE = /\b(build me|build a|create a|make a|make me|write a|write me|generate a|implement a|fix the|fix my|debug the|debug this|install the|deploy the|refactor the|refactor my|test the app|test it)\b/
+    // Edit/modify commands — always build mode (user is modifying an existing project)
+    // Catches: "change the X", "can we change", "can you change", "please change", "make it X", etc.
+    const EDIT_PHRASE = /\b(edit|update|upgrade|change|switch|swap|replace|rename|remove|delete|adjust|alter|amend|convert|modify|revise|refactor|rewrite|redo|refine|restyle|recolor|resize|transform|overhaul|patch|correct|improve|fix|tweak|tune|undo|revert|rollback)\b|(?:(?:can you|can u|could you|would you|would you mind|how about)\s+(?:please\s+)?(?:edit|update|upgrade|change|switch|swap|replace|rename|remove|delete|adjust|alter|amend|convert|modify|revise|refactor|rewrite|redo|refine|restyle|recolor|resize|transform|overhaul|patch|correct|improve|fix|tweak|tune|undo|revert|rollback))|\b(make it|make the|make sure|set the|set it|turn it|turn the|flip it|flip the|let's make|let's update|let's change|let's switch|instead of|it should be|switch this|switch the|update to|change to|change it)\b|\b(cahnge|chnage|upadte|updaet|swich|swithc|fiix|tweek|edti|chnge|udpate)\b/
+    if (BUILD_KEYWORDS.test(t) || BUILD_PHRASE.test(t) || EDIT_PHRASE.test(t)) return false
+
+    // Code-paste + question → explanation request
+    if ((text.includes('```') || text.includes('<code>')) && /\?/.test(t)) return true
+
+    // Very short messages (≤3 words)
+    if (words.length <= 3) return true
+
+    // Greetings
+    if (/^(hello|hi+|hey|yo|sup|howdy|good morning|good afternoon|good evening|what.?s up|how.?s it)/.test(t)) return true
+
+    // Emoji-only or emoji-dominant
+    if (/^[\p{Emoji}\s!?.]+$/u.test(t)) return true
+
+    // Thanks, acknowledgements
+    if (/^(thanks?|thank you|ty|thx|cheers|appreciate|got it|sounds good|makes sense|understood|noted|ok|okay|sure|perfect|copy that|roger|on it|let.?s go|yes|no|nope|yep|yup|nah|lol|haha|lmao|omg|wow|nice|cool|awesome|dope|sick|sweet)/.test(t)) return true
+
+    // Ambiguous — escalate to LLM classifier
+    return null
+  }, [])
+
+  // LLM-powered intent classifier — called only for ambiguous messages
+  const classifyIntent = useCallback(async (text: string): Promise<'chat' | 'build'> => {
+    const quick = quickClassify(text)
+    if (quick !== null) return quick ? 'chat' : 'build'
+
+    try {
+      const res = await fetch('/api/classify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text }),
+      })
+      if (!res.ok) return 'chat'
+      const { mode } = await res.json()
+      return mode === 'build' ? 'build' : 'chat'
+    } catch {
+      return 'chat' // Fail safe: default to chat
+    }
+  }, [quickClassify])
+
+  // Keep isConversational as a thin sync wrapper (used in isContinue check path)
+  const isConversational = useCallback((text: string): boolean => {
+    const q = quickClassify(text)
+    return q !== false
+  }, [quickClassify])
+
+  // Lightweight chat-only reply (no IDE, no file generation)
+  const streamReply = useCallback(async (chatId: string, userContent: string) => {
+    const chat = useAppStore.getState().chats.find((c) => c.id === chatId)
+    if (!chat) return
+    const apiMessages = chat.messages
+      .filter((m) => m.type !== "image" && m.type !== "video")
+      .map((m) => ({ role: m.role, content: m.content }))
+    const assistantMsgId = addMessage(chatId, { role: "assistant", content: "", model: selectedModel, isStreaming: true })
+    setStreaming(true)
+    try {
+      const userProfile = useAppStore.getState().userProfile
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: apiMessages, model: selectedModel, userProfile }),
+      })
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({ error: `HTTP ${response.status}` }))
+        const msg = response.status === 429 ? "Rate limited — wait a moment and try again." : response.status === 401 ? "This model isn't available on the current plan." : `Error: ${err.error || response.status}`
+        updateMessage(chatId, assistantMsgId, { content: msg, isStreaming: false })
+        setStreaming(false); return
+      }
+      const reader = response.body?.getReader()
+      const decoder = new TextDecoder()
+      if (!reader) { setStreaming(false); return }
+      let buffer = "", fullContent = ""
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split("\n")
+        buffer = lines.pop() || ""
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed || !trimmed.startsWith("data: ")) continue
+          const data = trimmed.slice(6)
+          if (data === "[DONE]") continue
+          try {
+            const parsed = JSON.parse(data)
+            // HITL task approval event
+            if (parsed.sparkie_task) {
+              const task = parsed.sparkie_task
+              updateMessage(chatId, assistantMsgId, {
+                content: fullContent || parsed.text || "I need your approval before I do this:",
+                isStreaming: false,
+                pendingTask: { ...task, status: "pending" },
+              })
+              setStreaming(false)
+              return
+            }
+            const delta = parsed.choices?.[0]?.delta
+            if (delta?.content) {
+              fullContent += delta.content
+              updateMessage(chatId, assistantMsgId, { content: fullContent })
+            }
+          } catch { /* skip */ }
+        }
+      }
+      // Detect if the chat model responded with build-redirect intent
+      // (e.g. misrouted build request: "I'll build that..." but no build fired)
+      const BUILD_REDIRECT_RE = /\b(i'll build|let me build|i'll create|let me create|i'll make|building that|creating that|spinning up|on it[!,]|here's the|here you go|i've built|i've created|i've made)\b/i
+      if (fullContent && BUILD_REDIRECT_RE.test(fullContent) && !fullContent.includes('```') && fullContent.length < 400) {
+        // Model responded with a build-redirect but no actual code — re-route to agent
+        updateMessage(chatId, assistantMsgId, { content: '', isStreaming: false })
+        streamAgent(chatId, userContent)
+        return
+      }
+      const finalContent = fullContent || "👋"
+      updateMessage(chatId, assistantMsgId, { content: finalContent, isStreaming: false })
+      saveMessage('assistant', finalContent)
+    } catch {
+      updateMessage(chatId, assistantMsgId, { content: "Connection error.", isStreaming: false })
+    } finally {
+      setStreaming(false)
+    }
+  }, [selectedModel, addMessage, updateMessage, setStreaming, saveMessage])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- streamAgent is stable at runtime (defined after, useCallback ref)
+
+  // ── streamAgent: Planner → Builder → Reviewer with inline thinking ────────
+  const streamAgent = useCallback(async (chatId: string, userContent: string, isEdit = false) => {
+    // Detect edit intent — if user is modifying an existing project, skip archive
+    const EDIT_INTENT_RE = /\b(edit|update|upgrade|change|switch|swap|replace|rename|remove|delete|adjust|alter|amend|convert|modify|revise|refactor|rewrite|redo|refine|restyle|recolor|resize|transform|overhaul|patch|correct|improve|fix|tweak|tune|undo|revert|rollback)\b|(?:(?:can you|can u|could you|would you|would you mind|how about)\s+(?:please\s+)?(?:edit|update|upgrade|change|switch|swap|replace|rename|remove|delete|adjust|alter|amend|convert|modify|revise|refactor|rewrite|redo|refine|restyle|recolor|resize|transform|overhaul|patch|correct|improve|fix|tweak|tune|undo|revert|rollback))|\b(make it|make the|make sure|set the|set it|turn it|turn the|flip it|flip the|let's make|let's update|let's change|let's switch|instead of|it should be|switch this|switch the|update to|change to|change it)\b|\b(cahnge|chnage|upadte|updaet|swich|swithc|fiix|tweek|edti|chnge|udpate)\b/i
+    const currentFilesForCtx = useAppStore.getState().files.filter(f => f.type !== 'archive')
+    const isEditRequest = (isEdit || EDIT_INTENT_RE.test(userContent)) && currentFilesForCtx.filter(f => f.type === 'file').length > 0
+
+    if (!isEditRequest) {
+      // New build — archive existing workspace
+      const currentFiles_archive = useAppStore.getState().files
+      const isArchv = (f: import('@/store/appStore').FileNode) => f.type === 'archive'
+      const activeFiles_pre = currentFiles_archive.filter(f => !isArchv(f))
+      const existingArchives_pre = currentFiles_archive.filter(isArchv)
+
+      if (activeFiles_pre.length > 0) {
+        const allUserMsgs = (useAppStore.getState().chats.find(c => c.id === chatId)?.messages ?? []).filter(m => m.role === 'user')
+        const prevMsg = allUserMsgs.slice().reverse().find(m => m.content.trim().split(/\s+/).length > 4)
+        const nameSource = prevMsg?.content || activeFiles_pre[0]?.name || 'project'
+        const folderName = nameSource.replace(/[^a-zA-Z0-9 ]/g, '').trim().split(/\s+/).slice(0, 5).join('-').toLowerCase() || 'project'
+        const now = new Date()
+        const archiveName = `${folderName}-${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`
+        const deepClone = (node: import('@/store/appStore').FileNode): import('@/store/appStore').FileNode => ({
+          ...node, id: crypto.randomUUID(), children: node.children?.map(deepClone),
+        })
+        useAppStore.getState().setFiles([...existingArchives_pre, {
+          id: crypto.randomUUID(), name: archiveName, type: 'archive', content: '',
+          children: activeFiles_pre.map(deepClone),
+        }])
+      } else {
+        useAppStore.getState().setFiles([])
+      }
+    }
+    // For edit requests: keep files in place — agent will overwrite with updated versions
+
+    // Build API messages with file context
+    const chat = useAppStore.getState().chats.find(c => c.id === chatId)
+    const projectName = deriveProjectName(chat?.title || 'New Chat')
+    const apiMessages = (chat?.messages ?? [])
+      .filter(m => m.type !== 'image' && m.type !== 'video')
+      .map(m => ({ role: m.role, content: m.content }))
+      .slice(0, -1) // exclude last message — it's the user msg just added; appended manually below
+
+    // File context for fix requests
+    const activeForCtx = currentFilesForCtx.filter(f => f.type === 'file' && f.content)
+    const fileContext = activeForCtx.map(f => `---FILE: ${f.name}---\n${f.content}\n---END FILE---`).join('\n\n')
+    const currentFilesPayload = fileContext || undefined
+
+    // For edit requests: prepend a strong signal so model outputs ---FILE:--- markers
+    // Models tend to respond conversationally to follow-up messages without this.
+    const apiUserContent = isEditRequest && currentFilesPayload
+      ? `[EDIT REQUEST — output the COMPLETE updated file(s) with ---FILE: filename--- markers. Do NOT respond conversationally. Regenerate the full file with changes applied.]\n\n${userContent}`
+      : userContent
+
+    // Pre-build acknowledgement — shown immediately so user isn't staring at silence
+    const ACK_PHRASES = [
+      `On it! Let me build that for you ✨`,
+      `Got it! Building that now ⚡`,
+      `On it — putting that together for you 🔥`,
+      `Sure thing! Spinning that up now ✨`,
+    ]
+    const ackText = ACK_PHRASES[Math.floor(Math.random() * ACK_PHRASES.length)]
+
+    // ACK message — permanent friendly message, becomes wrap-up at the end
+    const ackMsgId = addMessage(chatId, {
+      role: 'assistant', content: ackText, model: 'Agent Loop', isStreaming: false, type: 'text'
+    })
+    // Thinking message — shows live planning/building steps; hidden at finalize
+    const thinkingMsgId = addMessage(chatId, {
+      role: 'assistant', content: '', model: 'Agent Loop', isStreaming: true, type: 'text'
+    })
+
+    // buildMsgId is created lazily on first builder delta (avoids double-bubble during planning)
+    let buildMsgId = ''
+    const ensureBuildMsg = (): string => {
+      if (!buildMsgId) {
+        buildMsgId = addMessage(chatId, {
+          role: 'assistant', content: '', model: selectedModel, isStreaming: true, type: 'text'
+        })
+      }
+      return buildMsgId
+    }
+
+    setStreaming(true)
+    setExecuting(true)
+    clearLiveCode()
+    clearWorklog()
+    setContainerStatus('idle')
+    setPreviewUrl(null)
+    if (!ideOpen) openIDE()
+    setIDETab('process')
+    addWorklogEntry({ type: 'action', content: 'Build started — analyzing request', status: 'running' })
+
+    try {
+      // Cancel any in-flight agent request before starting a new one
+      agentAbortRef.current?.abort()
+      agentAbortRef.current = new AbortController()
+      const response = await fetch('/api/build', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: [...apiMessages, { role: 'user', content: apiUserContent }], currentFiles: currentFilesPayload, model: selectedModel, userProfile: useAppStore.getState().userProfile }),
+        signal: agentAbortRef.current.signal,
+      })
+
+      if (!response.ok) {
+        updateMessage(chatId, ackMsgId, { content: 'Agent error — try again', isStreaming: false })
+        updateMessage(chatId, buildMsgId, { content: '', isStreaming: false })
+        return
+      }
+
+      const reader = response.body?.getReader()
+      const decoder = new TextDecoder()
+      if (!reader) return
+
+      let buffer = ''
+      let fullBuild = ''
+      let filesCreated = 0
+      const createdFileNames = new Set<string>()
+      let lastThinkingText = '⚡ Initializing agent...'
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed.startsWith('data: ')) continue
+          const data = trimmed.slice(6)
+          if (data === '[DONE]') continue
+          try {
+            const parsed = JSON.parse(data)
+            if (parsed.event === 'thinking') {
+              lastThinkingText = parsed.text
+              updateMessage(chatId, thinkingMsgId, { content: lastThinkingText, isStreaming: true })
+              addWorklogEntry({ type: 'thinking', content: parsed.text, status: 'running' })
+            } else if (parsed.event === 'delta' && parsed.content) {
+              fullBuild += parsed.content
+              appendLiveCode(parsed.content)
+              // Create build message bubble on first delta (lazy — avoids double-bubble during planning)
+              ensureBuildMsg()
+              // Parse files incrementally (folders + files)
+              const partialParse = parseAIResponse(fullBuild, projectName)
+              // Create explicit folder nodes from ---FOLDER:--- markers
+              for (const folder of (partialParse.folders ?? [])) {
+                upsertFile(`${folder}/.gitkeep`, '', 'plaintext')
+              }
+              for (const file of partialParse.files) {
+                if (!createdFileNames.has(file.name)) {
+                  createdFileNames.add(file.name)
+                  if (filesCreated === 0 && !isEdit) {
+                    const oldActive = useAppStore.getState().files.filter(f => f.type !== 'archive')
+                    oldActive.forEach(f => useAppStore.getState().deleteFile(f.id))
+                  }
+                  const fileId = upsertFile(file.name, file.content, getLanguageFromFilename(file.name))
+                  if (filesCreated === 0) setActiveFile(fileId)
+                  addLiveCodeFile(file.name)
+                  addWorklogEntry({ type: 'code', content: `Writing ${file.name}`, status: 'running' })
+                  // Track in assets
+                  const chatTitle = useAppStore.getState().chats.find(c => c.id === chatId)?.title || 'New Chat'
+                  addAsset({ name: file.name, language: getLanguageFromFilename(file.name), content: file.content, chatId, chatTitle, fileId, assetType: detectAssetTypeFromName(file.name), source: 'agent' as const })
+                  filesCreated++
+                } else {
+                  // Update with complete final content (handles folder-prefixed paths)
+                  upsertFile(file.name, file.content, getLanguageFromFilename(file.name))
+                }
+              }
+            } else if (parsed.event === 'done') {
+              // Final parse pass (folders + files)
+              const finalParse = parseAIResponse(fullBuild, projectName)
+              for (const folder of (finalParse.folders ?? [])) {
+                upsertFile(`${folder}/.gitkeep`, '', 'plaintext')
+              }
+              for (const file of finalParse.files) {
+                if (!createdFileNames.has(file.name)) {
+                  createdFileNames.add(file.name)
+                  const fileId = upsertFile(file.name, file.content, getLanguageFromFilename(file.name))
+                  if (filesCreated === 0) setActiveFile(fileId)
+                  addLiveCodeFile(file.name)
+                  const chatTitle = useAppStore.getState().chats.find(c => c.id === chatId)?.title || 'New Chat'
+                  addAsset({ name: file.name, language: getLanguageFromFilename(file.name), content: file.content, chatId, chatTitle, fileId, assetType: detectAssetTypeFromName(file.name), source: 'agent' as const })
+                  filesCreated++
+                } else {
+                  // Update with complete final content (handles folder-prefixed paths)
+                  const updatedFileId = upsertFile(file.name, file.content, getLanguageFromFilename(file.name))
+                  // Sync asset store so preview/Open button get the final HTML
+                  updateAsset(updatedFileId, file.content)
+                }
+              }
+            } else if (parsed.event === 'error') {
+              updateMessage(chatId, ackMsgId, { content: `❌ ${parsed.message}`, isStreaming: false })
+              if (buildMsgId) updateMessage(chatId, buildMsgId, { content: '', isStreaming: false })
+              addWorklogEntry({ type: 'error', content: parsed.message, status: 'error' })
+            }
+          } catch { /* skip */ }
+        }
+      }
+
+      // Finalize messages — hide the planning/thinking status bubble
+      updateMessage(chatId, thinkingMsgId, { content: '', isStreaming: false })
+
+      if (filesCreated > 0) {
+        // Show clean description — NEVER raw code in the chat bubble
+        const fileNames = Array.from(createdFileNames).join(', ')
+        const description = `✨ Built ${fileNames} — preview ready →`
+        if (buildMsgId) updateMessage(chatId, buildMsgId, { content: description, isStreaming: false })
+        addWorklogEntry({ type: 'result', content: `Built ${filesCreated} file${filesCreated > 1 ? 's' : ''}: ${fileNames}`, status: 'done' })
+
+        // Natural post-build wrap-up message (like competitors do)
+        const WRAP_PHRASES = [
+          `There you go! Check the preview on the right. Let me know if you want any changes 🙌`,
+          `All done! Take a look at the preview — happy to tweak anything you'd like ✨`,
+          `Built and ready! Let me know what you think or if you want to adjust anything 🔥`,
+          `Done! Preview is live on the right. What should we change or add next?`,
+          `There it is! Let me know how it looks and what you'd like to change 🐝`,
+        ]
+        const wrapText = WRAP_PHRASES[Math.floor(Math.random() * WRAP_PHRASES.length)]
+        updateMessage(chatId, ackMsgId, { content: wrapText, isStreaming: false })
+        saveMessage('assistant', wrapText)
+
+        // Build completion card — shows files created, languages, quick actions
+        const createdFilesList = Array.from(createdFileNames)
+        const uniqueLangs = [...new Set(createdFilesList.map(f => getLanguageFromFilename(f)).filter(l => l !== 'plaintext'))]
+        addMessage(chatId, {
+          role: 'assistant',
+          content: '',
+          type: 'build_card',
+          model: selectedModel,
+          isStreaming: false,
+          buildCard: {
+            title: projectName || 'project',
+            files: createdFilesList,
+            fileCount: filesCreated,
+            languages: uniqueLangs,
+            isEdit,
+          },
+        })
+
+        // ── BRAIN.md — Sparkie's session memory ─────────────────────────────
+        // Auto-creates/updates a context block so Sparkie resumes without re-explanation
+        const brainTs = new Date().toISOString().slice(0, 16).replace('T', ' ')
+        const brainLines = [
+          '# SPARKIE BRAIN — Session Memory',
+          '<!-- Auto-generated. Do not delete — Sparkie uses this for context continuity. -->',
+          '',
+          '## Project',
+          `- **Name**: ${projectName || 'project'}`,
+          `- **Last built**: ${brainTs} UTC`,
+          `- **Action**: ${isEdit ? 'Edit/Update' : 'Fresh build'}`,
+          '',
+          '## Files',
+          ...createdFilesList.map(f => `- \`${f}\``),
+          '',
+          '## Stack',
+          ...(uniqueLangs.length > 0 ? uniqueLangs.map(l => `- ${l}`) : ['- (unknown)']),
+          '',
+          '## Context',
+          'This is the active project in this session. When the user asks to change, fix,',
+          'or extend something, assume they mean the files above unless specified otherwise.',
+        ]
+        upsertFile('BRAIN.md', brainLines.join('\n'), 'markdown')
+      } else {
+        // No files — restore archive and show text response
+        const currentState = useAppStore.getState()
+        const archives = currentState.files.filter(f => f.type === 'archive')
+        if (archives.length > 0) {
+          const latest = archives[archives.length - 1]
+          useAppStore.getState().setFiles([...archives.slice(0, -1), ...( latest.children ?? [])])
+        }
+        // No files produced — show clean conversational response or helpful fallback
+        if (fullBuild) {
+          const finalParse = parseAIResponse(fullBuild, projectName)
+          const textOnly = finalParse.text || ''
+          const hasFileMarkers = fullBuild.includes('---FILE:')
+          if (textOnly.length > 0 && !hasFileMarkers) {
+            // Model responded conversationally (e.g. clarification, error) — show as chat
+            updateMessage(chatId, ackMsgId, { content: textOnly.slice(0, 2000), isStreaming: false, model: selectedModel })
+            saveMessage('assistant', textOnly.slice(0, 2000))
+          } else if (hasFileMarkers) {
+            // Had markers but parser found no files — genuine parse failure
+            updateMessage(chatId, thinkingMsgId, { content: lastThinkingText, isStreaming: false })
+            if (buildMsgId) updateMessage(chatId, buildMsgId, { content: '⚠️ Build output was malformed — try rephrasing your request or use a more specific description.', isStreaming: false })
+            return
+          } else {
+            updateMessage(chatId, thinkingMsgId, { content: lastThinkingText, isStreaming: false })
+          }
+        } else {
+          updateMessage(chatId, thinkingMsgId, { content: lastThinkingText, isStreaming: false })
+        }
+        // Hide build bubble entirely if no files
+        if (buildMsgId) updateMessage(chatId, buildMsgId, { content: '', isStreaming: false })
+      }
+
+    } catch (err: unknown) {
+      // Ignore abort errors (user navigated away or sent a new message)
+      if (err instanceof Error && err.name === 'AbortError') return
+      updateMessage(chatId, ackMsgId, { content: '❌ Connection error', isStreaming: false })
+      if (buildMsgId) updateMessage(chatId, buildMsgId, { content: 'Try again.', isStreaming: false })
+    } finally {
+      setStreaming(false)
+      setExecuting(false)
+      saveChatFiles(chatId, useAppStore.getState().files)
+    }
+  }, [selectedModel, addMessage, updateMessage, setStreaming, setExecuting, openIDE, setIDETab, ideOpen, upsertFile, setActiveFile, clearLiveCode, appendLiveCode, addLiveCodeFile, addWorklogEntry, updateWorklogEntry, setContainerStatus, setPreviewUrl, saveChatFiles, addAsset, updateAsset])
+
+  // ── Abort cleanup on unmount ──────────────────────────────────────────────
+  useEffect(() => {
+    return () => {
+      agentAbortRef.current?.abort()
+    }
+  }, [])
+
+  // ── Voice recording ───────────────────────────────────────────────────────
+  const toggleRecording = useCallback(async () => {
+    if (isRecording) {
+      // Stop recording
+      mediaRecorderRef.current?.stop()
+      setIsRecording(false)
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+          ? 'audio/webm;codecs=opus'
+          : MediaRecorder.isTypeSupported('audio/webm')
+          ? 'audio/webm'
+          : 'audio/mp4'
+        const mr = new MediaRecorder(stream, { mimeType })
+        audioChunksRef.current = []
+        mr.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data) }
+        mr.onstop = async () => {
+          stream.getTracks().forEach(t => t.stop())
+          setIsTranscribing(true)
+          try {
+            const audioBlob = new Blob(audioChunksRef.current, { type: mimeType })
+            const res = await fetch('/api/transcribe', {
+              method: 'POST',
+              headers: { 'Content-Type': mimeType },
+              body: audioBlob,
+            })
+            if (res.ok) {
+              const { transcript } = await res.json()
+              if (transcript?.trim()) setInput(prev => prev ? prev + ' ' + transcript : transcript)
+            }
+          } catch { /* silent fail */ } finally {
+            setIsTranscribing(false)
+          }
+        }
+        mr.start()
+        mediaRecorderRef.current = mr
+        setIsRecording(true)
+      } catch {
+        alert('Microphone access denied. Please allow microphone access to use voice input.')
+      }
+    }
+  }, [isRecording])
+
+  // ── Voice chat: STT → AI → TTS loop ─────────────────────────────────────────
+  const sendMessageFromVoice = useCallback(async (userText: string): Promise<string> => {
+    let chatId = getOrCreateSingleChat()
+
+    addMessage(chatId, { role: "user", content: userText })
+    saveMessage('user', userText)
+
+    // Call chat/AI directly and collect the full text reply
+    return new Promise<string>((resolve) => {
+      (async () => {
+        try {
+          // Pass full chat history so Sparkie has context (not just the current utterance)
+          const chatHistory = useAppStore.getState().chats.find(c => c.id === chatId)?.messages ?? []
+          const apiMessages = chatHistory
+            .filter(m => m.type !== 'image' && m.type !== 'video')
+            .map(m => ({ role: m.role, content: m.content }))
+          // Append current user message (already added to store above)
+          const messagesWithUser = [...apiMessages.filter(m => m.content !== userText || m.role !== 'user'), { role: 'user', content: userText }]
+          const res = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              messages: messagesWithUser,
+              model: selectedModel,
+              voiceMode: true,
+            }),
+          })
+
+          if (!res.ok || !res.body) {
+            resolve("Sorry, I couldn't generate a response right now.")
+            return
+          }
+
+          const reader = res.body.getReader()
+          const decoder = new TextDecoder()
+          let fullText = ''
+          const msgId = addMessage(chatId!, { role: 'assistant', content: '', isStreaming: true })
+
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            const chunk = decoder.decode(value)
+            // Parse SSE data lines
+            const lines = chunk.split('\n')
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                const data = line.slice(6).trim()
+                if (data === '[DONE]') continue
+                try {
+                  const parsed = JSON.parse(data)
+                  const delta = parsed?.choices?.[0]?.delta?.content || parsed?.delta?.text || ''
+                  if (delta) {
+                    fullText += delta
+                    updateMessage(chatId!, msgId, { content: fullText })
+                  }
+                } catch {}
+              }
+            }
+          }
+
+          updateMessage(chatId!, msgId, { content: fullText, isStreaming: false })
+          resolve(fullText || "Done!")
+        } catch {
+          resolve("Sorry, something went wrong.")
+        }
+      })()
+    })
+  }, [currentChatId, createChat, addMessage, updateMessage, selectedModel])
+
+  const handleSubmit = useCallback(async () => {
+    if (!input.trim() || isStreaming) return
+
+    // ─── Slash commands ────────────────────────────────────────────────────
+    const trimmed = input.trim()
+    const slashCmd = trimmed.toLowerCase().split(/\s+/)[0]
+    if (slashCmd.startsWith('/')) {
+      let chatId = currentChatId
+      if (!chatId) chatId = createChat()
+      addMessage(chatId, { role: 'user', content: trimmed })
+      setInput('')
+      if (textareaRef.current) textareaRef.current.style.height = 'auto'
+
+      if (slashCmd === '/startradio') {
+        window.dispatchEvent(new CustomEvent('sparkie:startradio'))
+        addMessage(chatId, {
+          role: 'assistant',
+          content: "🎵 Sparkie Radio is now live! Tuning in to the station for you...",
+        })
+        return
+      }
+
+      if (slashCmd === '/stopradio') {
+        window.dispatchEvent(new CustomEvent('sparkie:stopradio'))
+        addMessage(chatId, {
+          role: 'assistant',
+          content: "📻 Radio stopped. Come back anytime — the station's always on.",
+        })
+        return
+      }
+
+      if (slashCmd === '/weather') {
+        const loadingMsgId = addMessage(chatId, {
+          role: 'assistant',
+          content: '⛅ One moment, pulling up your local forecast...',
+          isStreaming: true,
+        })
+        try {
+          // Try browser geolocation first for accurate user location
+          const getCoords = (): Promise<{ lat: number; lon: number } | null> =>
+            new Promise((resolve) => {
+              if (!navigator.geolocation) { resolve(null); return }
+              navigator.geolocation.getCurrentPosition(
+                (pos) => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+                () => resolve(null),
+                { timeout: 5000 }
+              )
+            })
+          const coords = await getCoords()
+          const url = coords
+            ? `/api/weather?lat=${coords.lat}&lon=${coords.lon}`
+            : '/api/weather'
+          const res = await fetch(url)
+          const data = await res.json()
+          updateMessage(chatId, loadingMsgId, { content: data.report, isStreaming: false })
+        } catch {
+          updateMessage(chatId, loadingMsgId, {
+            content: "Couldn't reach the weather service right now. Try again in a moment.",
+            isStreaming: false,
+          })
+        }
+        return
+      }
+
+      // Unknown slash command — let Sparkie explain what's available
+      addMessage(chatId, {
+        role: 'assistant',
+        content: `I don't know that command yet! Here's what I've got:\n\n**\`/startradio\`** — Start Sparkie Radio\n**\`/stopradio\`** — Stop the radio\n**\`/weather\`** — Get your local weather forecast`,
+      })
+      return
+    }
+    // ─── End slash commands ────────────────────────────────────────────────
+
+    let chatId = getOrCreateSingleChat()
+
+    const userContent = input.trim()
+    addMessage(chatId, { role: "user", content: userContent })
+    saveMessage('user', userContent)
+    setInput("")
+
+    if (textareaRef.current) textareaRef.current.style.height = "auto"
+
+    // Natural language media detection — catches "generate me a song", "make me a beat", etc.
+    // even when the user hasn't tapped the mode button
+    const nlLower = userContent.toLowerCase()
+    const NL_MUSIC = /\b(generat|creat|mak|compos|writ|produc|record|pleas.*song|pleas.*music|pleas.*beat|pleas.*track|pleas.*tune)\w*\s+(me\s+)?(a\s+)?(song|music|beat|track|tune|melody|instrumental|banger|jam|freestyle|rap|hip.?hop|lo.?fi|remix|cover|jingle|anthem)/i
+    const NL_LYRICS = /\b(generat|creat|writ)\w*\s+(me\s+)?(some\s+|a\s+)?(lyrics|verses|chorus|hook|rap\s+lyrics)/i
+    const NL_IMAGE = /\b(draw|paint|sketch|generat|creat|render|design|visuali|illustrat)\w*\s+(me\s+)?(a\s+|an\s+|some\s+)?(image|picture|photo|illustration|artwork|painting|drawing|poster|thumbnail|logo|icon|wallpaper|banner)/i
+    const NL_VIDEO = /\b(generat|creat|mak|produc|render)\w*\s+(me\s+)?(a\s+|an\s+|some\s+)?(video|clip|animation|short|reel|motion)/i
+
+    if (genMode === "image" || (genMode === "chat" && NL_IMAGE.test(nlLower))) {
+      generateMedia(chatId, userContent, "image")
+    } else if (genMode === "video" || (genMode === "chat" && NL_VIDEO.test(nlLower))) {
+      generateMedia(chatId, userContent, "video")
+    } else if (genMode === "music" || (genMode === "chat" && NL_MUSIC.test(nlLower))) {
+      generateMedia(chatId, userContent, "music")
+    } else if (genMode === "lyrics" || (genMode === "chat" && NL_LYRICS.test(nlLower))) {
+      generateMedia(chatId, userContent, "lyrics")
+    } else if (genMode === "speech") {
+      generateMedia(chatId, userContent, "speech")
+    } else {
+      const t = userContent.toLowerCase().trim()
+      const lastMode = useAppStore.getState().lastMode
+
+      // "continue / keep going / next step" — respect what Sparkie was just doing
+      const isContinue = /^(continue|keep going|next step|go on|proceed|carry on|keep it up|and then|what's next|next)\b/.test(t)
+      if (isContinue && lastMode === 'build') {
+        setLastMode('build')
+        streamAgent(chatId, userContent)
+        return
+      }
+
+      // If workspace has active files, check for edit intent first
+      // (classifier might miss "change the yellow to green" as a build command)
+      const activeFiles = useAppStore.getState().files.filter(f => f.type !== 'archive' && f.type === 'file')
+      // Broad intent: catches "can we change X", "could you update", "please make the X", "it didnt update", etc.
+      const EDIT_INTENT = /\b(edit|update|upgrade|change|switch|swap|replace|rename|remove|delete|adjust|alter|amend|convert|modify|revise|refactor|rewrite|redo|refine|restyle|recolor|resize|transform|overhaul|patch|correct|improve|fix|tweak|tune|undo|revert|rollback)\b|(?:(?:can you|can u|could you|would you|would you mind|how about)\s+(?:please\s+)?(?:edit|update|upgrade|change|switch|swap|replace|rename|remove|delete|adjust|alter|amend|convert|modify|revise|refactor|rewrite|redo|refine|restyle|recolor|resize|transform|overhaul|patch|correct|improve|fix|tweak|tune|undo|revert|rollback))|\b(make it|make the|make sure|set the|set it|turn it|turn the|flip it|flip the|let's make|let's update|let's change|let's switch|instead of|it should be|switch this|switch the|update to|change to|change it)\b|\b(cahnge|chnage|upadte|updaet|swich|swithc|fiix|tweek|edti|chnge|udpate)\b/i
+      if (activeFiles.length > 0 && EDIT_INTENT.test(userContent)) {
+        setLastMode('build')
+        streamAgent(chatId, userContent, true)
+        return
+      }
+
+      // Use LLM classifier for ambiguous messages; fast sync path for obvious ones
+      const intent = await classifyIntent(userContent)
+      if (intent === 'chat') {
+        setLastMode('chat')
+        streamReply(chatId, userContent)
+      } else {
+        setLastMode('build')
+        streamAgent(chatId, userContent)
+      }
+    }
+  }, [input, isStreaming, currentChatId, createChat, addMessage, genMode, streamAgent, generateMedia, classifyIntent, streamReply])
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (slashSuggestions.length > 0) {
+      if (e.key === "Tab" || e.key === "ArrowRight") {
+        e.preventDefault()
+        setInput(slashSuggestions[0].cmd + " ")
+        setSlashSuggestions([])
+        return
+      }
+      if (e.key === "Escape") {
+        setSlashSuggestions([])
+        return
+      }
+    }
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit() }
+  }
+
+  const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value
+    setInput(val)
+    const el = e.target
+    el.style.height = "auto"
+    el.style.height = Math.min(el.scrollHeight, 200) + "px"
+    // Slash command autocomplete
+    const word = val.split(/\s+/)[0]
+    if (word.startsWith('/') && val === word) {
+      setSlashSuggestions(
+        SLASH_COMMANDS.filter(s => s.cmd.startsWith(word.toLowerCase()))
+      )
+    } else {
+      setSlashSuggestions([])
+    }
+  }
+
+  const activeModels = genMode === "image" ? IMAGE_MODELS : genMode === "video" ? VIDEO_MODELS : genMode === "music" ? MUSIC_MODELS : genMode === "lyrics" ? LYRICS_MODELS : genMode === "speech" ? SPEECH_VOICES : MODELS
+  const activeModelId = genMode === "image" ? selectedImageModel : genMode === "video" ? selectedVideoModel : genMode === "music" ? selectedMusicModel : genMode === "lyrics" ? selectedLyricsModel : genMode === "speech" ? selectedVoiceId : selectedModel
+  const activeModelName = activeModels.find(m => m.id === activeModelId)?.name || activeModels[0].name
+
+  const placeholders: Record<GenMode, string> = {
+    chat: "Enter your task and submit to Sparkie...",
+    image: "Describe the image you want to generate...",
+    video: "Describe the video you want to generate... (add a start frame for I2V)",
+    music: "Describe the music you want to generate...",
+    lyrics: "Describe the song — genre, mood, theme, story...",
+    speech: "Enter the text you want to convert to speech...",
+  }
+
+  const messages_count = useAppStore(s => s.messages).length
+  const showTemplates = messages_count === 0 && input === "" && genMode === "chat"
+
+  return (
+    <>
+    <div className="relative">
+      {showTemplates && (
+        <div className="mb-3 flex flex-wrap gap-2">
+          {PROMPT_TEMPLATES.map(t => (
+            <button
+              key={t.label}
+              onClick={() => setInput(t.prompt)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-hive-700 border border-hive-border text-xs text-text-secondary hover:border-honey-500/50 hover:text-honey-400 transition-all"
+            >
+              <span>{t.icon}</span>
+              <span>{t.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {/* Slash command autocomplete */}
+      {slashSuggestions.length > 0 && (
+        <div className="mb-1 rounded-xl border border-honey-500/30 bg-hive-elevated overflow-hidden shadow-lg">
+          {slashSuggestions.map((s) => (
+            <button
+              key={s.cmd}
+              onMouseDown={(e) => { e.preventDefault(); setInput(s.cmd + " "); setSlashSuggestions([]) }}
+              className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-hive-hover text-left transition-colors"
+            >
+              <span className="text-honey-500 font-mono text-sm font-semibold">{s.cmd}</span>
+              <span className="text-xs text-text-muted">{s.desc}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="rounded-2xl bg-hive-surface border border-hive-border focus-within:border-honey-500/40 transition-colors">
+        <textarea
+          ref={textareaRef} value={input} onChange={handleInput} onKeyDown={handleKeyDown}
+          placeholder={placeholders[genMode]} rows={1}
+          className="w-full px-4 pt-3 pb-2 bg-transparent text-sm text-text-primary placeholder:text-text-muted resize-none focus:outline-none min-h-[44px] max-h-[200px]"
+        />
+        <div className="flex items-center justify-between px-3 pb-2">
+          <div className="flex items-center gap-1">
+            <button className="p-1.5 rounded-md hover:bg-hive-hover text-text-muted hover:text-text-secondary transition-colors" title="Attach file">
+              <Paperclip size={15} />
+            </button>
+            {/* I2V: Image upload for video mode */}
+            {genMode === "video" && (
+              <>
+                <input
+                  ref={videoFileRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (!file) return
+                    const reader = new FileReader()
+                    reader.onload = (ev) => setVideoFrameImage(ev.target?.result as string)
+                    reader.readAsDataURL(file)
+                    e.target.value = ""
+                  }}
+                />
+                <button
+                  onClick={() => videoFileRef.current?.click()}
+                  className={`p-1.5 rounded-md transition-colors ${videoFrameImage ? "bg-honey-500/20 text-honey-500" : "hover:bg-hive-hover text-text-muted hover:text-text-secondary"}`}
+                  title={videoFrameImage ? "Change start frame (Image-to-Video)" : "Add start frame (Image-to-Video)"}
+                >
+                  <Film size={15} />
+                </button>
+                {videoFrameImage && (
+                  <div className="relative flex items-center">
+                    <img src={videoFrameImage} alt="Start frame" className="h-6 w-6 rounded object-cover border border-honey-500/40" />
+                    <button
+                      onClick={() => setVideoFrameImage(null)}
+                      className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-hive-elevated border border-hive-border flex items-center justify-center text-text-muted hover:text-red-400 transition-colors"
+                      title="Remove start frame"
+                    >
+                      <X size={8} />
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+            <button
+              onClick={() => setGenMode(genMode === "image" ? "chat" : "image")}
+              className={`p-1.5 rounded-md transition-colors ${genMode === "image" ? "bg-honey-500/15 text-honey-500" : "hover:bg-hive-hover text-text-muted hover:text-text-secondary"}`}
+              title={genMode === "image" ? "Switch to chat" : "Image generation"}
+            >
+              <ImageIcon size={15} />
+            </button>
+            <button
+              onClick={() => { const next = genMode === "video" ? "chat" : "video"; if (next !== "video") setVideoFrameImage(null); setGenMode(next) }}
+              className={`p-1.5 rounded-md transition-colors ${genMode === "video" ? "bg-honey-500/15 text-honey-500" : "hover:bg-hive-hover text-text-muted hover:text-text-secondary"}`}
+              title={genMode === "video" ? "Switch to chat" : "Video generation"}
+            >
+              <Video size={15} />
+            </button>
+            <button
+              onClick={() => setGenMode(genMode === "music" ? "chat" : "music")}
+              className={`p-1.5 rounded-md transition-colors ${genMode === "music" ? "bg-honey-500/15 text-honey-500" : "hover:bg-hive-hover text-text-muted hover:text-text-secondary"}`}
+              title={genMode === "music" ? "Switch to chat" : "Music generation"}
+            >
+              <Music size={15} />
+            </button>
+
+            <button
+              onClick={() => setGenMode(genMode === "lyrics" ? "chat" : "lyrics")}
+              className={`p-1.5 rounded-md transition-colors ${genMode === "lyrics" ? "bg-honey-500/15 text-honey-500" : "hover:bg-hive-hover text-text-muted hover:text-text-secondary"}`}
+              title={genMode === "lyrics" ? "Switch to chat" : "Lyrics generation"}
+            >
+              <FileText size={15} />
+            </button>
+
+            <button
+              onClick={() => setGenMode(genMode === "speech" ? "chat" : "speech")}
+              className={`p-1.5 rounded-md transition-colors ${genMode === "speech" ? "bg-honey-500/15 text-honey-500" : "hover:bg-hive-hover text-text-muted hover:text-text-secondary"}`}
+              title={genMode === "speech" ? "Switch to chat" : "Text to speech"}
+            >
+              <Headphones size={15} />
+            </button>
+
+            {/* Model selector — hidden for chat mode (server auto-routes) */}
+            {genMode !== 'chat' && (
+            <div className="relative">
+              <button
+                onClick={() => setShowModels(!showModels)}
+                className="flex items-center gap-1 px-2 py-1 rounded-md hover:bg-hive-hover text-text-muted hover:text-text-secondary transition-colors text-xs"
+              >
+                <Sparkles size={12} className="text-honey-500" />
+                {activeModelName}
+                <ChevronDown size={12} />
+              </button>
+              {showModels && (
+                <div className="absolute bottom-full left-0 mb-1 w-72 bg-hive-elevated border border-hive-border rounded-lg shadow-xl py-1 z-[200] max-h-72 overflow-y-auto" style={{ background: "var(--hive-elevated)", backdropFilter: "none" }}>
+                  {activeModels.map((model) => (
+                    <button
+                      key={model.id}
+                      onClick={() => {
+                        if (genMode === "image") setSelectedImageModel(model.id)
+                        else if (genMode === "video") setSelectedVideoModel(model.id)
+                        else if (genMode === "music") setSelectedMusicModel(model.id)
+                        else if (genMode === "lyrics") setSelectedLyricsModel(model.id)
+                        else if (genMode === "speech") setSelectedVoiceId(model.id)
+                        else setSelectedModel(model.id)
+                        setShowModels(false)
+                      }}
+                      className={`w-full text-left px-3 py-2 text-sm hover:bg-hive-hover transition-colors flex items-center justify-between ${
+                        activeModelId === model.id ? "text-honey-500" : "text-text-secondary"
+                      }`}
+                    >
+                      <div>
+                        <span>{model.name}</span>
+                        {"desc" in model && (model as { desc?: string }).desc && (
+                          <span className="text-[10px] text-text-muted ml-2">{(model as { desc: string }).desc}</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {genMode === "speech" && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              const audio = new Audio()
+                              fetch("/api/speech-stream", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ text: "Hi, I'm Sparkie. How can I help you today?", model: "speech-02-turbo", voice_id: model.id }),
+                              }).then(r => r.arrayBuffer()).then(buf => {
+                                audio.src = URL.createObjectURL(new Blob([buf], { type: "audio/mpeg" }))
+                                audio.play().catch(() => {})
+                              }).catch(() => {})
+                            }}
+                            className="p-1 rounded text-text-muted hover:text-honey-500 hover:bg-honey-500/10 transition-colors"
+                            title="Preview voice"
+                          >
+                            <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor"><polygon points="1,1 9,5 1,9"/></svg>
+                          </button>
+                        )}
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                          model.tag === "Free" ? "bg-honey-500/20 text-honey-500" : "bg-honey-500/15 text-honey-500"
+                        }`}>{model.tag}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            )}{/* end genMode !== 'chat' */}
+          </div>
+          <button
+            onClick={() => setIsVoiceChatOpen(true)}
+            className="p-1.5 rounded-md transition-colors mr-1 hover:bg-hive-hover text-text-muted hover:text-honey-500"
+            title="Voice chat"
+          >
+            <Phone size={15} />
+          </button>
+          <button
+            onClick={toggleRecording}
+            disabled={isTranscribing}
+            className={`p-1.5 rounded-md transition-colors mr-1 ${
+              isRecording
+                ? 'bg-red-500/20 text-red-400 animate-pulse'
+                : isTranscribing
+                ? 'bg-honey-500/10 text-honey-500/50 cursor-wait'
+                : 'hover:bg-hive-hover text-text-muted hover:text-text-secondary'
+            }`}
+            title={isRecording ? 'Stop recording' : isTranscribing ? 'Transcribing...' : 'Voice input'}
+          >
+            {isRecording ? <MicOff size={15} /> : <Mic size={15} />}
+          </button>
+          <button
+            onClick={handleSubmit} disabled={!input.trim() || isStreaming}
+            className={`p-2 rounded-lg transition-all ${
+              input.trim()
+                ? "bg-honey-500 text-hive-900 hover:bg-honey-400 shadow-lg shadow-honey-500/20"
+                : "bg-hive-hover text-text-muted cursor-not-allowed"
+            }`}
+          >
+            <ArrowUp size={16} />
+          </button>
+        </div>
+      </div>
+    </div>
+
+    {/* Voice Chat overlay */}
+    {isVoiceChatOpen && (
+      <VoiceChat
+        isActive={isVoiceChatOpen}
+        onClose={() => setIsVoiceChatOpen(false)}
+        onSendMessage={sendMessageFromVoice}
+      />
+    )}
+    </>
+  )
+}
