@@ -59,14 +59,6 @@ function SkeletonCard() {
         <div className="h-2 bg-white/4 rounded w-3/4" />
       </div>
       <div className="h-7 bg-white/4 rounded-lg mt-1" />
-      {apiKeyPending && (
-        <ApiKeyModal
-          app={apiKeyPending.app}
-          fields={apiKeyPending.fields}
-          onSubmit={handleApiKeySubmit}
-          onClose={() => setApiKeyPending(null)}
-        />
-      )}
     </div>
   )
 }
@@ -589,6 +581,14 @@ export function ConnectorsView() {
           </>
         )}
       </div>
+      {apiKeyPending && (
+        <ApiKeyModal
+          app={apiKeyPending.app}
+          fields={apiKeyPending.fields}
+          onSubmit={handleApiKeySubmit}
+          onClose={() => setApiKeyPending(null)}
+        />
+      )}
     </div>
   )
 }
