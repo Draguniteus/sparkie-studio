@@ -120,12 +120,21 @@ export async function POST(req: NextRequest) {
       }
 
       // Step 2a: API_KEY scheme — need credentials from user
-      // If not provided yet, return scheme + fields so frontend can show key entry modal
+      // If not provided yet, fetch detail for expected_input_fields, return to frontend for modal
       if (authConfig.auth_scheme === 'API_KEY') {
         if (!body.credentials || Object.keys(body.credentials).length === 0) {
+          // Detail endpoint has expected_input_fields (list endpoint does not)
+          let fields: Array<{ name: string; displayName?: string; description?: string; required?: boolean }> = []
+          try {
+            const detailRes = await fetch(`${V3}/auth_configs/${authConfig.id}`, { headers: composioHeaders() })
+            if (detailRes.ok) {
+              const detail = await detailRes.json() as { expected_input_fields?: typeof fields }
+              fields = detail.expected_input_fields ?? []
+            }
+          } catch { /* fall through with empty fields */ }
           return NextResponse.json({
             authScheme: 'API_KEY',
-            fields: authConfig.fields ?? [],
+            fields,
           })
         }
         // Credentials provided — create connection with data payload
