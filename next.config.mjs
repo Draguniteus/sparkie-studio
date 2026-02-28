@@ -1,5 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Enable the Next.js instrumentation hook (server startup lifecycle)
+  // Required to register the background heartbeat scheduler
+  instrumentationHook: true,
+
   async headers() {
     return [
       {
