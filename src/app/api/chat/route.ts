@@ -887,7 +887,7 @@ const SPARKIE_TOOLS = [
         required: ['url', 'skill_name'],
       },
     },
-  }
+  },
   {
     type: 'function',
     function: {
