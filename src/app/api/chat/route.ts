@@ -2352,9 +2352,9 @@ function formatConnectorResponse(actionSlug: string, data: Record<string, unknow
 // Three-tier model selection. Users never see model names — Sparkie picks automatically.
 
 const MODELS = {
-  FAST:    'gpt-5-nano',          // Tier 1: conversational, fast, no tools
-  CAPABLE: 'kimi-k2.5-free',      // Tier 2: default, tools + coding (OpenAI-format tool calls)
-  DEEP:    'minimax-m2.5-free',   // Tier 3: complex coding, long tasks, deep reasoning
+  CONVERSATIONAL: 'gpt-5-nano',      // Tier 1: all conversations — gpt-5-nano fully supports tool calling
+  CAPABLE:        'kimi-k2.5-free',  // Tier 2: task execution — tools, coding, GitHub, multi-step
+  DEEP:           'minimax-m2.5-free', // Tier 3: heavy coding — large refactors, full rewrites, deep analysis
 } as const
 
 type ModelTier = typeof MODELS[keyof typeof MODELS]
@@ -2362,7 +2362,7 @@ type ModelTier = typeof MODELS[keyof typeof MODELS]
 interface ModelSelection {
   primary: ModelTier
   fallbacks: ModelTier[]
-  tier: 'fast' | 'capable' | 'deep'
+  tier: 'conversational' | 'capable' | 'deep'
   needsTools: boolean
 }
 
@@ -2370,33 +2370,49 @@ function selectModel(messages: Array<{ role: string; content: string }>): ModelS
   const lastUser = messages.slice().reverse().find(m => m.role === 'user')?.content ?? ''
   const lower = lastUser.toLowerCase()
   const msgLen = lastUser.length
+  const userTurns = messages.filter(m => m.role === 'user').length
 
-  // DEEP signals (Tier 3 — minimax): complex coding, long tasks
+  // ── Tier 3: DEEP — heavy coding, architecture-level tasks ─────────────────
   const deepCount = [
     /\b(refactor|rewrite|rebuild|migrate|overhaul|redesign)\b/.test(lower),
     /\b(entire|whole|full|complete)\b.{0,30}\b(code|codebase|file|app|system)\b/.test(lower),
     /\b(analyze|audit|review).{0,30}\b(codebase|repository|architecture)\b/.test(lower),
     /\bplan.{0,20}(and|then).{0,20}(build|implement|execute)\b/.test(lower),
     msgLen > 800,
-    messages.filter(m => m.role === 'user').length > 12 && lower.includes('code'),
+    userTurns > 12 && lower.includes('code'),
   ].filter(Boolean).length
 
-  // CAPABLE signals (Tier 2 — kimi): tools, code, tasks, anything actionable
-  const capableHit = /\b(code|build|create|make|write|fix|debug|deploy|commit|push|email|tweet|post|github|repo|file|task|schedule|search|find|check|get|fetch|list|remember|save|track)\b/.test(lower)
-    || msgLen > 200
+  // ── Hard task signals: action verbs requiring real execution ───────────────
+  // Note: "check/get/find" alone are ambiguous — only counted as task if paired with technical context
+  let taskIntent = /\b(code|build|create|write|fix|debug|deploy|deployment|commit|push|email|tweet|post|github|repo|file|task|schedule|search my|find me|look up|fetch|list|remember|save|track|install|run|execute|generate|add|remove|delete|update|edit|show me|pull|open pr|make a)\b/.test(lower)
+  // Technical status checks → always route to capable
+  if (/\b(check|is|are|does).{0,20}\b(deploy|deployment|working|running|broken|live|server|api|app|build|site)\b/.test(lower)) taskIntent = true
+
+  // ── Tier 1: CONVERSATIONAL — gpt-5-nano (supports tools, fast, cheap) ────
+  // gpt-5-nano fully supports function calling — use it for all conversation and light tool calls.
+  // Route to CONVERSATIONAL when message is relational/emotional/chitchat OR a simple question with no task signal.
+  const conversationalIntent = !taskIntent && (
+    // Emotional / personal sharing
+    /\b(feel|feeling|miss|love|like|hate|happy|sad|excited|nervous|worried|proud|grateful|lonely|tired|bored|frustrated|confused|share|tell you|thinking about|wanted to|talking about)\b/.test(lower) ||
+    // Greetings, acknowledgments, reactions
+    /^(hi|hey|hello|yo|sup|what's up|how are you|how's it going|good morning|good night|good evening|thanks|thank you|nice|cool|awesome|great|sounds good|got it|ok|okay|sure|lol|haha|wow|really|damn|perfect|love it|that's|thats)/.test(lower.trim()) ||
+    // Simple question with no task signal (weather, time, quick facts — nano handles these tools fine)
+    (!taskIntent && msgLen < 150 && /\b(who|what|why|when|where|how|weather|time|date|today)\b/.test(lower) && !/\b(code|file|repo|deploy|build|task|email|tweet|post|github)\b/.test(lower)) ||
+    // Short messages with zero task signal
+    (msgLen < 60 && !taskIntent)
+  )
 
   if (deepCount >= 2) {
-    return { primary: MODELS.DEEP, fallbacks: [MODELS.CAPABLE, MODELS.FAST], tier: 'deep', needsTools: true }
+    return { primary: MODELS.DEEP, fallbacks: [MODELS.CAPABLE, MODELS.CONVERSATIONAL], tier: 'deep', needsTools: true }
   }
-  if (!capableHit && msgLen < 80) {
-    return { primary: MODELS.FAST, fallbacks: [MODELS.CAPABLE], tier: 'fast', needsTools: false }
+  if (conversationalIntent && deepCount === 0) {
+    return { primary: MODELS.CONVERSATIONAL, fallbacks: [MODELS.CAPABLE], tier: 'conversational', needsTools: false }
   }
-  return { primary: MODELS.CAPABLE, fallbacks: [MODELS.DEEP, MODELS.FAST], tier: 'capable', needsTools: true }
+  // Default: CAPABLE — kimi handles most real tasks
+  return { primary: MODELS.CAPABLE, fallbacks: [MODELS.DEEP, MODELS.CONVERSATIONAL], tier: 'capable', needsTools: true }
 }
 
-/**
- * LLM call with automatic fallback on rate-limit (429) or server error (5xx).
- */
+
 async function tryLLMCall(
   payload: Record<string, unknown>,
   modelSelection: ModelSelection,
