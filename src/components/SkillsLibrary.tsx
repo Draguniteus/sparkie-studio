@@ -14,6 +14,22 @@ interface Skill {
 
 const MARKETPLACE_SKILLS = [
   {
+    name: "proactive-agent",
+    description: "Transform Sparkie from task-follower into proactive partner. WAL Protocol, Working Buffer, Autonomous Crons, and battle-tested patterns for overnight autonomous execution.",
+    url: "https://clawhub.ai/halthelobster/proactive-agent",
+    category: "AI",
+    icon: "🤖",
+    badge: "Free"
+  },
+  {
+    name: "self-improving-agent",
+    description: "Captures errors, corrections, and learnings to enable continuous improvement. Activates on failures, hooks into the agent loop, promotes learnings across sessions.",
+    url: "https://clawhub.ai/pskoett/self-improving-agent",
+    category: "AI",
+    icon: "🧠",
+    badge: "Free"
+  },
+  {
     name: "ace-music",
     description: "Generate unlimited free music with vocals using ACE-Step 1.5. Full songs, any genre, any language.",
     url: "https://raw.githubusercontent.com/ace-step/ace-step-skills/main/skills/acestep/SKILL.md",
