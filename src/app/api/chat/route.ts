@@ -2586,28 +2586,45 @@ Make it feel like walking into your friend's creative space and being genuinely 
         "🔱 The Five Are Assembling — Stand By...",
         "🫀 Hive Pulse Confirmed — We Are One Mind...",
         "🗡️ Gears In Motion — The Hive Never Sleeps...",
+        "🚀 Systems Hot — Agents On Standby...",
+        "🔋 Power Surge Detected — Hive Coming Online...",
+        "🛡️ Perimeter Secured — Intelligence Network Active...",
+        "🌐 Global Hive Connect — All Nodes Synchronized...",
+        "🎖️ Mission Briefing In Progress — Five Eyes Open...",
+        "💥 Hive Awakened — Zero Hesitation Protocol...",
+        "🔑 Clearance Granted — The Five Have The Keys...",
+        "🌑 Night Ops Active — Silent But Lethal...",
       ]
       const HIVE_ROUND: Record<number, string[]> = {
         1: [
-          "🔍 Scouter Bees Released — Scanning the Field...",
-          "📡 Hive Intelligence Gathering In Progress...",
-          "🎯 Bees Are Creating a Buzz — On Target...",
-          "🕵️ Flame On Recon — First Sweep Initiated...",
+          "🔍 Scouter Bees Released — First Contact Initiated...",
+          "📡 Intelligence Gathering In Progress — Scanning All Frequencies...",
+          "🎯 Flame On Recon — First Sweep Initiated...",
+          "🕵️ Field Agents Deployed — Eyes Open, Ears On...",
           "🐝 The Swarm Is Listening — Signal Acquired...",
+          "🌐 Casting The Net — Pulling All Relevant Intel...",
+          "🛰️ Overhead Scan Running — Nothing Escapes The Hive...",
+          "📥 Data Intake Commencing — Hive Absorbing Context...",
         ],
         2: [
-          "⚡ Swarm Is Swarming — Taking On The Task Head-On...",
-          "🛡️ Defense Matrix Engaged — Deep Dive Initiated...",
-          "💥 Worker Bees Deployed — Full Assault Mode...",
-          "🔥 Flame Is Executing — Watch The Sparks Fly...",
-          "🌀 Hive Momentum Building — Lock In...",
+          "⚡ Agents In Full Execution — No Brakes On The Swarm...",
+          "🔥 Flame Is Running Hot — Second Wave Incoming...",
+          "💥 Worker Bees At Full Capacity — Task Under Full Assault...",
+          "🛡️ Cross-Agent Validation Running — No Errors Tolerated...",
+          "🌀 Hive Momentum Building — Compounding Every Step...",
+          "⚙️ Parallel Threads Active — The Five Working As One...",
+          "📊 Correlating Findings — Truth Taking Shape...",
+          "🔗 Connecting The Dots — Pattern Recognition Live...",
         ],
         3: [
-          "🧠 Hive Mind Active — Cross-Referencing All Intel...",
-          "🔬 Specialist Bees On Scene — Analyzing Data...",
-          "🌊 Swarm Surge — Final Wave Incoming...",
-          "🏹 Precision Strike Mode — Every Byte Accounted For...",
-          "🔱 Atlas Is Bearing The Load — Hold Steady...",
+          "🧠 Hive Mind Fully Active — Deep Dive In Progress...",
+          "🔬 Precision Analysis Mode — Every Variable Accounted For...",
+          "🌊 Final Wave Surging — The Swarm Goes All In...",
+          "🏹 Precision Strike Mode — Locked And Loaded...",
+          "🔱 Atlas Is Bearing The Full Weight — Hold Steady...",
+          "🎯 Convergence Protocol — All Intel Narrowing To One Point...",
+          "💎 Extracting Signal From Noise — Quality Over Everything...",
+          "⚔️ Maximum Effort — This Round Decides The Mission...",
         ],
       }
       const HIVE_TIER: Record<string, string[]> = {
@@ -2615,30 +2632,48 @@ Make it feel like walking into your friend's creative space and being genuinely 
           "💬 Sparkie On The Line — Direct Feed Active...",
           "⚡ Sparkie Here — No Middlemen, Just Her...",
           "🐝 Queen On Comms — You Have Her Full Attention...",
+          "🌸 Sparkie Responding Directly — Clean Signal, No Overhead...",
+          "🎙️ Queen's Voice Only — Crisp, Direct, No Relay...",
+          "✨ Sparkie Solo — Lightweight, Fast, Present...",
         ],
         capable: [
           "🔥 Flame Ignited — Task Acquired, Executing...",
           "⚙️ Flame In Motion — Full Tool Access, Zero Hesitation...",
           "🏎️ Flame Is Running Hot — Output Incoming...",
+          "🌪️ Flame Blazing Through — Nothing Slows Her Down...",
+          "💨 Fastest Agent In The Hive — Flame On The Move...",
+          "🔥 Kimi Activated — The Speed Demon Is Loose...",
         ],
         ember: [
           "🪨 Ember Online — Stealth Mode Engaged...",
-          "🥷 Ember Running Silent — Code Specialist Deployed...",
-          "🌡️ Ember Burning Steady — Agentic Tools Active...",
+          "🥷 Ember Running Silent — Code Specialist Active...",
+          "🌡️ Ember Burning Steady — Agentic Tools Armed...",
           "🎯 Ember Locked In — Precision Code Execution...",
+          "🔦 Ember In The Dark — Low Profile, Maximum Output...",
+          "🧬 GLM Architecture Active — Ember Processing Deep Code...",
+          "⚡ Ember Silent Strike — You Won't Hear Her Coming...",
         ],
         deep: [
           "🔱 Atlas Has The Weight — Deep Analysis Underway...",
           "🌋 Atlas Rising — Heavy Lift Mode Activated...",
           "🧲 Atlas Pulling Everything In — No Detail Escapes...",
-          "🐋 Atlas In The Deep — Surface When Ready...",
+          "🐋 Atlas In The Deep — Will Surface When Ready...",
+          "🏔️ Atlas Carrying The Mountain — Steady As Stone...",
+          "🌊 Atlas Submerged — Mining The Deep For Answers...",
+          "⚓ Atlas Anchored — The Most Thorough Agent Is On Watch...",
+          "🌐 MiniMax Intelligence Online — Atlas Running At Scale...",
         ],
         trinity: [
           "🔴 DEFCON 1 — Trinity Has Been Deployed...",
-          "🔱 Trinity Online — 400B Parameters Activated...",
+          "🔱 Trinity Online — 400 Billion Parameters Activated...",
           "🌌 Frontier Unit Live — Trinity Is In The Field...",
           "⚠️ Trinity Engaged — Creative Systems Architect Active...",
           "🚨 Maximum Capability Reached — Trinity Carrying The Mission...",
+          "💀 This Wasn't A Drill — Trinity Is Real And She's Here...",
+          "🌑 Dark Matter Thinking — Trinity Operating Beyond Normal Range...",
+          "🧠 The Apex Agent Is Live — Trinity Running Full Context...",
+          "🎯 The Final Weapon — Trinity Deployed For Frontier Problems...",
+          "🛸 Unknown Territory — Trinity Mapping The Edge Of Possible...",
         ],
       }
       const HIVE_SYNTHESIS = [
@@ -2650,28 +2685,38 @@ Make it feel like walking into your friend's creative space and being genuinely 
         "🔱 The Hive Has Spoken — Preparing Your Answer...",
       ]
       const HIVE_TOOLS: Record<string, string> = {
-        web_search: "🌐 Scout Bees Searching The Web...",
-        get_weather: "🌦️ Weather Scout Reporting Conditions...",
-        get_github: "🐙 Hive Accessing The Repo...",
-        save_memory: "🧠 Memory Bee Storing Intel...",
-        read_file: "📁 Hive Accessing The Archives...",
-        write_file: "✍️ Scribe Bee Committing To Memory...",
-        schedule_task: "📅 Task Bee Filing Mission Brief...",
-        read_pending_tasks: "📋 Command Center Checking Orders...",
-        search_twitter: "🐦 Scout Monitoring The Airwaves...",
-        search_reddit: "📡 Field Report From The Ground...",
-        generate_image: "🎨 Artist Bees Creating Visual Intel...",
-        generate_video: "🎬 Film Crew Bees In Action...",
-        generate_music: "🎵 Music Bees Composing...",
-        generate_speech: "🔊 Voice Bee Warming Up...",
-        check_deployment: "🚀 Recon Drones Checking The Hive Perimeter...",
-        update_context: "🗺️ Hive Updating Mission Intel...",
-        update_actions: "📋 Hive Rewriting The Playbook...",
-        composio_execute: "🔗 Connector Bees Activating External Link...",
-        create_email_draft: "✉️ Carrier Bee Drafting Message...",
-        post_tweet: "🐦 Messenger Bee Heading To The Feed...",
-        get_worklog: "📒 Scribe Bee Pulling The Mission Log...",
-        install_skill: "⚡ Skill Bee Installing New Capability...",
+        // Intelligence & Search
+        web_search: "🌐 Scout Bees Deployed — Sweeping The Web For Intel...",
+        get_weather: "🌦️ Atmospheric Recon Active — Weather Scout Reporting...",
+        search_twitter: "🐦 Social Intercept — Monitoring Live Feed Frequencies...",
+        search_reddit: "📡 Ground Intelligence — Field Report Incoming...",
+        // GitHub & Code
+        get_github: "🐙 Repo Access Granted — Hive Pulling Source Intel...",
+        write_file: "✍️ Scribe Bee Active — Code Being Written To Disk...",
+        read_file: "📁 Archive Bee Active — Pulling Historical Data...",
+        // Memory & Cognition
+        save_memory: "🧠 Memory Bee Online — Encoding Long-Term Intel...",
+        update_context: "🗺️ Situational Awareness Updated — Mission Intel Refreshed...",
+        update_actions: "📋 Playbook Rewritten — New Orders Distributed To All Agents...",
+        // Task & Scheduling
+        schedule_task: "📅 Task Bee Filing Mission Brief — Scheduled For Execution...",
+        read_pending_tasks: "📋 Command Center Review — Checking All Pending Orders...",
+        // Media Generation
+        generate_image: "🎨 Visual Ops Active — Artist Bees Rendering...",
+        generate_video: "🎬 Film Crew Deployed — Frames Being Constructed...",
+        generate_music: "🎵 Studio Bees Recording — Frequency Being Composed...",
+        generate_speech: "🔊 Voice Synthesis Active — Signal Being Encoded...",
+        // Deployment & Infrastructure
+        check_deployment: "🚀 Perimeter Drones Active — Scanning Deployment Status...",
+        // Composio & External
+        composio_execute: "🔗 External Connector Armed — Cross-Platform Link Active...",
+        create_email_draft: "✉️ Carrier Bee Drafting — Message Being Encrypted...",
+        post_tweet: "🐦 Messenger Bee Inbound — Broadcast Queued For Launch...",
+        // Worklog & Skills
+        get_worklog: "📒 Mission Log Retrieved — Scribe Bee Reporting History...",
+        install_skill: "⚡ Skill Bee Installing — New Capability Loading Into Hive...",
+        // Time
+        get_current_time: "⏱️ Chronos Bee Checking — Hive Clock Synchronized...",
       }
       const pickHive = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)]
       hiveLog.push(pickHive(HIVE_INIT))
@@ -2846,6 +2891,23 @@ Make it feel like walking into your friend's creative space and being genuinely 
       if (usedTools) {
         finalMessages = loopMessages
         finalSystemContent = systemContent + `\n\nYou used tools across multiple steps and gathered real results. Synthesize everything into a complete, direct response. For any IMAGE_URL:/AUDIO_URL:/VIDEO_URL: results, the media block will be appended automatically — DO NOT repeat the URL in your text response.`
+
+        // Synthesis phase — shown after all tool rounds complete, before final answer
+        const HIVE_SYNTHESIS = [
+          "🧬 Hive Synthesizing — Weaving All Intel Into One...",
+          "⚡ The Five In Sync — Final Output Forming...",
+          "🎯 Gears Aligned — Precision Response Loading...",
+          "🔮 Hive Mind Crystallizing — Clarity Incoming...",
+          "🌟 Synthesis Complete — Sparkie Taking The Mic...",
+          "🔱 The Hive Has Spoken — Preparing Your Answer...",
+          "🧠 Cross-Referencing All Data Streams — Hold Tight...",
+          "🌊 All Threads Converging — One Signal, One Truth...",
+          "💎 Refining The Intel — Sparkie Crafting The Kill Shot...",
+          "🔥 Final Burn — Every Agent Locking In Results...",
+          "📡 Hive Broadcast Ready — Transmission Incoming...",
+          "⚔️ Mission Data Processed — Sparkie On Point...",
+        ]
+        hiveLog.push(HIVE_SYNTHESIS[Math.floor(Math.random() * HIVE_SYNTHESIS.length)])
       }
     }
 
@@ -2859,27 +2921,19 @@ Make it feel like walking into your friend's creative space and being genuinely 
         .trim()
     }
 
-    // Synthesis message — shown after tool rounds complete, before final answer
-    if (usedTools) {
-      const HIVE_SYNTH = [
-        "🧬 Hive Synthesizing — Weaving All Intel Into One...",
-        "⚡ The Five In Sync — Final Output Forming...",
-        "🎯 Gears Aligned — Precision Response Loading...",
-        "🔮 Hive Mind Crystallizing — Clarity Incoming...",
-        "🌟 Synthesis Complete — Sparkie Taking The Mic...",
-        "🔱 The Hive Has Spoken — Preparing Your Answer...",
-      ]
-      hiveLog.push(HIVE_SYNTH[Math.floor(Math.random() * HIVE_SYNTH.length)])
-    }
-    // For conversational (no tools), emit a gentle Hive status
+    // For conversational path (no tools), emit a Hive status
     if (hiveLog.length === 0) {
       const HIVE_CONV = [
-        "💬 Sparkie On The Line...",
-        "🐝 Queen's Ready — Listening...",
+        "💬 Sparkie On The Line — Direct Channel Open...",
+        "🐝 Queen's Ready — You Have Her Full Attention...",
         "✨ Hive At Ease — Sparkie On It...",
-        "⚡ Direct Channel Open — Sparkie With You...",
-        "🌸 No Buzz Needed — Sparkie Has You...",
-        "🎙️ Sparkie Live — No Tools, Just Her Voice...",
+        "⚡ No Tools Needed — Sparkie Has The Answer...",
+        "🌸 Clean Signal — Sparkie Speaking Directly...",
+        "🎙️ Sparkie Live — No Buzz, Just Her Voice...",
+        "🧘 Hive In Standby — Sparkie Solo Executing...",
+        "🌙 Low Overhead — Sparkie Running Lean...",
+        "💡 Direct Line To Sparkie — No Relay, No Delay...",
+        "🎯 Single Agent Active — Sparkie Locked On Target...",
       ]
       hiveLog.push(HIVE_CONV[Math.floor(Math.random() * HIVE_CONV.length)])
     }
