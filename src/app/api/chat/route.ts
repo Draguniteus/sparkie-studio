@@ -1507,6 +1507,7 @@ async function executeTool(
         if (!userId) return 'Not authenticated'
         const action = args.action as string
         const label = args.label as string
+        const whyHuman = (args.why_human as string) ?? ''
         const payload = (args.payload as Record<string, unknown>) ?? {}
         if (!action || !label) return 'action and label are required'
         const taskId = `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
@@ -1515,14 +1516,21 @@ async function executeTool(
             `CREATE TABLE IF NOT EXISTS sparkie_tasks (
               id TEXT PRIMARY KEY, user_id TEXT NOT NULL, action TEXT NOT NULL, label TEXT NOT NULL,
               payload JSONB NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'pending',
+              executor TEXT NOT NULL DEFAULT 'human', trigger_type TEXT DEFAULT 'manual',
+              trigger_config JSONB DEFAULT '{}', scheduled_at TIMESTAMPTZ, why_human TEXT,
               created_at TIMESTAMPTZ DEFAULT NOW(), resolved_at TIMESTAMPTZ
             )`
           )
+          await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS executor TEXT NOT NULL DEFAULT 'human'`).catch(() => {})
+          await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS trigger_type TEXT DEFAULT 'manual'`).catch(() => {})
+          await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS why_human TEXT`).catch(() => {})
           await query(
-            `INSERT INTO sparkie_tasks (id, user_id, action, label, payload, status) VALUES ($1, $2, $3, $4, $5, 'pending')`,
-            [taskId, userId, action, label, JSON.stringify(payload)]
+            `INSERT INTO sparkie_tasks (id, user_id, action, label, payload, status, executor, trigger_type, why_human)
+             VALUES ($1, $2, $3, $4, $5, 'pending', 'human', 'manual', $6)
+             ON CONFLICT (id) DO NOTHING`,
+            [taskId, userId, action, label, JSON.stringify(payload), whyHuman]
           )
-          return `HITL_TASK:${JSON.stringify({ id: taskId, action, label, payload })}`
+          return `HITL_TASK:${JSON.stringify({ id: taskId, action, label, payload, why_human: whyHuman })}`
         } catch (e) {
           return `Failed to create task: ${(e as Error).message}`
         }
@@ -2570,7 +2578,8 @@ Make it feel like walking into your friend's creative space and being genuinely 
     // Hive log — collected during agent loop, prepended to response stream
     let hiveLog: string[] = []
 
-    const MAX_TOOL_ROUNDS = 3
+    // Atlas (deep) and Trinity (frontier) need more rounds for heavy tasks
+    const MAX_TOOL_ROUNDS = (modelSelection.tier === 'deep' || modelSelection.tier === 'trinity') ? 6 : 3
     if (useTools) {
       // Agent loop — up to MAX_TOOL_ROUNDS of tool execution
       // Multi-round agent loop — up to MAX_TOOL_ROUNDS iterations
@@ -2890,7 +2899,15 @@ Make it feel like walking into your friend's creative space and being genuinely 
       // If we exhausted rounds with tool calls, set up for final streaming synthesis
       if (usedTools) {
         finalMessages = loopMessages
-        finalSystemContent = systemContent + `\n\nYou used tools across multiple steps and gathered real results. Synthesize everything into a complete, direct response. For any IMAGE_URL:/AUDIO_URL:/VIDEO_URL: results, the media block will be appended automatically — DO NOT repeat the URL in your text response.`
+        finalSystemContent = systemContent + `\n\nYou have completed ${round} rounds of tool execution and gathered real intelligence. Now synthesize everything into one complete, direct, high-quality response.
+
+SYNTHESIS RULES:
+- Draw on ALL tool results from every round — don't leave intel on the table
+- Be specific, concrete, and actionable — no vague summaries
+- If you hit the round limit without a clean stop, still give a full answer from what you have
+- Structure your response clearly — use headers, bullets, or code blocks as appropriate
+- For any IMAGE_URL:/AUDIO_URL:/VIDEO_URL: results, the media block will be appended — DO NOT repeat the URL in text
+- Never say "I ran out of rounds" or expose internal loop mechanics — just deliver the answer`
 
         // Synthesis phase — shown after all tool rounds complete, before final answer
         const HIVE_SYNTHESIS = [
