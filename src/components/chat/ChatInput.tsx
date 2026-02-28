@@ -112,6 +112,17 @@ const PROMPT_TEMPLATES = [
 type GenMode = "chat" | "image" | "video" | "music" | "lyrics" | "speech"
 
 export function ChatInput() {
+  // ── Persist a message to DB (fire-and-forget, never blocks UI) ──────────
+  const saveMessage = (role: 'user' | 'assistant', content: string) => {
+    if (!content?.trim()) return
+    fetch('/api/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role, content }),
+    }).catch(() => { /* silent — history is best-effort */ })
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   const [input, setInput] = useState("")
   const [showModels, setShowModels] = useState(false)
   const [genMode, setGenMode] = useState<GenMode>("chat")
@@ -402,6 +413,7 @@ export function ChatInput() {
       if (filesCreated > 0) {
         const description = finalParse.text || `✨ Created ${filesCreated} file(s). Check the preview →`
         updateMessage(chatId, assistantMsgId, { content: description, isStreaming: false })
+        saveMessage('assistant', description)
       } else {
         // AI responded with text only (no file blocks) — restore the most recent archive back
         // to the active workspace so the preview doesn't go blank
@@ -414,10 +426,12 @@ export function ChatInput() {
           const restored = latest.children ?? []
           useAppStore.getState().setFiles([...olderArchives, ...restored])
         }
+        const finalText = fullContent || "The model used all tokens for reasoning. Try a simpler prompt."
         updateMessage(chatId, assistantMsgId, {
-          content: fullContent || "The model used all tokens for reasoning. Try a simpler prompt.",
+          content: finalText,
           isStreaming: false,
         })
+        saveMessage('assistant', finalText)
       }
     } catch (error) {
       console.error("Stream error:", error)
@@ -1305,6 +1319,7 @@ export function ChatInput() {
 
     const userContent = input.trim()
     addMessage(chatId, { role: "user", content: userContent })
+    saveMessage('user', userContent)
     setInput("")
 
     if (textareaRef.current) textareaRef.current.style.height = "auto"
