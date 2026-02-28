@@ -123,6 +123,7 @@ export function ChatInput() {
 
   const [input, setInput] = useState("")
   const [showModels, setShowModels] = useState(false)
+  const [hiveStatus, setHiveStatus] = useState<string | null>(null)
   const [genMode, setGenMode] = useState<GenMode>("chat")
   const [slashSuggestions, setSlashSuggestions] = useState<Array<{ cmd: string; desc: string }>>([])
   const [selectedImageModel, setSelectedImageModel] = useState("flux")
@@ -786,6 +787,11 @@ export function ChatInput() {
           if (data === "[DONE]") continue
           try {
             const parsed = JSON.parse(data)
+            // Hive status update — show as animated status pill
+            if (parsed.hive_status) {
+              setHiveStatus(parsed.hive_status)
+              continue
+            }
             // HITL task approval event
             if (parsed.sparkie_task) {
               const task = parsed.sparkie_task
@@ -820,9 +826,10 @@ export function ChatInput() {
     } catch {
       updateMessage(chatId, assistantMsgId, { content: "Connection error.", isStreaming: false })
     } finally {
+      setHiveStatus(null)
       setStreaming(false)
     }
-  }, [selectedModel, addMessage, updateMessage, setStreaming, saveMessage])
+  }, [selectedModel, addMessage, updateMessage, setStreaming, setHiveStatus, saveMessage])
   // eslint-disable-next-line react-hooks/exhaustive-deps -- streamAgent is stable at runtime (defined after, useCallback ref)
 
   // ── streamAgent: Planner → Builder → Reviewer with inline thinking ────────
@@ -1465,6 +1472,14 @@ export function ChatInput() {
               <span className="text-xs text-text-muted">{s.desc}</span>
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Sparkie's Hive status — animated status pill during agent execution */}
+      {hiveStatus && (
+        <div className="mb-2 flex items-center gap-2 px-3 py-1.5 rounded-xl bg-honey-500/10 border border-honey-500/25 text-xs text-honey-400 animate-pulse w-fit max-w-full overflow-hidden">
+          <span className="shrink-0">⚡</span>
+          <span className="truncate font-medium">{hiveStatus}</span>
         </div>
       )}
       <div className="rounded-2xl bg-hive-surface border border-hive-border focus-within:border-honey-500/40 transition-colors">

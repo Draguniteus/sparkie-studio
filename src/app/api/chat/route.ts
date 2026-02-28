@@ -2540,6 +2540,8 @@ Make it feel like walking into your friend's creative space and being genuinely 
     const toolMediaResults: Array<{ name: string; result: string }> = []
 
     let finalMessages = [...recentMessages]
+    // Hive log — collected during agent loop, prepended to response stream
+    let hiveLog: string[] = []
 
     const MAX_TOOL_ROUNDS = 3
     if (useTools) {
@@ -2549,8 +2551,44 @@ Make it feel like walking into your friend's creative space and being genuinely 
       let round = 0
       let usedTools = false
 
+      // Hive status messages — bee/military metaphors for each agent phase
+      const HIVE_INIT = [
+        "🐝 Initiating Sparkie's Hive...",
+        "🏰 Hive Online — All Units Reporting...",
+        "⚡ Queen Sparkie Has Spoken — Mobilizing...",
+      ]
+      const HIVE_ROUND: Record<number, string[]> = {
+        1: ["🔍 Scouter Bees Released — Scanning the Field...", "📡 Hive Intelligence Gathering In Progress...", "🎯 Bees Are Creating a Buzz — On Target..."],
+        2: ["⚡ Swarm Is Swarming — Taking On The Task Head-On...", "🛡️ Defense Matrix Engaged — Deep Dive Initiated...", "💥 Worker Bees Deployed — Full Assault Mode..."],
+        3: ["🧠 Hive Mind Active — Cross-Referencing All Intel...", "🔬 Specialist Bees On Scene — Analyzing Data...", "🌊 Swarm Surge — Final Wave Incoming..."],
+      }
+      const HIVE_TOOLS: Record<string, string> = {
+        web_search: "🌐 Scout Bees Searching The Web...",
+        get_weather: "🌦️ Weather Scout Reporting Conditions...",
+        get_github: "🐙 Hive Accessing The Repo...",
+        save_memory: "🧠 Memory Bee Storing Intel...",
+        read_file: "📁 Hive Accessing The Archives...",
+        schedule_task: "📅 Task Bee Filing Mission Brief...",
+        read_pending_tasks: "📋 Command Center Checking Orders...",
+        search_twitter: "🐦 Scout Monitoring The Airwaves...",
+        search_reddit: "📡 Field Report From The Ground...",
+        generate_image: "🎨 Artist Bees Creating Visual Intel...",
+        generate_video: "🎬 Film Crew Bees In Action...",
+        generate_music: "🎵 Music Bees Composing...",
+        generate_speech: "🔊 Voice Bee Warming Up...",
+        check_deployment: "🚀 Recon Drones Checking The Hive Perimeter...",
+        update_context: "🗺️ Hive Updating Mission Intel...",
+        update_actions: "📋 Hive Rewriting The Playbook...",
+        composio_execute: "🔗 Connector Bees Activating External Link...",
+        create_email_draft: "✉️ Carrier Bee Drafting Message...",
+        post_tweet: "🐦 Messenger Bee Heading To The Feed...",
+      }
+      const pickHive = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)]
+      hiveLog.push(pickHive(HIVE_INIT))
+
       while (round < MAX_TOOL_ROUNDS) {
         round++
+        hiveLog.push(pickHive(HIVE_ROUND[round] ?? HIVE_ROUND[3]))
         const { response: loopRes, modelUsed: loopModel } = await tryLLMCall({
           stream: false, temperature: 0.8, max_tokens: 4096,
           tools: [...SPARKIE_TOOLS, ...connectorTools],
@@ -2577,6 +2615,7 @@ Make it feel like walking into your friend's creative space and being genuinely 
             toolCalls.map(async (tc) => {
               let args: Record<string, unknown> = {}
               try { args = JSON.parse(tc.function.arguments) } catch { /* bad json */ }
+              hiveLog.push(HIVE_TOOLS[tc.function.name] ?? `⚙️ ${tc.function.name.replace(/_/g, ' ')} Bee Deployed...`)
               const result = await executeTool(tc.function.name, args, toolContext)
               if (result.startsWith('IMAGE_URL:') || result.startsWith('VIDEO_URL:') || result.startsWith('AUDIO_URL:')) {
                 toolMediaResults.push({ name: tc.function.name, result })
@@ -2691,6 +2730,10 @@ Make it feel like walking into your friend's creative space and being genuinely 
 
           const stream = new ReadableStream({
             start(controller) {
+              // Emit hive status trail before the actual response
+              for (const msg of hiveLog) {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ hive_status: msg })}\n\n`))
+              }
               const chunks = finalContent.match(/.{1,80}/g) ?? [finalContent]
               for (const chunk of chunks) {
                 controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: chunk } }] })}\n\n`))
@@ -2724,6 +2767,15 @@ Make it feel like walking into your friend's creative space and being genuinely 
         .trim()
     }
 
+    // For conversational (no tools), emit a gentle Hive status
+    if (hiveLog.length === 0) {
+      const HIVE_CONV = [
+        "💬 Sparkie On The Line...",
+        "🐝 Queen's Ready — Listening...",
+        "✨ Hive At Ease — Sparkie On It...",
+      ]
+      hiveLog.push(HIVE_CONV[Math.floor(Math.random() * HIVE_CONV.length)])
+    }
     // Final streaming call — use tryLLMCall for fallback resilience
     const { response: streamRes } = await tryLLMCall({
       stream: true, temperature: 0.8, max_tokens: 8192,
@@ -2761,6 +2813,10 @@ Make it feel like walking into your friend's creative space and being genuinely 
       const reader = streamRes.body!.getReader()
       const wrappedStream = new ReadableStream({
         async start(controller) {
+          // Emit hive status trail before the actual response
+          for (const msg of hiveLog) {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ hive_status: msg })}\n\n`))
+          }
           while (true) {
             const { done, value } = await reader.read()
             if (done) break
@@ -2783,6 +2839,10 @@ Make it feel like walking into your friend's creative space and being genuinely 
     const decoder = new TextDecoder()
     const sanitizingStream = new ReadableStream({
       async start(controller) {
+        // Emit hive status trail before the actual response
+        for (const msg of hiveLog) {
+          controller.enqueue(encoder2.encode(`data: ${JSON.stringify({ hive_status: msg })}\n\n`))
+        }
         let buffer = ''
         while (true) {
           const { done, value } = await reader.read()
