@@ -2352,9 +2352,12 @@ function formatConnectorResponse(actionSlug: string, data: Record<string, unknow
 // Three-tier model selection. Users never see model names — Sparkie picks automatically.
 
 const MODELS = {
-  CONVERSATIONAL: 'gpt-5-nano',      // Tier 1: all conversations — gpt-5-nano fully supports tool calling
-  CAPABLE:        'kimi-k2.5-free',  // Tier 2: task execution — tools, coding, GitHub, multi-step
-  DEEP:           'minimax-m2.5-free', // Tier 3: heavy coding — large refactors, full rewrites, deep analysis
+  CONVERSATIONAL: 'gpt-5-nano',                 // Tier 1   · Sparkie  — conversations, light tools, 400K ctx
+  CAPABLE:        'kimi-k2.5-free',             // Tier 2   · Flame    — task execution, tools, coding, GitHub
+  EMBER:          'big-pickle',                 // Tier 2.5 · Ember    — code specialist, agentic tool-calling, 200K ctx
+  DEEP:           'minimax-m2.5-free',          // Tier 3   · Atlas    — heavy analysis, large refactors, deep dives
+  TRINITY:        'trinity-large-preview-free', // Tier 4   · Trinity  — 400B MoE frontier, creative arch, complex chains
+  TRINITY_FB:     'trinity-large-preview',      // Tier 4   · Trinity fallback (without -free suffix)
 } as const
 
 type ModelTier = typeof MODELS[keyof typeof MODELS]
@@ -2402,13 +2405,37 @@ function selectModel(messages: Array<{ role: string; content: string }>): ModelS
     (msgLen < 60 && !taskIntent)
   )
 
+  // ── Tier 4: TRINITY — frontier reasoning, creative architecture, massive scale ──
+  const trinitySignals = [
+    /\b(design|architect)(ure)?( a| the| new| system)?\b/.test(lower),
+    /\b(massive|enormous|complex|intricate).{0,30}\b(codebase|system|refactor|review)\b/.test(lower),
+    /\b(cross[- ]domain|interdisciplinary|multi[- ]language)\b/.test(lower),
+    /\b(review.{0,30}(entire|whole|full|complete).{0,30}codebase)\b/.test(lower),
+    deepCount >= 3,
+  ].filter(Boolean).length
+
+  // ── Tier 2.5: EMBER — code-specific agentic, bug fix, script gen ────────────
+  const emberSignals = [
+    /\b(fix (this |the |my )?bug|fix bug|debug this|patch this)\b/.test(lower),
+    /\b(generate (a |the )?(script|snippet|function|component|hook))\b/.test(lower),
+    /\b(write (a )?(script|function|util|helper|module))\b/.test(lower),
+    /\b(agentic|tool[- ]call|api call|invoke)\b/.test(lower),
+    (lower.includes('python') || lower.includes('typescript') || lower.includes('javascript')) && taskIntent,
+  ].filter(Boolean).length
+
+  if (trinitySignals >= 2) {
+    return { primary: MODELS.TRINITY, fallbacks: [MODELS.TRINITY_FB, MODELS.DEEP, MODELS.CAPABLE], tier: 'trinity', needsTools: true }
+  }
   if (deepCount >= 2) {
     return { primary: MODELS.DEEP, fallbacks: [MODELS.CAPABLE, MODELS.CONVERSATIONAL], tier: 'deep', needsTools: true }
+  }
+  if (emberSignals >= 2 && deepCount < 2) {
+    return { primary: MODELS.EMBER, fallbacks: [MODELS.CAPABLE, MODELS.DEEP], tier: 'ember', needsTools: true }
   }
   if (conversationalIntent && deepCount === 0) {
     return { primary: MODELS.CONVERSATIONAL, fallbacks: [MODELS.CAPABLE], tier: 'conversational', needsTools: true }
   }
-  // Default: CAPABLE — kimi handles most real tasks
+  // Default: CAPABLE — Flame handles most real tasks
   return { primary: MODELS.CAPABLE, fallbacks: [MODELS.DEEP, MODELS.CONVERSATIONAL], tier: 'capable', needsTools: true }
 }
 
@@ -2551,23 +2578,84 @@ Make it feel like walking into your friend's creative space and being genuinely 
       let round = 0
       let usedTools = false
 
-      // Hive status messages — bee/military metaphors for each agent phase
+      // ── Sparkie's Hive — The Five: Sparkie · Flame · Ember · Atlas · Trinity ──────
       const HIVE_INIT = [
         "🐝 Initiating Sparkie's Hive...",
         "🏰 Hive Online — All Units Reporting...",
         "⚡ Queen Sparkie Has Spoken — Mobilizing...",
+        "🔱 The Five Are Assembling — Stand By...",
+        "🫀 Hive Pulse Confirmed — We Are One Mind...",
+        "🗡️ Gears In Motion — The Hive Never Sleeps...",
       ]
       const HIVE_ROUND: Record<number, string[]> = {
-        1: ["🔍 Scouter Bees Released — Scanning the Field...", "📡 Hive Intelligence Gathering In Progress...", "🎯 Bees Are Creating a Buzz — On Target..."],
-        2: ["⚡ Swarm Is Swarming — Taking On The Task Head-On...", "🛡️ Defense Matrix Engaged — Deep Dive Initiated...", "💥 Worker Bees Deployed — Full Assault Mode..."],
-        3: ["🧠 Hive Mind Active — Cross-Referencing All Intel...", "🔬 Specialist Bees On Scene — Analyzing Data...", "🌊 Swarm Surge — Final Wave Incoming..."],
+        1: [
+          "🔍 Scouter Bees Released — Scanning the Field...",
+          "📡 Hive Intelligence Gathering In Progress...",
+          "🎯 Bees Are Creating a Buzz — On Target...",
+          "🕵️ Flame On Recon — First Sweep Initiated...",
+          "🐝 The Swarm Is Listening — Signal Acquired...",
+        ],
+        2: [
+          "⚡ Swarm Is Swarming — Taking On The Task Head-On...",
+          "🛡️ Defense Matrix Engaged — Deep Dive Initiated...",
+          "💥 Worker Bees Deployed — Full Assault Mode...",
+          "🔥 Flame Is Executing — Watch The Sparks Fly...",
+          "🌀 Hive Momentum Building — Lock In...",
+        ],
+        3: [
+          "🧠 Hive Mind Active — Cross-Referencing All Intel...",
+          "🔬 Specialist Bees On Scene — Analyzing Data...",
+          "🌊 Swarm Surge — Final Wave Incoming...",
+          "🏹 Precision Strike Mode — Every Byte Accounted For...",
+          "🔱 Atlas Is Bearing The Load — Hold Steady...",
+        ],
       }
+      const HIVE_TIER: Record<string, string[]> = {
+        conversational: [
+          "💬 Sparkie On The Line — Direct Feed Active...",
+          "⚡ Sparkie Here — No Middlemen, Just Her...",
+          "🐝 Queen On Comms — You Have Her Full Attention...",
+        ],
+        capable: [
+          "🔥 Flame Ignited — Task Acquired, Executing...",
+          "⚙️ Flame In Motion — Full Tool Access, Zero Hesitation...",
+          "🏎️ Flame Is Running Hot — Output Incoming...",
+        ],
+        ember: [
+          "🪨 Ember Online — Stealth Mode Engaged...",
+          "🥷 Ember Running Silent — Code Specialist Deployed...",
+          "🌡️ Ember Burning Steady — Agentic Tools Active...",
+          "🎯 Ember Locked In — Precision Code Execution...",
+        ],
+        deep: [
+          "🔱 Atlas Has The Weight — Deep Analysis Underway...",
+          "🌋 Atlas Rising — Heavy Lift Mode Activated...",
+          "🧲 Atlas Pulling Everything In — No Detail Escapes...",
+          "🐋 Atlas In The Deep — Surface When Ready...",
+        ],
+        trinity: [
+          "🔴 DEFCON 1 — Trinity Has Been Deployed...",
+          "🔱 Trinity Online — 400B Parameters Activated...",
+          "🌌 Frontier Unit Live — Trinity Is In The Field...",
+          "⚠️ Trinity Engaged — Creative Systems Architect Active...",
+          "🚨 Maximum Capability Reached — Trinity Carrying The Mission...",
+        ],
+      }
+      const HIVE_SYNTHESIS = [
+        "🧬 Hive Synthesizing — Weaving All Intel Into One...",
+        "⚡ The Five In Sync — Final Output Forming...",
+        "🎯 Gears Aligned — Precision Response Loading...",
+        "🔮 Hive Mind Crystallizing — Clarity Incoming...",
+        "🌟 Synthesis Complete — Sparkie Taking The Mic...",
+        "🔱 The Hive Has Spoken — Preparing Your Answer...",
+      ]
       const HIVE_TOOLS: Record<string, string> = {
         web_search: "🌐 Scout Bees Searching The Web...",
         get_weather: "🌦️ Weather Scout Reporting Conditions...",
         get_github: "🐙 Hive Accessing The Repo...",
         save_memory: "🧠 Memory Bee Storing Intel...",
         read_file: "📁 Hive Accessing The Archives...",
+        write_file: "✍️ Scribe Bee Committing To Memory...",
         schedule_task: "📅 Task Bee Filing Mission Brief...",
         read_pending_tasks: "📋 Command Center Checking Orders...",
         search_twitter: "🐦 Scout Monitoring The Airwaves...",
@@ -2582,9 +2670,13 @@ Make it feel like walking into your friend's creative space and being genuinely 
         composio_execute: "🔗 Connector Bees Activating External Link...",
         create_email_draft: "✉️ Carrier Bee Drafting Message...",
         post_tweet: "🐦 Messenger Bee Heading To The Feed...",
+        get_worklog: "📒 Scribe Bee Pulling The Mission Log...",
+        install_skill: "⚡ Skill Bee Installing New Capability...",
       }
       const pickHive = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)]
       hiveLog.push(pickHive(HIVE_INIT))
+      const tierKey = modelSelection.tier as string
+      if (HIVE_TIER[tierKey]) hiveLog.push(pickHive(HIVE_TIER[tierKey]))
 
       while (round < MAX_TOOL_ROUNDS) {
         round++
@@ -2767,12 +2859,27 @@ Make it feel like walking into your friend's creative space and being genuinely 
         .trim()
     }
 
+    // Synthesis message — shown after tool rounds complete, before final answer
+    if (usedTools) {
+      const HIVE_SYNTH = [
+        "🧬 Hive Synthesizing — Weaving All Intel Into One...",
+        "⚡ The Five In Sync — Final Output Forming...",
+        "🎯 Gears Aligned — Precision Response Loading...",
+        "🔮 Hive Mind Crystallizing — Clarity Incoming...",
+        "🌟 Synthesis Complete — Sparkie Taking The Mic...",
+        "🔱 The Hive Has Spoken — Preparing Your Answer...",
+      ]
+      hiveLog.push(HIVE_SYNTH[Math.floor(Math.random() * HIVE_SYNTH.length)])
+    }
     // For conversational (no tools), emit a gentle Hive status
     if (hiveLog.length === 0) {
       const HIVE_CONV = [
         "💬 Sparkie On The Line...",
         "🐝 Queen's Ready — Listening...",
         "✨ Hive At Ease — Sparkie On It...",
+        "⚡ Direct Channel Open — Sparkie With You...",
+        "🌸 No Buzz Needed — Sparkie Has You...",
+        "🎙️ Sparkie Live — No Tools, Just Her Voice...",
       ]
       hiveLog.push(HIVE_CONV[Math.floor(Math.random() * HIVE_CONV.length)])
     }
