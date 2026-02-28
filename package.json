@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "NODE_ENV=production next build",
     "start": "next start -p ${PORT:-3000}",
     "lint": "next lint"
   },
@@ -23,7 +23,7 @@
     "autoprefixer": "^10.0.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.468.0",
-    "next": "14.2.21",
+    "next": "14.2.32",
     "next-auth": "^4.24.11",
     "pg": "^8.13.3",
     "postcss": "^8",
@@ -40,5 +40,9 @@
   },
   "engines": {
     "node": "20.x"
+  },
+  "overrides": {
+    "cookie": ">=0.7.2",
+    "nanoid": ">=3.3.11"
   }
 }
