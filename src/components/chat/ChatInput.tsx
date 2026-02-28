@@ -816,13 +816,15 @@ export function ChatInput() {
         streamAgent(chatId, userContent)
         return
       }
-      updateMessage(chatId, assistantMsgId, { content: fullContent || "👋", isStreaming: false })
+      const finalContent = fullContent || "👋"
+      updateMessage(chatId, assistantMsgId, { content: finalContent, isStreaming: false })
+      saveMessage('assistant', finalContent)
     } catch {
       updateMessage(chatId, assistantMsgId, { content: "Connection error.", isStreaming: false })
     } finally {
       setStreaming(false)
     }
-  }, [selectedModel, addMessage, updateMessage, setStreaming])
+  }, [selectedModel, addMessage, updateMessage, setStreaming, saveMessage])
   // eslint-disable-next-line react-hooks/exhaustive-deps -- streamAgent is stable at runtime (defined after, useCallback ref)
 
   // ── streamAgent: Planner → Builder → Reviewer with inline thinking ────────
@@ -1044,6 +1046,7 @@ export function ChatInput() {
         ]
         const wrapText = WRAP_PHRASES[Math.floor(Math.random() * WRAP_PHRASES.length)]
         updateMessage(chatId, ackMsgId, { content: wrapText, isStreaming: false })
+        saveMessage('assistant', wrapText)
 
         // Build completion card — shows files created, languages, quick actions
         const createdFilesList = Array.from(createdFileNames)
@@ -1102,6 +1105,7 @@ export function ChatInput() {
           if (textOnly.length > 0 && !hasFileMarkers) {
             // Model responded conversationally (e.g. clarification, error) — show as chat
             updateMessage(chatId, ackMsgId, { content: textOnly.slice(0, 2000), isStreaming: false, model: selectedModel })
+            saveMessage('assistant', textOnly.slice(0, 2000))
           } else if (hasFileMarkers) {
             // Had markers but parser found no files — genuine parse failure
             updateMessage(chatId, thinkingMsgId, { content: lastThinkingText, isStreaming: false })
@@ -1185,6 +1189,7 @@ export function ChatInput() {
     let chatId = getOrCreateSingleChat()
 
     addMessage(chatId, { role: "user", content: userText })
+    saveMessage('user', userText)
 
     // Call chat/AI directly and collect the full text reply
     return new Promise<string>((resolve) => {
