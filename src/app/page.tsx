@@ -21,11 +21,16 @@ export default function Home() {
   const router = useRouter()
   const { ideOpen, onboardingDone, hydrateFromStorage } = useAppStore()
   const [mounted, setMounted] = useState(false)
+  const [isMobile, setIsMobile] = useState(false)
 
   useEffect(() => {
     hydrateFromStorage()
     applyTheme(loadTheme())
     setMounted(true)
+    const check = () => setIsMobile(window.innerWidth < 768)
+    check()
+    window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
   }, [hydrateFromStorage])
 
   // Client-side guard — belt-and-suspenders behind middleware
@@ -89,18 +94,37 @@ export default function Home() {
     )
   }
 
+  // On mobile: full-screen main panel + bottom nav sidebar, no IDE panel
+  const showIDE = ideOpen && !isMobile
+
   return (
-    <div ref={containerRef} className="flex h-screen w-screen overflow-hidden bg-hive-600">
+    <div ref={containerRef} className="flex h-[100dvh] w-screen overflow-hidden bg-hive-600">
       {mounted && !onboardingDone && <OnboardingModal />}
       <SettingsModal />
       {isDragging && (
         <div className="fixed inset-0 z-[9999] cursor-col-resize" />
       )}
-      <Sidebar />
-      <div className="flex-1 min-w-0 overflow-hidden">
-        <MainPanel />
+
+      {/* Sidebar — hidden on mobile (rendered as bottom nav inside Sidebar component) */}
+      <div className="hidden md:flex md:shrink-0">
+        <Sidebar />
       </div>
-      {ideOpen && (
+
+      {/* Mobile bottom nav */}
+      <div className="md:hidden">
+        <Sidebar />
+      </div>
+
+      {/* Main content area */}
+      <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
+        {/* On mobile: add bottom padding so content clears the bottom nav */}
+        <div className="flex-1 min-h-0 overflow-hidden md:pb-0 pb-[60px]">
+          <MainPanel />
+        </div>
+      </div>
+
+      {/* IDE splitter — desktop only */}
+      {showIDE && (
         <div
           onMouseDown={onSplitterMouseDown}
           className="relative w-4 shrink-0 cursor-col-resize group flex items-center justify-center"
@@ -118,8 +142,10 @@ export default function Home() {
           </div>
         </div>
       )}
-      {ideOpen && (
-        <div style={{ width: ideWidth }} className="shrink-0 overflow-hidden">
+
+      {/* IDE panel — desktop only */}
+      {showIDE && (
+        <div style={{ width: ideWidth }} className="shrink-0 overflow-hidden hidden md:block">
           <IDEPanel />
         </div>
       )}
