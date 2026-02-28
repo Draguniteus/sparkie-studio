@@ -26,14 +26,62 @@ async function ensureTables() {
   await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMPTZ`).catch(() => {})
 }
 
-/** Compute next scheduled_at from a cron expression (best-effort for common patterns) */
+/**
+ * Compute next scheduled_at from a 5-field cron expression (no npm needed).
+ * Handles: exact values, wildcards, step (*/n), comma lists, ranges.
+ * Scans forward minute-by-minute up to 1 year; falls back to +24h if nothing found.
+ */
 function nextCronTime(expression: string, after: Date = new Date()): Date {
   const parts = expression.trim().split(/\s+/)
   if (parts.length < 5) return new Date(after.getTime() + 24 * 60 * 60 * 1000)
-  const [, , , , dow] = parts
-  // Weekly: day-of-week is specific (e.g. "1" = Monday)
-  if (dow !== '*') return new Date(after.getTime() + 7 * 24 * 60 * 60 * 1000)
-  // Daily
+  const [minExpr, hourExpr, domExpr, monthExpr, dowExpr] = parts
+
+  function matchField(expr: string, value: number, min: number, max: number): boolean {
+    if (expr === '*') return true
+    for (const segment of expr.split(',')) {
+      if (segment.includes('/')) {
+        const [rangeStr, stepStr] = segment.split('/')
+        const step = parseInt(stepStr)
+        const rangeStart = rangeStr === '*' ? min : parseInt(rangeStr.split('-')[0])
+        const rangeEnd   = rangeStr === '*' ? max : (rangeStr.includes('-') ? parseInt(rangeStr.split('-')[1]) : max)
+        for (let v = rangeStart; v <= rangeEnd; v += step) {
+          if (v === value) return true
+        }
+      } else if (segment.includes('-')) {
+        const [lo, hi] = segment.split('-').map(Number)
+        if (value >= lo && value <= hi) return true
+      } else {
+        if (parseInt(segment) === value) return true
+      }
+    }
+    return false
+  }
+
+  // Scan forward 1 minute at a time, up to 1 year
+  const candidate = new Date(after.getTime() + 60_000)
+  candidate.setSeconds(0, 0)
+  const limit = new Date(after.getTime() + 365 * 24 * 60 * 60 * 1000)
+
+  while (candidate < limit) {
+    const min   = candidate.getMinutes()
+    const hour  = candidate.getHours()
+    const dom   = candidate.getDate()
+    const month = candidate.getMonth() + 1 // 1-12
+    const dow   = candidate.getDay()       // 0=Sun
+
+    if (
+      matchField(monthExpr, month, 1, 12) &&
+      matchField(domExpr,   dom,   1, 31) &&
+      matchField(dowExpr,   dow,   0, 6)  &&
+      matchField(hourExpr,  hour,  0, 23) &&
+      matchField(minExpr,   min,   0, 59)
+    ) {
+      return new Date(candidate)
+    }
+    candidate.setTime(candidate.getTime() + 60_000)
+  }
+
+  // Fallback: +24h
   return new Date(after.getTime() + 24 * 60 * 60 * 1000)
 }
 
