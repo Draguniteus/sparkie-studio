@@ -56,7 +56,7 @@ function CodePreview({ html, title, onExpand }: { html: string; title?: string; 
         </button>
       </div>
       {/* Iframe sandbox */}
-      <div className="relative" style={{ height: 260 }}>
+      <div className="relative" style={{ height: typeof window !== 'undefined' && window.innerWidth < 768 ? 200 : 260 }}>
         <iframe
           srcDoc={html}
           sandbox="allow-scripts"
@@ -211,7 +211,7 @@ export function SparkiesFeed() {
 
       <div className="h-full flex flex-col bg-hive-600">
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-hive-border shrink-0">
+        <div className="flex items-center justify-between px-3 md:px-4 py-3 border-b border-hive-border shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-honey-500/20 flex items-center justify-center">
               <Sparkles size={16} className="text-honey-500" />
@@ -231,7 +231,7 @@ export function SparkiesFeed() {
         </div>
 
         {/* Feed */}
-        <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
+        <div className="flex-1 overflow-y-auto p-3 md:p-4 flex flex-col gap-3 md:gap-4">
           {loading && (
             <div className="flex items-center justify-center py-16 gap-2 text-text-muted text-sm">
               <Sparkles size={16} className="animate-pulse text-honey-500" />
