@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth/next'
 import { authOptions } from '@/lib/auth'
 import { query } from '@/lib/db'
 import { loadIdentityFiles, buildIdentityBlock, updateSessionFile, updateContextFile, updateActionsFile } from '@/lib/identity'
+import { writeWorklog, writeMsgBatch } from '@/lib/worklog'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -1091,6 +1092,8 @@ Rules: Only USER facts + Sparkie execution procedures. Only NEW, specific, worth
         const existing = await query('SELECT id FROM user_memories WHERE user_id = $1 AND content ILIKE $2', [userId, `%${m.content.slice(0, 40)}%`])
         if (existing.rows.length === 0) {
           await query('INSERT INTO user_memories (user_id, category, content) VALUES ($1, $2, $3)', [userId, m.category, m.content])
+          // Write to persistent worklog
+          writeWorklog(userId, 'memory_learned', m.content, { category: m.category }).catch(() => {})
         }
       }
     }
@@ -2572,6 +2575,8 @@ Make it feel like walking into your friend's creative space and being genuinely 
               `${m.role === 'user' ? 'User' : 'Sparkie'}: ${m.content.slice(0, 400)}`
             ).join('\n')
             extractAndSaveMemories(userId, snap, apiKey)
+      // Write message batch to worklog (fire-and-forget)
+      writeMsgBatch(userId, messages.filter((m: { role: string }) => m.role === 'user').length).catch(() => {})
             const lastUser = messages.slice().reverse().find((m: { role: string; content: string }) => m.role === 'user')?.content ?? ''
             const lastSparkie = messages.slice().reverse().find((m: { role: string; content: string }) => m.role === 'assistant')?.content ?? ''
             updateSessionFile(userId, lastUser, lastSparkie)
@@ -2641,6 +2646,8 @@ Make it feel like walking into your friend's creative space and being genuinely 
         `${m.role === 'user' ? 'User' : 'Sparkie'}: ${m.content.slice(0, 400)}`
       ).join('\n')
       extractAndSaveMemories(userId, snap, apiKey)
+      // Write message batch to worklog (fire-and-forget)
+      writeMsgBatch(userId, messages.filter((m: { role: string }) => m.role === 'user').length).catch(() => {})
       const lastUserMsg = messages.slice().reverse().find((m: { role: string; content: string }) => m.role === 'user')?.content ?? ''
       const lastSparkieMsg = messages.slice().reverse().find((m: { role: string; content: string }) => m.role === 'assistant')?.content ?? ''
       updateSessionFile(userId, lastUserMsg, lastSparkieMsg)

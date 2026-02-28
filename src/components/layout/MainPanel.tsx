@@ -10,6 +10,9 @@ import { SparkiesCorner } from "@/components/SparkiesCorner"
 import { DreamJournal } from "@/components/DreamJournal"
 import { SparkiesFeed } from "@/components/SparkiesFeed"
 import { SkillsLibrary } from "@/components/SkillsLibrary"
+import { WorklogPage } from "@/components/WorklogPage"
+
+const ALL_NON_CHAT_TABS = ["radio","assets","connectors","corner","journal","feed","skills","worklog"]
 
 export function MainPanel() {
   const { currentChatId, activeTab } = useAppStore()
@@ -57,8 +60,13 @@ export function MainPanel() {
         <SkillsLibrary />
       </div>
 
+      {/* AI Work Log */}
+      <div className={`absolute inset-0 flex flex-col ${activeTab === "worklog" ? "z-10" : "invisible pointer-events-none"}`}>
+        <WorklogPage />
+      </div>
+
       {/* Chat / Welcome */}
-      <div className={`absolute inset-0 flex flex-col ${!["radio","assets","connectors","corner","journal","feed","skills"].includes(activeTab) ? "z-10" : "invisible pointer-events-none"}`}>
+      <div className={`absolute inset-0 flex flex-col ${!ALL_NON_CHAT_TABS.includes(activeTab) ? "z-10" : "invisible pointer-events-none"}`}>
         {currentChatId ? <ChatView /> : <WelcomeView />}
       </div>
     </div>
