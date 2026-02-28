@@ -1324,13 +1324,21 @@ export function ChatInput() {
 
     if (textareaRef.current) textareaRef.current.style.height = "auto"
 
-    if (genMode === "image") {
+    // Natural language media detection — catches "generate me a song", "make me a beat", etc.
+    // even when the user hasn't tapped the mode button
+    const nlLower = userContent.toLowerCase()
+    const NL_MUSIC = /\b(generat|creat|mak|compos|writ|produc|record|pleas.*song|pleas.*music|pleas.*beat|pleas.*track|pleas.*tune)\w*\s+(me\s+)?(a\s+)?(song|music|beat|track|tune|melody|instrumental|banger|jam|freestyle|rap|hip.?hop|lo.?fi|remix|cover|jingle|anthem)/i
+    const NL_LYRICS = /\b(generat|creat|writ)\w*\s+(me\s+)?(some\s+|a\s+)?(lyrics|verses|chorus|hook|rap\s+lyrics)/i
+    const NL_IMAGE = /\b(draw|paint|sketch|generat|creat|render|design|visuali|illustrat)\w*\s+(me\s+)?(a\s+|an\s+|some\s+)?(image|picture|photo|illustration|artwork|painting|drawing|poster|thumbnail|logo|icon|wallpaper|banner)/i
+    const NL_VIDEO = /\b(generat|creat|mak|produc|render)\w*\s+(me\s+)?(a\s+|an\s+|some\s+)?(video|clip|animation|short|reel|motion)/i
+
+    if (genMode === "image" || (genMode === "chat" && NL_IMAGE.test(nlLower))) {
       generateMedia(chatId, userContent, "image")
-    } else if (genMode === "video") {
+    } else if (genMode === "video" || (genMode === "chat" && NL_VIDEO.test(nlLower))) {
       generateMedia(chatId, userContent, "video")
-    } else if (genMode === "music") {
+    } else if (genMode === "music" || (genMode === "chat" && NL_MUSIC.test(nlLower))) {
       generateMedia(chatId, userContent, "music")
-    } else if (genMode === "lyrics") {
+    } else if (genMode === "lyrics" || (genMode === "chat" && NL_LYRICS.test(nlLower))) {
       generateMedia(chatId, userContent, "lyrics")
     } else if (genMode === "speech") {
       generateMedia(chatId, userContent, "speech")
