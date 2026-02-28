@@ -68,6 +68,7 @@ export async function GET(req: NextRequest) {
 
 // POST /api/connectors
 // body: { action: 'connect', appName: 'github' }
+//       { action: 'connect', appName: 'openai', credentials: { generic_api_key: 'sk-...' } }
 //     | { action: 'disconnect', connectedAccountId: 'xxx' }
 export async function POST(req: NextRequest) {
   try {
@@ -78,6 +79,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json() as {
       action: string
       appName?: string
+      credentials?: Record<string, string>
       connectedAccountId?: string
     }
 
@@ -86,9 +88,6 @@ export async function POST(req: NextRequest) {
 
       // Step 1: Find auth config for this app (v3)
       // NOTE: Do NOT use &is_composio_managed=true — that filter excludes custom auth configs.
-      // Composio provides managed configs for Gmail, Notion, Slack, HubSpot etc.
-      // GitHub and Twitter REQUIRE custom configs (Twitter managed creds were removed by Composio).
-      // Without the filter, we get whichever config exists — managed or custom.
       const authConfigRes = await fetch(
         `${V3}/auth_configs?toolkit_slug=${encodeURIComponent(body.appName)}&limit=1`,
         { headers: composioHeaders() }
@@ -100,10 +99,17 @@ export async function POST(req: NextRequest) {
           { status: authConfigRes.status }
         )
       }
-      const authConfigData = await authConfigRes.json() as { items?: Array<{ id: string; toolkit?: { slug: string }; is_composio_managed?: boolean }> }
+      const authConfigData = await authConfigRes.json() as {
+        items?: Array<{
+          id: string
+          auth_scheme?: string
+          toolkit?: { slug: string }
+          is_composio_managed?: boolean
+          fields?: Array<{ name: string; displayName?: string; description?: string; required?: boolean }>
+        }>
+      }
       const authConfig = authConfigData.items?.[0]
       if (!authConfig) {
-        // No config found — this app needs a custom auth config created in the Composio dashboard
         return NextResponse.json(
           {
             error: `No auth config found for "${body.appName}".`,
@@ -113,7 +119,41 @@ export async function POST(req: NextRequest) {
         )
       }
 
-      // Step 2: Create connected account (v3)
+      // Step 2a: API_KEY scheme — need credentials from user
+      // If not provided yet, return scheme + fields so frontend can show key entry modal
+      if (authConfig.auth_scheme === 'API_KEY') {
+        if (!body.credentials || Object.keys(body.credentials).length === 0) {
+          return NextResponse.json({
+            authScheme: 'API_KEY',
+            fields: authConfig.fields ?? [],
+          })
+        }
+        // Credentials provided — create connection with data payload
+        const connectRes = await fetch(`${V3}/connected_accounts`, {
+          method: 'POST',
+          headers: composioHeaders(),
+          body: JSON.stringify({
+            auth_config: { id: authConfig.id },
+            connection: {
+              user_id: entityId(userId),
+              data: body.credentials,
+            },
+          }),
+        })
+        if (!connectRes.ok) {
+          const text = await connectRes.text()
+          let detail = text
+          try { detail = JSON.stringify(JSON.parse(text)) } catch { /* keep raw */ }
+          return NextResponse.json(
+            { error: `Connection failed: ${connectRes.status}`, detail },
+            { status: connectRes.status }
+          )
+        }
+        const data = await connectRes.json() as { id?: string; status?: string }
+        return NextResponse.json({ status: data.status, connectedAccountId: data.id })
+      }
+
+      // Step 2b: OAuth scheme — redirect flow
       const host = req.headers.get('host') ?? 'localhost:3000'
       const proto = req.headers.get('x-forwarded-proto') ?? 'https'
       const redirectUri = `${proto}://${host}/connectors/callback`
@@ -154,13 +194,11 @@ export async function POST(req: NextRequest) {
 
     if (body.action === 'disconnect') {
       if (!body.connectedAccountId) return NextResponse.json({ error: 'connectedAccountId required' }, { status: 400 })
-      // v3 delete
       const res = await fetch(`${V3}/connected_accounts/${body.connectedAccountId}`, {
         method: 'DELETE',
         headers: composioHeaders(),
       })
       if (!res.ok) {
-        // Fallback: v1
         const resV1 = await fetch(`${V1}/connectedAccounts/${body.connectedAccountId}`, {
           method: 'DELETE',
           headers: composioHeaders(),
