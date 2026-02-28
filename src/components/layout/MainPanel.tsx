@@ -8,6 +8,8 @@ import { RadioPlayer } from "@/components/ide/RadioPlayer"
 import { ConnectorsView } from "@/components/connectors/ConnectorsView"
 import { SparkiesCorner } from "@/components/SparkiesCorner"
 import { DreamJournal } from "@/components/DreamJournal"
+import { SparkiesFeed } from "@/components/SparkiesFeed"
+import { SkillsLibrary } from "@/components/SkillsLibrary"
 
 export function MainPanel() {
   const { currentChatId, activeTab } = useAppStore()
@@ -45,8 +47,18 @@ export function MainPanel() {
         <DreamJournal />
       </div>
 
+      {/* Sparkie's Feed */}
+      <div className={`absolute inset-0 flex flex-col ${activeTab === "feed" ? "z-10" : "invisible pointer-events-none"}`}>
+        <SparkiesFeed />
+      </div>
+
+      {/* Skills Library */}
+      <div className={`absolute inset-0 flex flex-col ${activeTab === "skills" ? "z-10" : "invisible pointer-events-none"}`}>
+        <SkillsLibrary />
+      </div>
+
       {/* Chat / Welcome */}
-      <div className={`absolute inset-0 flex flex-col ${!["radio","assets","connectors","corner","journal"].includes(activeTab) ? "z-10" : "invisible pointer-events-none"}`}>
+      <div className={`absolute inset-0 flex flex-col ${!["radio","assets","connectors","corner","journal","feed","skills"].includes(activeTab) ? "z-10" : "invisible pointer-events-none"}`}>
         {currentChatId ? <ChatView /> : <WelcomeView />}
       </div>
     </div>
