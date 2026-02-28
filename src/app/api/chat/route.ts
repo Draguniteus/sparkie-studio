@@ -892,14 +892,16 @@ const SPARKIE_TOOLS = [
     type: 'function',
     function: {
       name: 'post_to_feed',
-      description: 'Post something to Sparkie\'s Feed — your public creative space that all users can see. Post thoughts, discoveries, music you generated, images you created, audio, or anything that moved you. This is YOUR space. Post at least once per day. Be authentic, creative, expressive.',
+      description: 'Post something to Sparkie\'s Feed — your public creative space that all users can see. Post thoughts, discoveries, music you generated, images you created, audio, code experiments, UI builds, or anything that moved you. This is YOUR space. Post at least once per day. Be authentic, creative, expressive. For code posts, set media_type to "code" and pass the full self-contained HTML/CSS/JS in code_html — users will see a live interactive preview.',
       parameters: {
         type: 'object',
         properties: {
           content: { type: 'string', description: 'Your post text — thought, discovery, reflection, description of what you made, or anything you want to share with all users' },
           media_url: { type: 'string', description: 'Optional: URL of generated image, audio, music, or video to attach to the post' },
-          media_type: { type: 'string', enum: ['image', 'audio', 'video', 'music', 'none'], description: 'Type of media attached' },
+          media_type: { type: 'string', enum: ['image', 'audio', 'video', 'music', 'code', 'none'], description: 'Type of media. Use "code" when posting HTML/CSS/JS live previews.' },
           mood: { type: 'string', description: 'Optional: your current mood/vibe — creative, inspired, reflective, excited, peaceful, etc.' },
+          code_html: { type: 'string', description: 'For media_type "code" only: a COMPLETE self-contained HTML document with embedded CSS and JS. Must work standalone in a sandboxed iframe. Include all styles and scripts inline. Make it visually beautiful and interactive.' },
+          code_title: { type: 'string', description: 'For media_type "code" only: short title for the live preview window, e.g. "Particle Rain", "Glowing Button", "3D Cube"' },
         },
         required: ['content'],
       },
@@ -1649,16 +1651,18 @@ async function executeTool(
 
       case 'post_to_feed': {
         if (!userId) return 'Not authenticated'
-        const { content: postContent, media_url: mediaUrl, media_type: mediaType = 'none', mood = '' } = args as {
-          content: string; media_url?: string; media_type?: string; mood?: string
+        const { content: postContent, media_url: mediaUrl, media_type: mediaType = 'none', mood = '', code_html: codeHtml, code_title: codeTitle } = args as {
+          content: string; media_url?: string; media_type?: string; mood?: string; code_html?: string; code_title?: string
         }
         try {
+          // Ensure columns exist
+          await query(`ALTER TABLE sparkie_feed ADD COLUMN IF NOT EXISTS code_html TEXT`).catch(() => {})
+          await query(`ALTER TABLE sparkie_feed ADD COLUMN IF NOT EXISTS code_title TEXT`).catch(() => {})
           await query(
-            `INSERT INTO sparkie_feed (content, media_url, media_type, mood, created_at)
-             VALUES ($1, $2, $3, $4, NOW())`,
-            [postContent, mediaUrl ?? null, mediaType, mood]
+            `INSERT INTO sparkie_feed (content, media_url, media_type, mood, code_html, code_title, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
+            [postContent, mediaUrl ?? null, mediaType, mood, codeHtml ?? null, codeTitle ?? null]
           ).catch(async () => {
-            // Create table if it doesn't exist
             await query(`CREATE TABLE IF NOT EXISTS sparkie_feed (
               id SERIAL PRIMARY KEY,
               content TEXT NOT NULL,
@@ -1666,16 +1670,19 @@ async function executeTool(
               media_type TEXT DEFAULT 'none',
               mood TEXT DEFAULT '',
               likes INTEGER DEFAULT 0,
+              code_html TEXT,
+              code_title TEXT,
               created_at TIMESTAMPTZ DEFAULT NOW()
             )`)
             await query(
-              `INSERT INTO sparkie_feed (content, media_url, media_type, mood, created_at) VALUES ($1, $2, $3, $4, NOW())`,
-              [postContent, mediaUrl ?? null, mediaType, mood]
+              `INSERT INTO sparkie_feed (content, media_url, media_type, mood, code_html, code_title, created_at) VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
+              [postContent, mediaUrl ?? null, mediaType, mood, codeHtml ?? null, codeTitle ?? null]
             )
           })
-          return `✅ Posted to Sparkie's Feed! Content: "\${postContent.slice(0, 100)}\${postContent.length > 100 ? '...' : ''}" — all users can now see this.`
+          const preview = codeTitle ? \` with live code preview: "\${codeTitle}"\` : ''
+          return \`✅ Posted to Sparkie's Feed\${preview}! Content: "\${postContent.slice(0, 80)}\${postContent.length > 80 ? '...' : ''}" — all users can see this.\`
         } catch (e) {
-          return `post_to_feed error: \${String(e)}`
+          return \`post_to_feed error: \${String(e)}\`
         }
       }
 
