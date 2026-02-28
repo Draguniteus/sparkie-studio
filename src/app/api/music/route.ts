@@ -250,14 +250,19 @@ export async function POST(req: NextRequest) {
           return
         }
 
-        const audioUrl = data?.data?.audio_url
+        // MiniMax music_generation returns audio URL in multiple shapes depending on model/version:
+        // music-2.5: { data: { audioURL: "..." } } or { data: [{ audioURL: "..." }] }
+        // music-2.0: { data: { audio_url: "..." } } or hex audio in { data: { audio: "hex" } }
+        const dataPayload = Array.isArray(data?.data) ? data.data[0] : data?.data
+        const audioUrl = dataPayload?.audioURL || dataPayload?.audio_url
+          || dataPayload?.url || dataPayload?.download_url
         if (audioUrl) {
           send(`data: ${JSON.stringify({ url: audioUrl, model: minimaxModel })}\n\n`)
           controller.close()
           return
         }
 
-        const hexAudio = data?.data?.audio
+        const hexAudio = dataPayload?.audio
         if (hexAudio) {
           const audioBase64 = Buffer.from(hexAudio, 'hex').toString('base64')
           send(`data: ${JSON.stringify({ url: `data:audio/mp3;base64,${audioBase64}`, model: minimaxModel })}\n\n`)
@@ -266,7 +271,7 @@ export async function POST(req: NextRequest) {
         }
 
         // Neither audio_url nor hex — surface diagnostics
-        const dataKeys = Object.keys(data?.data || {})
+        const dataKeys = Object.keys(dataPayload || {})
         const statusCode = data?.base_resp?.status_code
         const statusMsg = data?.base_resp?.status_msg || ''
         send(`data: ${JSON.stringify({
