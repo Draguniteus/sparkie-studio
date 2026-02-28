@@ -1,5 +1,7 @@
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { Sandbox } from '@e2b/code-interpreter'
+import { getServerSession } from 'next-auth/next'
+import { authOptions } from '@/lib/auth'
 
 export const runtime = 'nodejs'
 export const maxDuration = 120
@@ -24,6 +26,11 @@ export async function POST(req: NextRequest) {
   const apiKey = process.env.E2B_API_KEY
   if (!apiKey) {
     return new Response(JSON.stringify({ error: 'E2B_API_KEY not set' }), { status: 500 })
+  }
+
+  const session = await getServerSession(authOptions)
+  if (!session?.user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   let files: { name: string; content: string }[]
@@ -82,28 +89,32 @@ export async function POST(req: NextRequest) {
           onStderr: (data) => emit('stderr', data),
         })
 
-        // Wait up to 25s for server to start, then close stream (server keeps running in bg)
-        await new Promise<void>((resolve) => {
-          const timeout = setTimeout(() => resolve(), 25000)
-          const check = setInterval(() => {
-            if (serverStarted.value) { clearInterval(check); clearTimeout(timeout); resolve() }
-          }, 500)
-        })
-
-        // Stop watching the handle — server keeps running in background
-        await serverHandle.kill().catch(() => {})
+        // Wait up to 25s for server-ready signal
+        const startTime = Date.now()
+        while (!serverStarted.value && Date.now() - startTime < 25000) {
+          await new Promise(r => setTimeout(r, 500))
+        }
 
         if (serverStarted.value) {
-          emit('status', 'Server started. Check port 3000 for the live endpoint.')
+          // Get sandbox hostname for preview
+          const host = sbx.getHost(3000)
+          emit('url', `https://${host}`)
+          emit('status', 'Server ready!')
         } else {
-          emit('status', 'Server running (no port signal detected). Check terminal output.')
+          emit('status', 'Server may be starting — check terminal')
         }
-        emit('done', 'Backend project running in E2B sandbox.')
+
+        // Kill the background process after signaling
+        try { await serverHandle.kill() } catch { /* best-effort */ }
+
+        emit('done', 'Project launched.')
       } catch (err) {
         emit('error', err instanceof Error ? err.message : String(err))
       } finally {
+        if (sbx) {
+          try { await sbx.kill() } catch { /* best-effort cleanup */ }
+        }
         controller.close()
-        // Keep sandbox alive — server is still running in background
       }
     },
   })

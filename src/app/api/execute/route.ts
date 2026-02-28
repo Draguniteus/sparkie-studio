@@ -1,5 +1,7 @@
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { Sandbox } from '@e2b/code-interpreter'
+import { getServerSession } from 'next-auth/next'
+import { authOptions } from '@/lib/auth'
 
 // Sandbox pool — survives across requests in same server process
 const sandboxPool = new Map<string, Sandbox>()
@@ -13,6 +15,11 @@ export async function POST(req: NextRequest) {
   const apiKey = process.env.E2B_API_KEY
   if (!apiKey) {
     return new Response(JSON.stringify({ error: 'E2B_API_KEY not set' }), { status: 500 })
+  }
+
+  const session = await getServerSession(authOptions)
+  if (!session?.user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   let body: { code: string; language?: string; sessionId?: string }
@@ -91,7 +98,7 @@ export async function DELETE(req: NextRequest) {
     const sbx = sandboxPool.get(sessionId)!
     sandboxPool.delete(sessionId)
     await sbx.kill().catch(() => {})
-    return new Response(JSON.stringify({ killed: true }))
+    return NextResponse.json({ ok: true })
   }
-  return new Response(JSON.stringify({ killed: false }))
+  return NextResponse.json({ ok: false })
 }

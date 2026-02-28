@@ -5,7 +5,7 @@ import { authOptions } from '@/lib/auth'
 export const runtime = 'nodejs'
 export const maxDuration = 30
 
-const COMPOSIO_BASE = 'https://backend.composio.dev/api/v1'
+const COMPOSIO_BASE = 'https://backend.composio.dev/api/v3'
 
 function composioHeaders() {
   return {
@@ -26,10 +26,10 @@ export async function POST(req: NextRequest) {
 
   const entityId = `sparkie_user_${userId}`
 
-  const res = await fetch(`${COMPOSIO_BASE}/actions/execute/${actionSlug}`, {
+  const res = await fetch(`${COMPOSIO_BASE}/tools/execute/${actionSlug}`, {
     method: 'POST',
     headers: composioHeaders(),
-    body: JSON.stringify({ entityId, input: input ?? {} }),
+    body: JSON.stringify({ entity_id: entityId, arguments: input ?? {} }),
     signal: AbortSignal.timeout(25000),
   })
 
