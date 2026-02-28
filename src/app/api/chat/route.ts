@@ -1610,21 +1610,23 @@ async function executeConnectorTool(
   try {
     const apiKey = process.env.COMPOSIO_API_KEY
     if (!apiKey) return 'Connector not available'
-    const entityId = `sparkie_user_${userId}`
+    const entity_id = `sparkie_user_${userId}`
     const res = await fetch(
-      `https://backend.composio.dev/api/v1/actions/execute/${actionSlug}`,
+      `https://backend.composio.dev/api/v3/tools/execute/${actionSlug}`,
       {
         method: 'POST',
         headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entityId, input: args }),
+        body: JSON.stringify({ entity_id, arguments: args }),
         signal: AbortSignal.timeout(20000),
       }
     )
     if (!res.ok) {
-      const text = await res.text()
-      return `Action failed (${res.status}): ${text.slice(0, 200)}`
+      const errBody = await res.text()
+      // Surface a clean error — the 410 "upgrade to v3" message is gone now
+      return `Action failed (${res.status}): ${errBody.slice(0, 300)}`
     }
     const data = await res.json() as Record<string, unknown>
+    // v3 wraps success in { data: { ... } } — same shape as v1
     return formatConnectorResponse(actionSlug, data)
   } catch (e) {
     return `Connector error: ${String(e)}`
