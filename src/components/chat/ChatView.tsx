@@ -23,17 +23,17 @@ export function ChatView() {
   return (
     <div className="flex-1 flex flex-col h-full">
       {/* Chat Header */}
-      <div className="h-11 flex items-center justify-between px-4 border-b border-hive-border shrink-0">
+      <div className="h-11 flex items-center justify-between px-3 md:px-4 border-b border-hive-border shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-sm font-medium truncate text-text-primary">{chat.title}</span>
         </div>
         <div className="flex items-center gap-1">
-          <button className="p-1.5 rounded-md hover:bg-hive-hover text-text-muted hover:text-text-secondary transition-colors" title="Share">
+          <button className="p-2 md:p-1.5 rounded-md hover:bg-hive-hover text-text-muted hover:text-text-secondary transition-colors" title="Share">
             <Share size={14} />
           </button>
           <button
             onClick={toggleIDE}
-            className={`p-1.5 rounded-md transition-colors ${
+            className={`p-2 md:p-1.5 rounded-md transition-colors hidden md:flex ${
               ideOpen
                 ? 'bg-honey-500/15 text-honey-500'
                 : 'hover:bg-hive-hover text-text-muted hover:text-text-secondary'
@@ -42,21 +42,21 @@ export function ChatView() {
           >
             <Code size={14} />
           </button>
-          <button className="p-1.5 rounded-md hover:bg-hive-hover text-text-muted hover:text-text-secondary transition-colors">
+          <button className="p-2 md:p-1.5 rounded-md hover:bg-hive-hover text-text-muted hover:text-text-secondary transition-colors">
             <MoreHorizontal size={14} />
           </button>
         </div>
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 md:px-4 py-3 md:py-4 space-y-3 md:space-y-4">
         {chat.messages.filter(msg => msg.isStreaming || msg.content).map((msg) => (
           <MessageBubble key={msg.id} message={msg} userAvatarUrl={userAvatarUrl} />
         ))}
       </div>
 
       {/* Chat Input */}
-      <div className="px-4 pb-4">
+      <div className="px-3 md:px-4 pb-3 md:pb-4">
         <ChatInput />
       </div>
     </div>
