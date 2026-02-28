@@ -147,7 +147,7 @@ export function ChatInput() {
     updateMessage, currentChatId, isStreaming, setStreaming,
     openIDE, setExecuting, setActiveFile, setIDETab, ideOpen,
     clearLiveCode, appendLiveCode, addLiveCodeFile,
-    addWorklogEntry, updateWorklogEntry,
+    addWorklogEntry, updateWorklogEntry, clearWorklog,
     setContainerStatus, setPreviewUrl, saveChatFiles, addAsset, updateAsset,
     setLastMode,
   } = useAppStore()
@@ -910,10 +910,12 @@ export function ChatInput() {
     setStreaming(true)
     setExecuting(true)
     clearLiveCode()
+    clearWorklog()
     setContainerStatus('idle')
     setPreviewUrl(null)
     if (!ideOpen) openIDE()
     setIDETab('process')
+    addWorklogEntry({ type: 'action', content: 'Build started — analyzing request', status: 'running' })
 
     try {
       // Cancel any in-flight agent request before starting a new one
