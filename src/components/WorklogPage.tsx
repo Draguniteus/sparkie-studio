@@ -56,27 +56,27 @@ function EntryCard({ entry }: { entry: WorklogEntry }) {
         <Icon size={12} className={cfg.color} />
       </div>
       <div className="flex-1 min-w-0">
-        {entry.type === 'proactive_check' && meta.topic && (
+        {entry.type === 'proactive_check' && !!meta.topic && (
           <div className="text-[11px] font-semibold text-text-secondary mb-0.5">{String(meta.topic)}</div>
         )}
-        {entry.type === 'message_batch' && meta.count && (
+        {entry.type === 'message_batch' && !!meta.count && (
           <div className="text-xs font-medium text-text-secondary mb-0.5">
             You just sent me {String(meta.count)} message{Number(meta.count) !== 1 ? 's' : ''}
           </div>
         )}
-        {(entry.type === 'email_processed' || entry.type === 'email_skipped') && meta.subject && (
+        {(entry.type === 'email_processed' || entry.type === 'email_skipped') && !!meta.subject && (
           <div className="mb-0.5">
             <span className="text-xs font-medium text-text-primary">{String(meta.subject)}</span>
-            {meta.from && <div className="text-[10px] text-text-muted">from {String(meta.from)}</div>}
+            {!!meta.from && <div className="text-[10px] text-text-muted">from {String(meta.from)}</div>}
           </div>
         )}
         <p className="text-xs text-text-secondary leading-relaxed whitespace-pre-wrap break-words">{entry.content}</p>
-        {(entry.type === 'memory_learned' || entry.type === 'memory_updated') && meta.category && (
+        {(entry.type === 'memory_learned' || entry.type === 'memory_updated') && !!meta.category && (
           <span className="inline-block mt-1 text-[10px] px-2 py-0.5 rounded-full bg-purple-400/10 text-purple-400 font-medium capitalize">
             {String(meta.category)}
           </span>
         )}
-        {entry.type === 'email_skipped' && meta.reason && (
+        {entry.type === 'email_skipped' && !!meta.reason && (
           <p className="text-[10px] text-text-muted mt-0.5 italic">I skipped this one - {String(meta.reason)}</p>
         )}
       </div>
