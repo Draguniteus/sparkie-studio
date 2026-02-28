@@ -8,8 +8,45 @@ import { File, Download, Play, Square, RotateCcw } from "lucide-react"
 // Languages that can be executed via E2B
 const RUNNABLE_LANGUAGES = new Set(["python", "javascript", "typescript", "js", "ts", "py"])
 
-function isRunnable(language?: string): boolean {
-  return !!language && RUNNABLE_LANGUAGES.has(language.toLowerCase())
+// Framework/config files that should NOT show a Run button even though they're .ts/.js
+// These are project files, not executable scripts
+const NON_RUNNABLE_NAMES = new Set([
+  "layout.tsx", "layout.ts",
+  "page.tsx", "page.ts",
+  "loading.tsx", "error.tsx", "not-found.tsx", "template.tsx",
+  "middleware.ts", "middleware.js",
+  "vite.config.ts", "vite.config.js",
+  "next.config.ts", "next.config.js", "next.config.mjs",
+  "tailwind.config.ts", "tailwind.config.js",
+  "postcss.config.js", "postcss.config.ts",
+  "tsconfig.json", "package.json", ".eslintrc.js",
+  "globals.css", "index.css",
+])
+
+function isEntryPoint(name: string): boolean {
+  const base = name.split("/").pop() ?? name
+  // Strip path prefix and check if it's an entry/script file
+  const ENTRY_NAMES = new Set([
+    "index.ts", "index.js", "index.tsx", "index.jsx",
+    "main.ts", "main.js", "main.tsx", "main.jsx",
+    "server.ts", "server.js",
+    "app.ts", "app.js",
+    "cli.ts", "cli.js",
+    "run.ts", "run.js",
+    "script.ts", "script.js",
+  ])
+  return ENTRY_NAMES.has(base) || name.endsWith(".py")
+}
+
+function isRunnable(language?: string, name?: string): boolean {
+  if (!language || !RUNNABLE_LANGUAGES.has(language.toLowerCase())) return false
+  if (!name) return false
+  const base = name.split("/").pop() ?? name
+  if (NON_RUNNABLE_NAMES.has(base)) return false
+  // For .ts/.tsx/.js/.jsx — only show Run on entry points or scripts
+  // Python files are always runnable
+  if (language.toLowerCase() === "python") return true
+  return isEntryPoint(name)
 }
 
 export function CodeEditor() {
@@ -53,7 +90,7 @@ export function CodeEditor() {
     )
   }
 
-  const canRun = isRunnable(activeFile.language)
+  const canRun = isRunnable(activeFile.language, activeFile.name)
 
   return (
     <div className="h-full flex flex-col">
