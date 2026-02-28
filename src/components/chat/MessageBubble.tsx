@@ -182,11 +182,7 @@ export function MessageBubble({ message, userAvatarUrl }: Props) {
                   </a>
                 </div>
                 <audio
-                   src={
-                     message.imageUrl?.startsWith('https://')
-                       ? `/api/music/proxy?url=${encodeURIComponent(message.imageUrl!)}`
-                       : message.imageUrl
-                   }
+                   src={message.imageUrl}
                    controls
                    className="w-full"
                    style={{ height: 40, colorScheme: "dark" }}
