@@ -14,6 +14,14 @@ interface Skill {
 
 const MARKETPLACE_SKILLS = [
   {
+    name: "frontend-design",
+    description: "Produces distinctive, production-grade frontend interfaces. Commits to bold design directions — avoids generic AI aesthetics. Use when building components, pages, or full apps.",
+    url: "https://clawhub.ai/steipete/frontend-design",
+    category: "Design",
+    icon: "🎨",
+    badge: "Popular"
+  },
+  {
     name: "proactive-agent",
     description: "Transform Sparkie from task-follower into proactive partner. WAL Protocol, Working Buffer, Autonomous Crons, and battle-tested patterns for overnight autonomous execution.",
     url: "https://clawhub.ai/halthelobster/proactive-agent",
