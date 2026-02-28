@@ -101,7 +101,7 @@ export function TaskQueuePanel() {
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-border-primary shrink-0">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-text-primary">Task Queue</span>
+          <span className="text-xs font-semibold text-text-primary">Agent Tasks</span>
           {pendingCount > 0 && (
             <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
               {pendingCount} pending
@@ -142,9 +142,12 @@ export function TaskQueuePanel() {
             <span className="text-xs">Loading tasks...</span>
           </div>
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-24 text-text-secondary gap-1">
-            <CheckCircle2 className="w-5 h-5 text-green-500/50" />
-            <span className="text-xs">No tasks here</span>
+          <div className="flex flex-col items-center justify-center h-full text-text-secondary gap-2 px-4 py-8">
+            <CheckCircle2 className="w-5 h-5 text-green-500/40" />
+            <span className="text-xs font-medium text-text-secondary">All clear</span>
+            <p className="text-[10px] text-text-muted text-center leading-relaxed">
+              Tasks appear here when Sparkie queues an action that needs your approval — like sending an email, posting a tweet, or a scheduled job.
+            </p>
           </div>
         ) : (
           <div className="divide-y divide-border-primary">
