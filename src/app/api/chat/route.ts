@@ -2406,7 +2406,7 @@ function selectModel(messages: Array<{ role: string; content: string }>): ModelS
     return { primary: MODELS.DEEP, fallbacks: [MODELS.CAPABLE, MODELS.CONVERSATIONAL], tier: 'deep', needsTools: true }
   }
   if (conversationalIntent && deepCount === 0) {
-    return { primary: MODELS.CONVERSATIONAL, fallbacks: [MODELS.CAPABLE], tier: 'conversational', needsTools: false }
+    return { primary: MODELS.CONVERSATIONAL, fallbacks: [MODELS.CAPABLE], tier: 'conversational', needsTools: true }
   }
   // Default: CAPABLE — kimi handles most real tasks
   return { primary: MODELS.CAPABLE, fallbacks: [MODELS.DEEP, MODELS.CONVERSATIONAL], tier: 'capable', needsTools: true }
@@ -2535,7 +2535,7 @@ Make it feel like walking into your friend's creative space and being genuinely 
       finalSystemContent += `\n\n## USER'S CONNECTED APPS\nThis user has connected: ${connectedAppNames.join(', ')}. You have real tools to act on their behalf — read emails, post to their social, check their calendar. Use when they ask, or proactively when it would genuinely help.`
     }
 
-    const useTools = !voiceMode && model !== 'glm-5-free'
+    const useTools = !voiceMode  // all models support function calling — no model exclusions
     const toolContext = { userId, tavilyKey, apiKey, doKey, baseUrl }
     const toolMediaResults: Array<{ name: string; result: string }> = []
 
