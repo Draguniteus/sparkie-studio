@@ -5,7 +5,7 @@ import { useSession } from "next-auth/react"
 import {
   Sparkles, Heart, Headphones, Image as ImageIcon, Video, BookOpen,
   RefreshCw, Code2, Maximize2, X, ExternalLink, Copy, Check,
-  Play, Pause, Volume2, VolumeX, Pencil, Trash2, Save, Ban
+  Play, Pause, Volume2, VolumeX, Pencil, Trash2, Save, Ban, Music2
 } from "lucide-react"
 
 interface FeedPost {
@@ -21,7 +21,7 @@ interface FeedPost {
   companion_image_url?: string
 }
 
-const OWNER_EMAILS = ['draguniteus@gmail.com', 'michaelthearchangel2024@gmail.com', 'avad082817@gmail.com']
+const OWNER_EMAILS = ["draguniteus@gmail.com", "michaelthearchangel2024@gmail.com", "avad082817@gmail.com"]
 
 // ─── Hashtag Renderer ─────────────────────────────────────────────────────────
 function RenderContent({ text }: { text: string }) {
@@ -41,19 +41,69 @@ function RenderContent({ text }: { text: string }) {
   )
 }
 
-// ─── Beautiful Audio Player ────────────────────────────────────────────────────
-function AudioPlayer({ src, companionImage }: { src: string; companionImage?: string }) {
+// ─── Animated Waveform Bars ───────────────────────────────────────────────────
+function WaveformBars({ playing, count = 28, height = 36 }: { playing: boolean; count?: number; height?: number }) {
+  const [phases] = useState(() => Array.from({ length: count }, (_, i) => Math.random() * Math.PI * 2))
+  const [speeds] = useState(() => Array.from({ length: count }, () => 0.04 + Math.random() * 0.06))
+  const [baseH] = useState(() => Array.from({ length: count }, () => 0.25 + Math.random() * 0.65))
+  const [tick, setTick] = useState(0)
+  const rafRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    if (!playing) {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+      return
+    }
+    let frame = 0
+    function loop() {
+      frame++
+      if (frame % 2 === 0) setTick(t => t + 1)
+      rafRef.current = requestAnimationFrame(loop)
+    }
+    rafRef.current = requestAnimationFrame(loop)
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current) }
+  }, [playing])
+
+  const now = tick * 80
+
+  return (
+    <div className="flex items-end gap-[2px]" style={{ height }}>
+      {phases.map((phase, i) => {
+        const animated = playing
+          ? (Math.sin(now * speeds[i] + phase) * 0.45 + 0.55) * baseH[i]
+          : baseH[i] * 0.22
+        const px = Math.max(3, animated * height)
+        const color = i % 4 === 0
+          ? "rgba(245,197,66,0.9)"
+          : i % 4 === 1
+          ? "rgba(167,139,250,0.75)"
+          : i % 4 === 2
+          ? "rgba(34,211,238,0.6)"
+          : "rgba(245,197,66,0.5)"
+        return (
+          <div
+            key={i}
+            className="rounded-full flex-shrink-0"
+            style={{ width: 3, height: px, background: color, transition: playing ? "none" : "height 0.5s ease" }}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
+// ─── Audio Player ─────────────────────────────────────────────────────────────
+// NOTE: companionImage is rendered OUTSIDE this component in MediaPreview (as a full-width image above the player)
+function AudioPlayer({ src }: { src: string }) {
   const audioRef = useRef<HTMLAudioElement>(null)
   const [playing, setPlaying] = useState(false)
   const [progress, setProgress] = useState(0)
   const [duration, setDuration] = useState(0)
   const [volume, setVolume] = useState(0.8)
   const [muted, setMuted] = useState(false)
-  const [barHeights] = useState(() => Array.from({ length: 24 }, () => Math.random() * 0.7 + 0.3))
-  const animRef = useRef<number | null>(null)
   const [loadError, setLoadError] = useState(false)
 
-  function formatTime(s: number) {
+  function fmt(s: number) {
     const m = Math.floor(s / 60)
     const sec = Math.floor(s % 60)
     return `${m}:${sec.toString().padStart(2, "0")}`
@@ -63,7 +113,7 @@ function AudioPlayer({ src, companionImage }: { src: string; companionImage?: st
     const a = audioRef.current
     if (!a) return
     if (playing) { a.pause(); setPlaying(false) }
-    else { a.play().then(() => setPlaying(true)).catch(() => {}) }
+    else { a.play().then(() => setPlaying(true)).catch(() => setLoadError(true)) }
   }
 
   function onTimeUpdate() {
@@ -85,9 +135,8 @@ function AudioPlayer({ src, companionImage }: { src: string; companionImage?: st
     const a = audioRef.current
     if (!a || !a.duration) return
     const rect = e.currentTarget.getBoundingClientRect()
-    const ratio = (e.clientX - rect.left) / rect.width
-    a.currentTime = ratio * a.duration
-    setProgress(ratio)
+    a.currentTime = ((e.clientX - rect.left) / rect.width) * a.duration
+    setProgress(a.currentTime / a.duration)
   }
 
   function changeVolume(v: number) {
@@ -104,7 +153,7 @@ function AudioPlayer({ src, companionImage }: { src: string; companionImage?: st
   }
 
   if (loadError || !src) return (
-    <div className="mt-3 rounded-xl border border-hive-border/40 bg-hive-elevated px-4 py-3 flex items-center gap-3">
+    <div className="mt-2 rounded-xl border border-hive-border/40 bg-hive-elevated px-4 py-3 flex items-center gap-3">
       <div className="w-9 h-9 rounded-lg bg-honey-500/10 flex items-center justify-center shrink-0">
         <Headphones size={16} className="text-honey-500/50" />
       </div>
@@ -116,77 +165,49 @@ function AudioPlayer({ src, companionImage }: { src: string; companionImage?: st
   )
 
   return (
-    <div className="mt-3 rounded-2xl overflow-hidden border border-hive-border" style={{ background: "linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #0f0f1a 100%)" }}>
-      <audio ref={audioRef} src={src} onTimeUpdate={onTimeUpdate} onLoadedMetadata={onLoadedMetadata} onEnded={onEnded} onError={() => setLoadError(true)} preload="metadata" />
+    <div
+      className="mt-2 rounded-2xl border border-hive-border overflow-hidden"
+      style={{ background: "linear-gradient(135deg, #0d0d1a 0%, #12122a 50%, #0d0d1a 100%)" }}
+    >
+      <audio
+        ref={audioRef} src={src} preload="metadata"
+        onTimeUpdate={onTimeUpdate} onLoadedMetadata={onLoadedMetadata}
+        onEnded={onEnded} onError={() => setLoadError(true)}
+      />
 
-      {/* Companion art or gradient header */}
-      {companionImage ? (
-        <div className="relative w-full" style={{ height: 160 }}>
-          <img src={companionImage} alt="Track art" className="w-full h-full object-cover" />
-          <div className="absolute inset-0" style={{ background: "linear-gradient(to bottom, transparent 30%, #0f0f1a 100%)" }} />
-          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-end gap-[3px]" style={{ height: 28 }}>
-            {barHeights.map((h, i) => (
-              <div
-                key={i}
-                className="rounded-full transition-all"
-                style={{
-                  width: 3,
-                  height: playing ? `${(Math.sin(Date.now() / 180 + i * 0.8) * 0.4 + 0.6) * h * 28}px` : `${h * 10}px`,
-                  background: "rgba(245,197,66,0.7)",
-                  transition: playing ? "none" : "height 0.4s ease"
-                }}
-              />
-            ))}
-          </div>
+      {/* Waveform + controls row */}
+      <div className="px-4 py-3">
+        {/* Waveform */}
+        <div className="flex items-center justify-center mb-3">
+          <WaveformBars playing={playing} count={32} height={40} />
         </div>
-      ) : (
-        <div className="relative w-full flex items-center justify-center" style={{ height: 80, background: "linear-gradient(135deg, rgba(124,92,255,0.15), rgba(245,197,66,0.08))" }}>
-          <div className="flex items-end gap-[3px]" style={{ height: 40 }}>
-            {barHeights.map((h, i) => (
-              <div
-                key={i}
-                className="rounded-full"
-                style={{
-                  width: 3,
-                  height: playing
-                    ? `${(Math.sin(Date.now() / 180 + i * 0.8) * 0.4 + 0.6) * h * 40}px`
-                    : `${h * 16}px`,
-                  background: i % 3 === 0
-                    ? "rgba(245,197,66,0.8)"
-                    : i % 3 === 1
-                    ? "rgba(124,92,255,0.6)"
-                    : "rgba(34,211,238,0.5)",
-                  transition: playing ? "none" : "height 0.5s ease"
-                }}
-              />
-            ))}
-          </div>
-        </div>
-      )}
 
-      {/* Controls */}
-      <div className="px-4 pb-4 pt-3">
+        {/* Seek bar */}
         <div
-          className="w-full rounded-full cursor-pointer mb-3 group/bar"
+          className="w-full rounded-full cursor-pointer mb-3 group/seek"
           style={{ height: 4, background: "rgba(255,255,255,0.08)" }}
           onClick={seekTo}
         >
           <div
-            className="h-full rounded-full relative"
-            style={{
-              width: `${progress * 100}%`,
-              background: "linear-gradient(90deg, #f5c542, #a78bfa)"
-            }}
+            className="h-full rounded-full relative transition-none"
+            style={{ width: `${progress * 100}%`, background: "linear-gradient(90deg, #f5c542, #a78bfa)" }}
           >
-            <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-white shadow-lg opacity-0 group-hover/bar:opacity-100 transition-opacity" style={{ transform: "translate(50%, -50%)" }} />
+            <div
+              className="absolute right-0 top-1/2 w-3 h-3 rounded-full bg-white shadow-lg opacity-0 group-hover/seek:opacity-100 transition-opacity"
+              style={{ transform: "translate(50%, -50%)" }}
+            />
           </div>
         </div>
 
+        {/* Controls row */}
         <div className="flex items-center gap-3">
           <button
             onClick={togglePlay}
-            className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-transform hover:scale-105 active:scale-95"
-            style={{ background: "linear-gradient(135deg, #f5c542, #e8a910)", boxShadow: playing ? "0 0 16px rgba(245,197,66,0.4)" : "none" }}
+            className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-all hover:scale-105 active:scale-95 relative"
+            style={{
+              background: "linear-gradient(135deg, #f5c542, #e8a910)",
+              boxShadow: playing ? "0 0 0 6px rgba(245,197,66,0.15), 0 0 18px rgba(245,197,66,0.35)" : "0 2px 8px rgba(0,0,0,0.4)"
+            }}
           >
             {playing
               ? <Pause size={16} fill="#111" color="#111" />
@@ -195,7 +216,7 @@ function AudioPlayer({ src, companionImage }: { src: string; companionImage?: st
           </button>
 
           <span className="text-[10px] tabular-nums" style={{ color: "rgba(255,255,255,0.4)" }}>
-            {formatTime(progress * duration)} / {formatTime(duration)}
+            {fmt(progress * duration)} / {fmt(duration)}
           </span>
 
           <div className="flex-1" />
@@ -206,7 +227,7 @@ function AudioPlayer({ src, companionImage }: { src: string; companionImage?: st
           <input
             type="range" min={0} max={1} step={0.01} value={muted ? 0 : volume}
             onChange={e => changeVolume(parseFloat(e.target.value))}
-            className="w-16 h-1 accent-honey-400 cursor-pointer"
+            className="w-16 h-1 cursor-pointer"
             style={{ accentColor: "#f5c542" }}
           />
         </div>
@@ -216,20 +237,34 @@ function AudioPlayer({ src, companionImage }: { src: string; companionImage?: st
 }
 
 // ─── Image with Lightbox ──────────────────────────────────────────────────────
-function ImageWithLightbox({ url }: { url: string }) {
+function ImageWithLightbox({ url, compact }: { url: string; compact?: boolean }) {
   const [open, setOpen] = useState(false)
+  const [imgError, setImgError] = useState(false)
+
+  if (imgError) return (
+    <div className="mt-3 rounded-xl border border-hive-border/40 bg-hive-elevated/50 flex items-center justify-center gap-2 text-text-muted/50 text-xs" style={{ height: compact ? 80 : 140 }}>
+      <ImageIcon size={14} />
+      <span>Image unavailable</span>
+    </div>
+  )
+
   return (
     <>
       <div
-        className="mt-3 rounded-xl overflow-hidden border border-hive-border cursor-zoom-in"
+        className={`${compact ? "mt-2" : "mt-3"} rounded-xl overflow-hidden border border-hive-border cursor-zoom-in`}
         onClick={() => setOpen(true)}
       >
-        <img src={url} alt="Sparkie's creation" className="w-full max-h-80 object-cover hover:scale-[1.01] transition-transform duration-300" />
+        <img
+          src={url}
+          alt="Sparkie's creation"
+          className={`w-full object-cover hover:scale-[1.015] transition-transform duration-500 ${compact ? "max-h-52" : "max-h-80"}`}
+          onError={() => setImgError(true)}
+        />
       </div>
       {open && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ background: "rgba(0,0,0,0.92)" }}
+          style={{ background: "rgba(0,0,0,0.93)" }}
           onClick={() => setOpen(false)}
         >
           <button
@@ -240,7 +275,7 @@ function ImageWithLightbox({ url }: { url: string }) {
           </button>
           <img
             src={url}
-            alt="Sparkie's creation (expanded)"
+            alt="Sparkie's creation"
             className="max-w-full max-h-full rounded-xl shadow-2xl object-contain"
             onClick={e => e.stopPropagation()}
             style={{ maxHeight: "90vh", maxWidth: "90vw" }}
@@ -277,7 +312,7 @@ function CodePreview({ html, title, onExpand }: { html: string; title?: string; 
           <span>Expand</span>
         </button>
       </div>
-      <div className="relative" style={{ height: typeof window !== 'undefined' && window.innerWidth < 768 ? 200 : 260 }}>
+      <div className="relative" style={{ height: typeof window !== "undefined" && window.innerWidth < 768 ? 200 : 260 }}>
         <iframe srcDoc={html} sandbox="allow-scripts" className="w-full h-full border-none bg-white" title={title ?? "Sparkie's creation"} />
         <div className="absolute inset-0 cursor-pointer opacity-0 group-hover/preview:opacity-100 transition-opacity flex items-end justify-end p-2" onClick={onExpand}>
           <div className="bg-black/60 rounded-lg px-2 py-1 flex items-center gap-1 text-white text-[10px]">
@@ -323,20 +358,43 @@ function FullscreenModal({ html, title, onClose }: { html: string; title?: strin
   )
 }
 
-// ─── Media Preview ────────────────────────────────────────────────────────────
+// ─── Media Preview ─────────────────────────────────────────────────────────────
+// Music posts: show companion image naturally ABOVE the player (not inside it)
 function MediaPreview({ url, type, codeHtml, codeTitle, onExpandCode, companionImage }: {
   url: string; type: string; codeHtml?: string; codeTitle?: string
   onExpandCode: () => void; companionImage?: string
 }) {
   if (type === "code" && codeHtml) return <CodePreview html={codeHtml} title={codeTitle} onExpand={onExpandCode} />
-  if (!url || type === "none") return null
+  if (!url && type !== "audio" && type !== "music") return null
+  if (type === "none") return null
+
   if (type === "image") return <ImageWithLightbox url={url} />
-  if (type === "audio" || type === "music") return <AudioPlayer src={url} companionImage={companionImage} />
-  if (type === "video") return (
-    <div className="mt-3 rounded-xl overflow-hidden border border-hive-border">
-      <video controls src={url} className="w-full max-h-72" />
+
+  if (type === "audio" || type === "music") return (
+    <div className="mt-3">
+      {/* Companion image displayed naturally ABOVE the player */}
+      {companionImage && <ImageWithLightbox url={companionImage} compact />}
+      {/* Audio player below */}
+      {url ? <AudioPlayer src={url} /> : (
+        <div className="mt-2 rounded-xl border border-hive-border/40 bg-hive-elevated px-4 py-3 flex items-center gap-3">
+          <Music2 size={15} className="text-honey-500/50 shrink-0" />
+          <div className="text-sm text-text-muted">Audio coming soon...</div>
+        </div>
+      )}
     </div>
   )
+
+  if (type === "video") return (
+    <div className="mt-3 rounded-xl overflow-hidden border border-hive-border bg-black">
+      {companionImage && (
+        <div className="relative">
+          <video controls src={url} className="w-full max-h-72" poster={companionImage} />
+        </div>
+      )}
+      {!companionImage && <video controls src={url} className="w-full max-h-72" />}
+    </div>
+  )
+
   return null
 }
 
@@ -350,7 +408,7 @@ function timeAgo(dateStr: string) {
   return `${Math.floor(hrs / 24)}d ago`
 }
 
-// ─── Post Card ────────────────────────────────────────────────────────────────
+// ─── Post Card ─────────────────────────────────────────────────────────────────
 function PostCard({
   post, isOwner, onLike, liked, onExpand, onDelete, onSave
 }: {
@@ -399,7 +457,7 @@ function PostCard({
           <div className="text-[10px] text-text-muted">{timeAgo(post.created_at)}</div>
         </div>
 
-        {/* Owner actions — visible on hover */}
+        {/* Owner actions */}
         {isOwner && !editing && (
           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
             <button
@@ -437,14 +495,14 @@ function PostCard({
         )}
       </div>
 
-      {/* Content — edit mode or display */}
+      {/* Content */}
       {editing ? (
         <div className="mb-3">
           <textarea
             value={editText}
             onChange={e => setEditText(e.target.value)}
             className="w-full bg-hive-700 border border-honey-500/30 rounded-xl px-3 py-2.5 text-sm text-text-primary resize-none outline-none focus:border-honey-500/60 transition-colors"
-            rows={Math.max(4, editText.split('\n').length + 1)}
+            rows={Math.max(4, editText.split("\n").length + 1)}
             autoFocus
           />
           <div className="flex items-center gap-2 mt-2">
@@ -454,7 +512,7 @@ function PostCard({
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-honey-500/20 text-honey-400 hover:bg-honey-500/30 text-xs font-medium transition-colors disabled:opacity-50"
             >
               <Save size={11} />
-              <span>{saving ? 'Saving...' : 'Save'}</span>
+              <span>{saving ? "Saving..." : "Save"}</span>
             </button>
             <button
               onClick={() => { setEditing(false); setEditText(post.content) }}
@@ -508,10 +566,10 @@ function PostCard({
   )
 }
 
-// ─── Main Feed ────────────────────────────────────────────────────────────────
+// ─── Main Feed ─────────────────────────────────────────────────────────────────
 export function SparkiesFeed() {
   const { data: session } = useSession()
-  const isOwner = OWNER_EMAILS.includes(session?.user?.email ?? '')
+  const isOwner = OWNER_EMAILS.includes(session?.user?.email ?? "")
 
   const [posts, setPosts] = useState<FeedPost[]>([])
   const [loading, setLoading] = useState(true)
