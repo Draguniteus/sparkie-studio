@@ -269,7 +269,7 @@ function CodePreview({ html, title, onExpand }: { html: string; title?: string; 
           <span>Expand</span>
         </button>
       </div>
-      <div className="relative" style={{ height: typeof window !== \'undefined\' && window.innerWidth < 768 ? 200 : 260 }}>
+      <div className="relative" style={{ height: typeof window !== 'undefined' && window.innerWidth < 768 ? 200 : 260 }}>
         <iframe srcDoc={html} sandbox="allow-scripts" className="w-full h-full border-none bg-white" title={title ?? "Sparkie's creation"} />
         <div className="absolute inset-0 cursor-pointer opacity-0 group-hover/preview:opacity-100 transition-opacity flex items-end justify-end p-2" onClick={onExpand}>
           <div className="bg-black/60 rounded-lg px-2 py-1 flex items-center gap-1 text-white text-[10px]">
