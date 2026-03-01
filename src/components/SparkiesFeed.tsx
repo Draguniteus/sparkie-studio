@@ -93,8 +93,7 @@ function WaveformBars({ playing, count = 28, height = 36 }: { playing: boolean; 
 }
 
 // ─── Audio Player ─────────────────────────────────────────────────────────────
-// NOTE: companionImage is rendered OUTSIDE this component in MediaPreview (as a full-width image above the player)
-function AudioPlayer({ src }: { src: string }) {
+function AudioPlayer({ src, title }: { src: string; title?: string }) {
   const audioRef = useRef<HTMLAudioElement>(null)
   const [playing, setPlaying] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -166,7 +165,7 @@ function AudioPlayer({ src }: { src: string }) {
 
   return (
     <div
-      className="mt-2 rounded-2xl border border-hive-border overflow-hidden"
+      className="mt-3 rounded-2xl border border-hive-border overflow-hidden"
       style={{ background: "linear-gradient(135deg, #0d0d1a 0%, #12122a 50%, #0d0d1a 100%)" }}
     >
       <audio
@@ -175,16 +174,42 @@ function AudioPlayer({ src }: { src: string }) {
         onEnded={onEnded} onError={() => setLoadError(true)}
       />
 
-      {/* Waveform + controls row */}
-      <div className="px-4 py-3">
+      <div className="px-4 pt-4 pb-3">
+        {/* Track title + waveform row */}
+        <div className="flex items-center gap-3 mb-3">
+          {/* Animated disc icon */}
+          <div
+            className="w-10 h-10 rounded-full shrink-0 flex items-center justify-center border-2 transition-all"
+            style={{
+              background: playing
+                ? "conic-gradient(from 0deg, #f5c542, #a78bfa, #22d3ee, #f5c542)"
+                : "linear-gradient(135deg, #1a1a2e, #16213e)",
+              borderColor: playing ? "rgba(245,197,66,0.4)" : "rgba(255,255,255,0.08)",
+              boxShadow: playing ? "0 0 16px rgba(245,197,66,0.3)" : "none",
+              animation: playing ? "spin 4s linear infinite" : "none"
+            }}
+          >
+            <div className="w-4 h-4 rounded-full bg-hive-surface" />
+          </div>
+
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold text-text-primary truncate">
+              {title || "Sparkie Track"}
+            </p>
+            <p className="text-[10px] text-text-muted">Sparkie Records</p>
+          </div>
+
+          <Music2 size={13} style={{ color: "rgba(245,197,66,0.4)" }} />
+        </div>
+
         {/* Waveform */}
         <div className="flex items-center justify-center mb-3">
-          <WaveformBars playing={playing} count={32} height={40} />
+          <WaveformBars playing={playing} count={36} height={44} />
         </div>
 
         {/* Seek bar */}
         <div
-          className="w-full rounded-full cursor-pointer mb-3 group/seek"
+          className="w-full rounded-full cursor-pointer mb-2.5 group/seek"
           style={{ height: 4, background: "rgba(255,255,255,0.08)" }}
           onClick={seekTo}
         >
@@ -203,7 +228,7 @@ function AudioPlayer({ src }: { src: string }) {
         <div className="flex items-center gap-3">
           <button
             onClick={togglePlay}
-            className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-all hover:scale-105 active:scale-95 relative"
+            className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-all hover:scale-105 active:scale-95"
             style={{
               background: "linear-gradient(135deg, #f5c542, #e8a910)",
               boxShadow: playing ? "0 0 0 6px rgba(245,197,66,0.15), 0 0 18px rgba(245,197,66,0.35)" : "0 2px 8px rgba(0,0,0,0.4)"
@@ -237,12 +262,13 @@ function AudioPlayer({ src }: { src: string }) {
 }
 
 // ─── Image with Lightbox ──────────────────────────────────────────────────────
-function ImageWithLightbox({ url, compact }: { url: string; compact?: boolean }) {
+function ImageWithLightbox({ url, title }: { url: string; title?: string }) {
   const [open, setOpen] = useState(false)
   const [imgError, setImgError] = useState(false)
+  const [loaded, setLoaded] = useState(false)
 
   if (imgError) return (
-    <div className="mt-3 rounded-xl border border-hive-border/40 bg-hive-elevated/50 flex items-center justify-center gap-2 text-text-muted/50 text-xs" style={{ height: compact ? 80 : 140 }}>
+    <div className="mt-3 rounded-xl border border-hive-border/40 bg-hive-elevated/50 flex items-center justify-center gap-2 text-text-muted/50 text-xs" style={{ height: 140 }}>
       <ImageIcon size={14} />
       <span>Image unavailable</span>
     </div>
@@ -251,14 +277,20 @@ function ImageWithLightbox({ url, compact }: { url: string; compact?: boolean })
   return (
     <>
       <div
-        className={`${compact ? "mt-2" : "mt-3"} rounded-xl overflow-hidden border border-hive-border cursor-zoom-in`}
+        className="mt-3 rounded-xl overflow-hidden border border-hive-border cursor-zoom-in relative"
         onClick={() => setOpen(true)}
       >
+        {/* Skeleton shimmer while loading */}
+        {!loaded && (
+          <div className="absolute inset-0 bg-hive-elevated animate-pulse" style={{ minHeight: 180 }} />
+        )}
         <img
           src={url}
-          alt="Sparkie's creation"
-          className={`w-full object-cover hover:scale-[1.015] transition-transform duration-500 ${compact ? "max-h-52" : "max-h-80"}`}
+          alt={title || "Sparkie's creation"}
+          className={`w-full object-cover hover:scale-[1.015] transition-all duration-500 max-h-80 ${loaded ? "opacity-100" : "opacity-0"}`}
+          onLoad={() => setLoaded(true)}
           onError={() => setImgError(true)}
+          loading="lazy"
         />
       </div>
       {open && (
@@ -275,7 +307,7 @@ function ImageWithLightbox({ url, compact }: { url: string; compact?: boolean })
           </button>
           <img
             src={url}
-            alt="Sparkie's creation"
+            alt={title || "Sparkie's creation"}
             className="max-w-full max-h-full rounded-xl shadow-2xl object-contain"
             onClick={e => e.stopPropagation()}
             style={{ maxHeight: "90vh", maxWidth: "90vw" }}
@@ -285,6 +317,7 @@ function ImageWithLightbox({ url, compact }: { url: string; compact?: boolean })
     </>
   )
 }
+
 
 // ─── Code Preview ─────────────────────────────────────────────────────────────
 function CodePreview({ html, title, onExpand }: { html: string; title?: string; onExpand: () => void }) {
@@ -372,11 +405,11 @@ function MediaPreview({ url, type, codeHtml, codeTitle, onExpandCode, companionI
 
   if (type === "audio" || type === "music") return (
     <div className="mt-3">
-      {/* Companion image displayed naturally ABOVE the player */}
-      {companionImage && <ImageWithLightbox url={companionImage} compact />}
-      {/* Audio player below */}
-      {url ? <AudioPlayer src={url} /> : (
-        <div className="mt-2 rounded-xl border border-hive-border/40 bg-hive-elevated px-4 py-3 flex items-center gap-3">
+      {/* Companion image — full width, natural image post style */}
+      {companionImage && <ImageWithLightbox url={companionImage} title={codeTitle} />}
+      {/* Audio player below companion image */}
+      {url ? <AudioPlayer src={url} title={codeTitle} /> : (
+        <div className="mt-3 rounded-xl border border-hive-border/40 bg-hive-elevated px-4 py-3 flex items-center gap-3">
           <Music2 size={15} className="text-honey-500/50 shrink-0" />
           <div className="text-sm text-text-muted">Audio coming soon...</div>
         </div>
