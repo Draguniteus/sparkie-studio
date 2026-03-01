@@ -43,6 +43,52 @@ export async function PATCH(req: Request) {
   }
 }
 
+// PUT — update an existing post (used by Sparkie to add real audio URLs, fix media, etc.)
+export async function PUT(req: Request) {
+  await ensureFeedTable()
+  try {
+    const body = await req.json() as {
+      id: number
+      media_url?: string | null
+      media_type?: string
+      companion_image_url?: string | null
+      content?: string
+      mood?: string
+    }
+    const { id, media_url, media_type, companion_image_url, content, mood } = body
+    if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
+
+    const updates: string[] = []
+    const values: unknown[] = []
+    let idx = 1
+    if (media_url !== undefined)          { updates.push(`media_url = $${idx++}`);           values.push(media_url) }
+    if (media_type !== undefined)         { updates.push(`media_type = $${idx++}`);          values.push(media_type) }
+    if (companion_image_url !== undefined) { updates.push(`companion_image_url = $${idx++}`); values.push(companion_image_url) }
+    if (content !== undefined)            { updates.push(`content = $${idx++}`);             values.push(content) }
+    if (mood !== undefined)               { updates.push(`mood = $${idx++}`);                values.push(mood) }
+    if (updates.length === 0) return NextResponse.json({ error: 'nothing to update' }, { status: 400 })
+
+    values.push(id)
+    await query(`UPDATE sparkie_feed SET ${updates.join(', ')} WHERE id = $${idx}`, values)
+    return NextResponse.json({ ok: true })
+  } catch (e) {
+    return NextResponse.json({ error: String(e) }, { status: 500 })
+  }
+}
+
+// DELETE — remove a post by id
+export async function DELETE(req: Request) {
+  await ensureFeedTable()
+  try {
+    const { id } = await req.json() as { id: number }
+    if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
+    await query(`DELETE FROM sparkie_feed WHERE id = $1`, [id])
+    return NextResponse.json({ ok: true })
+  } catch (e) {
+    return NextResponse.json({ error: String(e) }, { status: 500 })
+  }
+}
+
 export async function POST(req: Request) {
   await ensureFeedTable()
   try {
