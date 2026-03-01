@@ -345,14 +345,9 @@ function CodePreview({ html, title, onExpand }: { html: string; title?: string; 
           <span>Expand</span>
         </button>
       </div>
-      <div className="relative" style={{ height: typeof window !== "undefined" && window.innerWidth < 768 ? 200 : 260 }}>
+      <div className="relative" style={{ height: typeof window !== "undefined" && window.innerWidth < 768 ? 300 : 420 }}>
         <iframe srcDoc={html} sandbox="allow-scripts" className="w-full h-full border-none bg-white" title={title ?? "Sparkie's creation"} />
-        <div className="absolute inset-0 cursor-pointer opacity-0 group-hover/preview:opacity-100 transition-opacity flex items-end justify-end p-2" onClick={onExpand}>
-          <div className="bg-black/60 rounded-lg px-2 py-1 flex items-center gap-1 text-white text-[10px]">
-            <Maximize2 size={9} />
-            <span>Fullscreen</span>
-          </div>
-        </div>
+      </div>
       </div>
     </div>
   )
@@ -418,13 +413,15 @@ function MediaPreview({ url, type, codeHtml, codeTitle, onExpandCode, companionI
   )
 
   if (type === "video") return (
-    <div className="mt-3 rounded-xl overflow-hidden border border-hive-border bg-black">
-      {companionImage && (
-        <div className="relative">
-          <video controls src={url} className="w-full max-h-72" poster={companionImage} />
-        </div>
-      )}
-      {!companionImage && <video controls src={url} className="w-full max-h-72" />}
+    <div className="mt-3 rounded-xl overflow-hidden border border-hive-border bg-black" style={{ minHeight: 240 }}>
+      <video
+        controls
+        src={url}
+        preload="auto"
+        poster={companionImage || undefined}
+        className="w-full"
+        style={{ minHeight: 240, maxHeight: 480, display: "block" }}
+      />
     </div>
   )
 
