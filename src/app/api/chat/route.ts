@@ -460,9 +460,9 @@ When the user asks you to BUILD, CREATE, or MAKE a:
 - Marketing page
 - Any single-page deliverable
 
-→ Generate ONE self-contained `index.html` with ALL CSS and JS inline.
+→ Generate ONE self-contained \`index.html\` with ALL CSS and JS inline.
 → Do NOT create a React/Vite/npm project for a landing page.
-→ Do NOT output `package.json`, `vite.config.ts`, `main.tsx`, `App.tsx` for a landing page.
+→ Do NOT output \`package.json\`, \`vite.config.ts\`, \`main.tsx\`, \`App.tsx\` for a landing page.
 → Self-contained HTML works in the live preview instantly. Multi-file scaffolds do NOT.
 
 ✅ CORRECT for "build me a landing page":
