@@ -5,7 +5,13 @@ import { authOptions } from "@/lib/auth"
 
 export const runtime = "nodejs"
 
-const ADMIN_EMAIL = "draguniteus@gmail.com"
+// ─── Admin emails — full access including radio upload ───────────────────────
+const ADMIN_EMAILS = [
+  "draguniteus@gmail.com",
+  "michaelthearchangel2024@gmail.com",
+  "avad082817@gmail.com", // Angelique — Michael's wife, admin + mod rights
+]
+
 const REPO_OWNER = "Draguniteus"
 const REPO_NAME = "SparkieRadio"
 const BRANCH = "main"
@@ -56,16 +62,19 @@ async function uploadFileToGitHub(
 
 export async function POST(req: NextRequest) {
   try {
-    // ── Auth check ─────────────────────────────────────────────────────────
+    // ── Auth check ────────────────────────────────────────────────────────────
     const session = await getServerSession(authOptions)
     if (!session?.user?.email) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
     }
-    if (session.user.email.toLowerCase() !== ADMIN_EMAIL.toLowerCase()) {
-      return NextResponse.json({ error: "Forbidden — station uploads are admin-only" }, { status: 403 })
+    if (!ADMIN_EMAILS.includes(session.user.email.toLowerCase())) {
+      return NextResponse.json(
+        { error: "Forbidden — station uploads are admin-only" },
+        { status: 403 }
+      )
     }
 
-    // ── Guard GITHUB_TOKEN ─────────────────────────────────────────────────
+    // ── Guard GITHUB_TOKEN ────────────────────────────────────────────────────
     const GITHUB_TOKEN = process.env.GITHUB_TOKEN
     if (!GITHUB_TOKEN) {
       return NextResponse.json(
@@ -74,7 +83,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // ── Parse multipart ────────────────────────────────────────────────────
+    // ── Parse multipart ───────────────────────────────────────────────────────
     const formData = await req.formData()
     const file = formData.get("file") as File | null
     const coverImage = formData.get("coverImage") as File | null
@@ -90,17 +99,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Only MP3, OGG, AAC, WAV files allowed" }, { status: 400 })
     }
 
-    // Safe base name (used for both audio + cover)
+    // Safe base name
     const audioExt = file.name.split(".").pop()?.toLowerCase() ?? "mp3"
     const safeName = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")
     const audioPath = `songs/${safeName}.${audioExt}`
 
-    // ── Upload audio to GitHub ─────────────────────────────────────────────
+    // ── Upload audio to GitHub ────────────────────────────────────────────────
     const audioBase64 = Buffer.from(await file.arrayBuffer()).toString("base64")
     await uploadFileToGitHub(GITHUB_TOKEN, audioPath, audioBase64, `feat(radio): add ${safeName}.${audioExt}`)
     const rawUrl = `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${BRANCH}/${audioPath}`
 
-    // ── Upload cover image to GitHub (optional) ────────────────────────────
+    // ── Upload cover image to GitHub (optional) ───────────────────────────────
     let coverUrl: string | undefined
     if (coverImage && coverImage.size > 0) {
       const validImageTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"]
@@ -113,7 +122,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── Update playlist.json ───────────────────────────────────────────────
+    // ── Update playlist.json ──────────────────────────────────────────────────
     let playlist: Array<{ id: string; title: string; artist?: string; url: string; coverUrl?: string }> = []
     let playlistSha: string | undefined
     try {
@@ -131,7 +140,6 @@ export async function POST(req: NextRequest) {
       title,
       ...(artist ? { artist } : {}),
       url: rawUrl,
-      // Keep existing coverUrl if no new image uploaded
       ...(coverUrl
         ? { coverUrl }
         : existingIdx >= 0 && playlist[existingIdx].coverUrl
