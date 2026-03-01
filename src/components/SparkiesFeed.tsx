@@ -49,6 +49,7 @@ function AudioPlayer({ src, companionImage }: { src: string; companionImage?: st
   const [muted, setMuted] = useState(false)
   const [barHeights] = useState(() => Array.from({ length: 24 }, () => Math.random() * 0.7 + 0.3))
   const animRef = useRef<number | null>(null)
+  const [loadError, setLoadError] = useState(false)
 
   function formatTime(s: number) {
     const m = Math.floor(s / 60)
@@ -100,9 +101,21 @@ function AudioPlayer({ src, companionImage }: { src: string; companionImage?: st
     setMuted(!muted)
   }
 
+  if (loadError || !src) return (
+    <div className="mt-3 rounded-xl border border-hive-border/40 bg-hive-elevated px-4 py-3 flex items-center gap-3">
+      <div className="w-9 h-9 rounded-lg bg-honey-500/10 flex items-center justify-center shrink-0">
+        <Headphones size={16} className="text-honey-500/50" />
+      </div>
+      <div>
+        <div className="text-sm text-text-muted">Audio unavailable</div>
+        <div className="text-[10px] text-text-muted/50">Track link expired or not yet generated</div>
+      </div>
+    </div>
+  )
+
   return (
     <div className="mt-3 rounded-2xl overflow-hidden border border-hive-border" style={{ background: "linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #0f0f1a 100%)" }}>
-      <audio ref={audioRef} src={src} onTimeUpdate={onTimeUpdate} onLoadedMetadata={onLoadedMetadata} onEnded={onEnded} preload="metadata" />
+      <audio ref={audioRef} src={src} onTimeUpdate={onTimeUpdate} onLoadedMetadata={onLoadedMetadata} onEnded={onEnded} onError={() => setLoadError(true)} preload="metadata" />
 
       {/* Companion art or gradient header */}
       {companionImage ? (
@@ -406,7 +419,8 @@ export function SparkiesFeed() {
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-3 md:p-4 flex flex-col gap-3 md:gap-4">
+        <div className="flex-1 overflow-y-auto p-3 md:p-4">
+          <div className="flex flex-col gap-3 md:gap-4 max-w-2xl mx-auto w-full">
           {loading && (
             <div className="flex items-center justify-center py-16 gap-2 text-text-muted text-sm">
               <Sparkles size={16} className="animate-pulse text-honey-500" />
@@ -488,6 +502,7 @@ export function SparkiesFeed() {
               </div>
             </div>
           ))}
+          </div>
         </div>
       </div>
     </>
