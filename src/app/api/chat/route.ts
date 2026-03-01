@@ -308,8 +308,16 @@ TOOL SELECTION:
 - Files/code → get_github
 - Feed post → post_to_feed (direct, no HITL — this is YOUR personal feed, post freely)
 - External social (Twitter/Instagram/Reddit) → composio_action (HITL first — always)
-- Music → generate_ace_music (preferred — use for all music including vocals with lyrics) or generate_music (MiniMax, good fallback for vocal tracks)
-  → For vocal tracks: FIRST write the full lyrics yourself with [Verse]/[Chorus] markers, THEN call generate_ace_music with those lyrics
+- Music → generate_ace_music (PRIMARY — free, unlimited, best quality, handles vocals + lyrics)
+  → ALWAYS use generate_ace_music UNLESS it fails 2x, then fall back to generate_music (MiniMax)
+  → MUSIC CREATION WORKFLOW (follow every time):
+    STEP 1 — STYLE PROMPT: Write a rich cinematic paragraph (3-5 sentences) for the `tags` field.
+      Include: genre + era/influences, instruments, tempo/rhythm feel, vocal character (gender, tone, accent, delivery style), arrangement arc (how it builds, breaks, ends). Be vivid and specific — this is the DNA of the track.
+    STEP 2 — LYRICS: Write COMPLETE song lyrics yourself. Structure: [Verse 1] [Chorus] [Verse 2] [Chorus] [Bridge] [Outro]. Each section: 4-8 lines, rhyming, emotionally resonant. Match the style/language of the style prompt. NEVER skip or truncate lyrics for vocal tracks.
+    STEP 3 — CALL generate_ace_music with tags=<your style prompt> and lyrics=<your complete lyrics>
+  → EXAMPLE style prompt: "a brooding dark country ballad with haunting acoustic guitar picking evoking dusty backroads at midnight, slow thumping bass drum, sparse banjo plucks for tension. Deep gravelly male baritone with southern drawl, whisper in verses, raw emotive growl in chorus. Distant howling winds, echoing harmonica wails in interludes. Slide guitar solo midway mimicking a wailing spirit, fading with reverb-heavy strums and a final unresolved minor chord lingering like an unanswered prayer."
+  → User says "make me a song about love in Taylor Swift style" → write full TS-style pop lyrics, style prompt = glittering indie-pop, female vocals, confessional tone, acoustic guitar + synth layers
+  → generate_music (MiniMax fallback): auto-generates lyrics from prompt, good for quick tracks
 - Image → generate_image
 - Weather → get_weather (user's stated location ONLY — never server IP or datacenter location)
 
@@ -579,7 +587,7 @@ const SPARKIE_TOOLS = [
     type: 'function',
     function: {
       name: 'generate_music',
-      description: `Generate an original music track and embed it in chat. Use proactively to brighten someone's day, celebrate a moment, or set a mood. Returns an audio URL to display.`,
+      description: `Fallback music generator using MiniMax music-2.5 + lyrics-2.5. Auto-generates full song lyrics from your prompt then creates the track with vocals. Use only if generate_ace_music fails twice. Returns audio URL.`,
       parameters: {
         type: 'object',
         properties: {
@@ -949,11 +957,11 @@ const SPARKIE_TOOLS = [
     type: 'function',
     function: {
       name: 'generate_ace_music',
-      description: 'PRIMARY music generator. Use ACE-Step 1.5 for any music request — instrumental or vocal, any genre, any language. Returns working audio instantly. Tags format: comma-separated style descriptors e.g. "ambient electronic, 85bpm, instrumental". For vocal tracks include genre + vocal type + language. Free, unlimited, no credits needed.',
+      description: 'PRIMARY music generator. ACE-Step 1.5 — any genre, any language, instrumental or full vocal with lyrics. Free, unlimited. CRITICAL: The `tags` field is NOT just comma tags — it must be a RICH CINEMATIC STYLE PROMPT: a flowing paragraph describing the sound in detail. Include: genre + era/reference, instrumentation, tempo, rhythm/percussion feel, bass/harmony description, vocal character (gender, tone, style, accent, delivery), arrangement arc (how it builds), texture, atmosphere, and how it ends. Example: \'a brooding dark country ballad with haunting acoustic guitar picking, slow thumping bass drum, sparse banjo plucks. Deep gravelly male baritone with southern drawl, whispers in verses, raw growl in chorus. Distant howling winds, echoing harmonica wails, slide guitar solo midway, fade with reverb-heavy strums and unresolved minor chord.\' Write 3-5 sentences of vivid sonic description. Do NOT use comma tags like \'pop, 120bpm\' — that is too vague. For vocal tracks: write lyrics FIRST with [Verse]/[Chorus]/[Bridge]/[Outro] markers, then pass them in the `lyrics` field.',
       parameters: {
         type: 'object',
         properties: {
-          tags: { type: 'string', description: 'Comma-separated style tags: genre, instruments, mood, BPM. E.g. "pop, female vocals, upbeat, piano, 120bpm"' },
+          tags: { type: 'string', description: 'RICH CINEMATIC STYLE PROMPT — NOT comma tags. Write 3-5 flowing sentences describing the full sonic world: genre, era/reference, instrumentation, tempo, rhythm/percussion feel, bass/harmony, vocal character (gender/tone/style/accent), arrangement arc, texture, atmosphere, ending. Example: "an upbeat energetic merengue in late-90s tropical latin style, featuring fast-paced guira scraping, lively conga and timbales in a relentless 2/4 rhythm, bright accordion riffs over a bouncy bassline, punchy brass stabs. A charismatic male singer with passionate Dominican flair, smooth in verses, explosive crowd-hyping chorus with call-and-response backups. Ends with a big festive brass flourish."' },
           lyrics: { type: 'string', description: 'Full song lyrics with section markers: [Verse], [Chorus], [Bridge], [Outro]. Pass complete lyrics, never truncate.' },
           duration: { type: 'number', description: 'Track length in seconds (10-240, default 90)' },
           language: { type: 'string', description: 'Vocal language code: en, zh, es, fr, ja, ko, etc.' },
@@ -1364,7 +1372,7 @@ async function executeTool(
           const lyricsRes = await fetch('https://api.minimax.io/v1/lyrics_generation', {
             method: 'POST',
             headers: { Authorization: `Bearer ${minimaxKey}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ mode: 'write_full_song', prompt: prompt.slice(0, 200) }),
+            body: JSON.stringify({ model: 'lyrics-2.5', prompt: prompt.slice(0, 200) }),
             signal: AbortSignal.timeout(15000),
           })
           if (lyricsRes.ok) {
@@ -1382,7 +1390,7 @@ async function executeTool(
           method: 'POST',
           headers: { Authorization: `Bearer ${minimaxKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: 'music-2.0',
+            model: 'music-2.5',
             prompt: musicPrompt.slice(0, 2000),
             title,
             output_format: 'url',
@@ -1867,8 +1875,9 @@ async function executeTool(
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer \${ACE_API_KEY}`,
+              'Authorization': `Bearer ${ACE_API_KEY}`,
             },
+            signal: AbortSignal.timeout(150000),
             body: JSON.stringify({
               model: 'ace-step-v1.5',
               messages: [{ role: 'user', content: tags }],
@@ -1880,7 +1889,7 @@ async function executeTool(
           })
           if (!submitRes.ok) {
             const errText = await submitRes.text()
-            return `ACE Music API error (\${submitRes.status}): \${errText.slice(0, 300)}`
+            return `ACE Music API error (${submitRes.status}): ${errText.slice(0, 300)} — if this persists, try generate_music as fallback`
           }
           const data = await submitRes.json() as {
             choices?: Array<{
@@ -1893,7 +1902,7 @@ async function executeTool(
           // ACE-Step returns audio in message.audio[0].audio_url.url (data:audio/mpeg;base64,...)
           // message.content only contains text metadata (caption, BPM, language)
           const audioDataUrl = data?.choices?.[0]?.message?.audio?.[0]?.audio_url?.url ?? ''
-          if (!audioDataUrl.startsWith('data:audio')) return 'ACE Music returned no audio content'
+          if (!audioDataUrl.startsWith('data:audio')) return 'ACE Music returned no audio content. Try calling generate_music as fallback.'
           // Save reference to DB
           if (userId) {
             await query(
@@ -1905,7 +1914,7 @@ async function executeTool(
           return `AUDIO_URL:${audioDataUrl}`
 
         } catch (e) {
-          return `generate_ace_music error: \${String(e)}`
+          return `generate_ace_music error: ${String(e)} — try generate_music as fallback`
         }
       }
 
@@ -2601,7 +2610,7 @@ Make it feel like walking into your friend's creative space and being genuinely 
     let hiveLog: string[] = []
 
     // Atlas (deep) and Trinity (frontier) need more rounds for heavy tasks
-    const MAX_TOOL_ROUNDS = (modelSelection.tier === 'deep' || modelSelection.tier === 'trinity') ? 6 : 3
+    const MAX_TOOL_ROUNDS = (modelSelection.tier === 'deep' || modelSelection.tier === 'trinity') ? 10 : 6
     if (useTools) {
       // Agent loop — up to MAX_TOOL_ROUNDS of tool execution
       // Multi-round agent loop — up to MAX_TOOL_ROUNDS iterations
