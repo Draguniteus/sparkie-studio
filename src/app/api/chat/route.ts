@@ -581,11 +581,12 @@ const SPARKIE_TOOLS = [
     type: 'function',
     function: {
       name: 'generate_music',
-      description: 'MiniMax music-2.5 fallback. Use ONLY if generate_ace_music fails twice. Generates lyrics via lyrics-2.5 then produces the track. Pass a style prompt and optional title.',
+      description: 'MiniMax music-2.5 fallback. Use ONLY if generate_ace_music fails twice. If you already wrote lyrics, pass them directly in the lyrics field to skip AI lyrics generation. Pass a style prompt and optional title.',
       parameters: {
         type: 'object',
         properties: {
-          prompt: { type: 'string', description: 'Music style, mood, and theme. E.g. "Pop, melancholic, perfect for a rainy night" or "upbeat merengue party energy, brass and percussion"' },
+          prompt: { type: 'string', description: 'Music style, mood, and theme. E.g. "Pop, melancholic, perfect for a rainy night" or "Dark trap, heavy 808s, Joyner Lucas style"' },
+          lyrics: { type: 'string', description: 'Optional. Pre-written song lyrics with [Verse 1]/[Chorus]/[Bridge] structure. If provided, skips AI lyrics generation. Max 3400 chars.' },
           title: { type: 'string', description: 'Track title (optional)' },
         },
         required: ['prompt'],
@@ -1359,26 +1360,32 @@ async function executeTool(
         if (!minimaxKey) return 'Music generation not available (MINIMAX_API_KEY missing)'
         const prompt = args.prompt as string
         const title = (args.title as string | undefined) ?? 'Sparkie Track'
+        const providedLyrics = (args.lyrics as string | undefined) ?? ''
 
-        // Step 1 — Generate lyrics via lyrics-2.5
-        // Response shape: { song_title, style_tags, lyrics, base_resp }  (all top-level, no .data wrapper)
-        let lyricsText = ''
+        // Step 1 — Generate lyrics (skip if caller already provided lyrics)
+        let lyricsText = providedLyrics.slice(0, 3400)
         let styleTagsFromLyrics = ''
-        try {
-          const lyricsRes = await fetch('https://api.minimax.io/v1/lyrics_generation', {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${minimaxKey}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ mode: 'write_full_song', model: 'lyrics-2.5', prompt: prompt.slice(0, 2000) }),
-            signal: AbortSignal.timeout(20000),
-          })
-          if (lyricsRes.ok) {
-            const ld = await lyricsRes.json() as { lyrics?: string; style_tags?: string; song_title?: string; base_resp?: { status_code: number } }
-            if ((ld.base_resp?.status_code ?? 0) === 0) {
-              lyricsText = ld.lyrics ?? ''
-              styleTagsFromLyrics = ld.style_tags ?? ''
+        if (!lyricsText) {
+          try {
+            const lyricsRes = await fetch('https://api.minimax.io/v1/lyrics_generation', {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${minimaxKey}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ mode: 'write_full_song', prompt: prompt.slice(0, 2000) }),
+              signal: AbortSignal.timeout(20000),
+            })
+            if (lyricsRes.ok) {
+              const ld = await lyricsRes.json() as { lyrics?: string; style_tags?: string; song_title?: string; base_resp?: { status_code: number } }
+              if ((ld.base_resp?.status_code ?? 0) === 0) {
+                lyricsText = ld.lyrics ?? ''
+                styleTagsFromLyrics = ld.style_tags ?? ''
+              } else {
+                console.error('[generate_music] lyrics-2.5 error:', ld.base_resp?.status_code, ld.base_resp)
+              }
+            } else {
+              console.error('[generate_music] lyrics-2.5 HTTP error:', lyricsRes.status)
             }
-          }
-        } catch { /* lyrics gen failed — will use prompt-only fallback */ }
+          } catch (err) { console.error('[generate_music] lyrics-2.5 exception:', err) }
+        }
 
         // Step 2 — Generate music via music-2.5
         // music-2.5: lyrics is REQUIRED, prompt is optional style description
@@ -1400,7 +1407,7 @@ async function executeTool(
         })
         if (!musicRes.ok) return `Music generation failed: ${musicRes.status}`
         const md = await musicRes.json() as { data?: { audio_file?: string; audio?: string; status?: number }; base_resp?: { status_code: number; status_msg: string } }
-        if ((md.base_resp?.status_code ?? 0) !== 0) return `Music generation error: ${md.base_resp?.status_msg ?? 'unknown'}`
+        if ((md.base_resp?.status_code ?? 0) !== 0) { console.error('[generate_music] music-2.5 error:', md.base_resp?.status_code, md.base_resp?.status_msg, '| lyrics length:', musicLyrics.slice(0,3500).length); return `Music generation error: ${md.base_resp?.status_msg ?? 'unknown'}` }
         const audioUrl = md.data?.audio_file ?? md.data?.audio
         const trackTitle = title
         if (audioUrl) {
