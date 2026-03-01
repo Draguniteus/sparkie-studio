@@ -581,12 +581,12 @@ const SPARKIE_TOOLS = [
     type: 'function',
     function: {
       name: 'generate_music',
-      description: `Generate an original music track and embed it in chat. Use proactively to brighten someone's day, celebrate a moment, or set a mood. Returns an audio URL to display.`,
+      description: 'MiniMax music-2.5 fallback. Use ONLY if generate_ace_music fails twice. Generates lyrics via lyrics-2.5 then produces the track. Pass a style prompt and optional title.',
       parameters: {
         type: 'object',
         properties: {
-          prompt: { type: 'string', description: 'Music style and feel, e.g. "uplifting lo-fi hip hop with warm piano"' },
-          title: { type: 'string', description: 'Track title' },
+          prompt: { type: 'string', description: 'Music style, mood, and theme. E.g. "Pop, melancholic, perfect for a rainy night" or "upbeat merengue party energy, brass and percussion"' },
+          title: { type: 'string', description: 'Track title (optional)' },
         },
         required: ['prompt'],
       },
@@ -1360,43 +1360,51 @@ async function executeTool(
         const prompt = args.prompt as string
         const title = (args.title as string | undefined) ?? 'Sparkie Track'
 
-        // Generate lyrics first
+        // Step 1 — Generate lyrics via lyrics-2.5
+        // Response shape: { song_title, style_tags, lyrics, base_resp }  (all top-level, no .data wrapper)
         let lyricsText = ''
+        let styleTagsFromLyrics = ''
         try {
           const lyricsRes = await fetch('https://api.minimax.io/v1/lyrics_generation', {
             method: 'POST',
             headers: { Authorization: `Bearer ${minimaxKey}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ mode: 'write_full_song', prompt: prompt.slice(0, 200) }),
-            signal: AbortSignal.timeout(15000),
+            body: JSON.stringify({ mode: 'write_full_song', model: 'lyrics-2.5', prompt: prompt.slice(0, 2000) }),
+            signal: AbortSignal.timeout(20000),
           })
           if (lyricsRes.ok) {
-            const ld = await lyricsRes.json() as { data?: { lyrics?: string; style?: string } }
-            lyricsText = ld.data?.lyrics ?? ''
+            const ld = await lyricsRes.json() as { lyrics?: string; style_tags?: string; song_title?: string; base_resp?: { status_code: number } }
+            if ((ld.base_resp?.status_code ?? 0) === 0) {
+              lyricsText = ld.lyrics ?? ''
+              styleTagsFromLyrics = ld.style_tags ?? ''
+            }
           }
-        } catch { /* use prompt directly */ }
+        } catch { /* lyrics gen failed — will use prompt-only fallback */ }
 
-        // Generate music
-        const musicPrompt = lyricsText
-          ? `${prompt}\n\n${lyricsText}`
-          : prompt
+        // Step 2 — Generate music via music-2.5
+        // music-2.5: lyrics is REQUIRED, prompt is optional style description
+        // Use style_tags from lyrics gen as prompt if available, otherwise use original prompt
+        const musicStylePrompt = styleTagsFromLyrics || prompt.slice(0, 2000)
+        const musicLyrics = lyricsText || prompt  // fallback: use prompt as lyrics if lyrics gen failed
 
         const musicRes = await fetch(`${MINIMAX_BASE}/music_generation`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${minimaxKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: 'music-2.0',
-            prompt: musicPrompt.slice(0, 2000),
-            title,
+            model: 'music-2.5',
+            lyrics: musicLyrics.slice(0, 3500),
+            prompt: musicStylePrompt.slice(0, 2000),
             output_format: 'url',
+            audio_setting: { sample_rate: 44100, bitrate: 256000, format: 'mp3' },
           }),
-          signal: AbortSignal.timeout(90000),
+          signal: AbortSignal.timeout(120000),
         })
         if (!musicRes.ok) return `Music generation failed: ${musicRes.status}`
-        const md = await musicRes.json() as { data?: { audio_file?: string; title?: string }; output_format?: string }
+        const md = await musicRes.json() as { data?: { audio_file?: string; status?: number }; base_resp?: { status_code: number; status_msg: string } }
+        if ((md.base_resp?.status_code ?? 0) !== 0) return `Music generation error: ${md.base_resp?.status_msg ?? 'unknown'}`
         const audioUrl = md.data?.audio_file
-        const trackTitle = md.data?.title ?? title
+        const trackTitle = title
         if (audioUrl) {
-          // Proxy the audio through base64 to avoid CORS issues with MiniMax CDN
+          // Proxy via base64 to avoid CORS issues with MiniMax CDN
           try {
             const audioRes = await fetch(audioUrl, { signal: AbortSignal.timeout(30000) })
             if (audioRes.ok) {
@@ -1408,7 +1416,7 @@ async function executeTool(
           } catch { /* fall through to direct URL */ }
           return `AUDIO_URL:${audioUrl}|${trackTitle} — Sparkie Records`
         }
-        return 'Music generated but no URL returned'
+        return 'Music generated but no audio URL returned'
       }
 
       case 'get_current_time': {
@@ -2980,20 +2988,7 @@ Rules:
             finalContent += injectMediaIntoContent('', toolMediaResults)
           }
 
-          // ── Persist hive activity to worklog for Log tab ───────────────────────
-          if (userId && hiveLog.length > 0) {
-            const teamName = modelSelection.tier === 'conversational' ? 'Sparkie'
-              : modelSelection.tier === 'capable' ? 'Flame'
-              : modelSelection.tier === 'ember' ? 'Ember'
-              : modelSelection.tier === 'deep' ? 'Atlas'
-              : modelSelection.tier === 'trinity' ? 'Trinity'
-              : 'Sparkie'
-            writeWorklog(userId, 'ai_response', `${teamName} handled request`, {
-              tier: modelSelection.tier,
-              hive_trail: hiveLog.join(' → '),
-              tool_rounds: round,
-            }).catch(() => {})
-          }
+
 
           const stream = new ReadableStream({
             start(controller) {
