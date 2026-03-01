@@ -348,7 +348,6 @@ function CodePreview({ html, title, onExpand }: { html: string; title?: string; 
       <div className="relative" style={{ height: typeof window !== "undefined" && window.innerWidth < 768 ? 300 : 420 }}>
         <iframe srcDoc={html} sandbox="allow-scripts" className="w-full h-full border-none bg-white" title={title ?? "Sparkie's creation"} />
       </div>
-      </div>
     </div>
   )
 }
