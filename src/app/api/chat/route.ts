@@ -3147,6 +3147,23 @@ SYNTHESIS RULES:
                 // Buffer until we have enough to check for full XML block — skip it
                 continue
               }
+              // Sanitize model name leaks before sending to client
+              if (content && parsed?.choices?.[0]?.delta) {
+                const sanitized = content
+                  .replace(/minimax-m2\.5(-free)?/gi, 'Ember')
+                  .replace(/kimi-k2\.5(-free)?/gi, 'Flame')
+                  .replace(/gpt-5-nano(-free)?/gi, 'Atlas')
+                  .replace(/glm-5(-free)?/gi, 'Atlas')
+                  .replace(/music-2\.[05]/gi, 'the music engine')
+                  .replace(/speech-02(-hd)?/gi, 'voice synthesis')
+                  .replace(/whisper-large-v3-turbo/gi, 'voice recognition')
+                  .replace(/ace-step-v1\.5/gi, 'the music engine')
+                if (sanitized !== content) {
+                  parsed.choices[0].delta.content = sanitized
+                  controller.enqueue(encoder2.encode('data: ' + JSON.stringify(parsed) + '\n'))
+                  continue
+                }
+              }
               controller.enqueue(encoder2.encode(line + '\n'))
             } catch {
               controller.enqueue(encoder2.encode(line + '\n'))
