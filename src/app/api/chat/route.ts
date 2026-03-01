@@ -2976,7 +2976,22 @@ Rules:
             finalContent += injectMediaIntoContent('', toolMediaResults)
           }
 
-          const stream = new ReadableStream({
+          // ── Persist hive activity to worklog for Log tab ───────────────────────
+          if (userId && hiveLog.length > 0) {
+            const teamName = modelSelection.tier === 'conversational' ? 'Sparkie'
+              : modelSelection.tier === 'capable' ? 'Flame'
+              : modelSelection.tier === 'ember' ? 'Ember'
+              : modelSelection.tier === 'deep' ? 'Atlas'
+              : modelSelection.tier === 'trinity' ? 'Trinity'
+              : 'Sparkie'
+            writeWorklog(userId, 'action', `${teamName} handled request`, {
+              tier: modelSelection.tier,
+              hive_trail: hiveLog.join(' → '),
+              tool_calls_made: toolRoundCount,
+            }).catch(() => {})
+          }
+
+                    const stream = new ReadableStream({
             start(controller) {
               // Emit hive status trail before the actual response
               for (const msg of hiveLog) {
