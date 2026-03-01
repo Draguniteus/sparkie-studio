@@ -66,9 +66,10 @@ function parseMusicPrompt(raw: string): { stylePrompt: string; lyrics: string } 
       lyricParagraphs.length = 0
       lyricParagraphs.push(text.slice(tagMatch.index))
     } else {
+      // No section tags — this is a plain style prompt, not lyrics.
+      // Leave lyricParagraphs empty; lyrics-2.5 will generate them automatically.
       stylePrompt = text.slice(0, 500)
       lyricParagraphs.length = 0
-      lyricParagraphs.push(text)
     }
   }
 
@@ -211,7 +212,7 @@ export async function POST(req: NextRequest) {
     prompt: finalPrompt,
     lyrics: finalLyrics,
     output_format: 'url',
-    audio_setting: { sample_rate: 44100, bitrate: 256000, format: 'mp3' },
+    audio_setting: { sample_rate: 44100, bitrate: 128000, format: 'mp3' },
   }
 
   const stream = new ReadableStream({
@@ -254,8 +255,8 @@ export async function POST(req: NextRequest) {
         // music-2.5: { data: { audioURL: "..." } } or { data: [{ audioURL: "..." }] }
         // music-2.0: { data: { audio_url: "..." } } or hex audio in { data: { audio: "hex" } }
         const dataPayload = Array.isArray(data?.data) ? data.data[0] : data?.data
-        const audioUrl = dataPayload?.audioURL || dataPayload?.audio_url
-          || dataPayload?.url || dataPayload?.download_url
+        const audioUrl = dataPayload?.audio_file || dataPayload?.audioURL
+          || dataPayload?.audio_url || dataPayload?.url || dataPayload?.download_url
         if (audioUrl) {
           send(`data: ${JSON.stringify({ url: audioUrl, model: minimaxModel })}\n\n`)
           controller.close()
@@ -271,6 +272,7 @@ export async function POST(req: NextRequest) {
         }
 
         // Neither audio_url nor hex — surface diagnostics
+        console.error('[/api/music] No audio URL found. data keys:', Object.keys(dataPayload || {}), '| full response data:', JSON.stringify(data?.data).slice(0,500))
         const dataKeys = Object.keys(dataPayload || {})
         const statusCode = data?.base_resp?.status_code
         const statusMsg = data?.base_resp?.status_msg || ''
