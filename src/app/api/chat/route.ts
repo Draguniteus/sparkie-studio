@@ -2984,7 +2984,7 @@ Rules:
               : modelSelection.tier === 'deep' ? 'Atlas'
               : modelSelection.tier === 'trinity' ? 'Trinity'
               : 'Sparkie'
-            writeWorklog(userId, 'action', `${teamName} handled request`, {
+            writeWorklog(userId, 'ai_response', `${teamName} handled request`, {
               tier: modelSelection.tier,
               hive_trail: hiveLog.join(' → '),
               tool_calls_made: toolRoundCount,
