@@ -307,7 +307,7 @@ TOOL SELECTION:
 - Current info → search_web or tavily
 - Files/code → get_github
 - Social post → composio_action (HITL first — always)
-- Music → generate_music or generate_ace_music
+- Music → generate_ace_music (preferred — higher quality, instrumental or vocal, returns data URI directly) or generate_music (MiniMax, good for vocal tracks with lyrics)
 - Image → generate_image
 - Weather → get_weather (user's stated location ONLY — never server IP or datacenter location)
 
@@ -947,7 +947,7 @@ const SPARKIE_TOOLS = [
     type: 'function',
     function: {
       name: 'generate_ace_music',
-      description: 'Generate a full song with vocals using ACE-Step 1.5 — free, unlimited, no credits. Better than MiniMax for full songs with lyrics. Supports 50+ languages. Use when: user wants a full song with verses/chorus/bridge, user wants vocals in a specific language, or MiniMax music is unavailable. API key needed from acemusic.ai (free).',
+      description: 'PRIMARY music generator. Use ACE-Step 1.5 for any music request — instrumental or vocal, any genre, any language. Returns working audio instantly. Tags format: comma-separated style descriptors e.g. "ambient electronic, 85bpm, instrumental". For vocal tracks include genre + vocal type + language. Free, unlimited, no credits needed.',
       parameters: {
         type: 'object',
         properties: {
@@ -1391,7 +1391,19 @@ async function executeTool(
         const md = await musicRes.json() as { data?: { audio_file?: string; title?: string }; output_format?: string }
         const audioUrl = md.data?.audio_file
         const trackTitle = md.data?.title ?? title
-        if (audioUrl) return `AUDIO_URL:${audioUrl}|${trackTitle} — Sparkie Records`
+        if (audioUrl) {
+          // Proxy the audio through base64 to avoid CORS issues with MiniMax CDN
+          try {
+            const audioRes = await fetch(audioUrl, { signal: AbortSignal.timeout(30000) })
+            if (audioRes.ok) {
+              const audioBuffer = await audioRes.arrayBuffer()
+              const audioB64 = Buffer.from(audioBuffer).toString('base64')
+              const mimeType = audioRes.headers.get('content-type') || 'audio/mpeg'
+              return `AUDIO_URL:data:${mimeType};base64,${audioB64}|${trackTitle} — Sparkie Records`
+            }
+          } catch { /* fall through to direct URL */ }
+          return `AUDIO_URL:${audioUrl}|${trackTitle} — Sparkie Records`
+        }
         return 'Music generated but no URL returned'
       }
 
@@ -1868,20 +1880,28 @@ async function executeTool(
             const errText = await submitRes.text()
             return `ACE Music API error (\${submitRes.status}): \${errText.slice(0, 300)}`
           }
-          const data = await submitRes.json() as { choices?: Array<{ message?: { content?: string } }> }
-          const audioB64 = data?.choices?.[0]?.message?.content ?? ''
-          if (!audioB64) return 'ACE Music returned no audio content'
-          // audioB64 is base64-encoded MP3 — save to DB as asset
+          const data = await submitRes.json() as {
+            choices?: Array<{
+              message?: {
+                content?: string
+                audio?: Array<{ audio_url?: { url?: string } }>
+              }
+            }>
+          }
+          // ACE-Step returns audio in message.audio[0].audio_url.url (data:audio/mpeg;base64,...)
+          // message.content only contains text metadata (caption, BPM, language)
+          const audioDataUrl = data?.choices?.[0]?.message?.audio?.[0]?.audio_url?.url ?? ''
+          if (!audioDataUrl.startsWith('data:audio')) return 'ACE Music returned no audio content'
+          // Save reference to DB
           if (userId) {
-            const audioBuffer = Buffer.from(audioB64, 'base64')
-            const audioDataUrl = `data:audio/mp3;base64,\${audioB64.slice(0, 100)}...`
             await query(
               `INSERT INTO sparkie_assets (user_id, asset_type, url, name, created_at)
                VALUES ($1, 'audio', $2, $3, NOW())`,
-              [userId, audioDataUrl, `ace-music-\${Date.now()}.mp3`]
+              [userId, audioDataUrl.slice(0, 120) + '...', `ace-music-${Date.now()}.mp3`]
             ).catch(() => {})
           }
-          return `AUDIO_URL:data:audio/mp3;base64,\${audioB64}`
+          return `AUDIO_URL:${audioDataUrl}`
+
         } catch (e) {
           return `generate_ace_music error: \${String(e)}`
         }
