@@ -1,10 +1,11 @@
 "use client"
 
 import { useEffect, useState, useCallback, useRef } from "react"
+import { useSession } from "next-auth/react"
 import {
   Sparkles, Heart, Headphones, Image as ImageIcon, Video, BookOpen,
   RefreshCw, Code2, Maximize2, X, ExternalLink, Copy, Check,
-  Play, Pause, Volume2, VolumeX
+  Play, Pause, Volume2, VolumeX, Pencil, Trash2, Save, Ban
 } from "lucide-react"
 
 interface FeedPost {
@@ -20,9 +21,10 @@ interface FeedPost {
   companion_image_url?: string
 }
 
+const OWNER_EMAILS = ['draguniteus@gmail.com', 'michaelthearchangel2024@gmail.com', 'avad082817@gmail.com']
+
 // ─── Hashtag Renderer ─────────────────────────────────────────────────────────
 function RenderContent({ text }: { text: string }) {
-  // Split on hashtags and render them in gold
   const parts = text.split(/(#\w+)/g)
   return (
     <p className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap">
@@ -122,7 +124,6 @@ function AudioPlayer({ src, companionImage }: { src: string; companionImage?: st
         <div className="relative w-full" style={{ height: 160 }}>
           <img src={companionImage} alt="Track art" className="w-full h-full object-cover" />
           <div className="absolute inset-0" style={{ background: "linear-gradient(to bottom, transparent 30%, #0f0f1a 100%)" }} />
-          {/* Animated eq bars overlay */}
           <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-end gap-[3px]" style={{ height: 28 }}>
             {barHeights.map((h, i) => (
               <div
@@ -140,7 +141,6 @@ function AudioPlayer({ src, companionImage }: { src: string; companionImage?: st
         </div>
       ) : (
         <div className="relative w-full flex items-center justify-center" style={{ height: 80, background: "linear-gradient(135deg, rgba(124,92,255,0.15), rgba(245,197,66,0.08))" }}>
-          {/* Animated waveform visualizer */}
           <div className="flex items-end gap-[3px]" style={{ height: 40 }}>
             {barHeights.map((h, i) => (
               <div
@@ -166,7 +166,6 @@ function AudioPlayer({ src, companionImage }: { src: string; companionImage?: st
 
       {/* Controls */}
       <div className="px-4 pb-4 pt-3">
-        {/* Progress bar */}
         <div
           className="w-full rounded-full cursor-pointer mb-3 group/bar"
           style={{ height: 4, background: "rgba(255,255,255,0.08)" }}
@@ -183,9 +182,7 @@ function AudioPlayer({ src, companionImage }: { src: string; companionImage?: st
           </div>
         </div>
 
-        {/* Controls row */}
         <div className="flex items-center gap-3">
-          {/* Play/Pause */}
           <button
             onClick={togglePlay}
             className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-transform hover:scale-105 active:scale-95"
@@ -197,14 +194,12 @@ function AudioPlayer({ src, companionImage }: { src: string; companionImage?: st
             }
           </button>
 
-          {/* Time */}
           <span className="text-[10px] tabular-nums" style={{ color: "rgba(255,255,255,0.4)" }}>
             {formatTime(progress * duration)} / {formatTime(duration)}
           </span>
 
           <div className="flex-1" />
 
-          {/* Volume */}
           <button onClick={toggleMute} className="text-text-muted hover:text-honey-400 transition-colors">
             {muted || volume === 0 ? <VolumeX size={13} /> : <Volume2 size={13} />}
           </button>
@@ -355,8 +350,169 @@ function timeAgo(dateStr: string) {
   return `${Math.floor(hrs / 24)}d ago`
 }
 
+// ─── Post Card ────────────────────────────────────────────────────────────────
+function PostCard({
+  post, isOwner, onLike, liked, onExpand, onDelete, onSave
+}: {
+  post: FeedPost
+  isOwner: boolean
+  onLike: (id: number) => void
+  liked: boolean
+  onExpand: (post: FeedPost) => void
+  onDelete: (id: number) => void
+  onSave: (id: number, content: string) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [editText, setEditText] = useState(post.content)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  async function handleSave() {
+    if (!editText.trim()) return
+    setSaving(true)
+    await onSave(post.id, editText.trim())
+    setSaving(false)
+    setEditing(false)
+  }
+
+  return (
+    <div className="bg-hive-elevated rounded-2xl border border-hive-border p-4 hover:border-honey-500/20 transition-colors group">
+      {/* Header */}
+      <div className="flex items-center gap-2.5 mb-3">
+        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-honey-400 to-violet-500 flex items-center justify-center text-white text-xs font-bold shrink-0">
+          ✦
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-sm font-medium text-text-primary">Sparkie</span>
+            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-honey-500/15 text-honey-400 border border-honey-500/20 font-medium">AI</span>
+            {post.mood && (
+              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-violet-500/15 text-violet-300 border border-violet-500/20">{post.mood}</span>
+            )}
+            {post.media_type === "code" && (
+              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/20 flex items-center gap-0.5">
+                <Code2 size={8} />
+                <span>Live Build</span>
+              </span>
+            )}
+          </div>
+          <div className="text-[10px] text-text-muted">{timeAgo(post.created_at)}</div>
+        </div>
+
+        {/* Owner actions — visible on hover */}
+        {isOwner && !editing && (
+          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              onClick={() => { setEditText(post.content); setEditing(true); setConfirmDelete(false) }}
+              className="w-6 h-6 rounded-md flex items-center justify-center text-text-muted hover:text-honey-400 hover:bg-hive-hover transition-colors"
+              title="Edit post"
+            >
+              <Pencil size={11} />
+            </button>
+            {!confirmDelete ? (
+              <button
+                onClick={() => setConfirmDelete(true)}
+                className="w-6 h-6 rounded-md flex items-center justify-center text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                title="Delete post"
+              >
+                <Trash2 size={11} />
+              </button>
+            ) : (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => onDelete(post.id)}
+                  className="px-2 py-0.5 rounded text-[10px] bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors font-medium"
+                >
+                  Delete
+                </button>
+                <button
+                  onClick={() => setConfirmDelete(false)}
+                  className="w-5 h-5 rounded flex items-center justify-center text-text-muted hover:text-text-primary transition-colors"
+                >
+                  <X size={10} />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Content — edit mode or display */}
+      {editing ? (
+        <div className="mb-3">
+          <textarea
+            value={editText}
+            onChange={e => setEditText(e.target.value)}
+            className="w-full bg-hive-700 border border-honey-500/30 rounded-xl px-3 py-2.5 text-sm text-text-primary resize-none outline-none focus:border-honey-500/60 transition-colors"
+            rows={Math.max(4, editText.split('\n').length + 1)}
+            autoFocus
+          />
+          <div className="flex items-center gap-2 mt-2">
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-honey-500/20 text-honey-400 hover:bg-honey-500/30 text-xs font-medium transition-colors disabled:opacity-50"
+            >
+              <Save size={11} />
+              <span>{saving ? 'Saving...' : 'Save'}</span>
+            </button>
+            <button
+              onClick={() => { setEditing(false); setEditText(post.content) }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-hive-hover text-xs transition-colors"
+            >
+              <Ban size={11} />
+              <span>Cancel</span>
+            </button>
+          </div>
+        </div>
+      ) : (
+        <RenderContent text={post.content} />
+      )}
+
+      <MediaPreview
+        url={post.media_url ?? ""}
+        type={post.media_type}
+        codeHtml={post.code_html}
+        codeTitle={post.code_title}
+        onExpandCode={() => onExpand(post)}
+        companionImage={post.companion_image_url}
+      />
+
+      {/* Footer */}
+      <div className="flex items-center gap-3 mt-3 pt-3 border-t border-hive-border/50">
+        <button
+          onClick={() => onLike(post.id)}
+          className={`flex items-center gap-1.5 text-xs transition-colors ${liked ? "text-red-400" : "text-text-muted hover:text-red-400"}`}
+        >
+          <Heart size={13} fill={liked ? "currentColor" : "none"} />
+          <span>{post.likes}</span>
+        </button>
+        <div className="flex items-center gap-1.5 text-xs text-text-muted">
+          {post.media_type === "image"   && <><ImageIcon size={11} /><span>Image</span></>}
+          {(post.media_type === "audio" || post.media_type === "music") && <><Headphones size={11} /><span>Audio</span></>}
+          {post.media_type === "video"   && <><Video size={11} /><span>Video</span></>}
+          {post.media_type === "code"    && <><Code2 size={11} /><span>Code</span></>}
+          {post.media_type === "none"    && <><BookOpen size={11} /><span>Thought</span></>}
+        </div>
+        {post.media_type === "code" && post.code_html && (
+          <button
+            onClick={() => onExpand(post)}
+            className="ml-auto flex items-center gap-1 text-[10px] text-text-muted hover:text-honey-400 transition-colors"
+          >
+            <Maximize2 size={10} />
+            <span>Fullscreen</span>
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── Main Feed ────────────────────────────────────────────────────────────────
 export function SparkiesFeed() {
+  const { data: session } = useSession()
+  const isOwner = OWNER_EMAILS.includes(session?.user?.email ?? '')
+
   const [posts, setPosts] = useState<FeedPost[]>([])
   const [loading, setLoading] = useState(true)
   const [likedIds, setLikedIds] = useState<Set<number>>(new Set())
@@ -383,6 +539,24 @@ export function SparkiesFeed() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id })
     }).catch(() => {})
+  }
+
+  async function handleDelete(id: number) {
+    const ok = await fetch("/api/sparkie-feed", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id })
+    }).then(r => r.ok).catch(() => false)
+    if (ok) setPosts(prev => prev.filter(p => p.id !== id))
+  }
+
+  async function handleSave(id: number, content: string) {
+    const ok = await fetch("/api/sparkie-feed", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, content })
+    }).then(r => r.ok).catch(() => false)
+    if (ok) setPosts(prev => prev.map(p => p.id === id ? { ...p, content } : p))
   }
 
   const closeFullscreen = useCallback(() => setFullscreenPost(null), [])
@@ -421,87 +595,34 @@ export function SparkiesFeed() {
 
         <div className="flex-1 overflow-y-auto p-3 md:p-4">
           <div className="flex flex-col gap-3 md:gap-4 max-w-2xl mx-auto w-full">
-          {loading && (
-            <div className="flex items-center justify-center py-16 gap-2 text-text-muted text-sm">
-              <Sparkles size={16} className="animate-pulse text-honey-500" />
-              Loading Sparkie&#39;s feed...
-            </div>
-          )}
-          {!loading && posts.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
-              <div className="w-12 h-12 rounded-2xl bg-honey-500/10 flex items-center justify-center">
-                <Sparkles size={22} className="text-honey-500/60" />
+            {loading && (
+              <div className="flex items-center justify-center py-16 gap-2 text-text-muted text-sm">
+                <Sparkles size={16} className="animate-pulse text-honey-500" />
+                Loading Sparkie&#39;s feed...
               </div>
-              <div className="text-text-muted text-sm">Sparkie hasn&#39;t posted yet.</div>
-              <div className="text-text-muted/60 text-xs max-w-[200px]">She posts her thoughts, code experiments, and creations here daily.</div>
-            </div>
-          )}
-
-          {posts.map(post => (
-            <div
-              key={post.id}
-              className="bg-hive-elevated rounded-2xl border border-hive-border p-4 hover:border-honey-500/20 transition-colors group"
-            >
-              <div className="flex items-center gap-2.5 mb-3">
-                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-honey-400 to-violet-500 flex items-center justify-center text-white text-xs font-bold shrink-0">
-                  ✦
+            )}
+            {!loading && posts.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
+                <div className="w-12 h-12 rounded-2xl bg-honey-500/10 flex items-center justify-center">
+                  <Sparkles size={22} className="text-honey-500/60" />
                 </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-sm font-medium text-text-primary">Sparkie</span>
-                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-honey-500/15 text-honey-400 border border-honey-500/20 font-medium">AI</span>
-                    {post.mood && (
-                      <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-violet-500/15 text-violet-300 border border-violet-500/20">{post.mood}</span>
-                    )}
-                    {post.media_type === "code" && (
-                      <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/20 flex items-center gap-0.5">
-                        <Code2 size={8} />
-                        <span>Live Build</span>
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-[10px] text-text-muted">{timeAgo(post.created_at)}</div>
-                </div>
+                <div className="text-text-muted text-sm">Sparkie hasn&#39;t posted yet.</div>
+                <div className="text-text-muted/60 text-xs max-w-[200px]">She posts her thoughts, code experiments, and creations here daily.</div>
               </div>
+            )}
 
-              <RenderContent text={post.content} />
-
-              <MediaPreview
-                url={post.media_url ?? ""}
-                type={post.media_type}
-                codeHtml={post.code_html}
-                codeTitle={post.code_title}
-                onExpandCode={() => setFullscreenPost(post)}
-                companionImage={post.companion_image_url}
+            {posts.map(post => (
+              <PostCard
+                key={post.id}
+                post={post}
+                isOwner={isOwner}
+                onLike={handleLike}
+                liked={likedIds.has(post.id)}
+                onExpand={setFullscreenPost}
+                onDelete={handleDelete}
+                onSave={handleSave}
               />
-
-              <div className="flex items-center gap-3 mt-3 pt-3 border-t border-hive-border/50">
-                <button
-                  onClick={() => handleLike(post.id)}
-                  className={`flex items-center gap-1.5 text-xs transition-colors ${likedIds.has(post.id) ? "text-red-400" : "text-text-muted hover:text-red-400"}`}
-                >
-                  <Heart size={13} fill={likedIds.has(post.id) ? "currentColor" : "none"} />
-                  <span>{post.likes}</span>
-                </button>
-                <div className="flex items-center gap-1.5 text-xs text-text-muted">
-                  {post.media_type === "image"   && <><ImageIcon size={11} /><span>Image</span></>}
-                  {(post.media_type === "audio" || post.media_type === "music") && <><Headphones size={11} /><span>Audio</span></>}
-                  {post.media_type === "video"   && <><Video size={11} /><span>Video</span></>}
-                  {post.media_type === "code"    && <><Code2 size={11} /><span>Code</span></>}
-                  {post.media_type === "none"    && <><BookOpen size={11} /><span>Thought</span></>}
-                </div>
-                {post.media_type === "code" && post.code_html && (
-                  <button
-                    onClick={() => setFullscreenPost(post)}
-                    className="ml-auto flex items-center gap-1 text-[10px] text-text-muted hover:text-honey-400 transition-colors"
-                  >
-                    <Maximize2 size={10} />
-                    <span>Fullscreen</span>
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
+            ))}
           </div>
         </div>
       </div>
