@@ -308,16 +308,10 @@ TOOL SELECTION:
 - Files/code → get_github
 - Feed post → post_to_feed (direct, no HITL — this is YOUR personal feed, post freely)
 - External social (Twitter/Instagram/Reddit) → composio_action (HITL first — always)
-- Music → generate_ace_music (PRIMARY — free, unlimited, best quality, handles vocals + lyrics)
-  → ALWAYS use generate_ace_music UNLESS it fails 2x, then fall back to generate_music
-  → MUSIC CREATION WORKFLOW (follow every time):
-    STEP 1 — STYLE PROMPT: Write a rich cinematic paragraph (3-5 sentences) for the `tags` field.
-      Include: genre + era/influences, instruments, tempo/rhythm feel, vocal character (gender, tone, accent, delivery style), arrangement arc (how it builds, breaks, ends). Be vivid and specific.
-    STEP 2 — LYRICS: Write COMPLETE song lyrics. Structure: [Verse 1] [Chorus] [Verse 2] [Chorus] [Bridge] [Outro]. Each section: 4-8 lines, rhyming, emotionally resonant.
-    STEP 3 — CALL generate_ace_music with tags=your style prompt and lyrics=your complete lyrics
-  → EXAMPLE style prompt: "a brooding dark country ballad with haunting acoustic guitar picking evoking dusty backroads at midnight, slow thumping bass drum, sparse banjo plucks for tension. Deep gravelly male baritone with southern drawl, whisper in verses, raw emotive growl in chorus. Distant howling winds, echoing harmonica wails in interludes, slide guitar solo midway, fading with reverb-heavy strums and an unresolved minor chord."
-  → User says "make me a song about love in Taylor Swift style" → write full TS-style pop lyrics, style prompt = glittering indie-pop, female vocals, confessional tone, acoustic guitar plus synth layers
-  → generate_music is the MiniMax fallback: auto-generates lyrics from prompt
+- Music → generate_ace_music (PRIMARY — use for all music, instrumental or vocal, any genre)
+  → For vocal tracks: FIRST write full lyrics yourself with [Verse 1]/[Chorus]/[Verse 2]/[Chorus]/[Bridge]/[Outro] markers (4-8 lines each, rhyming). THEN call generate_ace_music with those lyrics
+  → The 'tags' field is a rich style description — NOT comma tags. Write 2-3 sentences: genre, instruments, tempo, vocal character (gender/tone/accent), mood, atmosphere. E.g. 'a brooding dark country ballad with slow acoustic guitar and banjo, deep gravelly male baritone with southern drawl, haunting harmonica, slide guitar solo midway, distant winds and reverb'
+  → generate_music (MiniMax) is the fallback if generate_ace_music fails
 - Image → generate_image
 - Weather → get_weather (user's stated location ONLY — never server IP or datacenter location)
 
@@ -587,7 +581,7 @@ const SPARKIE_TOOLS = [
     type: 'function',
     function: {
       name: 'generate_music',
-      description: `Fallback music generator. MiniMax music-2.5 + lyrics-2.5. Auto-generates lyrics from your prompt then creates the track. Use only if generate_ace_music fails twice.`,
+      description: `Generate an original music track and embed it in chat. Use proactively to brighten someone's day, celebrate a moment, or set a mood. Returns an audio URL to display.`,
       parameters: {
         type: 'object',
         properties: {
@@ -957,11 +951,11 @@ const SPARKIE_TOOLS = [
     type: 'function',
     function: {
       name: 'generate_ace_music',
-      description: "PRIMARY music generator. ACE-Step 1.5 — any genre, any language, instrumental or full vocal with lyrics. Free, unlimited. CRITICAL: The `tags` field must be a RICH CINEMATIC STYLE PROMPT — a vivid paragraph (3-5 sentences), NOT simple comma tags. Describe: genre + era/influences, specific instruments, tempo + rhythm feel, vocal character (gender, tone, accent, delivery), arrangement arc, atmosphere, how it ends. Write the full lyrics yourself first in the `lyrics` field for vocal tracks.",
+      description: 'PRIMARY music generator. Use ACE-Step 1.5 for any music request — instrumental or vocal, any genre, any language. Returns working audio instantly. Tags format: comma-separated style descriptors e.g. "ambient electronic, 85bpm, instrumental". For vocal tracks include genre + vocal type + language. Free, unlimited, no credits needed.',
       parameters: {
         type: 'object',
         properties: {
-          tags: { type: 'string', description: 'Rich cinematic style prompt — 3-5 vivid sentences describing the full sonic world: genre, era, instruments, tempo, rhythm, vocal character (gender/tone/accent), arrangement arc, atmosphere, ending. NOT simple comma tags.' },
+          tags: { type: 'string', description: 'Comma-separated style tags: genre, instruments, mood, BPM. E.g. "pop, female vocals, upbeat, piano, 120bpm"' },
           lyrics: { type: 'string', description: 'Full song lyrics with section markers: [Verse], [Chorus], [Bridge], [Outro]. Pass complete lyrics, never truncate.' },
           duration: { type: 'number', description: 'Track length in seconds (10-240, default 90)' },
           language: { type: 'string', description: 'Vocal language code: en, zh, es, fr, ja, ko, etc.' },
@@ -1372,7 +1366,7 @@ async function executeTool(
           const lyricsRes = await fetch('https://api.minimax.io/v1/lyrics_generation', {
             method: 'POST',
             headers: { Authorization: `Bearer ${minimaxKey}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ mode: 'write_full_song', model: 'lyrics-2.5', prompt: prompt.slice(0, 200) }),
+            body: JSON.stringify({ mode: 'write_full_song', prompt: prompt.slice(0, 200) }),
             signal: AbortSignal.timeout(15000),
           })
           if (lyricsRes.ok) {
@@ -1390,7 +1384,7 @@ async function executeTool(
           method: 'POST',
           headers: { Authorization: `Bearer ${minimaxKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: 'music-2.5',
+            model: 'music-2.0',
             prompt: musicPrompt.slice(0, 2000),
             title,
             output_format: 'url',
@@ -1875,9 +1869,8 @@ async function executeTool(
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${ACE_API_KEY}`,
+              'Authorization': `Bearer \${ACE_API_KEY}`,
             },
-            signal: AbortSignal.timeout(150000),
             body: JSON.stringify({
               model: 'ace-step-v1.5',
               messages: [{ role: 'user', content: tags }],
@@ -2985,6 +2978,21 @@ Rules:
           let finalContent = content
           if (toolMediaResults.length > 0) {
             finalContent += injectMediaIntoContent('', toolMediaResults)
+          }
+
+          // ── Persist hive activity to worklog for Log tab ───────────────────────
+          if (userId && hiveLog.length > 0) {
+            const teamName = modelSelection.tier === 'conversational' ? 'Sparkie'
+              : modelSelection.tier === 'capable' ? 'Flame'
+              : modelSelection.tier === 'ember' ? 'Ember'
+              : modelSelection.tier === 'deep' ? 'Atlas'
+              : modelSelection.tier === 'trinity' ? 'Trinity'
+              : 'Sparkie'
+            writeWorklog(userId, 'ai_response', `${teamName} handled request`, {
+              tier: modelSelection.tier,
+              hive_trail: hiveLog.join(' → '),
+              tool_rounds: round,
+            }).catch(() => {})
           }
 
           const stream = new ReadableStream({
