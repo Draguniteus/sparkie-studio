@@ -1394,14 +1394,14 @@ async function executeTool(
             lyrics: musicLyrics.slice(0, 3500),
             prompt: musicStylePrompt.slice(0, 2000),
             output_format: 'url',
-            audio_setting: { sample_rate: 44100, bitrate: 256000, format: 'mp3' },
+            audio_setting: { sample_rate: 44100, bitrate: 128000, format: 'mp3' },
           }),
           signal: AbortSignal.timeout(120000),
         })
         if (!musicRes.ok) return `Music generation failed: ${musicRes.status}`
-        const md = await musicRes.json() as { data?: { audio_file?: string; status?: number }; base_resp?: { status_code: number; status_msg: string } }
+        const md = await musicRes.json() as { data?: { audio_file?: string; audio?: string; status?: number }; base_resp?: { status_code: number; status_msg: string } }
         if ((md.base_resp?.status_code ?? 0) !== 0) return `Music generation error: ${md.base_resp?.status_msg ?? 'unknown'}`
-        const audioUrl = md.data?.audio_file
+        const audioUrl = md.data?.audio_file ?? md.data?.audio
         const trackTitle = title
         if (audioUrl) {
           // Proxy via base64 to avoid CORS issues with MiniMax CDN
