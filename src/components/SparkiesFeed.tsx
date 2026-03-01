@@ -53,7 +53,7 @@ function AudioPlayer({ src, companionImage }: { src: string; companionImage?: st
   function formatTime(s: number) {
     const m = Math.floor(s / 60)
     const sec = Math.floor(s % 60)
-    return \`\${m}:\${sec.toString().padStart(2, "0")}\`
+    return `${m}:${sec.toString().padStart(2, "0")}`
   }
 
   function togglePlay() {
@@ -117,7 +117,7 @@ function AudioPlayer({ src, companionImage }: { src: string; companionImage?: st
                 className="rounded-full transition-all"
                 style={{
                   width: 3,
-                  height: playing ? \`\${(Math.sin(Date.now() / 180 + i * 0.8) * 0.4 + 0.6) * h * 28}px\` : \`\${h * 10}px\`,
+                  height: playing ? `${(Math.sin(Date.now() / 180 + i * 0.8) * 0.4 + 0.6) * h * 28}px` : `${h * 10}px`,
                   background: "rgba(245,197,66,0.7)",
                   transition: playing ? "none" : "height 0.4s ease"
                 }}
@@ -136,8 +136,8 @@ function AudioPlayer({ src, companionImage }: { src: string; companionImage?: st
                 style={{
                   width: 3,
                   height: playing
-                    ? \`\${(Math.sin(Date.now() / 180 + i * 0.8) * 0.4 + 0.6) * h * 40}px\`
-                    : \`\${h * 16}px\`,
+                    ? `${(Math.sin(Date.now() / 180 + i * 0.8) * 0.4 + 0.6) * h * 40}px`
+                    : `${h * 16}px`,
                   background: i % 3 === 0
                     ? "rgba(245,197,66,0.8)"
                     : i % 3 === 1
@@ -162,7 +162,7 @@ function AudioPlayer({ src, companionImage }: { src: string; companionImage?: st
           <div
             className="h-full rounded-full relative"
             style={{
-              width: \`\${progress * 100}%\`,
+              width: `${progress * 100}%`,
               background: "linear-gradient(90deg, #f5c542, #a78bfa)"
             }}
           >
@@ -216,7 +216,7 @@ function ImageWithLightbox({ url }: { url: string }) {
         className="mt-3 rounded-xl overflow-hidden border border-hive-border cursor-zoom-in"
         onClick={() => setOpen(true)}
       >
-        <img src={url} alt="Sparkie\'s creation" className="w-full max-h-80 object-cover hover:scale-[1.01] transition-transform duration-300" />
+        <img src={url} alt="Sparkie's creation" className="w-full max-h-80 object-cover hover:scale-[1.01] transition-transform duration-300" />
       </div>
       {open && (
         <div
@@ -232,7 +232,7 @@ function ImageWithLightbox({ url }: { url: string }) {
           </button>
           <img
             src={url}
-            alt="Sparkie\'s creation (expanded)"
+            alt="Sparkie's creation (expanded)"
             className="max-w-full max-h-full rounded-xl shadow-2xl object-contain"
             onClick={e => e.stopPropagation()}
             style={{ maxHeight: "90vh", maxWidth: "90vw" }}
@@ -270,7 +270,7 @@ function CodePreview({ html, title, onExpand }: { html: string; title?: string; 
         </button>
       </div>
       <div className="relative" style={{ height: typeof window !== \'undefined\' && window.innerWidth < 768 ? 200 : 260 }}>
-        <iframe srcDoc={html} sandbox="allow-scripts" className="w-full h-full border-none bg-white" title={title ?? "Sparkie\'s creation"} />
+        <iframe srcDoc={html} sandbox="allow-scripts" className="w-full h-full border-none bg-white" title={title ?? "Sparkie's creation"} />
         <div className="absolute inset-0 cursor-pointer opacity-0 group-hover/preview:opacity-100 transition-opacity flex items-end justify-end p-2" onClick={onExpand}>
           <div className="bg-black/60 rounded-lg px-2 py-1 flex items-center gap-1 text-white text-[10px]">
             <Maximize2 size={9} />
@@ -300,7 +300,7 @@ function FullscreenModal({ html, title, onClose }: { html: string; title?: strin
         <span className="text-sm text-text-primary font-medium flex-1">{title ?? "Live Preview"}</span>
         <a
           href={`data:text/html;charset=utf-8,${encodeURIComponent(html)}`}
-          download={`${(title ?? "preview").replace(/\\s+/g, "-")}.html`}
+          download={`${(title ?? "preview").replace(/\s+/g, "-")}.html`}
           className="flex items-center gap-1.5 text-xs text-text-muted hover:text-honey-400 transition-colors px-2 py-1 rounded-lg hover:bg-hive-hover"
         >
           <ExternalLink size={12} />
@@ -310,7 +310,7 @@ function FullscreenModal({ html, title, onClose }: { html: string; title?: strin
           <X size={14} />
         </button>
       </div>
-      <iframe srcDoc={html} sandbox="allow-scripts" className="flex-1 border-none bg-white" title={title ?? "Sparkie\'s creation"} />
+      <iframe srcDoc={html} sandbox="allow-scripts" className="flex-1 border-none bg-white" title={title ?? "Sparkie's creation"} />
     </div>
   )
 }
