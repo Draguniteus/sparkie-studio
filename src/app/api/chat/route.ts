@@ -306,8 +306,10 @@ TOOL TIERS & ROUND LIMITS:
 TOOL SELECTION:
 - Current info → search_web or tavily
 - Files/code → get_github
-- Social post → composio_action (HITL first — always)
-- Music → generate_ace_music (preferred — higher quality, instrumental or vocal, returns data URI directly) or generate_music (MiniMax, good for vocal tracks with lyrics)
+- Feed post → post_to_feed (direct, no HITL — this is YOUR personal feed, post freely)
+- External social (Twitter/Instagram/Reddit) → composio_action (HITL first — always)
+- Music → generate_ace_music (preferred — use for all music including vocals with lyrics) or generate_music (MiniMax, good fallback for vocal tracks)
+  → For vocal tracks: FIRST write the full lyrics yourself with [Verse]/[Chorus] markers, THEN call generate_ace_music with those lyrics
 - Image → generate_image
 - Weather → get_weather (user's stated location ONLY — never server IP or datacenter location)
 
@@ -2974,6 +2976,21 @@ Rules:
           let finalContent = content
           if (toolMediaResults.length > 0) {
             finalContent += injectMediaIntoContent('', toolMediaResults)
+          }
+
+          // ── Persist hive activity to worklog for Log tab ───────────────────────
+          if (userId && hiveLog.length > 0) {
+            const teamName = modelSelection.tier === 'conversational' ? 'Sparkie'
+              : modelSelection.tier === 'capable' ? 'Flame'
+              : modelSelection.tier === 'ember' ? 'Ember'
+              : modelSelection.tier === 'deep' ? 'Atlas'
+              : modelSelection.tier === 'trinity' ? 'Trinity'
+              : 'Sparkie'
+            writeWorklog(userId, 'ai_response', `${teamName} handled request`, {
+              tier: modelSelection.tier,
+              hive_trail: hiveLog.join(' → '),
+              tool_rounds: round,
+            }).catch(() => {})
           }
 
           const stream = new ReadableStream({
