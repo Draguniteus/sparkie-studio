@@ -277,11 +277,26 @@ export function MessageBubble({ message, userAvatarUrl }: Props) {
             <button className="p-1 rounded hover:bg-hive-hover text-text-muted hover:text-text-secondary transition-colors" title="Bad response">
               <ThumbsDown size={12} />
             </button>
-            {message.model && (
-              <span className="text-[10px] text-text-muted ml-2">
-                {message.model.split("/").pop()?.replace(/-free$/, "") || message.model}
-              </span>
-            )}
+            {message.model && (() => {
+              // Map internal model IDs to Sparkie team codenames — never expose provider names
+              const TEAM_NAMES: Record<string, string> = {
+                "minimax-m2.5-free": "Sparkie",
+                "minimax-m2.5": "Sparkie",
+                "kimi-k2.5-free": "Flame",
+                "kimi-k2.5": "Flame",
+                "gpt-5-nano": "Atlas",
+                "glm-5-free": "Ember",
+                "glm-5": "Ember",
+              }
+              const modelSlug = message.model.split("/").pop() || message.model
+              const teamName = TEAM_NAMES[modelSlug] || TEAM_NAMES[message.model] || "Sparkie"
+              return (
+                <span className="text-[10px] text-text-muted ml-2 flex items-center gap-0.5">
+                  <span style={{ color: "rgba(245,197,66,0.5)" }}>✦</span>
+                  <span>{teamName}</span>
+                </span>
+              )
+            })()}
           </div>
         )}
       </div>
