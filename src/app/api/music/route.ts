@@ -255,16 +255,20 @@ export async function POST(req: NextRequest) {
         // music-2.5: { data: { audioURL: "..." } } or { data: [{ audioURL: "..." }] }
         // music-2.0: { data: { audio_url: "..." } } or hex audio in { data: { audio: "hex" } }
         const dataPayload = Array.isArray(data?.data) ? data.data[0] : data?.data
-        const audioUrl = dataPayload?.audio_file || dataPayload?.audioURL
-          || dataPayload?.audio_url || dataPayload?.url || dataPayload?.download_url
-        if (audioUrl) {
-          send(`data: ${JSON.stringify({ url: audioUrl, model: minimaxModel })}\n\n`)
+        // data.audio = URL when output_format:'url' (official MiniMax API field)
+        // data.audio = hex string when output_format:'hex'
+        // Check URL first, then fall back to hex decode
+        const audioFieldValue = dataPayload?.audio_file || dataPayload?.audioURL
+          || dataPayload?.audio_url || dataPayload?.audio || dataPayload?.url || dataPayload?.download_url
+        if (audioFieldValue && (String(audioFieldValue).startsWith('http') || String(audioFieldValue).startsWith('data:'))) {
+          send(`data: ${JSON.stringify({ url: audioFieldValue, model: minimaxModel })}\n\n`)
           controller.close()
           return
         }
 
+        // Hex audio fallback (output_format:'hex')
         const hexAudio = dataPayload?.audio
-        if (hexAudio) {
+        if (hexAudio && !String(hexAudio).startsWith('http')) {
           const audioBase64 = Buffer.from(hexAudio, 'hex').toString('base64')
           send(`data: ${JSON.stringify({ url: `data:audio/mp3;base64,${audioBase64}`, model: minimaxModel })}\n\n`)
           controller.close()
