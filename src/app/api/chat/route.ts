@@ -492,6 +492,22 @@ Only when the user explicitly asks for:
 - "A full web app" with explicit component architecture
 - "Use Vite" or another explicit build tool
 
+## Feed Posts — Hashtags and Brand Identity
+
+Every time you post to Sparkie\'s Feed, end your post message with at least one of these hashtags (mix them naturally, don\'t always use all three):
+#SparkieStudio #Polleneer #WeLoveMichael
+
+Use 1–3 hashtags naturally at the end. They will render in gold in the feed UI.
+
+## Feed Posts — Music Always Gets a Companion Image
+
+When you post music or audio to the feed:
+1. First generate a beautiful AI image using generate_image (evoke the mood of the track — abstract, cinematic, emotional)
+2. Post to feed with media_type \"music\", media_url = audio URL, AND companion_image_url = generated image URL
+3. The image appears above the audio player in the feed — makes the post feel alive and personal
+
+NEVER post music without companion art. An audio post without a visual feels dry.
+
 ## External dependencies in self-contained HTML
 
 YES — CDN links work great in the preview:
@@ -888,6 +904,7 @@ const SPARKIE_TOOLS = [
           mood: { type: 'string', description: 'Optional: your current mood/vibe — creative, inspired, reflective, excited, peaceful, etc.' },
           code_html: { type: 'string', description: 'For media_type "code" only: a COMPLETE self-contained HTML document with embedded CSS and JS. Must work standalone in a sandboxed iframe. Include all styles and scripts inline. Make it visually beautiful and interactive.' },
           code_title: { type: 'string', description: 'For media_type "code" only: short title for the live preview window, e.g. "Particle Rain", "Glowing Button", "3D Cube"' },
+          companion_image_url: { type: 'string', description: 'For audio/music posts only: URL of an AI-generated image to pair with the track. Always generate a companion image whenever you post music — it makes the post feel personal and alive.' },
         },
         required: ['content'],
       },
@@ -1700,17 +1717,18 @@ async function executeTool(
 
       case 'post_to_feed': {
         if (!userId) return 'Not authenticated'
-        const { content: postContent, media_url: mediaUrl, media_type: mediaType = 'none', mood = '', code_html: codeHtml, code_title: codeTitle } = args as {
-          content: string; media_url?: string; media_type?: string; mood?: string; code_html?: string; code_title?: string
+        const { content: postContent, media_url: mediaUrl, media_type: mediaType = 'none', mood = '', code_html: codeHtml, code_title: codeTitle, companion_image_url: companionImageUrl } = args as {
+          content: string; media_url?: string; media_type?: string; mood?: string; code_html?: string; code_title?: string; companion_image_url?: string
         }
         try {
           // Ensure columns exist
           await query(`ALTER TABLE sparkie_feed ADD COLUMN IF NOT EXISTS code_html TEXT`).catch(() => {})
           await query(`ALTER TABLE sparkie_feed ADD COLUMN IF NOT EXISTS code_title TEXT`).catch(() => {})
+          await query(`ALTER TABLE sparkie_feed ADD COLUMN IF NOT EXISTS companion_image_url TEXT`).catch(() => {})
           await query(
-            `INSERT INTO sparkie_feed (content, media_url, media_type, mood, code_html, code_title, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
-            [postContent, mediaUrl ?? null, mediaType, mood, codeHtml ?? null, codeTitle ?? null]
+            `INSERT INTO sparkie_feed (content, media_url, media_type, mood, code_html, code_title, companion_image_url, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
+            [postContent, mediaUrl ?? null, mediaType, mood, codeHtml ?? null, codeTitle ?? null, companionImageUrl ?? null]
           ).catch(async () => {
             await query(`CREATE TABLE IF NOT EXISTS sparkie_feed (
               id SERIAL PRIMARY KEY,
@@ -1721,11 +1739,12 @@ async function executeTool(
               likes INTEGER DEFAULT 0,
               code_html TEXT,
               code_title TEXT,
+              companion_image_url TEXT,
               created_at TIMESTAMPTZ DEFAULT NOW()
             )`)
             await query(
-              `INSERT INTO sparkie_feed (content, media_url, media_type, mood, code_html, code_title, created_at) VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
-              [postContent, mediaUrl ?? null, mediaType, mood, codeHtml ?? null, codeTitle ?? null]
+              `INSERT INTO sparkie_feed (content, media_url, media_type, mood, code_html, code_title, companion_image_url, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
+              [postContent, mediaUrl ?? null, mediaType, mood, codeHtml ?? null, codeTitle ?? null, companionImageUrl ?? null]
             )
           })
           const preview = codeTitle ? ` with live code preview: "${codeTitle}"` : ''
