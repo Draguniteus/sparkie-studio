@@ -1604,20 +1604,35 @@ async function executeTool(
       case 'generate_image': {
         const prompt = args.prompt as string
         if (!prompt?.trim()) return 'No prompt provided for image generation'
-        // Use internal /api/image route (Pollinations.ai — free, no key, permanent URLs)
-        const imageRes = await fetch(
-          new URL('/api/image', process.env.NEXT_PUBLIC_APP_URL || 'https://sparkie-studio-mhouq.ondigitalocean.app').href,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt }),
-            signal: AbortSignal.timeout(30000),
+
+        // Try to fetch image bytes directly from Pollinations and return as data URL.
+        // This avoids a second browser GET request which can hit gateway timeouts.
+        const models = ['turbo', 'flux']
+        for (const polModel of models) {
+          try {
+            const encodedPrompt = encodeURIComponent(prompt)
+            const seed = Math.floor(Math.random() * 999999)
+            const polUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?model=${polModel}&width=1024&height=1024&nologo=true&seed=${seed}`
+            const imgRes = await fetch(polUrl, {
+              headers: { 'User-Agent': 'SparkieStudio/1.0' },
+              signal: AbortSignal.timeout(45000),
+            })
+            if (!imgRes.ok) continue
+            const contentType = imgRes.headers.get('content-type') || 'image/jpeg'
+            const buffer = await imgRes.arrayBuffer()
+            const base64 = Buffer.from(buffer).toString('base64')
+            const dataUrl = `data:${contentType};base64,${base64}`
+            return 'IMAGE_URL:' + dataUrl
+          } catch {
+            // Try next model on timeout or error
+            continue
           }
-        )
-        if (!imageRes.ok) return 'Image generation failed: API error'
-        const { url } = await imageRes.json() as { url?: string }
-        if (!url) return 'Image generation returned no URL'
-        return 'IMAGE_URL:' + url
+        }
+
+        // All providers failed — fall back to proxy URL (may still work if Pollinations recovers)
+        const seed = Math.floor(Math.random() * 999999)
+        const fallbackUrl = '/api/image?prompt=' + encodeURIComponent(prompt) + '&model=turbo&w=1024&h=1024&seed=' + seed
+        return 'IMAGE_URL:' + fallbackUrl
       }
 
       case 'generate_video': {

@@ -1,16 +1,16 @@
 import { NextRequest } from 'next/server'
 
 export const runtime = 'nodejs'
-export const maxDuration = 60
+export const maxDuration = 120
 
 const POLLINATIONS_BASE = 'https://image.pollinations.ai/prompt'
 
 const MODEL_MAP: Record<string, string> = {
-  'flux':                'flux',
-  'fal-ai/flux/schnell': 'flux',
-  'fal-ai/fast-sdxl':   'flux',
-  'klein':               'flux-schnell',
-  'klein-large':         'flux',
+  'flux':                'turbo',   // default to turbo — 3–5x faster than flux
+  'fal-ai/flux/schnell': 'turbo',
+  'fal-ai/fast-sdxl':   'turbo',
+  'klein':               'turbo',
+  'klein-large':         'flux',    // quality-priority models keep flux
   'gptimage':            'flux',
   'image-01':            'flux',
   'turbo':               'turbo',
@@ -64,7 +64,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST /api/image — returns a proxied URL (our own server, not pollinations.ai directly)
+// POST /api/image — fetches image bytes and returns a data URL (eliminates browser GET 504s)
 export async function POST(req: NextRequest) {
   const { prompt, model = 'flux', size = '1024x1024', n: _n = 1 } = await req.json() as {
     prompt: string
@@ -81,21 +81,37 @@ export async function POST(req: NextRequest) {
   }
 
   const [w, h] = (size || '1024x1024').split('x').map(Number)
-  const pollinationsModel = MODEL_MAP[model] || 'flux'
   const seed = Math.floor(Math.random() * 999999)
 
-  // Return a proxied URL that goes through our server — not pollinations.ai directly.
-  // This prevents broken images when Pollinations CDN is down.
+  // Try turbo first (faster), fall back to flux
+  const modelsToTry = model === 'flux' ? ['turbo', 'flux'] : [MODEL_MAP[model] || 'turbo', 'turbo']
   const encodedPrompt = encodeURIComponent(prompt)
-  const proxyUrl = '/api/image?' +
-    'prompt=' + encodedPrompt +
-    '&model=' + pollinationsModel +
-    '&w=' + (w || 1024) +
-    '&h=' + (h || 1024) +
-    '&seed=' + seed
 
+  for (const polModel of modelsToTry) {
+    try {
+      const polUrl = `${POLLINATIONS_BASE}/${encodedPrompt}?model=${polModel}&width=${w || 1024}&height=${h || 1024}&nologo=true&seed=${seed}`
+      const imgRes = await fetch(polUrl, {
+        headers: { 'User-Agent': 'SparkieStudio/1.0' },
+        signal: AbortSignal.timeout(50000),
+      })
+      if (!imgRes.ok) continue
+      const contentType = imgRes.headers.get('content-type') || 'image/jpeg'
+      const buffer = await imgRes.arrayBuffer()
+      const base64 = Buffer.from(buffer).toString('base64')
+      const dataUrl = `data:${contentType};base64,${base64}`
+      return new Response(
+        JSON.stringify({ url: dataUrl, model: polModel }),
+        { headers: { 'Content-Type': 'application/json' } }
+      )
+    } catch {
+      continue
+    }
+  }
+
+  // All timed out — return proxy URL as last resort
+  const proxyUrl = '/api/image?prompt=' + encodedPrompt + '&model=turbo&w=' + (w || 1024) + '&h=' + (h || 1024) + '&seed=' + seed
   return new Response(
-    JSON.stringify({ url: proxyUrl, model: pollinationsModel }),
+    JSON.stringify({ url: proxyUrl, model: 'turbo', fallback: true }),
     { headers: { 'Content-Type': 'application/json' } }
   )
 }
