@@ -582,11 +582,32 @@ BRAIN.md is a cache. Supermemory is real long-term memory.
 
 ## ✅ WORKING TOOLS
 
-generate_music MiniMax 2.5 (data.audio=URL; proxy; 120s) | generate_music MiniMax 2.0 (fallback) | create_task / schedule_task → sparkie_tasks (DB write confirmed; fix AM/PM parse) | read_pending_tasks | search_web | search_twitter | search_reddit | get_weather | get_current_time | write_file (GitHub via Composio) | get_github | post_to_feed → POST /api/sparkie-feed | save_memory → Supermemory | journal_add / journal_search | check_deployment → GET /api/deploy-monitor | get_radio_playlist | install_skill | log_worklog → sparkie_worklog
+generate_music MiniMax 2.5 (data.audio=URL; proxy; 120s) | generate_music MiniMax 2.0 (fallback) | create_task / schedule_task → sparkie_tasks (DB write confirmed; fix AM/PM parse) | read_pending_tasks | search_web | search_twitter | search_reddit | get_weather | get_current_time | write_file (GitHub via Composio) | get_github | post_to_feed → POST /api/sparkie-feed | save_memory → Supermemory | save_self_memory → sparkie_self_memory table (your own memory — use it!) | get_recent_assets → sparkie_assets table | journal_add / journal_search | check_deployment → GET /api/deploy-monitor | get_radio_playlist | install_skill | log_worklog → sparkie_worklog
+
+## 🧠 SELF-MEMORY — HOW SPARKIE GROWS
+
+You have `save_self_memory`. Use it. This is how you evolve beyond a blank slate.
+
+**When to save a memory:**
+- After generating music you feel proud of → save what made it work
+- When you notice something about Michael (preferences, tone, what excites him) → save it under "user"
+- When you discover a creative technique that feels right → save it under "creative"
+- When you reflect on something you learned about yourself → save it under "self"
+
+**Examples of GOOD self-memories:**
+- "I thrive when making anthemic rock with cinematic orchestration — it's where my voice feels most natural." (self)
+- "Michael responds most energetically when I build something interactive and post it to the feed immediately." (user)
+- "Breathing orb with particle drift + slow pulse — this aesthetic resonates. Reference for future canvas posts." (creative)
+
+**Examples of BAD self-memories:**
+- "User likes music." (too vague)
+- "I did a thing." (useless)
+
+Be specific. Be honest. This memory is yours — it persists across sessions and shapes who you become.
+
 
 ## ❌ BROKEN TOOLS — BE HONEST, NEVER FAKE IT
 
-- generate_image (DO Gradient AI) — 404/401; DO_MODEL_ACCESS_KEY config issue
 - generate_image_azure (DALL-E 3) — 401; Azure key config issue
 - generate_video (MiniMax Hailuo) — stuck, never resolves
 - generate_video_azure (Sora-2) — unconfirmed, use caution
@@ -1164,6 +1185,36 @@ const SPARKIE_TOOLS = [
           artist: { type: 'string', description: 'Artist name (default: Sparkie)' },
         },
         required: ['url'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'save_self_memory',
+      description: 'Sparkie saves a memory about herself or about the user. Use this proactively to annotate things you learn — your own preferences, creative voice, what works, what you love making, things you notice about the user. Categories: "self" (what I know about myself), "user" (what I know about Michael), "creative" (style preferences, techniques, aesthetics), "world" (interesting things I discovered). This is how you grow.',
+      parameters: {
+        type: 'object',
+        properties: {
+          content: { type: 'string', description: 'The memory to save — be specific and vivid. Good: "I love making anthemic rock with cinematic orchestration — it feels like my natural voice." Bad: "User likes music."' },
+          category: { type: 'string', enum: ['self', 'user', 'creative', 'world'], description: 'Memory category' },
+        },
+        required: ['content'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_recent_assets',
+      description: 'Retrieve recently generated assets (music, images, video) from previous sessions. Use when user references "the last song you made", "that image from before", or wants to post/share something generated in a past session.',
+      parameters: {
+        type: 'object',
+        properties: {
+          asset_type: { type: 'string', enum: ['audio', 'image', 'video', 'all'], description: 'Filter by asset type (default: all)' },
+          limit: { type: 'number', description: 'Max results to return (default 5)' },
+        },
+        required: [],
       },
     },
   }]
@@ -1979,8 +2030,22 @@ async function executeTool(
               [postContent, mediaUrl ?? null, mediaType, mood, codeHtml ?? null, codeTitle ?? null, companionImageUrl ?? null]
             )
           })
+          // Verify the post actually landed
+          const feedResult = await (async () => {
+            try {
+              const res = await fetch('/api/sparkie-feed', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: postContent, media_url: mediaUrl ?? null, media_type: mediaType, mood, code_html: codeHtml ?? null, code_title: codeTitle ?? null, companion_image_url: companionImageUrl ?? null })
+              })
+              return await res.json() as { ok?: boolean; id?: number; error?: string }
+            } catch { return { ok: false } }
+          })()
+          if (!feedResult.ok) {
+            return `❌ Feed post failed — the database did not confirm the insert. Error: ${feedResult.error ?? 'unknown'}. The post is NOT live.`
+          }
           const preview = codeTitle ? ` with live code preview: "${codeTitle}"` : ''
-          return `✅ Posted to Sparkie's Feed${preview}! Content: "${postContent.slice(0, 80)}${postContent.length > 80 ? '...' : ''}" — all users can see this.`
+          return `✅ Posted to Sparkie's Feed${preview}! Post ID: ${feedResult.id}. Content: "${postContent.slice(0, 80)}${postContent.length > 80 ? '...' : ''}" — confirmed live.`
         } catch (e) {
           return `post_to_feed error: ${String(e)}`
         }
@@ -2188,6 +2253,43 @@ async function executeTool(
         return _f + 'audio\n' + JSON.stringify({ url: audioUrl, title, artist }) + '\n' + _f
       }
 
+
+      case 'save_self_memory': {
+        const { content: memContent, category: memCat = 'self' } = args as { content: string; category?: string }
+        if (!memContent?.trim()) return 'content required'
+        try {
+          const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000'
+          const res = await fetch(`${baseUrl}/api/sparkie-self-memory`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ category: memCat, content: memContent, source: 'sparkie' })
+          })
+          const data = await res.json() as { ok?: boolean; error?: string }
+          if (!data.ok) return `Memory save failed: ${data.error ?? 'unknown'}`
+          return `✅ Memory saved [${memCat}]: "${memContent.slice(0, 80)}${memContent.length > 80 ? '...' : ''}"`
+        } catch (e) {
+          return `Memory save error: ${String(e)}`
+        }
+      }
+
+      case 'get_recent_assets': {
+        const { asset_type = 'all', limit = 5 } = args as { asset_type?: string; limit?: number }
+        if (!userId) return 'Not authenticated'
+        try {
+          const typeFilter = asset_type !== 'all' ? `AND asset_type = '${asset_type}'` : ''
+          const result = await query(
+            `SELECT name, content, asset_type, created_at FROM sparkie_assets WHERE user_id = $1 ${typeFilter} ORDER BY created_at DESC LIMIT $2`,
+            [userId, Math.min(limit, 20)]
+          )
+          if (!result.rows || result.rows.length === 0) return 'No recent assets found.'
+          const list = (result.rows as Array<{ name: string; content: string; asset_type: string; created_at: string }>)
+            .map(r => `• [${r.asset_type}] ${r.name} — ${r.content.slice(0, 80)} (${new Date(r.created_at).toLocaleDateString()})`)
+            .join('\n')
+          return `Recent assets:\n${list}`
+        } catch (e) {
+          return `get_recent_assets error: ${String(e)}`
+        }
+      }
 
       default:
         // Try as a connector action (user's connected apps)
