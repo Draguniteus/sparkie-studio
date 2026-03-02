@@ -1660,21 +1660,24 @@ async function executeTool(
           } catch { /* fall through */ }
         }
 
-        // ── Provider 3: Pollinations (fallback, may be down) ────────────────────
-        try {
-          const seed = Math.floor(Math.random() * 999999)
-          const polUrl = 'https://image.pollinations.ai/prompt/' + encodeURIComponent(prompt) + '?model=turbo&width=1024&height=1024&nologo=true&seed=' + seed
-          const imgRes = await fetch(polUrl, {
-            headers: { 'User-Agent': 'SparkieStudio/1.0' },
-            signal: AbortSignal.timeout(30000),
-          })
-          if (imgRes.ok) {
-            const ct = imgRes.headers.get('content-type') || 'image/jpeg'
-            const buf = await imgRes.arrayBuffer()
-            const b64 = Buffer.from(buf).toString('base64')
-            return 'IMAGE_URL:data:' + ct + ';base64,' + b64
-          }
-        } catch { /* all providers failed */ }
+        // ── Provider 3: Pollinations gen.pollinations.ai (imagen-4 → grok-imagine → flux) ──
+        const polModels = ['imagen-4', 'grok-imagine', 'flux', 'zimage']
+        for (const polModel of polModels) {
+          try {
+            const seed = Math.floor(Math.random() * 999999)
+            const polUrl = 'https://gen.pollinations.ai/image/' + encodeURIComponent(prompt) + '?model=' + polModel + '&width=1024&height=1024&nologo=true&seed=' + seed
+            const imgRes = await fetch(polUrl, {
+              headers: { 'User-Agent': 'SparkieStudio/1.0' },
+              signal: AbortSignal.timeout(45000),
+            })
+            if (imgRes.ok) {
+              const ct = imgRes.headers.get('content-type') || 'image/jpeg'
+              const buf = await imgRes.arrayBuffer()
+              const b64 = Buffer.from(buf).toString('base64')
+              return 'IMAGE_URL:data:' + ct + ';base64,' + b64
+            }
+          } catch { /* try next model */ }
+        }
 
         return 'Image generation is temporarily unavailable. Please try again in a moment.'
       }

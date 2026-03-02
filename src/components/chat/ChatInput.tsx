@@ -37,15 +37,18 @@ const MODELS = [
 ]
 
 const IMAGE_MODELS = [
-  { id: "flux", name: "Flux", tag: "Free", desc: "Fast high-quality" },
+  { id: "imagen-4", name: "Imagen 4", tag: "Free", desc: "Google Imagen 4 via Pollinations" },
+  { id: "grok-imagine", name: "Grok Imagine", tag: "Free", desc: "xAI Grok image model" },
+  { id: "flux", name: "Flux Schnell", tag: "Free", desc: "Fast high-quality — 5K imgs/day" },
   { id: "zimage", name: "Z-Image", tag: "Free", desc: "Turbo with 2x upscale" },
-  { id: "klein", name: "Klein 4B", tag: "Free", desc: "FLUX.2 fast" },
-  { id: "klein-large", name: "Klein 9B", tag: "Free", desc: "FLUX.2 high quality" },
-  { id: "gptimage", name: "GPT Image", tag: "Free", desc: "OpenAI image gen" },
-  { id: "image-01", name: "MiniMax Image", tag: "Paid", desc: "$0.0035/image — high quality" },
+  { id: "klein", name: "Klein 4B", tag: "Free", desc: "FLUX.2 Klein 4B" },
+  { id: "klein-large", name: "Klein 9B", tag: "Free", desc: "FLUX.2 Klein 9B — high quality" },
+  { id: "gptimage", name: "GPT Image", tag: "Free", desc: "GPT Image 1 Mini" },
 ]
 
 const VIDEO_MODELS = [
+  { id: "seedance", name: "Seedance", tag: "Free", desc: "Pollinations video — 2-10s" },
+  { id: "grok-video", name: "Grok Video", tag: "Free", desc: "xAI Grok video via Pollinations" },
   { id: "MiniMax-Hailuo-2.3", name: "Hailuo 2.3", tag: "Paid", desc: "$0.28 / 768P 6s — best quality" },
   { id: "MiniMax-Hailuo-02", name: "Hailuo 02", tag: "Paid", desc: "$0.10 / 512P 6s — balanced" },
   { id: "T2V-01-Director", name: "T2V Director", tag: "Paid", desc: "Camera control commands" },
@@ -66,6 +69,7 @@ const LYRICS_MODELS = [
 const SPEECH_MODELS = [
   { id: "speech-02-turbo", name: "Speech Turbo", tag: "Paid", desc: "$60 / M chars — fastest" },
   { id: "speech-02-hd", name: "Speech HD", tag: "Paid", desc: "$100 / M chars — highest quality" },
+  { id: "whisper", name: "Whisper Large V3", tag: "Free", desc: "Pollinations audio transcription" },
 ]
 
 // Voice options for speech generation — all English voices from platform.minimax.io/docs/faq/system-voice-id

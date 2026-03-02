@@ -3,17 +3,23 @@ import { NextRequest } from 'next/server'
 export const runtime = 'nodejs'
 export const maxDuration = 120
 
-const POLLINATIONS_BASE = 'https://image.pollinations.ai/prompt'
+// New Pollinations base: gen.pollinations.ai (previously image.pollinations.ai/prompt)
+const POLLINATIONS_BASE = 'https://gen.pollinations.ai/image'
 
 const MODEL_MAP: Record<string, string> = {
-  'flux':                'turbo',   // default to turbo — 3–5x faster than flux
-  'fal-ai/flux/schnell': 'turbo',
-  'fal-ai/fast-sdxl':   'turbo',
-  'klein':               'turbo',
-  'klein-large':         'flux',    // quality-priority models keep flux
-  'gptimage':            'flux',
+  // Pollinations image models (mapped to their gen.pollinations.ai model IDs)
+  'flux':                'flux',
+  'zimage':              'zimage',
+  'imagen-4':            'imagen-4',
+  'grok-imagine':        'grok-imagine',
+  'klein':               'klein',
+  'klein-large':         'klein-large',
+  'gptimage':            'gptimage',
+  // Legacy aliases
+  'fal-ai/flux/schnell': 'flux',
+  'fal-ai/fast-sdxl':   'flux',
+  'turbo':               'zimage',   // turbo → zimage (2x upscale equivalent)
   'image-01':            'flux',
-  'turbo':               'turbo',
 }
 
 // GET /api/image?prompt=...&model=...&w=...&h=...&seed=...
@@ -30,7 +36,7 @@ export async function GET(req: NextRequest) {
     return new Response('prompt required', { status: 400 })
   }
 
-  const pollinationsModel = MODEL_MAP[model] || 'flux'
+  const pollinationsModel = MODEL_MAP[model] || 'imagen-4'
   const encodedPrompt = encodeURIComponent(prompt)
   const pollinationsUrl = `${POLLINATIONS_BASE}/${encodedPrompt}?model=${pollinationsModel}&width=${w}&height=${h}&nologo=true&seed=${seed}`
 
@@ -139,7 +145,7 @@ export async function POST(req: NextRequest) {
 
   // ── Provider 3: Pollinations (fallback) ────────────────────────────────────
   const encodedPrompt = encodeURIComponent(prompt)
-  for (const polModel of ['turbo', 'flux']) {
+  for (const polModel of ['imagen-4', 'grok-imagine', 'flux', 'zimage']) {
     try {
       const polUrl = POLLINATIONS_BASE + '/' + encodedPrompt + '?model=' + polModel + '&width=' + (w || 1024) + '&height=' + (h || 1024) + '&nologo=true&seed=' + seed
       const imgRes = await fetch(polUrl, { headers: { 'User-Agent': 'SparkieStudio/1.0' }, signal: AbortSignal.timeout(45000) })

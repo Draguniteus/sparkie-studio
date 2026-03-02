@@ -82,9 +82,7 @@ export async function GET(req: NextRequest) {
 // POST /api/video → submit generation task, returns { taskId }
 export async function POST(req: NextRequest) {
   const apiKey = process.env.MINIMAX_API_KEY
-  if (!apiKey) {
-    return NextResponse.json({ error: 'MINIMAX_API_KEY not configured' }, { status: 500 })
-  }
+  // Note: Pollinations models don't need apiKey — key check happens after Pollinations early return
 
   let body: Record<string, unknown>
   try {
@@ -116,7 +114,37 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Missing prompt or first_frame_image' }, { status: 400 })
   }
 
-  // Validate model
+  // Pollinations video models (seedance, grok-video) — synchronous, return video bytes directly
+  const POLLINATIONS_VIDEO_MODELS = ['seedance', 'seedance-pro', 'grok-video']
+  if (POLLINATIONS_VIDEO_MODELS.includes(model as string)) {
+    try {
+      const dur = typeof duration === 'number' ? Math.min(Math.max(duration, 2), 10) : 6
+      const polUrl = 'https://gen.pollinations.ai/image/' + encodeURIComponent(prompt || '') +
+        '?model=' + model + '&duration=' + dur + '&width=854&height=480&nologo=true'
+      const vidRes = await fetch(polUrl, {
+        headers: { 'User-Agent': 'SparkieStudio/1.0' },
+        signal: AbortSignal.timeout(120000),
+      })
+      if (!vidRes.ok) {
+        return NextResponse.json({ error: 'Pollinations video generation failed: ' + vidRes.status }, { status: 502 })
+      }
+      const ct = vidRes.headers.get('content-type') || 'video/mp4'
+      const buf = await vidRes.arrayBuffer()
+      const b64 = Buffer.from(buf).toString('base64')
+      const dataUrl = 'data:' + ct + ';base64,' + b64
+      return NextResponse.json({ url: dataUrl, model, status: 'done' })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Pollinations video failed'
+      return NextResponse.json({ error: msg }, { status: 500 })
+    }
+  }
+
+  // MiniMax models need API key
+  if (!apiKey) {
+    return NextResponse.json({ error: 'MINIMAX_API_KEY not configured' }, { status: 500 })
+  }
+
+  // Validate MiniMax model
   const T2V_MODELS = ['MiniMax-Hailuo-2.3', 'MiniMax-Hailuo-02', 'T2V-01-Director', 'T2V-01']
   const I2V_MODELS = ['MiniMax-Hailuo-2.3', 'MiniMax-Hailuo-2.3-Fast', 'MiniMax-Hailuo-02', 'I2V-01-Director', 'I2V-01-live', 'I2V-01']
   const isI2V = !!first_frame_image
@@ -128,7 +156,7 @@ export async function POST(req: NextRequest) {
     }, { status: 400 })
   }
 
-  // Build request body
+  // Build MiniMax request body
   const reqBody: Record<string, unknown> = { model, prompt }
   if (first_frame_image) reqBody.first_frame_image = first_frame_image
   if (duration) reqBody.duration = duration
