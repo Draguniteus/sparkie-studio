@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth/next'
 import { authOptions } from '@/lib/auth'
-import { sql as pgSql } from '@vercel/postgres'
+import { query } from '@/lib/db'
 
 export const runtime = 'nodejs'
 
-// Only these tables are allowed via this endpoint
 const ALLOWED_TABLES = new Set([
   'sparkie_worklog', 'sparkie_tasks', 'sparkie_feed', 'user_memories',
   'sparkie_skills', 'sparkie_assets', 'sparkie_radio_tracks', 'chat_messages',
@@ -15,10 +14,14 @@ const ALLOWED_TABLES = new Set([
 
 function isSelectOnly(sql: string): boolean {
   const clean = sql.trim().toUpperCase()
-  return clean.startsWith('SELECT') && 
-    !clean.includes('INSERT') && !clean.includes('UPDATE') && 
-    !clean.includes('DELETE') && !clean.includes('DROP') && 
-    !clean.includes('TRUNCATE') && !clean.includes('ALTER')
+  return (
+    clean.startsWith('SELECT') &&
+    !clean.includes('INSERT') && !clean.includes('UPDATE') &&
+    !clean.includes('DELETE') && !clean.includes('DROP') &&
+    !clean.includes('TRUNCATE') && !clean.includes('ALTER') &&
+    !clean.includes('CREATE') && !clean.includes('GRANT') &&
+    !clean.includes('EXEC') && !clean.includes('EXECUTE')
+  )
 }
 
 export async function POST(req: NextRequest) {
@@ -27,22 +30,40 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { sql: rawSql } = await req.json() as { sql: string }
+  let rawSql: string
+  try {
+    const body = await req.json() as { sql?: string }
+    rawSql = body.sql ?? ''
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+  }
 
   if (!rawSql || !isSelectOnly(rawSql)) {
     return NextResponse.json({ error: 'Only SELECT queries are permitted' }, { status: 400 })
   }
 
-  // Verify query references only allowed tables
-  const mentionsAllowed = Array.from(ALLOWED_TABLES).some(t => 
+  const mentionsAllowed = Array.from(ALLOWED_TABLES).some(t =>
     rawSql.toLowerCase().includes(t)
   )
   if (!mentionsAllowed) {
-    return NextResponse.json({ error: 'Query must reference at least one Sparkie table' }, { status: 400 })
+    return NextResponse.json(
+      { error: 'Query must reference at least one Sparkie table' },
+      { status: 400 }
+    )
+  }
+
+  // Enforce LIMIT cap
+  const limitMatch = rawSql.match(/\bLIMIT\s+(\d+)/i)$
+  const existingLimit = limitMatch ? parseInt(limitMatch[1]) : null
+  let safeSQL = rawSql.replace(/;\s*$/, '')
+  if (!existingLimit) {
+    safeSQL += ' LIMIT 20'
+  } else if (existingLimit > 100) {
+    safeSQL = safeSQL.replace(/\bLIMIT\s+\d+/i, 'LIMIT 100')
   }
 
   try {
-    const result = await pgSql.query(rawSql)
+    const result = await query(safeSQL)
     return NextResponse.json({ rows: result.rows, rowCount: result.rowCount })
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
