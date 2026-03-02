@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Enforce LIMIT cap
-  const limitMatch = rawSql.match(/\bLIMIT\s+(\d+)/i)$
+  const limitMatch = rawSql.match(/\bLIMIT\s+(\d+)/i)
   const existingLimit = limitMatch ? parseInt(limitMatch[1]) : null
   let safeSQL = rawSql.replace(/;\s*$/, '')
   if (!existingLimit) {
