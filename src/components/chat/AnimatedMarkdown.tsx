@@ -11,7 +11,7 @@ interface Props {
   messageId: string
 }
 
-// Tracks which messages have finished animating
+// Tracks which messages have finished animating (module-level, resets on page reload)
 const animationDoneSet = new Set<string>()
 
 // Per-render char offset — reset each render, incremented as spans are created
@@ -26,7 +26,7 @@ function AnimatedText({
 }) {
   if (!text) return null
 
-  // Already animated — render settled plain text, no animation
+  // Already animated (or historical) — render settled plain text, no animation
   if (isDone) {
     return <>{text}</>
   }
@@ -128,14 +128,12 @@ export function AnimatedMarkdown({ content, isStreaming, messageId }: Props) {
   }
   wasStreamingRef.current = isStreaming
 
-  // Case B: message was never streamed (slash commands, system messages, etc.)
+  // Case B: message was never streamed in this session (historical / loaded from DB)
+  // Mark done IMMEDIATELY — no animation, render plain text right away
   const neverStreamedRef = useRef(!isStreaming)
   if (neverStreamedRef.current && !markedDoneRef.current) {
     markedDoneRef.current = true
-    const id = messageId
-    setTimeout(() => {
-      animationDoneSet.add(id)
-    }, (Array.from(content).length * 0.03 + 1.2) * 1000)
+    animationDoneSet.add(messageId)
   }
 
   const isDone = animationDoneSet.has(messageId)
