@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState, useRef } from "react"
-import { Play, Pause, Volume2, VolumeX } from "lucide-react"
+import { Play, Pause, Volume2, VolumeX, Headphones } from "lucide-react"
 
 // ─── Animated Waveform Bars ───────────────────────────────────────────────────
 function WaveformBars({ playing, count = 28, height = 36 }: { playing: boolean; count?: number; height?: number }) {
