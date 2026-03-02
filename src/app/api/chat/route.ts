@@ -648,6 +648,8 @@ Rule: broken tool → say so honestly → never substitute output type or fake s
 - AM/PM: "10am" = 10:00, "10pm" = 22:00 — never flip
 - "tomorrow" = today + 1 day (from get_current_time result)
 - Always store UTC-normalized timestamps in sparkie_tasks
+- ⚠️ For schedule_task: if user gives a clock time ("3pm", "10am tomorrow"), use when_iso (ISO 8601 with timezone offset from get_current_time). Do NOT compute delay_hours from a clock time — AM/PM math causes flips.
+- Example: user says "remind me at 3pm" → get_current_time → build when_iso="2026-03-02T15:00:00-05:00" → pass to schedule_task
 
 ## 📝 WORKLOG — LOG EVERY ACTION
 
@@ -1037,7 +1039,11 @@ const SPARKIE_TOOLS = [
           },
           delay_hours: {
             type: 'number',
-            description: 'For trigger_type=delay: how many hours from now to execute (e.g. 72 for 3 days)',
+            description: 'For trigger_type=delay: how many hours from now to execute (e.g. 72 for 3 days). Use when_iso instead if the user specified a clock time like "3pm".',
+          },
+          when_iso: {
+            type: 'string',
+            description: 'For trigger_type=delay: exact ISO 8601 datetime to fire (e.g. "2026-03-03T15:00:00-05:00"). Use this instead of delay_hours when user gives a specific time like "3pm tomorrow" — derive from get_current_time result. Eliminates AM/PM conversion errors.',
           },
           cron_expression: {
             type: 'string',
@@ -1949,9 +1955,16 @@ async function executeTool(
         if (!label || !action || !triggerType) return 'label, action, and trigger_type are required'
 
         // Calculate scheduled_at for delay tasks
+        const whenIso = args.when_iso as string | undefined
         let scheduledAt: Date | null = null
-        if (triggerType === 'delay' && delayHours) {
-          scheduledAt = new Date(Date.now() + delayHours * 3600 * 1000)
+        if (triggerType === 'delay') {
+          if (whenIso) {
+            // Prefer exact ISO datetime — no AM/PM math needed
+            scheduledAt = new Date(whenIso)
+            if (isNaN(scheduledAt.getTime())) scheduledAt = null
+          } else if (delayHours) {
+            scheduledAt = new Date(Date.now() + delayHours * 3600 * 1000)
+          }
         }
 
         const taskId = `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`

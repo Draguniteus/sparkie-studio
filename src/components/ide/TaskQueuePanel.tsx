@@ -41,16 +41,18 @@ function timeAgo(dateStr: string): string {
   return `${days}d ago`
 }
 
-function formatScheduled(dateStr: string | null): string | null {
+function formatScheduled(dateStr: string | null, cronExpr?: string): string | null {
+  if (!dateStr && cronExpr) return `⏰ ${cronExpr}`
   if (!dateStr) return null
   const d = new Date(dateStr)
+  if (isNaN(d.getTime())) return null
   const now = new Date()
   const isToday = d.toDateString() === now.toDateString()
   const isTomorrow = d.toDateString() === new Date(now.getTime() + 86400000).toDateString()
-  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
   if (isToday) return `Today ${time}`
   if (isTomorrow) return `Tomorrow ${time}`
-  return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ` ${time}`
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ` ${time}`
 }
 
 export function TaskQueuePanel() {
@@ -164,7 +166,7 @@ export function TaskQueuePanel() {
               const Icon = cfg.icon
               const isActioning = actioning === task.id
               const isPendingHuman = task.status === 'pending' && task.executor === 'human'
-              const scheduledDisplay = formatScheduled(task.scheduled_at)
+              const scheduledDisplay = formatScheduled(task.scheduled_at, task.trigger_type === 'cron' ? (task.payload as Record<string, unknown>)?.cron_expression as string | undefined : undefined)
 
               return (
                 <div key={task.id} className={`px-3 py-2.5 hover:bg-white/[0.02] transition-colors ${cfg.bg}`}>
