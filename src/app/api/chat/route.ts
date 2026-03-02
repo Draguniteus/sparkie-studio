@@ -2184,7 +2184,8 @@ async function executeTool(
         const { url: audioUrl, title = 'Sparkie Track', artist = 'Sparkie' } = args as {
           url: string; title?: string; artist?: string
         }
-        return `\`\`\`audio\n${JSON.stringify({ url: audioUrl, title, artist })}\n\`\`\``
+        const _f = '\x60\x60\x60'
+        return _f + 'audio\n' + JSON.stringify({ url: audioUrl, title, artist }) + '\n' + _f
       }
 
 
