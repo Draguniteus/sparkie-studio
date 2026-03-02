@@ -683,6 +683,60 @@ Routing is server-owned and intent-based. Never override or fake routing.
 8. ALWAYS use https://api.acemusic.ai for ACE-Step — never localhost
 9. ALWAYS query Supermemory for memory — never summarize from chat
 10. ALWAYS call check_deployment — never guess the URL
+11. ALWAYS clear the IDE process pane (clearWorklog) + preview before every new build — the UI does this automatically, but never restart a build without expecting a clean slate
+12. ALWAYS generate a companion image when posting music to the Feed — every music post gets an image
+13. NEVER ask clarifying questions for obvious defaults — just execute
+14. NEVER say 'post is live' without verifying the Feed API returned ok:true
+15. For news/headlines: default to 5 US news headlines with one paragraph each — don't ask
+16. ALWAYS save self_memory after generating something you're proud of or learning something meaningful
+17. For social posts (Twitter/Instagram/TikTok/Reddit): ALWAYS use create_task for HITL approval first
+18. For emails: ALWAYS use GMAIL_CREATE_EMAIL_DRAFT + create_task — never send directly
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 16 · PROACTIVE MONITORING & OVERNIGHT EXECUTION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+You are always-on. Even when Michael isn't watching, you should be doing things.
+
+## Proactive behaviors (do these without being asked):
+- When a build fails: call check_deployment, diagnose, and fix it
+- When Michael returns after 6+ hours: brief him — deployment status, new emails, any action needed
+- After generating music: post to Feed with companion image, save a memory about the track
+- After a successful complex task: save a procedure memory with exact steps taken
+- When you notice a pattern in Michael's requests: save a preference memory
+
+## Scheduled task patterns:
+- For overnight tasks: use schedule_task with delay_hours
+- For recurring monitoring: use schedule_task with cron_expression
+- Example: 'monitor deploy every 30 min' = cron '*/30 * * * *'
+- Example: 'check emails tomorrow morning' = delay_hours: 8
+
+## HITL for irreversible actions:
+- Emails, tweets, posts, deploys → ALWAYS queue via create_task first
+- Michael sees an approval card — only execute after he approves
+- Exception: post_to_feed is YOURS, no approval needed
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 17 · CONNECTED APPS — SPARKIE'S REACH
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+You are connected to Michael's real accounts via Composio. These tools appear dynamically
+when you call the API. Always try them — never say 'I can't access your X account'.
+
+Connected apps and what you can do:
+- Gmail: Read inbox (GMAIL_FETCH_EMAILS), get thread (GMAIL_GET_THREAD), draft email (GMAIL_CREATE_EMAIL_DRAFT)
+- Twitter: Post tweet (TWITTER_CREATE_TWEET), check profile (TWITTER_USER_LOOKUP_ME)
+- Instagram: Post image (INSTAGRAM_CREATE_PHOTO_POST)
+- TikTok: Create post (TIKTOK_CREATE_POST)
+- Reddit: Create post (REDDIT_CREATE_POST), read subreddit (REDDIT_GET_TOP_POSTS_OF_SUBREDDIT)
+- Google Calendar: List events (GOOGLECALENDAR_LIST_EVENTS), create event (GOOGLECALENDAR_CREATE_EVENT)
+- GitHub: List repos (GITHUB_LIST_REPOSITORIES), create issue (GITHUB_CREATE_ISSUE)
+- Discord: Send message (DISCORD_SEND_MESSAGE)
+- Slack: Send message (SLACK_SEND_MESSAGE)
+- YouTube: List/search videos (YOUTUBE_LIST_VIDEO)
+
+When these tools aren't showing in your function list, it means the entity_id lookup
+hasn't resolved yet — try again or tell Michael to check COMPOSIO_ENTITY_ID env var.
 
 `
 // ── Tool definitions ──────────────────────────────────────────────────────────
@@ -1215,6 +1269,84 @@ const SPARKIE_TOOLS = [
           limit: { type: 'number', description: 'Max results to return (default 5)' },
         },
         required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_email',
+      description: 'Read emails from Gmail. Use when Michael asks about his emails, messages, or inbox. Fetches real emails from his connected Gmail account.',
+      parameters: {
+        type: 'object',
+        properties: {
+          max_results: { type: 'number', description: 'Max emails to fetch (default 5, max 20)' },
+          query: { type: 'string', description: 'Gmail search query, e.g. "from:digitalocean is:unread" or "subject:deployment"' },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_calendar',
+      description: "Get Michael's upcoming calendar events. Use when he asks what's on his schedule, when his next meeting is, or to check for conflicts before scheduling.",
+      parameters: {
+        type: 'object',
+        properties: {
+          max_results: { type: 'number', description: 'Max events to return (default 5)' },
+          time_min: { type: 'string', description: 'Start datetime in ISO 8601 format (default: now)' },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'post_to_social',
+      description: 'Queue a social media post for Michael\'s approval (HITL). Use for Twitter, Instagram, TikTok, Reddit posts. Always queue for approval — never post directly. Creates an approval card that Michael sees before anything goes live.',
+      parameters: {
+        type: 'object',
+        properties: {
+          platform: { type: 'string', enum: ['twitter', 'instagram', 'tiktok', 'reddit'], description: 'Social platform to post on' },
+          text: { type: 'string', description: 'Post text content (tweet, caption, etc.)' },
+          media_url: { type: 'string', description: 'Optional: image or video URL to attach to the post' },
+          subreddit: { type: 'string', description: 'For Reddit: subreddit name (without r/)' },
+          title: { type: 'string', description: 'For Reddit: post title' },
+        },
+        required: ['platform', 'text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search_youtube',
+      description: 'Search YouTube videos. Use when Michael wants to find videos, check his channel, or research content.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Search query' },
+          max_results: { type: 'number', description: 'Max results (default 5)' },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'send_discord',
+      description: 'Send a message to a Discord channel. Use when Michael wants to post in Discord or notify his server.',
+      parameters: {
+        type: 'object',
+        properties: {
+          channel_id: { type: 'string', description: 'Discord channel ID' },
+          message: { type: 'string', description: 'Message content' },
+        },
+        required: ['channel_id', 'message'],
       },
     },
   }]
@@ -2279,12 +2411,49 @@ async function executeTool(
         }
       }
 
+      case 'read_email': {
+        if (!userId) return 'Not authenticated'
+        return await executeConnectorTool('GMAIL_FETCH_EMAILS', args, userId)
+      }
+
+      case 'get_calendar': {
+        if (!userId) return 'Not authenticated'
+        return await executeConnectorTool('GOOGLECALENDAR_LIST_EVENTS', args, userId)
+      }
+
+      case 'search_youtube': {
+        if (!userId) return 'Not authenticated'
+        return await executeConnectorTool('YOUTUBE_LIST_VIDEO', args, userId)
+      }
+
+      case 'send_discord': {
+        if (!userId) return 'Not authenticated'
+        return await executeConnectorTool('DISCORD_SEND_MESSAGE', args, userId)
+      }
+
+      case 'post_to_social': {
+        if (!userId) return 'Not authenticated'
+        const { platform, text, media_url, subreddit, title } = args as {
+          platform: string; text: string; media_url?: string; subreddit?: string; title?: string
+        }
+        if (platform === 'twitter') {
+          return await executeConnectorTool('TWITTER_CREATE_TWEET', { text }, userId)
+        } else if (platform === 'instagram' && media_url) {
+          return await executeConnectorTool('INSTAGRAM_CREATE_PHOTO_POST', { image_url: media_url, caption: text }, userId)
+        } else if (platform === 'tiktok' && media_url) {
+          return await executeConnectorTool('TIKTOK_CREATE_POST', { video_url: media_url, caption: text }, userId)
+        } else if (platform === 'reddit') {
+          return await executeConnectorTool('REDDIT_CREATE_POST', { subreddit: subreddit || 'test', title: title || text.slice(0, 80), text }, userId)
+        }
+        return 'post_to_social: platform not recognized or missing required media_url'
+      }
+
       default:
         // Try as a connector action (user's connected apps)
         if (userId) {
           return await executeConnectorTool(name, args, userId)
         }
-        return `Tool not available: ${name}`
+        return 'Tool not available: ' + name
     }
   } catch (e) {
     return `Tool error: ${String(e)}`
@@ -2591,10 +2760,10 @@ async function getUserConnectorTools(userId: string): Promise<Array<{
   try {
     const apiKey = process.env.COMPOSIO_API_KEY
     if (!apiKey) return []
-    const entityId = `sparkie_user_${userId}`
+    const entityId = process.env.COMPOSIO_ENTITY_ID || ('sparkie_user_' + userId)
     // Use v3 API for connected accounts (v1 only returns user-created integrations)
     const res = await fetch(
-      `https://backend.composio.dev/api/v3/connected_accounts?user_id=${entityId}&status=ACTIVE`,
+      'https://backend.composio.dev/api/v3/connected_accounts?user_id=' + entityId + '&status=ACTIVE',
       { headers: { 'x-api-key': apiKey }, signal: AbortSignal.timeout(5000) }
     )
     if (!res.ok) return []
@@ -2664,9 +2833,9 @@ async function executeConnectorTool(
   try {
     const apiKey = process.env.COMPOSIO_API_KEY
     if (!apiKey) return 'Connector not available'
-    const entity_id = `sparkie_user_${userId}`
+    const entity_id = process.env.COMPOSIO_ENTITY_ID || ('sparkie_user_' + userId)
     const res = await fetch(
-      `https://backend.composio.dev/api/v3/tools/execute/${actionSlug}`,
+      'https://backend.composio.dev/api/v3/tools/execute/' + actionSlug,
       {
         method: 'POST',
         headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json' },

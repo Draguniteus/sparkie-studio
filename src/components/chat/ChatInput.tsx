@@ -887,6 +887,10 @@ export function ChatInput() {
       ? `[EDIT REQUEST — output the COMPLETE updated file(s) with ---FILE: filename--- markers. Do NOT respond conversationally. Regenerate the full file with changes applied.]\n\n${userContent}`
       : userContent
 
+    // BUG-06/07/08: Auto-clear IDE process pane + preview before every new build
+    clearWorklog()
+    setPreviewUrl('')
+
     // Pre-build acknowledgement — shown immediately so user isn't staring at silence
     const ACK_PHRASES = [
       `On it! Let me build that for you ✨`,
