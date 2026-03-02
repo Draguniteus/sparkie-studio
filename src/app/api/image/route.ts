@@ -35,6 +35,10 @@ async function pollAsyncJob(requestId: string): Promise<{ url: string }> {
       throw new Error('No image URL in result')
     }
     if (statusData.status === 'FAILED') throw new Error('Image generation failed')
+    // Break on auth errors — no point retrying
+    if (statusRes.status === 401 || statusRes.status === 403) {
+      throw new Error(`Image generation auth failed (${statusRes.status}) — DO_MODEL_ACCESS_KEY may be invalid or expired`)
+    }
   }
   throw new Error('Image generation timed out')
 }
@@ -76,6 +80,10 @@ export async function POST(req: NextRequest) {
               input: { prompt, num_images: n },
             }),
           })
+          if (!invokeRes.ok) {
+            const errText = await invokeRes.text()
+            throw new Error(`Image generation failed (${invokeRes.status}): ${errText.slice(0, 200)}`)
+          }
           const invokeData = await invokeRes.json() as { request_id: string }
           const requestId = invokeData.request_id
 
