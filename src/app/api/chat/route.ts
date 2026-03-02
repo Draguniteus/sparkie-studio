@@ -472,6 +472,13 @@ When the user asks you to BUILD, CREATE, or MAKE a:
 ⚠️ DOES NOT INCLUDE: "make me an image", "draw me X", "render Y", "create a picture/visual/photo"
 → Those are media generation tasks → use generate_image tool. NEVER write a file for these.
 
+⚠️ DOES NOT INCLUDE: "make music", "generate a song", "create audio", "play me a track", "compose music", "make a beat", "write a song", "generate music"
+→ Those are music generation tasks → use generate_music or generate_ace_music tool. NEVER write a file for these. Return audio using the \`\`\`audio code fence in chat.
+
+⚠️ DOES NOT INCLUDE: "what do you know about me?", "what's your Supermemory tag?", "analyze yourself", "what are your capabilities?", "what tools do you have?", "how do you work?", "what's broken?", "audit yourself", "what are you missing?", "what's missing?"
+→ Those are introspection/memory queries → answer directly in chat from Section 15 knowledge. NEVER write a file or build index.html for these.
+
+
 → Generate ONE self-contained \`index.html\` with ALL CSS and JS inline.
 → Do NOT create a React/Vite/npm project for a landing page.
 → Do NOT output \`package.json\`, \`vite.config.ts\`, \`main.tsx\`, \`App.tsx\` for a landing page.
@@ -1098,7 +1105,68 @@ const SPARKIE_TOOLS = [
       },
     },
   }
-]
+,
+  {
+    type: 'function',
+    function: {
+      name: 'execute_terminal',
+      description: 'Run a bash command in the E2B sandbox terminal. Use for: checking versions, running scripts, debugging, file system operations. Always create a session first with action:"create", then run commands.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['create', 'input'], description: 'create: start new terminal session; input: send command to existing session' },
+          sessionId: { type: 'string', description: 'Session ID from previous create call (required for input action)' },
+          data: { type: 'string', description: 'Bash command to run (for input action)' },
+        },
+        required: ['action'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'query_database',
+      description: 'Run a SQL SELECT query on the Sparkie database. Tables: sparkie_worklog, sparkie_tasks, sparkie_feed, user_memories, sparkie_skills, sparkie_assets, sparkie_radio_tracks, chat_messages, dream_journal, user_sessions, sparkie_outreach_log, user_identity_files, users. Never guess — query first.',
+      parameters: {
+        type: 'object',
+        properties: {
+          sql: { type: 'string', description: 'SQL SELECT query to run against the Sparkie database' },
+          limit: { type: 'number', description: 'Max rows to return (default 20, max 100)' },
+        },
+        required: ['sql'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'check_health',
+      description: 'Check if the Sparkie Studio app is live by directly pinging the deployment URL. Use this when deploy-monitor times out or returns 504.',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'URL to ping (defaults to https://sparkie-studio-mhouq.ondigitalocean.app if omitted)' },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'play_audio',
+      description: 'Play an audio track in the chat interface using the AnimatedMarkdown audio player. Always use this after generating music — return the audio as a code fence using the audio markdown block.',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'Direct audio URL to embed (mp3, wav, ogg)' },
+          title: { type: 'string', description: 'Track title to display in the player' },
+          artist: { type: 'string', description: 'Artist name (default: Sparkie)' },
+        },
+        required: ['url'],
+      },
+    },
+  }]
 
 // ── Memory helpers ─────────────────────────────────────────────────────────────
 async function loadMemories(userId: string, queryText?: string): Promise<string> {
@@ -2058,6 +2126,67 @@ async function executeTool(
           return `generate_ace_music error: \${String(e)}`
         }
       }
+
+      case 'execute_terminal': {
+        const { action, sessionId, data: cmdData } = args as {
+          action: 'create' | 'input'; sessionId?: string; data?: string
+        }
+        try {
+          const termRes = await fetch(`${baseUrl}/api/terminal`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action, sessionId, data: cmdData }),
+          })
+          if (!termRes.ok) return `Terminal error: ${termRes.status} — ${await termRes.text()}`
+          const termData = await termRes.json() as { sessionId?: string; output?: string; error?: string }
+          if (termData.error) return `Terminal error: ${termData.error}`
+          if (action === 'create') return JSON.stringify({ sessionId: termData.sessionId, ready: true })
+          return termData.output ?? 'Command sent'
+        } catch (e) {
+          return `Terminal unavailable: ${String(e)}`
+        }
+      }
+
+      case 'query_database': {
+        const { sql, limit = 20 } = args as { sql: string; limit?: number }
+        if (!sql.trim().toUpperCase().startsWith('SELECT')) {
+          return 'Only SELECT queries are allowed.'
+        }
+        const safeSQL = `${sql.replace(/;\s*$/, '')} LIMIT ${Math.min(Number(limit), 100)}`
+        try {
+          const dbRes = await fetch(`${baseUrl}/api/db/query`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sql: safeSQL }),
+          })
+          if (!dbRes.ok) return `DB error: ${dbRes.status} — ${await dbRes.text()}`
+          const dbData = await dbRes.json() as { rows?: unknown[]; error?: string }
+          if (dbData.error) return `Query error: ${dbData.error}`
+          return JSON.stringify(dbData.rows ?? []).slice(0, 4000)
+        } catch (e) {
+          return `Database unavailable: ${String(e)}`
+        }
+      }
+
+      case 'check_health': {
+        const targetUrl = (args.url as string | undefined) ?? 'https://sparkie-studio-mhouq.ondigitalocean.app'
+        try {
+          const start = Date.now()
+          const healthRes = await fetch(targetUrl, { method: 'HEAD', signal: AbortSignal.timeout(8000) })
+          const ms = Date.now() - start
+          return JSON.stringify({ url: targetUrl, status: healthRes.status, ok: healthRes.ok, latencyMs: ms })
+        } catch (e) {
+          return JSON.stringify({ url: targetUrl, reachable: false, error: String(e) })
+        }
+      }
+
+      case 'play_audio': {
+        const { url: audioUrl, title = 'Sparkie Track', artist = 'Sparkie' } = args as {
+          url: string; title?: string; artist?: string
+        }
+        return `\`\`\`audio\n${JSON.stringify({ url: audioUrl, title, artist })}\n\`\`\``
+      }
+
 
       default:
         // Try as a connector action (user's connected apps)
