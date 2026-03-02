@@ -1464,34 +1464,22 @@ async function executeTool(
       }
 
       case 'generate_image': {
-        if (!doKey) return 'Image generation not available (DO_MODEL_ACCESS_KEY missing)'
         const prompt = args.prompt as string
-        const headers = { Authorization: `Bearer ${doKey}`, 'Content-Type': 'application/json' }
-        // Use fal-ai/flux/schnell — fast, high quality
-        const invokeRes = await fetch(`${DO_INFERENCE_BASE}/async-invoke`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ model_id: 'fal-ai/flux/schnell', input: { prompt, num_images: 1 } }),
-          signal: AbortSignal.timeout(10000),
-        })
-        if (!invokeRes.ok) return `Image job failed: ${invokeRes.status}`
-        const { request_id } = await invokeRes.json() as { request_id: string }
-
-        // Poll for result (max 50 × 2s = 100s)
-        for (let i = 0; i < 50; i++) {
-          await new Promise(r => setTimeout(r, 2000))
-          const statusRes = await fetch(`${DO_INFERENCE_BASE}/async-invoke/${request_id}/status`, { headers })
-          const { status } = await statusRes.json() as { status: string }
-          if (status === 'COMPLETE') {
-            const resultRes = await fetch(`${DO_INFERENCE_BASE}/async-invoke/${request_id}`, { headers })
-            const result = await resultRes.json() as { output?: { images?: Array<{ url: string }> } }
-            const url = result.output?.images?.[0]?.url
-            if (url) return `IMAGE_URL:${url}`
-            return 'Image generated but no URL returned'
+        if (!prompt?.trim()) return 'No prompt provided for image generation'
+        // Use internal /api/image route (Pollinations.ai — free, no key, permanent URLs)
+        const imageRes = await fetch(
+          new URL('/api/image', process.env.NEXT_PUBLIC_APP_URL || 'https://sparkie-studio-mhouq.ondigitalocean.app').href,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt }),
+            signal: AbortSignal.timeout(30000),
           }
-          if (status === 'FAILED') return 'Image generation failed'
-        }
-        return 'Image generation timed out'
+        )
+        if (!imageRes.ok) return 'Image generation failed: API error'
+        const { url } = await imageRes.json() as { url?: string }
+        if (!url) return 'Image generation returned no URL'
+        return 'IMAGE_URL:' + url
       }
 
       case 'generate_video': {
