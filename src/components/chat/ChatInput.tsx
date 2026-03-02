@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react"
 import { useAppStore } from "@/store/appStore"
 import { parseAIResponse, getLanguageFromFilename, deriveProjectName } from "@/lib/fileParser"
-import { Paperclip, ArrowUp, Sparkles, ChevronDown, Image as ImageIcon, Video, Music, Mic, MicOff, FileText, Headphones, Phone, Film, X } from "lucide-react"
+import { Paperclip, ArrowUp, Sparkles, ChevronDown, Image as ImageIcon, Video, Music, Mic, MicOff, FileText, Headphones, Phone, Film, X, Square } from "lucide-react"
 import { VoiceChat } from "@/components/chat/VoiceChat"
 
 // ── Asset type detection helper (for AssetsTab categories) ─────────────────
@@ -136,6 +136,7 @@ export function ChatInput() {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const videoFileRef = useRef<HTMLInputElement>(null)
   const agentAbortRef = useRef<AbortController | null>(null)
+  const chatAbortRef = useRef<AbortController | null>(null)
   const [isRecording, setIsRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [isVoiceChatOpen, setIsVoiceChatOpen] = useState(false)
@@ -1208,15 +1209,20 @@ export function ChatInput() {
             .map(m => ({ role: m.role, content: m.content }))
           // Append current user message (already added to store above)
           const messagesWithUser = [...apiMessages.filter(m => m.content !== userText || m.role !== 'user'), { role: 'user', content: userText }]
-          const res = await fetch('/api/chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              messages: messagesWithUser,
-              model: selectedModel,
-              voiceMode: true,
-            }),
-          })
+          const res = await (async () => {
+            chatAbortRef.current?.abort()
+            chatAbortRef.current = new AbortController()
+            return fetch('/api/chat', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                messages: messagesWithUser,
+                model: selectedModel,
+                voiceMode: true,
+              }),
+              signal: chatAbortRef.current.signal,
+            })
+          })()
 
           if (!res.ok || !res.body) {
             resolve("Sorry, I couldn't generate a response right now.")
@@ -1658,16 +1664,29 @@ export function ChatInput() {
           >
             {isRecording ? <MicOff size={15} /> : <Mic size={15} />}
           </button>
-          <button
-            onClick={handleSubmit} disabled={!input.trim() || isStreaming}
-            className={`p-2 rounded-lg transition-all ${
-              input.trim()
-                ? "bg-honey-500 text-hive-900 hover:bg-honey-400 shadow-lg shadow-honey-500/20"
-                : "bg-hive-hover text-text-muted cursor-not-allowed"
-            }`}
-          >
-            <ArrowUp size={16} />
-          </button>
+          {isStreaming ? (
+            <button
+              onClick={() => {
+                chatAbortRef.current?.abort()
+                agentAbortRef.current?.abort()
+              }}
+              className="p-2 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30 transition-all"
+              title="Stop generating"
+            >
+              <Square size={16} className="fill-current" />
+            </button>
+          ) : (
+            <button
+              onClick={handleSubmit} disabled={!input.trim()}
+              className={`p-2 rounded-lg transition-all ${
+                input.trim()
+                  ? "bg-honey-500 text-hive-900 hover:bg-honey-400 shadow-lg shadow-honey-500/20"
+                  : "bg-hive-hover text-text-muted cursor-not-allowed"
+              }`}
+            >
+              <ArrowUp size={16} />
+            </button>
+          )}
         </div>
       </div>
     </div>
