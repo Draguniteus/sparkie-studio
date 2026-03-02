@@ -1,3 +1,4 @@
+// deploy-trigger: 2026-03-02T08:18:42Z
 import { getToken } from 'next-auth/jwt';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
