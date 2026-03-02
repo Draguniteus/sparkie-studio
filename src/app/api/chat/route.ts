@@ -3582,10 +3582,9 @@ Rules:
               for (const msg of hiveLog) {
                 controller.enqueue(encoder.encode(`data: ${JSON.stringify({ hive_status: msg })}\n\n`))
               }
-              const chunks = finalContent.match(/.{1,80}/g) ?? [finalContent]
-              for (const chunk of chunks) {
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: chunk } }] })}\n\n`))
-              }
+              // Send as single chunk — chunking at 80 chars breaks markdown code fences (e.g. ```image blocks)
+              // Client-side AnimatedMarkdown handles the char-by-char animation effect independently
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: finalContent } }] })}\n\n`))
               controller.enqueue(encoder.encode('data: [DONE]\n\n'))
               controller.close()
             },

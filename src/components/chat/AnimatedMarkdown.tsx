@@ -143,7 +143,10 @@ export function AnimatedMarkdown({ content, isStreaming, messageId }: Props) {
 
   const makeComponents = (done: boolean): Components => ({
     p({ children }) {
-      return <p><AnimatedNodes isDone={done}>{children}</AnimatedNodes></p>
+      return <p style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}><AnimatedNodes isDone={done}>{children}</AnimatedNodes></p>
+    },
+    a({ children, href }) {
+      return <a href={href} target="_blank" rel="noopener noreferrer" style={{ wordBreak: 'break-all' }}><AnimatedNodes isDone={done}>{children}</AnimatedNodes></a>
     },
     h1({ children }) {
       return <h1><AnimatedNodes isDone={done}>{children}</AnimatedNodes></h1>
