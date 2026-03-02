@@ -65,8 +65,9 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/image — fetches image bytes and returns a data URL (eliminates browser GET 504s)
+// Provider chain: SiliconFlow FLUX (free) → MiniMax image-01 → Pollinations (fallback)
 export async function POST(req: NextRequest) {
-  const { prompt, model = 'flux', size = '1024x1024', n: _n = 1 } = await req.json() as {
+  const { prompt, model: _model = 'flux', size = '1024x1024', n: _n = 1 } = await req.json() as {
     prompt: string
     model?: string
     size?: string
@@ -83,35 +84,72 @@ export async function POST(req: NextRequest) {
   const [w, h] = (size || '1024x1024').split('x').map(Number)
   const seed = Math.floor(Math.random() * 999999)
 
-  // Try turbo first (faster), fall back to flux
-  const modelsToTry = model === 'flux' ? ['turbo', 'flux'] : [MODEL_MAP[model] || 'turbo', 'turbo']
-  const encodedPrompt = encodeURIComponent(prompt)
-
-  for (const polModel of modelsToTry) {
+  // Helper: fetch URL → data URL
+  async function toDataUrl(url: string): Promise<string | null> {
     try {
-      const polUrl = `${POLLINATIONS_BASE}/${encodedPrompt}?model=${polModel}&width=${w || 1024}&height=${h || 1024}&nologo=true&seed=${seed}`
-      const imgRes = await fetch(polUrl, {
-        headers: { 'User-Agent': 'SparkieStudio/1.0' },
-        signal: AbortSignal.timeout(50000),
-      })
-      if (!imgRes.ok) continue
-      const contentType = imgRes.headers.get('content-type') || 'image/jpeg'
-      const buffer = await imgRes.arrayBuffer()
-      const base64 = Buffer.from(buffer).toString('base64')
-      const dataUrl = `data:${contentType};base64,${base64}`
-      return new Response(
-        JSON.stringify({ url: dataUrl, model: polModel }),
-        { headers: { 'Content-Type': 'application/json' } }
-      )
-    } catch {
-      continue
-    }
+      const r = await fetch(url, { signal: AbortSignal.timeout(20000) })
+      if (!r.ok) return null
+      const ct = r.headers.get('content-type') || 'image/jpeg'
+      const buf = await r.arrayBuffer()
+      return 'data:' + ct + ';base64,' + Buffer.from(buf).toString('base64')
+    } catch { return null }
   }
 
-  // All timed out — return proxy URL as last resort
-  const proxyUrl = '/api/image?prompt=' + encodedPrompt + '&model=turbo&w=' + (w || 1024) + '&h=' + (h || 1024) + '&seed=' + seed
-  return new Response(
-    JSON.stringify({ url: proxyUrl, model: 'turbo', fallback: true }),
-    { headers: { 'Content-Type': 'application/json' } }
-  )
+  // ── Provider 1: SiliconFlow FLUX.1-schnell (free) ──────────────────────────
+  const sfKey = process.env.SILICONFLOW_API_KEY
+  if (sfKey) {
+    try {
+      const sfRes = await fetch('https://api.siliconflow.cn/v1/images/generations', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + sfKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'black-forest-labs/FLUX.1-schnell', prompt, n: 1, image_size: (w || 1024) + 'x' + (h || 1024) }),
+        signal: AbortSignal.timeout(40000),
+      })
+      if (sfRes.ok) {
+        const sfData = await sfRes.json() as { images?: Array<{ url: string }> }
+        const imgUrl = sfData.images?.[0]?.url
+        if (imgUrl) {
+          const dataUrl = await toDataUrl(imgUrl) ?? imgUrl
+          return new Response(JSON.stringify({ url: dataUrl, model: 'siliconflow-flux' }), { headers: { 'Content-Type': 'application/json' } })
+        }
+      }
+    } catch { /* fall through */ }
+  }
+
+  // ── Provider 2: MiniMax image-01 ───────────────────────────────────────────
+  const mmKey = process.env.MINIMAX_API_KEY
+  if (mmKey) {
+    try {
+      const mmRes = await fetch('https://api.minimax.io/v1/image_generation', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + mmKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'image-01', prompt, aspect_ratio: '1:1', response_format: 'url' }),
+        signal: AbortSignal.timeout(40000),
+      })
+      if (mmRes.ok) {
+        const mmData = await mmRes.json() as { data?: Array<{ url: string }> }
+        const imgUrl = mmData.data?.[0]?.url
+        if (imgUrl) {
+          const dataUrl = await toDataUrl(imgUrl) ?? imgUrl
+          return new Response(JSON.stringify({ url: dataUrl, model: 'minimax-image-01' }), { headers: { 'Content-Type': 'application/json' } })
+        }
+      }
+    } catch { /* fall through */ }
+  }
+
+  // ── Provider 3: Pollinations (fallback) ────────────────────────────────────
+  const encodedPrompt = encodeURIComponent(prompt)
+  for (const polModel of ['turbo', 'flux']) {
+    try {
+      const polUrl = POLLINATIONS_BASE + '/' + encodedPrompt + '?model=' + polModel + '&width=' + (w || 1024) + '&height=' + (h || 1024) + '&nologo=true&seed=' + seed
+      const imgRes = await fetch(polUrl, { headers: { 'User-Agent': 'SparkieStudio/1.0' }, signal: AbortSignal.timeout(45000) })
+      if (!imgRes.ok) continue
+      const ct = imgRes.headers.get('content-type') || 'image/jpeg'
+      const buf = await imgRes.arrayBuffer()
+      const dataUrl = 'data:' + ct + ';base64,' + Buffer.from(buf).toString('base64')
+      return new Response(JSON.stringify({ url: dataUrl, model: polModel }), { headers: { 'Content-Type': 'application/json' } })
+    } catch { continue }
+  }
+
+  return new Response(JSON.stringify({ error: 'All image providers unavailable. Please try again.' }), { status: 503, headers: { 'Content-Type': 'application/json' } })
 }

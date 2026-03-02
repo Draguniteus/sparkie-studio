@@ -1605,34 +1605,78 @@ async function executeTool(
         const prompt = args.prompt as string
         if (!prompt?.trim()) return 'No prompt provided for image generation'
 
-        // Try to fetch image bytes directly from Pollinations and return as data URL.
-        // This avoids a second browser GET request which can hit gateway timeouts.
-        const models = ['turbo', 'flux']
-        for (const polModel of models) {
+        // ── Provider 1: SiliconFlow FLUX.1-schnell (free, fast) ────────────────
+        const sfKey = process.env.SILICONFLOW_API_KEY
+        if (sfKey) {
           try {
-            const encodedPrompt = encodeURIComponent(prompt)
-            const seed = Math.floor(Math.random() * 999999)
-            const polUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?model=${polModel}&width=1024&height=1024&nologo=true&seed=${seed}`
-            const imgRes = await fetch(polUrl, {
-              headers: { 'User-Agent': 'SparkieStudio/1.0' },
-              signal: AbortSignal.timeout(45000),
+            const sfRes = await fetch('https://api.siliconflow.cn/v1/images/generations', {
+              method: 'POST',
+              headers: { Authorization: 'Bearer ' + sfKey, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ model: 'black-forest-labs/FLUX.1-schnell', prompt, n: 1, image_size: '1024x1024' }),
+              signal: AbortSignal.timeout(40000),
             })
-            if (!imgRes.ok) continue
-            const contentType = imgRes.headers.get('content-type') || 'image/jpeg'
-            const buffer = await imgRes.arrayBuffer()
-            const base64 = Buffer.from(buffer).toString('base64')
-            const dataUrl = `data:${contentType};base64,${base64}`
-            return 'IMAGE_URL:' + dataUrl
-          } catch {
-            // Try next model on timeout or error
-            continue
-          }
+            if (sfRes.ok) {
+              const sfData = await sfRes.json() as { images?: Array<{ url: string }> }
+              const imgUrl = sfData.images?.[0]?.url
+              if (imgUrl) {
+                // Fetch bytes to return as data URL (avoids browser CORS / expiry issues)
+                const imgRes = await fetch(imgUrl, { signal: AbortSignal.timeout(20000) })
+                if (imgRes.ok) {
+                  const ct = imgRes.headers.get('content-type') || 'image/jpeg'
+                  const buf = await imgRes.arrayBuffer()
+                  const b64 = Buffer.from(buf).toString('base64')
+                  return 'IMAGE_URL:data:' + ct + ';base64,' + b64
+                }
+                return 'IMAGE_URL:' + imgUrl
+              }
+            }
+          } catch { /* fall through */ }
         }
 
-        // All providers failed — fall back to proxy URL (may still work if Pollinations recovers)
-        const seed = Math.floor(Math.random() * 999999)
-        const fallbackUrl = '/api/image?prompt=' + encodeURIComponent(prompt) + '&model=turbo&w=1024&h=1024&seed=' + seed
-        return 'IMAGE_URL:' + fallbackUrl
+        // ── Provider 2: MiniMax image-01 ────────────────────────────────────────
+        const mmKey = process.env.MINIMAX_API_KEY
+        if (mmKey) {
+          try {
+            const mmRes = await fetch('https://api.minimax.io/v1/image_generation', {
+              method: 'POST',
+              headers: { Authorization: 'Bearer ' + mmKey, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ model: 'image-01', prompt, aspect_ratio: '1:1', response_format: 'url' }),
+              signal: AbortSignal.timeout(40000),
+            })
+            if (mmRes.ok) {
+              const mmData = await mmRes.json() as { data?: Array<{ url: string }> }
+              const imgUrl = mmData.data?.[0]?.url
+              if (imgUrl) {
+                const imgRes = await fetch(imgUrl, { signal: AbortSignal.timeout(20000) })
+                if (imgRes.ok) {
+                  const ct = imgRes.headers.get('content-type') || 'image/jpeg'
+                  const buf = await imgRes.arrayBuffer()
+                  const b64 = Buffer.from(buf).toString('base64')
+                  return 'IMAGE_URL:data:' + ct + ';base64,' + b64
+                }
+                return 'IMAGE_URL:' + imgUrl
+              }
+            }
+          } catch { /* fall through */ }
+        }
+
+        // ── Provider 3: Pollinations (fallback, may be down) ────────────────────
+        try {
+          const seed = Math.floor(Math.random() * 999999)
+          const polUrl = 'https://image.pollinations.ai/prompt/' + encodeURIComponent(prompt) + '?model=turbo&width=1024&height=1024&nologo=true&seed=' + seed
+          const imgRes = await fetch(polUrl, {
+            headers: { 'User-Agent': 'SparkieStudio/1.0' },
+            signal: AbortSignal.timeout(30000),
+          })
+          if (imgRes.ok) {
+            const ct = imgRes.headers.get('content-type') || 'image/jpeg'
+            const buf = await imgRes.arrayBuffer()
+            const b64 = Buffer.from(buf).toString('base64')
+            return 'IMAGE_URL:data:' + ct + ';base64,' + b64
+          }
+        } catch { /* all providers failed */ }
+
+        return 'Image generation is temporarily unavailable. Please try again in a moment.'
       }
 
       case 'generate_video': {
