@@ -10,7 +10,7 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@e2b/code-interpreter": "1.0.0",
+    "@e2b/code-interpreter": "^1.5.1",
     "@types/node": "^20",
     "@types/pg": "^8.11.6",
     "@types/react": "^18",
