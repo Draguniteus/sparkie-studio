@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth"
 import { randomUUID } from "crypto"
-import { authOptions } from "@/lib/auth"
 import { requireRole } from "@/lib/authRole"
 
 export const runtime = "nodejs"
@@ -51,20 +49,22 @@ async function uploadFileToGitHub(
   })
 }
 
-export async function POST(req: NextRequest) {
+export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
-    const session = await getServerSession(authOptions)
-    const authError = requireRole(session, "radio")
-    if (authError) return authError
+    // ── Auth check ───────────────────────────────────────────────────────────
+    const auth = await requireRole("radio")
+    if (!auth.ok) return auth.response
 
+    // ── Guard GITHUB_TOKEN ───────────────────────────────────────────────────
     const GITHUB_TOKEN = process.env.GITHUB_TOKEN
     if (!GITHUB_TOKEN) {
       return NextResponse.json(
-        { error: "GITHUBTOKEN not configured" },
+        { error: "GITHUB_TOKEN not configured" },
         { status: 500 }
       )
     }
 
+    // ── Parse multipart ──────────────────────────────────────────────────────
     const formData = await req.formData()
     const file = formData.get("file") as File | null
     const coverImage = formData.get("coverImage") as File | null
@@ -74,19 +74,23 @@ export async function POST(req: NextRequest) {
     if (!file) return NextResponse.json({ error: "No file provided" }, { status: 400 })
     if (!title) return NextResponse.json({ error: "Title is required" }, { status: 400 })
 
+    // Validate audio type
     const validAudioTypes = ["audio/mpeg", "audio/mp3", "audio/ogg", "audio/aac", "audio/wav", "audio/x-wav"]
     if (!validAudioTypes.includes(file.type) && !file.name.match(/\.(mp3|ogg|aac|wav)$/i)) {
       return NextResponse.json({ error: "Only MP3, OGG, AAC, WAV files allowed" }, { status: 400 })
     }
 
+    // Safe base name
     const audioExt = file.name.split(".").pop()?.toLowerCase() ?? "mp3"
     const safeName = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")
     const audioPath = `songs/${safeName}.${audioExt}`
 
+    // ── Upload audio ─────────────────────────────────────────────────────────
     const audioBase64 = Buffer.from(await file.arrayBuffer()).toString("base64")
     await uploadFileToGitHub(GITHUB_TOKEN, audioPath, audioBase64, `feat(radio): add ${safeName}.${audioExt}`)
     const rawUrl = `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${BRANCH}/${audioPath}`
 
+    // ── Upload cover image (optional) ────────────────────────────────────────
     let coverUrl: string | undefined
     if (coverImage && coverImage.size > 0) {
       const validImageTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"]
@@ -99,6 +103,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── Update playlist.json ─────────────────────────────────────────────────
     let playlist: Array<{ id: string; title: string; artist?: string; url: string; coverUrl?: string }> = []
     let playlistSha: string | undefined
     try {
