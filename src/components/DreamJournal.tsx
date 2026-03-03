@@ -5,7 +5,7 @@ import {
   Lock, Book, Plus, Trash2, ChevronLeft,
   Moon, Target, Sparkles, StickyNote,
   Star, Check, Bold, Italic, List, ListOrdered,
-  Pencil, AlignLeft
+  Pencil, AlignLeft, Image as ImageIcon, Palette, X as XIcon
 } from "lucide-react"
 
 // ── TYPES ─────────────────────────────────────────────────────────────────────
@@ -15,7 +15,24 @@ interface JournalEntry {
   content: string
   category: string
   mood?: string
+  images?: string[]
+  theme?: string
   created_at: string
+}
+
+// ── JOURNAL THEMES ─────────────────────────────────────────────────────────────
+const JOURNAL_THEMES = [
+  { id: 'default',   label: 'Default',       bg: '',       preview: 'bg-hive-700',                     text: 'text-text-secondary' },
+  { id: 'starfield', label: 'Starfield',      bg: 'journal-theme-starfield',  preview: 'bg-[#050b1a]', text: 'text-blue-100' },
+  { id: 'aurora',    label: 'Aurora',         bg: 'journal-theme-aurora',     preview: 'bg-[#071a0d]', text: 'text-emerald-100' },
+  { id: 'embers',    label: 'Embers',         bg: 'journal-theme-embers',     preview: 'bg-[#1a0700]', text: 'text-orange-100' },
+  { id: 'ocean',     label: 'Deep Ocean',     bg: 'journal-theme-ocean',      preview: 'bg-[#010d1a]', text: 'text-cyan-100' },
+  { id: 'cosmos',    label: 'Cosmos',         bg: 'journal-theme-cosmos',     preview: 'bg-[#0d0010]', text: 'text-purple-100' },
+  { id: 'parchment', label: 'Parchment',      bg: 'journal-theme-parchment',  preview: 'bg-[#1a1510]', text: 'text-amber-100' },
+]
+
+function getTheme(id?: string) {
+  return JOURNAL_THEMES.find(t => t.id === id) || JOURNAL_THEMES[0]
 }
 
 // ── CATEGORIES ────────────────────────────────────────────────────────────────
@@ -445,8 +462,35 @@ function NewEntry({
   const [category, setCategory] = useState(initialCategory)
   const [saving, setSaving] = useState(false)
   const [titleError, setTitleError] = useState(false)
+  const [images, setImages] = useState<string[]>([])
+  const [uploadingImg, setUploadingImg] = useState(false)
+  const [theme, setTheme] = useState('default')
+  const [showThemePicker, setShowThemePicker] = useState(false)
   const editorRef = useRef<HTMLDivElement>(null)
   const titleRef = useRef<HTMLInputElement>(null)
+  const imgInputRef = useRef<HTMLInputElement>(null)
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || [])
+    if (!files.length) return
+    setUploadingImg(true)
+    const newUrls: string[] = []
+    for (const file of files) {
+      if (!file.type.startsWith('image/')) continue
+      await new Promise<void>(resolve => {
+        const reader = new FileReader()
+        reader.onload = (ev) => {
+          const dataUrl = ev.target?.result as string
+          if (dataUrl) newUrls.push(dataUrl)
+          resolve()
+        }
+        reader.readAsDataURL(file)
+      })
+    }
+    setImages(prev => [...prev, ...newUrls])
+    setUploadingImg(false)
+    if (e.target) e.target.value = ''
+  }
 
   useEffect(() => {
     titleRef.current?.focus()
@@ -470,7 +514,7 @@ function NewEntry({
     const res = await fetch('/api/journal', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'create', title: title.trim(), content, category }),
+      body: JSON.stringify({ action: 'create', title: title.trim(), content, category, images, theme }),
     }).then(r => r.json())
     setSaving(false)
     if (res.entry) onSave(res.entry)
@@ -490,6 +534,16 @@ function NewEntry({
         <span className={`flex items-center gap-1 text-[10px] font-medium px-2.5 py-1 rounded-full border ${cat.bg} ${cat.border} ${cat.color}`}>
           <cat.icon size={9} /> {cat.label}
         </span>
+        <button onClick={() => imgInputRef.current?.click()} disabled={uploadingImg}
+          className="p-1.5 rounded-lg border border-white/10 text-text-muted hover:text-white hover:border-white/20 transition-all relative"
+          title="Attach images">
+          {uploadingImg ? <div className="w-3.5 h-3.5 border border-white/40 border-t-white rounded-full animate-spin" /> : <ImageIcon size={14} />}
+        </button>
+        <button onClick={() => setShowThemePicker(v => !v)}
+          className={`p-1.5 rounded-lg border transition-all ${theme !== 'default' ? 'border-violet-500/50 text-violet-400 bg-violet-500/10' : 'border-white/10 text-text-muted hover:text-white hover:border-white/20'}`}
+          title="Entry theme">
+          <Palette size={14} />
+        </button>
         <button
           onClick={save}
           disabled={!title.trim() || !hasContent || saving}
@@ -518,8 +572,21 @@ function NewEntry({
       {/* Rich text toolbar */}
       <FormatToolbar editorRef={editorRef} />
 
+      {/* Theme picker panel */}
+      {showThemePicker && (
+        <div className="px-4 py-2.5 border-b border-hive-border bg-hive-600/50 flex items-center gap-2 overflow-x-auto shrink-0">
+          {JOURNAL_THEMES.map(t => (
+            <button key={t.id} onClick={() => { setTheme(t.id); setShowThemePicker(false) }}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-[10px] font-medium whitespace-nowrap transition-all ${theme === t.id ? 'border-violet-500/60 text-violet-300 bg-violet-500/15' : 'border-white/10 text-text-muted hover:border-white/20'}`}>
+              <span className={`w-3 h-3 rounded-full ${t.preview}`} />
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Content */}
-      <div className="flex-1 flex flex-col overflow-auto px-6 py-4 gap-3">
+      <div className={`flex-1 flex flex-col overflow-auto px-6 py-4 gap-3 ${getTheme(theme).bg}`}>
         {/* Title — REQUIRED */}
         <div className="flex flex-col gap-1">
           <input
@@ -541,10 +608,29 @@ function NewEntry({
         <div className="text-[11px] text-text-muted">
           {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
         </div>
+        {/* Attached images strip */}
+        {images.length > 0 && (
+          <div className="flex gap-2 flex-wrap mt-1">
+            {images.map((url, i) => (
+              <div key={i} className="relative group">
+                <img src={url} alt={`attachment ${i+1}`} className="w-20 h-20 object-cover rounded-xl border border-white/10" />
+                <button onClick={() => setImages(prev => prev.filter((_, j) => j !== i))}
+                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                  <XIcon size={10} className="text-white" />
+                </button>
+              </div>
+            ))}
+            <button onClick={() => imgInputRef.current?.click()}
+              className="w-20 h-20 rounded-xl border border-dashed border-white/20 hover:border-honey-500/50 flex items-center justify-center text-text-muted hover:text-honey-400 transition-all">
+              <ImageIcon size={18} />
+            </button>
+          </div>
+        )}
         <RichEditor
           onContentChange={html => setHtmlContent(html)}
           placeholder="Write freely. This space is yours alone…"
         />
+        <input ref={imgInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleImageUpload} />
       </div>
     </div>
   )
@@ -582,8 +668,9 @@ function ReadEntry({ entry, onBack, onDelete }: {
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const cat = getCat(entry.category || 'night_dreams')
+  const entryTheme = getTheme(entry.theme)
   return (
-    <div className="flex flex-col h-full">
+    <div className={`flex flex-col h-full ${entryTheme.bg}`}>
       <div className="flex items-center gap-2 px-4 py-3 border-b border-hive-border shrink-0">
         <button onClick={onBack} className="p-1.5 rounded-lg hover:bg-hive-hover text-text-muted hover:text-white transition-colors">
           <ChevronLeft size={16} />
@@ -609,8 +696,19 @@ function ReadEntry({ entry, onBack, onDelete }: {
         {entry.title && (
           <h2 className="text-xl font-bold text-white mb-4" style={{ fontFamily: "'Georgia', serif" }}>{entry.title}</h2>
         )}
+        {/* Attached images */}
+        {entry.images && entry.images.length > 0 && (
+          <div className="flex gap-2 flex-wrap mb-5">
+            {entry.images.map((url, i) => (
+              <img key={i} src={url} alt={`image ${i+1}`}
+                className="max-h-52 rounded-2xl border border-white/10 object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                onClick={() => window.open(url, '_blank')}
+              />
+            ))}
+          </div>
+        )}
         <div
-          className="text-text-secondary text-[15px] leading-relaxed [&_strong]:text-white [&_em]:italic [&_ul]:list-disc [&_ul]:ml-5 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:ml-5 [&_ol]:my-2 [&_li]:my-1"
+          className={`text-[15px] leading-relaxed [&_strong]:text-white [&_em]:italic [&_ul]:list-disc [&_ul]:ml-5 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:ml-5 [&_ol]:my-2 [&_li]:my-1 ${entryTheme.text}`}
           style={{ fontFamily: "'Georgia', serif" }}
           dangerouslySetInnerHTML={{ __html: entry.content }}
         />
