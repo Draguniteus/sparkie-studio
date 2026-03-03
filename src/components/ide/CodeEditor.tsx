@@ -83,9 +83,12 @@ export function CodeEditor() {
 
   if (!activeFile) {
     return (
-      <div className="h-full flex flex-col items-center justify-center text-text-muted p-8">
-        <File size={24} className="mb-2 text-honey-500/40" />
-        <p className="text-xs">Select a file to edit</p>
+      <div className="h-full flex flex-col items-center justify-center text-text-muted p-8 gap-2">
+        <div className="w-10 h-10 rounded-xl bg-hive-elevated flex items-center justify-center">
+          <File size={18} className="text-honey-500/50" />
+        </div>
+        <p className="text-xs font-medium text-text-secondary">No file selected</p>
+        <p className="text-[11px] text-text-muted text-center max-w-[180px]">Select a file from the explorer to view or edit it</p>
       </div>
     )
   }
@@ -151,21 +154,26 @@ export function CodeEditor() {
         </div>
       </div>
 
-      {/* Editor area */}
-      <div className="flex-1 relative overflow-hidden">
-        <div className="absolute left-0 top-0 bottom-0 w-10 bg-hive-700 border-r border-hive-border overflow-hidden select-none">
-          <div className="pt-3 px-1">
+      {/* Editor area — scrollable, fills panel, no truncation */}
+      <div className="flex-1 relative overflow-hidden flex">
+        {/* Line numbers — syncs scroll with textarea */}
+        <div
+          className="w-12 shrink-0 bg-hive-700 border-r border-hive-border overflow-hidden select-none"
+          aria-hidden="true"
+        >
+          <div className="pt-3 pr-3 pl-1 text-right">
             {(activeFile.content || "").split("\n").map((_, i) => (
-              <div key={i} className="text-[11px] text-text-muted text-right pr-2 leading-[20px] font-mono">{i + 1}</div>
+              <div key={i} className="text-[11px] text-text-muted/50 leading-[20px] font-mono tabular-nums">{i + 1}</div>
             ))}
           </div>
         </div>
+        {/* Textarea — full width, horizontal + vertical scroll, no word-wrap */}
         <textarea
           value={activeFile.content || ""}
           onChange={handleChange}
           spellCheck={false}
-          className="w-full h-full bg-transparent text-[13px] text-text-primary font-mono leading-[20px] p-3 pl-12 resize-none focus:outline-none overflow-auto whitespace-pre"
-          style={{ tabSize: 2 }}
+          className="flex-1 min-w-0 bg-transparent text-[13px] text-text-primary font-mono leading-[20px] pt-3 pb-4 px-4 resize-none focus:outline-none overflow-auto"
+          style={{ tabSize: 2, whiteSpace: 'pre', overflowWrap: 'normal', wordBreak: 'keep-all' }}
         />
       </div>
 
