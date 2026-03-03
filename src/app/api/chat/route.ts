@@ -1694,21 +1694,21 @@ async function executeTool(
         const task_id = submitData.task_id
         if (!task_id) return 'No task_id returned from MiniMax'
 
-        // Poll (max 30 × 5s = 150s total)
-        for (let i = 0; i < 30; i++) {
+        // Poll up to 55 × 5s = 275s (~4.5 min) — MiniMax avg is 2-5 min
+        // NOTE: Poll response has NO base_resp wrapper — only submit response does
+        for (let i = 0; i < 55; i++) {
           await new Promise(r => setTimeout(r, 5000))
           const pollRes = await fetch(`${MINIMAX_BASE}/query/video_generation?task_id=${task_id}`, {
             headers: { Authorization: `Bearer ${minimaxKey}` },
-            signal: AbortSignal.timeout(10000),
+            signal: AbortSignal.timeout(15000),
           })
-          if (!pollRes.ok) continue
-          const pd = await pollRes.json() as { status: string; file_id?: string; base_resp?: { status_code: number } }
-          if (pd.base_resp?.status_code !== 0) continue
-          // MiniMax status can be 'Success' or 'Fail' (capital S/F)
-          if ((pd.status === 'Success' || pd.status === 'success') && pd.file_id) {
+          if (!pollRes.ok) continue // transient error, keep polling
+          const pd = await pollRes.json() as { status: string; file_id?: string }
+          // MiniMax poll status values (capitalized): Preparing, Queueing, Processing, Success, Fail
+          if (pd.status === 'Success' && pd.file_id) {
             const fileRes = await fetch(`${MINIMAX_BASE}/files/retrieve?file_id=${pd.file_id}`, {
               headers: { Authorization: `Bearer ${minimaxKey}` },
-              signal: AbortSignal.timeout(10000),
+              signal: AbortSignal.timeout(15000),
             })
             if (!fileRes.ok) return 'File retrieve failed'
             const fd = await fileRes.json() as { file?: { download_url: string } }
@@ -1716,9 +1716,10 @@ async function executeTool(
             if (videoUrl) return `VIDEO_URL:${videoUrl}`
             return 'Video generated but no URL returned'
           }
-          if (pd.status === 'Fail' || pd.status === 'fail') return 'Video generation failed'
+          if (pd.status === 'Fail') return 'Video generation failed'
+          // Preparing / Queueing / Processing → keep polling
         }
-        return 'Video generation timed out (MiniMax)'
+        return 'Video generation timed out (MiniMax) — try again'
       }
 
       case 'generate_image_azure': {
