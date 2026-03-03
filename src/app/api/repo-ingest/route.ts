@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
     const ctx = await getProjectContext(userId, repo)
     if (!ctx) return NextResponse.json({ error: 'Not ingested yet' }, { status: 404 })
     return NextResponse.json(ctx)
-  } catch e) {
+  } catch(e) {
     return NextResponse.json({ error: String(e) }, { status: 500 })
   }
 }
