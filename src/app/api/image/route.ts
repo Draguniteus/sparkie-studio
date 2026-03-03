@@ -6,6 +6,14 @@ export const maxDuration = 120
 // New Pollinations base: gen.pollinations.ai (previously image.pollinations.ai/prompt)
 const POLLINATIONS_BASE = 'https://gen.pollinations.ai/image'
 
+// Auth header — key stored in POLLINATIONS_API_KEY env var
+function pollinationsHeaders(): Record<string, string> {
+  const key = process.env.POLLINATIONS_API_KEY
+  const h: Record<string, string> = { 'User-Agent': 'SparkieStudio/1.0' }
+  if (key) h['Authorization'] = `Bearer ${key}`
+  return h
+}
+
 const MODEL_MAP: Record<string, string> = {
   // Pollinations image models
   'flux':                'flux',
@@ -42,7 +50,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const imgRes = await fetch(pollinationsUrl, {
-      headers: { 'User-Agent': 'SparkieStudio/1.0' },
+      headers: pollinationsHeaders(),
       signal: AbortSignal.timeout(55000),
     })
 
@@ -106,7 +114,7 @@ export async function POST(req: NextRequest) {
         '?model=' + polModel + '&width=' + (w || 1024) + '&height=' + (h || 1024) +
         '&nologo=true&seed=' + seed
       const imgRes = await fetch(polUrl, {
-        headers: { 'User-Agent': 'SparkieStudio/1.0' },
+        headers: pollinationsHeaders(),
         signal: AbortSignal.timeout(25000),
       })
       if (!imgRes.ok) continue
