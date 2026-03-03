@@ -16,6 +16,8 @@ export type WorklogType =
   | 'signal_skipped'
   | 'auth_check'
   | 'tool_call'
+  | 'proactive_signal'
+  | 'decision'
   | 'decision'
   | 'hold'
   | 'self_assessment'
