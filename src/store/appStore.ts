@@ -148,6 +148,7 @@ interface AppState {
   ideOpen: boolean
   ideTab: IDETab
   isExecuting: boolean
+  longTaskLabel: string | null   // 'In memory:...' chip text; null = hidden
   liveCode: string
   liveCodeFiles: string[]
   addFile: (file: Omit<FileNode, 'id'>) => string
@@ -163,6 +164,7 @@ interface AppState {
   setIdeTab: (tab: IDETab) => void
   setIDETab: (tab: IDETab) => void
   setExecuting: (v: boolean) => void
+  setLongTaskLabel: (label: string | null) => void
   appendLiveCode: (chunk: string) => void
   addLiveCodeFile: (name: string) => void
   clearLiveCode: () => void
@@ -292,6 +294,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       liveCode: '',
       liveCodeFiles: [],
       isExecuting: false,
+  longTaskLabel: null,
       isStreaming: false,
       ideTab: 'process',
       containerStatus: 'idle',
@@ -350,6 +353,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   setIdeTab: (tab) => set({ ideTab: tab }),
   setIDETab: (tab) => set({ ideTab: tab }),
   setExecuting: (v) => set({ isExecuting: v }),
+  setLongTaskLabel: (label) => set({ longTaskLabel: label }),
   appendLiveCode: (chunk) => set((s) => ({ liveCode: s.liveCode + chunk })),
   addLiveCodeFile: (name) =>
     set((s) => ({ liveCodeFiles: s.liveCodeFiles.includes(name) ? s.liveCodeFiles : [...s.liveCodeFiles, name] })),

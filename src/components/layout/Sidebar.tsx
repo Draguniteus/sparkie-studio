@@ -1,5 +1,6 @@
 'use client'
 
+import { useState, useEffect } from 'react'
 import { useAppStore } from '@/store/appStore'
 import {
   Search, FolderOpen, Image, MessageSquare,
@@ -8,6 +9,18 @@ import {
 import { useAuth } from '@/hooks/useAuth'
 
 export function Sidebar() {
+  const [connectorHealth, setConnectorHealth] = useState<'ok' | 'warn' | 'error' | null>(null)
+  useEffect(() => {
+    const check = () => {
+      fetch('/api/health', { signal: AbortSignal.timeout(5000) })
+        .then(r => setConnectorHealth(r.ok ? 'ok' : 'warn'))
+        .catch(() => setConnectorHealth('error'))
+    }
+    check()
+    const t = setInterval(check, 60_000)
+    return () => clearInterval(t)
+  }, [])
+
   const {
     sidebarOpen, toggleSidebar,
     setActiveTab, activeTab, openSettings,
@@ -52,7 +65,15 @@ export function Sidebar() {
               : 'text-text-muted'
           }`}
         >
-          <Icon size={20} />
+          <span className="relative">
+            <Icon size={20} />
+            {key === 'connectors' && connectorHealth && (
+              <span className={`absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full border border-hive-700 ${
+                connectorHealth === 'ok' ? 'bg-green-400' :
+                connectorHealth === 'warn' ? 'bg-honey-500' : 'bg-red-400'
+              }`} />
+            )}
+          </span>
           <span className="text-[9px] font-medium">{label}</span>
         </button>
       ))}
@@ -163,7 +184,15 @@ export function Sidebar() {
               }`}
               title={label}
             >
-              <Icon size={15} />
+              <span className="relative">
+                <Icon size={15} />
+                {key === 'connectors' && connectorHealth && (
+                  <span className={`absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full border border-hive-700 ${
+                    connectorHealth === 'ok' ? 'bg-green-400' :
+                    connectorHealth === 'warn' ? 'bg-honey-500' : 'bg-red-400'
+                  }`} />
+                )}
+              </span>
               {label}
             </button>
           ))}
