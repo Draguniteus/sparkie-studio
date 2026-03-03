@@ -792,6 +792,16 @@ export function ChatInput() {
           if (data === "[DONE]") continue
           try {
             const parsed = JSON.parse(data)
+            // Phase 5: task_chip — show "In memory:..." chip while tools run
+            if (parsed.task_chip) {
+              useAppStore.getState().setLongTaskLabel(parsed.task_chip as string)
+              continue
+            }
+            // Phase 5: task_chip_clear — hide chip when response arrives
+            if (parsed.task_chip_clear) {
+              useAppStore.getState().setLongTaskLabel(null)
+              continue
+            }
             // Hive status update — show as animated status pill + log to worklog
             if (parsed.hive_status) {
               setHiveStatus(parsed.hive_status)
