@@ -169,6 +169,7 @@ const FILTER_TABS: { key: FilterTab; label: string }[] = [
 ]
 
 interface PreviewModal {
+  id: string
   name: string
   content: string
   type: AssetType
@@ -344,7 +345,7 @@ export function AssetsTab() {
             {filtered.map(asset => (
               <div
                 key={asset.id}
-                onClick={() => setPreview({ name: asset.name, content: asset.content, type: asset.assetType, chatId: asset.chatId, chatTitle: asset.chatTitle })}
+                onClick={() => setPreview({ id: asset.id, name: asset.name, content: asset.content, type: asset.assetType, chatId: asset.chatId, chatTitle: asset.chatTitle })}
                 className="group relative flex flex-col rounded-xl border border-hive-border bg-hive-elevated hover:border-honey-500/30 hover:bg-hive-hover transition-all cursor-pointer overflow-hidden"
                 style={{ height: "160px" }}
               >
