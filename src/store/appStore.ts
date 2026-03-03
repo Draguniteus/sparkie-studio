@@ -167,6 +167,7 @@ interface AppState {
   addAsset: (asset: Omit<Asset, 'id' | 'createdAt'>) => void
   updateAsset: (fileId: string, content: string) => void
   clearAssets: () => void
+  removeAsset: (id: string) => void
   containerStatus: ContainerStatus
   previewUrl: string | null
   terminalOutput: string
@@ -376,6 +377,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ assets: [] })
     // Clear from DB too
     fetch('/api/assets', { method: 'DELETE' }).catch(() => {})
+  },
+  removeAsset: (id) => {
+    set((s) => ({ assets: s.assets.filter(a => a.id !== id) }))
+    fetch('/api/assets?id=' + encodeURIComponent(id), { method: 'DELETE' }).catch(() => {})
   },
 
   worklog: [],
