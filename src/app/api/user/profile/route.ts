@@ -12,9 +12,9 @@ export async function GET() {
   const res = await query<{
     id: string; email: string; display_name: string;
     tier: string; credits: number; gender: string | null; age: number | null;
-    avatar_url: string | null;
+    avatar_url: string | null; role: string;
   }>(
-    'SELECT id, email, display_name, tier, credits, gender, age, avatar_url FROM users WHERE email = $1',
+    'SELECT id, email, display_name, tier, credits, gender, age, avatar_url, role FROM users WHERE email = $1',
     [session.user.email]
   );
 
@@ -27,25 +27,9 @@ export async function GET() {
     displayName: user.display_name,
     tier: user.tier ?? 'free',
     credits: user.credits ?? 0,
+    role: user.role ?? 'user',
     gender: user.gender,
     age: user.age,
-    avatarUrl: user.avatar_url ?? null,
+    avatarUrl: user.avatar_url,
   });
-}
-
-export async function PATCH(req: Request) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const body = await req.json();
-  const { displayName } = body;
-
-  if (typeof displayName === 'string' && displayName.trim()) {
-    await query(
-      'UPDATE users SET display_name = $1 WHERE email = $2',
-      [displayName.trim(), session.user.email]
-    );
-  }
-
-  return NextResponse.json({ success: true });
 }

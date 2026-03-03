@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS users (
   age                    INTEGER,
   tier                   TEXT DEFAULT 'free',
   credits                INTEGER DEFAULT 100,
+  role                   TEXT DEFAULT 'user',
   created_at             TIMESTAMPTZ DEFAULT now(),
   updated_at             TIMESTAMPTZ DEFAULT now()
 );
@@ -39,6 +40,9 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS verify_token_expires   TIMESTAMPTZ;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS gender                 TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS age                    INTEGER;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url             TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS tier                   TEXT DEFAULT 'free';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS credits                INTEGER DEFAULT 100;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS role                   TEXT DEFAULT 'user';
 
 CREATE TABLE IF NOT EXISTS agents (
   id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -103,6 +107,20 @@ CREATE INDEX IF NOT EXISTS idx_credit_transactions_user_id ON credit_transaction
 CREATE INDEX IF NOT EXISTS idx_agents_creator_id ON agents(creator_id);
 CREATE INDEX IF NOT EXISTS idx_agents_visibility ON agents(visibility);
 CREATE INDEX IF NOT EXISTS idx_users_verify_token ON users(verify_token);
+
+-- Seed owner accounts (idempotent)
+INSERT INTO users (email, display_name, email_verified, role)
+VALUES ('draguniteus@gmail.com', 'Michael', true, 'owner')
+ON CONFLICT (email) DO UPDATE SET role = 'owner';
+
+INSERT INTO users (email, display_name, email_verified, role)
+VALUES ('michaelthearchangel2024@gmail.com', 'Michael (alt)', true, 'owner')
+ON CONFLICT (email) DO UPDATE SET role = 'owner';
+
+-- Seed Angelique — admin + mod + radio rights; sets her own password on first visit
+INSERT INTO users (email, display_name, email_verified, role)
+VALUES ('avad082817@gmail.com', 'Angelique', true, 'admin')
+ON CONFLICT (email) DO UPDATE SET role = 'admin', email_verified = true, display_name = 'Angelique';
 `;
 
 export async function GET(req: Request) {
