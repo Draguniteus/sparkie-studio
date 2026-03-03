@@ -2,6 +2,22 @@
 
 import { useState, useRef, useCallback, useEffect } from "react"
 import { useAppStore } from "@/store/appStore"
+
+// ── Step trace + worklog card types ──────────────────────────────────────
+interface StepTrace { icon: string; label: string; status: 'running' | 'done' | 'error'; duration?: number }
+interface WorklogCard { tool: string; summary: string; ts: string }
+
+const STEP_ICON_MAP: Record<string, string> = {
+  file: '📄', edit: '✏️', terminal: '⚡', search: '🔍',
+  database: '🗃️', globe: '🌐', brain: '🧠', scroll: '📋',
+  rocket: '🚀', image: '🎨', music: '🎵', video: '🎬', mic: '🎤', zap: '⚡',
+}
+const WORKLOG_TOOL_LABEL: Record<string, string> = {
+  save_memory: 'Saved to memory', save_self_memory: 'Self-memory updated',
+  log_worklog: 'Worklog entry', patch_file: 'Code patched',
+  write_file: 'File written', trigger_deploy: 'Deploy action',
+  create_task: 'Task queued', schedule_task: 'Task scheduled',
+}
 import { parseAIResponse, getLanguageFromFilename, deriveProjectName } from "@/lib/fileParser"
 import { Paperclip, ArrowUp, Sparkles, ChevronDown, Image as ImageIcon, Video, Music, Mic, MicOff, FileText, Headphones, Phone, Film, X, Square } from "lucide-react"
 import { VoiceChat } from "@/components/chat/VoiceChat"
@@ -128,6 +144,8 @@ export function ChatInput() {
   const [input, setInput] = useState("")
   const [showModels, setShowModels] = useState(false)
   const [hiveStatus, setHiveStatus] = useState<string | null>(null)
+  const [stepTraces, setStepTraces] = useState<StepTrace[]>([])
+  const [inlineFeedCards, setInlineFeedCards] = useState<WorklogCard[]>([])
   const [genMode, setGenMode] = useState<GenMode>("chat")
   const [slashSuggestions, setSlashSuggestions] = useState<Array<{ cmd: string; desc: string }>>([])
   const [selectedImageModel, setSelectedImageModel] = useState("flux")
@@ -792,6 +810,25 @@ export function ChatInput() {
           if (data === "[DONE]") continue
           try {
             const parsed = JSON.parse(data)
+            // Step-trace card
+            if (parsed.step_trace) {
+              const trace = parsed.step_trace as StepTrace
+              setStepTraces(prev => {
+                // Update last running entry to done/error, or add new running entry
+                const existing = prev.findIndex(t => t.label === trace.label && t.status === 'running')
+                if (existing >= 0 && (trace.status === 'done' || trace.status === 'error')) {
+                  return prev.map((t, i) => i === existing ? trace : t)
+                }
+                if (trace.status === 'running') return [...prev, trace]
+                return [...prev, trace]
+              })
+              continue
+            }
+            // Worklog card inline
+            if (parsed.worklog_card) {
+              setInlineFeedCards(prev => [...prev, parsed.worklog_card as WorklogCard])
+              continue
+            }
             // Phase 5: task_chip — show "In memory:..." chip while tools run
             if (parsed.task_chip) {
               useAppStore.getState().setLongTaskLabel(parsed.task_chip as string)
@@ -827,11 +864,11 @@ export function ChatInput() {
           } catch { /* skip */ }
         }
       }
-      // Detect if the chat model responded with build-redirect intent
-      // (e.g. misrouted build request: "I'll build that..." but no build fired)
-      const BUILD_REDIRECT_RE = /\b(i'll build|let me build|i'll create|let me create|i'll make|building that|creating that|spinning up|on it[!,]|here's the|here you go|i've built|i've created|i've made)\b/i
-      if (fullContent && BUILD_REDIRECT_RE.test(fullContent) && !fullContent.includes('```') && fullContent.length < 400) {
-        // Model responded with a build-redirect but no actual code — re-route to agent
+      // BUILD_REDIRECT: Only re-route if the model gave JUST a "I'll do it" with nothing else
+      // AND the original message had strong task intent (not emotional/greeting)
+      const BUILD_REDIRECT_RE = /^\s*(i'll build|let me build|i'll create|let me create|building that|creating that)[\.!]?\s*$/i
+      const hasStrongTaskIntent = /\b(build|create|make me|generate|write me|code)\b/i.test(userContent) && userContent.length > 20
+      if (fullContent && BUILD_REDIRECT_RE.test(fullContent.trim()) && hasStrongTaskIntent) {
         updateMessage(chatId, assistantMsgId, { content: '', isStreaming: false })
         streamAgent(chatId, userContent)
         return
@@ -1496,6 +1533,53 @@ export function ChatInput() {
               <span className="text-honey-500 font-mono text-sm font-semibold">{s.cmd}</span>
               <span className="text-xs text-text-muted">{s.desc}</span>
             </button>
+          ))}
+        </div>
+      )}
+
+      {/* Step-trace cards — show per-tool execution steps like SureThing */}
+      {stepTraces.length > 0 && (
+        <div className="mb-2 flex flex-col gap-1">
+          {stepTraces.slice(-6).map((trace, i) => (
+            <div key={i} className={`flex items-center gap-2.5 px-3 py-1.5 rounded-lg border text-xs w-fit max-w-full transition-all ${
+              trace.status === 'running'
+                ? 'bg-honey-500/8 border-honey-500/20 text-honey-400'
+                : trace.status === 'error'
+                ? 'bg-red-500/8 border-red-500/20 text-red-400'
+                : 'bg-hive-elevated/60 border-white/5 text-text-muted'
+            }`}>
+              <span className="shrink-0 text-[13px]">{STEP_ICON_MAP[trace.icon] ?? '⚡'}</span>
+              <span className="font-medium truncate max-w-[260px]">{trace.label}</span>
+              {trace.status === 'running' && (
+                <span className="shrink-0 flex gap-[3px] items-center">
+                  {[0,1,2].map(d => (
+                    <span key={d} className="w-1 h-1 rounded-full bg-honey-400 animate-bounce" style={{ animationDelay: `${d * 0.15}s` }} />
+                  ))}
+                </span>
+              )}
+              {trace.status === 'done' && <span className="shrink-0 text-green-400">✓</span>}
+              {trace.status === 'error' && <span className="shrink-0 text-red-400">✕</span>}
+              {trace.duration && trace.status !== 'running' && (
+                <span className="shrink-0 text-text-muted text-[10px] tabular-nums">{trace.duration < 1000 ? `${trace.duration}ms` : `${(trace.duration/1000).toFixed(1)}s`}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Inline worklog cards — memory/code/task actions shown in chat feed */}
+      {inlineFeedCards.length > 0 && (
+        <div className="mb-2 flex flex-col gap-1.5">
+          {inlineFeedCards.map((card, i) => (
+            <div key={i} className="flex items-start gap-2.5 px-3 py-2 rounded-xl bg-gradient-to-r from-purple-900/20 to-purple-950/10 border border-purple-500/20 text-xs w-fit max-w-full">
+              <div className="w-5 h-5 rounded-md bg-purple-500/20 flex items-center justify-center shrink-0 mt-0.5">
+                <span className="text-[11px]">🧠</span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <span className="text-purple-300 font-medium">{WORKLOG_TOOL_LABEL[card.tool] ?? card.tool.replace(/_/g,' ')}</span>
+                <p className="text-text-muted mt-0.5 leading-snug line-clamp-2">{card.summary}</p>
+              </div>
+            </div>
           ))}
         </div>
       )}
