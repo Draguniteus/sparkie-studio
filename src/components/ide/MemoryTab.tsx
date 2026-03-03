@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback, ComponentType } from 'react'
-import { Brain, Trash2, RefreshCw, Sparkles, Shield, Clock, Zap, BookOpen, User } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
+import { Brain, Trash2, RefreshCw, Sparkles, Shield, Clock, Zap, BookOpen, User, type LucideIcon } from 'lucide-react'
 
 interface MemoryEntry {
   id: number
@@ -14,7 +14,7 @@ interface MemoryEntry {
   created_at: string
 }
 
-const CATEGORY_STYLES: Record<string, { pill: string; card: string; dot: string; icon: ComponentType<{ size?: number; className?: string }> }> = {
+const CATEGORY_STYLES: Record<string, { pill: string; card: string; dot: string; icon: LucideIcon }> = {
   work_rule:      { pill: 'bg-purple-500/20 text-purple-300 border border-purple-500/30',  card: 'border-l-purple-500/60 bg-gradient-to-br from-purple-900/20 to-purple-950/40', dot: 'bg-purple-500', icon: Shield },
   self:           { pill: 'bg-blue-500/20 text-blue-300 border border-blue-500/30',        card: 'border-l-blue-500/60 bg-gradient-to-br from-blue-900/20 to-blue-950/40',       dot: 'bg-blue-500',   icon: Brain  },
   profile:        { pill: 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30',  card: 'border-l-indigo-500/60 bg-gradient-to-br from-indigo-900/20 to-indigo-950/40', dot: 'bg-indigo-400', icon: User   },
@@ -28,7 +28,7 @@ const DEFAULT_STYLE = {
   pill: 'bg-slate-500/20 text-slate-300 border border-slate-500/30',
   card: 'border-l-slate-500/60 bg-gradient-to-br from-slate-800/20 to-slate-900/40',
   dot: 'bg-slate-500',
-  icon: BookOpen as ComponentType<{ size?: number; className?: string }>,
+  icon: BookOpen as LucideIcon,
 }
 
 function getStyle(category: string) {
