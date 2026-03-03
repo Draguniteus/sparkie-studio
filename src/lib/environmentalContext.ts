@@ -82,7 +82,7 @@ async function getLastDeployInfo(): Promise<{ sha: string; status: 'success' | '
        WHERE type = 'code_push' ORDER BY created_at DESC LIMIT 1`
     )
     if (!res.rows[0]) return { sha: 'unknown', status: 'unknown' }
-    const meta = res.rows[0].metadata ?? {}
+    const meta = (res.rows[0].metadata ?? {}) as { commit_sha?: string; deploy_status?: string }
     return {
       sha: meta.commit_sha ?? 'unknown',
       status: meta.deploy_status ?? 'unknown'
