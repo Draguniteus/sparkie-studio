@@ -191,7 +191,6 @@ export function AssetsTab() {
   const filtered = useMemo(() => {
     return enriched
       .slice()
-      .reverse()
       .filter(a => {
         // Exclude raw source/config files (they live in Files tab)
         if (isSourceFile(a.name)) return false
