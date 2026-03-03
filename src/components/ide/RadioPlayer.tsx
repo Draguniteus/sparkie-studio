@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react"
 import { useSession } from "next-auth/react"
-import { Music, Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, X, Radio, Link, Upload, ChevronDown, ChevronUp, Pencil, Check, Megaphone, Image as ImageIcon } from "lucide-react"
+import { Music, Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, X, Radio, Link, Upload, ChevronDown, ChevronUp, Pencil, Check, Megaphone, Image as ImageIcon, BookmarkPlus } from "lucide-react"
 
 interface RadioTrack {
   id: string
@@ -96,6 +96,8 @@ export function RadioPlayer() {
   const [showAnnouncement, setShowAnnouncement] = useState(false)
   const [announcementText, setAnnouncementText] = useState("")
   const [activeBroadcast, setActiveBroadcast] = useState<string | null>(null)
+  // Track which station tracks the user has already saved to My Tracks
+  const [savedIds, setSavedIds] = useState<Set<string>>(new Set())
   const audioRef = useRef<HTMLAudioElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -346,6 +348,25 @@ export function RadioPlayer() {
     setAnnouncementText(""); setShowAnnouncement(false)
   }, [announcementText])
 
+  // Save a station track to the user's personal My Tracks (cross-tab)
+  const saveStationTrackToMine = useCallback((track: RadioTrack) => {
+    if (savedIds.has(track.id)) return
+    const myTrack: RadioTrack = {
+      id: crypto.randomUUID(),
+      title: track.title,
+      artist: track.artist,
+      src: track.src,
+      type: 'url',
+      addedAt: new Date(),
+    }
+    setTracks(prev => {
+      const next = [...prev, myTrack]
+      saveTracks(next)
+      return next
+    })
+    setSavedIds(prev => new Set([...prev, track.id]))
+  }, [savedIds])
+
   const formatTime = (s: number) => {
     if (!isFinite(s)) return "0:00"
     const m = Math.floor(s / 60); const sec = Math.floor(s % 60)
@@ -364,13 +385,14 @@ export function RadioPlayer() {
       <input ref={editCoverInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden"
         onChange={(e) => { const f = e.target.files?.[0]; if (f) { setEditCoverFile(f); setEditCoverPreview(URL.createObjectURL(f)) } }} />
 
-      {/* Station Announcement Banner */}
+      {/* Station Announcement Banner — rainbow animated */}
       {activeBroadcast && (
-        <div className="px-3 py-2 bg-honey-500/15 border-b border-honey-500/30 flex items-center gap-2 shrink-0">
-          <Megaphone className="w-3.5 h-3.5 text-honey-500 shrink-0" />
-          <p className="flex-1 text-xs text-honey-400 font-medium">{activeBroadcast}</p>
+        <div className="px-3 py-2 bg-black/30 border-b border-white/10 flex items-center gap-2 shrink-0 relative overflow-hidden">
+          <div className="absolute inset-0 opacity-20" style={{background: 'linear-gradient(90deg,#ff0055,#ff6600,#ffee00,#00ff88,#00ccff,#aa44ff,#ff0055)', backgroundSize: '300% 100%', animation: 'rainbowSlide 4s linear infinite'}} />
+          <Megaphone className="w-3.5 h-3.5 shrink-0 relative z-10" style={{color: 'white'}} />
+          <p className="flex-1 text-xs font-bold relative z-10 rainbow-broadcast">{activeBroadcast}</p>
           {isAdmin && (
-            <button onClick={() => setActiveBroadcast(null)} className="text-honey-500/60 hover:text-honey-400 transition-colors">
+            <button onClick={() => setActiveBroadcast(null)} className="relative z-10 text-white/60 hover:text-white transition-colors">
               <X className="w-3 h-3" />
             </button>
           )}
@@ -667,6 +689,13 @@ export function RadioPlayer() {
                       {track.artist && <p className="text-[10px] text-text-muted truncate">{track.artist}</p>}
                     </div>
                     <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                      {activeTab === "station" && (
+                        <button onClick={e => { e.stopPropagation(); saveStationTrackToMine(track) }}
+                          className={`w-6 h-6 rounded-md flex items-center justify-center transition-all ${savedIds.has(track.id) ? 'text-honey-500 bg-honey-500/10' : 'text-text-muted hover:text-honey-400 hover:bg-honey-500/10'}`}
+                          title={savedIds.has(track.id) ? "Saved to My Tracks" : "Save to My Tracks"}>
+                          {savedIds.has(track.id) ? <Check className="w-3 h-3" /> : <BookmarkPlus className="w-3 h-3" />}
+                        </button>
+                      )}
                       {isAdmin && activeTab === "station" && (
                         <button onClick={e => { e.stopPropagation(); startEdit(track) }}
                           className="w-6 h-6 rounded-md flex items-center justify-center text-text-muted hover:text-honey-400 hover:bg-honey-500/10 transition-all"
@@ -674,10 +703,12 @@ export function RadioPlayer() {
                           <Pencil className="w-3 h-3" />
                         </button>
                       )}
-                      <button onClick={e => { e.stopPropagation(); removeTrack(track.id) }}
-                        className="w-6 h-6 rounded-md flex items-center justify-center text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-all">
-                        <X className="w-3 h-3" />
-                      </button>
+                      {(isAdmin || activeTab === "mine") && (
+                        <button onClick={e => { e.stopPropagation(); removeTrack(track.id) }}
+                          className="w-6 h-6 rounded-md flex items-center justify-center text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-all">
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
