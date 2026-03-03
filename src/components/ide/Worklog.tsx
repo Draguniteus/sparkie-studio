@@ -18,12 +18,11 @@ function formatDuration(ms: number): string {
   return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`
 }
 
-// ── Icon mapping (handles new Phase 1 types) ─────────────────────────────────
-function getIcon(type: string, decisionType?: string): typeof Brain {
+function getIcon(type: string, decisionType?: string): React.ElementType {
   if (decisionType === "skip") return SkipForward
   if (decisionType === "proactive") return Zap
   if (decisionType === "hold") return ShieldCheck
-  const map: Record<string, typeof Brain> = {
+  const map: Record<string, React.ElementType> = {
     thinking: Brain,
     action: Zap,
     result: CheckCircle,
@@ -49,7 +48,6 @@ function getIcon(type: string, decisionType?: string): typeof Brain {
   return map[type] ?? BookOpen
 }
 
-// ── Color mapping by status and type ─────────────────────────────────────────
 function getColor(type: string, status?: string, decisionType?: string): string {
   if (status === "anomaly") return "text-red-400"
   if (status === "blocked") return "text-yellow-400"
@@ -102,18 +100,20 @@ function getLabel(type: string, decisionType?: string): string {
     ai_response: "AI Response",
     message_batch: "Messages",
   }
-  return map[type] ?? type.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())
+  return map[type] ?? type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+const PRIORITY_STYLES: Record<string, string> = {
+  P0: "bg-red-500/20 text-red-400 border border-red-500/30",
+  P1: "bg-honey-500/20 text-honey-400 border border-honey-500/30",
+  P2: "bg-blue-500/20 text-blue-400 border border-blue-500/30",
 }
 
 function PriorityBadge({ priority }: { priority?: string }) {
   if (!priority || priority === "P3") return null
-  const styles: Record<string, string> = {
-    P0: "bg-red-500/20 text-red-400 border border-red-500/30",
-    P1: "bg-honey-500/20 text-honey-400 border border-honey-500/30",
-    P2: "bg-blue-500/20 text-blue-400 border border-blue-500/30",
-  }
+  const cls = PRIORITY_STYLES[priority] ?? ""
   return (
-    <span className={\`text-[9px] font-bold px-1 rounded \${styles[priority] ?? ""}\`}>
+    <span className={"text-[9px] font-bold px-1 rounded " + cls}>
       {priority}
     </span>
   )
@@ -157,22 +157,15 @@ export function Worklog({ compact = false }: WorklogProps) {
         const duration = entry.actual_duration_ms ?? entry.duration
         const timestamp = entry.created_at ?? entry.timestamp
 
+        let rowClass = "flex gap-2 " + (compact ? "py-1 px-1.5" : "p-2.5") + " rounded-lg transition-colors "
+        if (isAnomaly) rowClass += "bg-red-500/5 border border-red-500/20"
+        else if (isBlocked) rowClass += "bg-yellow-500/5 border border-yellow-500/20"
+        else if (isRunning) rowClass += "bg-honey-500/5 border border-honey-500/20"
+        else if (!compact) rowClass += "hover:bg-hive-hover"
+
         return (
-          <div
-            key={entry.id}
-            className={\`flex gap-2 \${compact ? "py-1 px-1.5" : "p-2.5"} rounded-lg transition-colors \${
-              isAnomaly
-                ? "bg-red-500/5 border border-red-500/20"
-                : isBlocked
-                ? "bg-yellow-500/5 border border-yellow-500/20"
-                : isRunning
-                ? "bg-honey-500/5 border border-honey-500/20"
-                : compact
-                ? ""
-                : "hover:bg-hive-hover"
-            }\`}
-          >
-            <div className={\`shrink-0 mt-0.5 \${color}\`}>
+          <div key={entry.id} className={rowClass}>
+            <div className={"shrink-0 mt-0.5 " + color}>
               {isRunning
                 ? <Loader2 size={compact ? 12 : 14} className="animate-spin" />
                 : <Icon size={compact ? 12 : 14} />
@@ -180,20 +173,17 @@ export function Worklog({ compact = false }: WorklogProps) {
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1.5 flex-wrap">
-                <span className={\`text-[10px] font-medium uppercase tracking-wider \${color}\`}>{label}</span>
-                {entry.signal_priority && <PriorityBadge priority={entry.signal_priority} />}
+                <span className={"text-[10px] font-medium uppercase tracking-wider " + color}>{label}</span>
+                <PriorityBadge priority={entry.signal_priority} />
                 <span className="text-[10px] text-text-muted">{formatTime(timestamp)}</span>
                 {duration != null && entry.status === "done" && (
                   <span className="text-[10px] text-text-muted">{formatDuration(duration)}</span>
                 )}
                 {isSkipped && <span className="text-[9px] text-text-muted italic">skipped</span>}
               </div>
-              <p className={\`\${compact ? "text-[10px]" : "text-xs"} text-text-secondary mt-0.5 \${
-                compact ? "truncate" : "break-words whitespace-pre-wrap"
-              }\`}>
+              <p className={(compact ? "text-[10px]" : "text-xs") + " text-text-secondary mt-0.5 " + (compact ? "truncate" : "break-words whitespace-pre-wrap")}>
                 {compact && entry.content.length > 80 ? entry.content.slice(0, 80) + "…" : entry.content}
               </p>
-              {/* Phase 1: Inner monologue — show reasoning for decision/skip/hold/escalate entries */}
               {!compact && entry.reasoning && (
                 <p className="text-[10px] text-text-muted italic mt-1 opacity-75 border-l-2 border-text-muted/20 pl-2">
                   {entry.reasoning}
