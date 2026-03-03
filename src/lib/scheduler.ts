@@ -7,6 +7,96 @@ import { loadReadyDeferredIntents, markDeferredIntentSurfaced } from '@/lib/time
 import { runTTLDecaySweep } from '@/lib/knowledgeTTL'
 import { computeUserModel } from '@/lib/userModel'
 
+// ── Proactive inbox/calendar loop (Phase 6) ────────────────────────────────
+const COMPOSIO_BASE = 'https://backend.composio.dev/api/v3'
+const COMPOSIO_KEY  = process.env.COMPOSIO_API_KEY ?? ''
+const INTERNAL_BASE = process.env.NEXTAUTH_URL ?? process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3000'
+
+async function proactiveInboxSweep(userId: string): Promise<void> {
+  if (!COMPOSIO_KEY) return
+
+  // 1. Fetch last 5 unread emails via Composio Gmail connector
+  let emailsJson: string
+  try {
+    const entityId = `sparkie_user_${userId}`
+    const emailRes = await fetch(`${COMPOSIO_BASE}/actions/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': COMPOSIO_KEY },
+      body: JSON.stringify({
+        actionName: 'GMAIL_FETCH_EMAILS',
+        input: { query: 'is:unread', max_results: 5 },
+        entityId,
+      }),
+      signal: AbortSignal.timeout(10000),
+    })
+    if (!emailRes.ok) return
+    const emailData = await emailRes.json() as { data?: { messages?: Array<{ subject: string; from: string; snippet: string; id: string }> } }
+    const messages = emailData?.data?.messages ?? []
+    if (messages.length === 0) return
+    emailsJson = JSON.stringify(messages.slice(0, 3))
+  } catch { return }
+
+  // 2. Check if we already have a pending inbox task for this user (debounce)
+  try {
+    const existing = await query<{ id: string }>(
+      `SELECT id FROM sparkie_tasks WHERE user_id = $1 AND label LIKE 'Inbox sweep%' AND status = 'pending' AND created_at > NOW() - INTERVAL '30 minutes'`,
+      [userId]
+    )
+    if (existing.rows.length > 0) return // already queued
+
+    // 3. Create autonomous task to draft responses to urgent emails
+    const taskId = `proactive_inbox_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+    await query(
+      `INSERT INTO sparkie_tasks (id, user_id, action, label, payload, status, executor, trigger_type, scheduled_at)
+       VALUES ($1, $2, $3, $4, $5, 'pending', 'ai', 'manual', NOW())`,
+      [taskId, userId,
+        `Review these unread emails and take appropriate action: ${emailsJson}. For each: (1) if urgent, draft a reply using the user's email account via GMAIL_CREATE_EMAIL_DRAFT. (2) if informational, just log a worklog summary. (3) if low-priority newsletter, skip. Report what you did.`,
+        'Inbox sweep — autonomous email review',
+        JSON.stringify({ email_count: JSON.parse(emailsJson).length, source: 'proactive_scheduler' })
+      ]
+    )
+
+    await writeWorklog(userId, 'proactive_signal', `📬 Found ${JSON.parse(emailsJson).length} unread emails — queued autonomous review`, {
+      status: 'running',
+      decision_type: 'proactive',
+      reasoning: 'Proactive inbox sweep found unread messages; autonomous draft task created',
+      signal_priority: 'P2',
+    })
+  } catch { /* non-critical */ }
+}
+
+async function proactiveCalendarSweep(userId: string): Promise<void> {
+  if (!COMPOSIO_KEY) return
+  const now = new Date()
+  const in24h = new Date(now.getTime() + 24 * 60 * 60 * 1000)
+  try {
+    const entityId = `sparkie_user_${userId}`
+    const calRes = await fetch(`${COMPOSIO_BASE}/actions/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': COMPOSIO_KEY },
+      body: JSON.stringify({
+        actionName: 'GOOGLECALENDAR_LIST_EVENTS',
+        input: { timeMin: now.toISOString(), timeMax: in24h.toISOString(), maxResults: 5 },
+        entityId,
+      }),
+      signal: AbortSignal.timeout(10000),
+    })
+    if (!calRes.ok) return
+    const calData = await calRes.json() as { data?: { items?: Array<{ summary: string; start?: { dateTime?: string }; attendees?: unknown[] }> } }
+    const events = calData?.data?.items ?? []
+    if (events.length === 0) return
+
+    // Surface calendar events to worklog (no task creation needed — just awareness)
+    const eventSummary = events.slice(0, 3).map(e => `${e.summary} at ${e.start?.dateTime ?? 'TBD'}`).join('; ')
+    await writeWorklog(userId, 'proactive_signal', `📅 ${events.length} upcoming event${events.length > 1 ? 's' : ''} in next 24h: ${eventSummary}`, {
+      status: 'done',
+      decision_type: 'proactive',
+      reasoning: 'Proactive calendar sweep surfaced upcoming events',
+      signal_priority: 'P3',
+    })
+  } catch { /* non-critical */ }
+}
+
 const INTERNAL_SECRET = process.env.SPARKIE_INTERNAL_SECRET ?? ''
 const SCHEDULER_INTERVAL_MS = 60_000 // 1 minute
 
@@ -255,6 +345,16 @@ async function heartbeatTick(baseUrl: string): Promise<void> {
 
       // Prune expired tool cache entries
       pruneToolCache()
+
+      // ── Proactive inbox + calendar sweeps ──────────────────────────────────
+      // Run once every 5 ticks (~5 min) for all active users to avoid hammering APIs
+      const shouldRunProactive = Math.floor(Date.now() / 1000) % 300 < 60
+      if (shouldRunProactive && dueUsers.rows.length > 0) {
+        for (const { user_id } of dueUsers.rows.slice(0, 2)) {
+          proactiveInboxSweep(user_id).catch(() => {})
+          proactiveCalendarSweep(user_id).catch(() => {})
+        }
+      }
 
       // ── Surface ready deferred intents ─────────────────────────────────────
       // Check all active users for deferred intents that are now ready
