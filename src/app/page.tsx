@@ -131,7 +131,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* IDE splitter — desktop only */}
+      {/* Sparkie's Brain splitter — desktop only */}
       {showIDE && (
         <div
           onMouseDown={onSplitterMouseDown}
@@ -151,7 +151,7 @@ export default function Home() {
         </div>
       )}
 
-      {/* IDE panel — desktop only */}
+      {/* Sparkie's Brain panel — desktop only */}
       {showIDE && (
         <div style={{ width: ideWidth }} className="shrink-0 overflow-hidden hidden md:block">
           <IDEPanel />

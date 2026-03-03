@@ -10,6 +10,8 @@ import { LiveCodeView } from "@/components/ide/LiveCodeView"
 import { Terminal } from "@/components/ide/Terminal"
 import { Download, ChevronLeft, ChevronRight } from "lucide-react"
 import { TaskQueuePanel } from "@/components/ide/TaskQueuePanel"
+import { MemoryTab } from "@/components/ide/MemoryTab"
+import { Brain } from "lucide-react"
 
 
 function WorklogPanel() {
@@ -28,7 +30,7 @@ function WorklogPanel() {
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-hive-border shrink-0">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-text-primary">Sparkie's Worklog</span>
+          <div className="flex items-center gap-1.5"><div className="w-4 h-4 rounded bg-purple-500/20 flex items-center justify-center"><Brain size={9} className="text-purple-400" /></div><span className="text-xs font-semibold text-text-primary">Sparkie's Brain</span></div>
           {entries.length > 0 && (
             <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
           )}
@@ -172,6 +174,7 @@ export function IDEPanelInner() {
   const tabs = [
     { id: 'process',  label: 'Process'  },
     { id: 'worklog',  label: 'Worklog'  },
+    { id: 'memory',   label: 'Memory'   },
     { id: 'tasks',    label: 'Tasks'    },
     { id: 'files',    label: 'Files'    },
     { id: 'terminal', label: 'Terminal' },
@@ -213,6 +216,9 @@ export function IDEPanelInner() {
       <div className="flex-1 overflow-hidden">
         {ideTab === 'worklog' && (
           <WorklogPanel />
+        )}
+        {ideTab === 'memory' && (
+          <MemoryTab />
         )}
         {ideTab === 'tasks' && (
           <TaskQueuePanel />
