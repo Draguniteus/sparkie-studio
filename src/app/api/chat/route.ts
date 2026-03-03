@@ -1635,7 +1635,21 @@ async function executeTool(
               const ct = imgRes.headers.get('content-type') || 'image/jpeg'
               const buf = await imgRes.arrayBuffer()
               const b64 = Buffer.from(buf).toString('base64')
-              return 'IMAGE_URL:data:' + ct + ';base64,' + b64
+              const dataUrl = 'data:' + ct + ';base64,' + b64
+              // Persist asset to DB so the message stores a stable URL (not MB of base64)
+              if (userId) {
+                try {
+                  const fid = crypto.randomUUID()
+                  const slug = (prompt as string).slice(0, 40).replace(/[^a-z0-9]/gi, '_').toLowerCase()
+                  await query(
+                    `INSERT INTO sparkie_assets (user_id, name, content, asset_type, source, file_id, chat_title, chat_id, language)
+                     VALUES ($1, $2, $3, 'image', 'agent', $4, '', '', '')`,
+                    [userId, slug + '.jpg', dataUrl, fid]
+                  )
+                  return 'IMAGE_URL:' + baseUrl + '/api/assets-image?fid=' + fid
+                } catch { /* fall back to data URL if DB save fails */ }
+              }
+              return 'IMAGE_URL:' + dataUrl
             }
           } catch { /* try next model */ }
         }
@@ -3054,7 +3068,7 @@ function selectModel(messages: Array<{ role: string; content: string }>): ModelS
     // Greetings, acknowledgments, reactions
     /^(hi|hey|hello|yo|sup|what's up|how are you|how's it going|good morning|good night|good evening|thanks|thank you|nice|cool|awesome|great|sounds good|got it|ok|okay|sure|lol|haha|wow|really|damn|perfect|love it|that's|thats)/.test(lower.trim()) ||
     // Simple question with no task signal (weather, time, quick facts — nano handles these tools fine)
-    (!taskIntent && msgLen < 150 && /\b(who|what|why|when|where|how|weather|time|date|today)\b/.test(lower) && !/\b(code|file|repo|deploy|build|task|email|tweet|post|github)\b/.test(lower)) ||
+    (!taskIntent && msgLen < 150 && /\b(who|what|why|when|where|how|date|today)\b/.test(lower) && !/\b(weather|time|news|current|latest|live|price|stock|code|file|repo|deploy|build|task|email|tweet|post|github)\b/.test(lower)) ||
     // Short messages with zero task signal
     (msgLen < 60 && !taskIntent)
   )
