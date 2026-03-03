@@ -39,7 +39,7 @@ export async function runAuthHealthSweep(userId: string): Promise<AuthStatus[]> 
           healthy: false,
           checked_at: new Date().toISOString(),
           error: `HTTP ${connRes.status}`,
-          reconnect_url: \`/connectors\`
+          reconnect_url: '/connectors'
         })
         continue
       }
@@ -52,7 +52,7 @@ export async function runAuthHealthSweep(userId: string): Promise<AuthStatus[]> 
         healthy,
         checked_at: new Date().toISOString(),
         error: healthy ? undefined : 'No active connection found',
-        reconnect_url: healthy ? undefined : \`/connectors\`
+        reconnect_url: healthy ? undefined : '/connectors'
       })
     } catch (e) {
       results.push({
@@ -60,7 +60,7 @@ export async function runAuthHealthSweep(userId: string): Promise<AuthStatus[]> 
         healthy: false,
         checked_at: new Date().toISOString(),
         error: e instanceof Error ? e.message : String(e),
-        reconnect_url: \`/connectors\`
+        reconnect_url: '/connectors'
       })
     }
   }
