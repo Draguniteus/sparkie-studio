@@ -3,13 +3,7 @@ import { Pool } from 'pg';
 
 export const runtime = 'nodejs';
 
-// DO managed PostgreSQL uses a self-signed cert chain
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
-});
 
 const migration = `
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
@@ -32,7 +26,6 @@ CREATE TABLE IF NOT EXISTS users (
   updated_at             TIMESTAMPTZ DEFAULT now()
 );
 
--- Idempotent column additions for existing tables
 ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash          TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified         BOOLEAN DEFAULT false;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS verify_token           TEXT;
@@ -108,7 +101,6 @@ CREATE INDEX IF NOT EXISTS idx_agents_creator_id ON agents(creator_id);
 CREATE INDEX IF NOT EXISTS idx_agents_visibility ON agents(visibility);
 CREATE INDEX IF NOT EXISTS idx_users_verify_token ON users(verify_token);
 
--- Seed owner accounts (idempotent)
 INSERT INTO users (email, display_name, email_verified, role)
 VALUES ('draguniteus@gmail.com', 'Michael', true, 'owner')
 ON CONFLICT (email) DO UPDATE SET role = 'owner';
@@ -117,7 +109,6 @@ INSERT INTO users (email, display_name, email_verified, role)
 VALUES ('michaelthearchangel2024@gmail.com', 'Michael (alt)', true, 'owner')
 ON CONFLICT (email) DO UPDATE SET role = 'owner';
 
--- Seed Angelique — admin + mod + radio rights; sets her own password on first visit
 INSERT INTO users (email, display_name, email_verified, role)
 VALUES ('avad082817@gmail.com', 'Angelique', true, 'admin')
 ON CONFLICT (email) DO UPDATE SET role = 'admin', email_verified = true, display_name = 'Angelique';
@@ -130,6 +121,15 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  // Pool created inside handler — avoids module-level cold-start deadlock
+  const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false },
+    connectionTimeoutMillis: 10000,
+    idleTimeoutMillis: 10000,
+    max: 1,
+  });
+
   const client = await pool.connect();
   try {
     await client.query(migration);
@@ -140,20 +140,19 @@ export async function GET(req: Request) {
     `);
     const tables = tablesResult.rows.map((r: { table_name: string }) => r.table_name);
 
-    // Return users columns so we can verify the migration visually
     const colsResult = await client.query(`
       SELECT column_name, data_type, column_default, is_nullable
       FROM information_schema.columns
       WHERE table_schema = 'public' AND table_name = 'users'
       ORDER BY ordinal_position;
     `);
-    const usersColumns = colsResult.rows;
 
-    return NextResponse.json({ success: true, tables, usersColumns });
+    return NextResponse.json({ success: true, tables, usersColumns: colsResult.rows });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: msg }, { status: 500 });
   } finally {
     client.release();
+    await pool.end();
   }
 }
