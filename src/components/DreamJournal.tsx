@@ -324,11 +324,22 @@ function LockScreen({ onUnlock }: { onUnlock: () => void }) {
 
 // ── WYSIWYG EDITOR ────────────────────────────────────────────────────────────
 // Uses contenteditable + execCommand for true live formatting (bold/italic show instantly)
-function RichEditor({ onContentChange, placeholder }: {
+function RichEditor({ onContentChange, placeholder, editorRef: externalRef, initialContent }: {
   onContentChange: (html: string) => void
   placeholder: string
+  editorRef?: React.RefObject<HTMLDivElement>
+  initialContent?: string
 }) {
-  const editorRef = useRef<HTMLDivElement>(null)
+  const internalRef = useRef<HTMLDivElement>(null)
+  const editorRef = externalRef ?? internalRef
+
+  useEffect(() => {
+    if (initialContent && editorRef.current) {
+      editorRef.current.innerHTML = initialContent
+      onContentChange(initialContent)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [isEmpty, setIsEmpty] = useState(true)
 
   const exec = (cmd: string, value?: string) => {
@@ -494,12 +505,7 @@ function NewEntry({
 
   useEffect(() => {
     titleRef.current?.focus()
-    // If initialContent passed (from Sparkie), inject it into contenteditable
-    if (initialContent && editorRef.current) {
-      editorRef.current.innerHTML = initialContent
-      setHtmlContent(initialContent)
-    }
-  }, [initialContent])
+  }, [])
 
   const save = async () => {
     if (!title.trim()) {
@@ -508,7 +514,7 @@ function NewEntry({
       setTimeout(() => setTitleError(false), 2000)
       return
     }
-    const content = editorRef.current?.innerHTML || ''
+    const content = htmlContent
     if (!content.trim() || content === '<br>') return
     setSaving(true)
     const res = await fetch('/api/journal', {
@@ -629,6 +635,8 @@ function NewEntry({
         <RichEditor
           onContentChange={html => setHtmlContent(html)}
           placeholder="Write freely. This space is yours alone…"
+          editorRef={editorRef}
+          initialContent={initialContent}
         />
         <input ref={imgInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleImageUpload} />
       </div>
