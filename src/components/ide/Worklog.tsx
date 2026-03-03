@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, ElementType } from "react"
 import { useAppStore, WorklogEntry } from "@/store/appStore"
 import {
   Brain, Zap, CheckCircle, AlertCircle, Code, Loader2,
@@ -19,11 +19,11 @@ function formatDuration(ms: number): string {
   return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`
 }
 
-function getIcon(type: string, decisionType?: string): React.ElementType {
+function getIcon(type: string, decisionType?: string): ElementType {
   if (decisionType === "skip") return SkipForward
   if (decisionType === "proactive") return Zap
   if (decisionType === "hold") return ShieldCheck
-  const map: Record<string, React.ElementType> = {
+  const map: Record<string, ElementType> = {
     thinking: Brain, action: Zap, result: CheckCircle, error: AlertCircle,
     code: Code, email_processed: Mail, email_skipped: SkipForward,
     memory_learned: Sparkles, memory_updated: Sparkles,

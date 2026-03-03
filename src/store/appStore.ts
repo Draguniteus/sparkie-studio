@@ -107,9 +107,10 @@ export type WorklogEntry = {
   actual_duration_ms?: number
   signal_priority?: 'P0' | 'P1' | 'P2' | 'P3'
   duration?: number
+  confidence?: number
 }
 
-export type IDETab = 'process' | 'files' | 'terminal' | 'worklog' | 'tasks'
+export type IDETab = 'process' | 'files' | 'terminal' | 'worklog' | 'tasks' | 'memory'
 
 export type ContainerStatus =
   | 'idle'
