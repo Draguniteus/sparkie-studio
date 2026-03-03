@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server'
-import { getServerSession } from 'next-auth'
+import { getServerSession } from 'next-auth/next'
 import { authOptions } from '@/lib/auth'
 import { query } from '@/lib/db'
 import {
@@ -11,8 +11,9 @@ import {
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions)
-  if (!session?.user?.id) return new Response('Unauthorized', { status: 401 })
-  const userId = session.user.id
+  if (!session?.user) return new Response('Unauthorized', { status: 401 })
+  const userId = (session.user as { id?: string }).id ?? session.user.email ?? ''
+  if (!userId) return new Response('Unauthorized', { status: 401 })
 
   const { searchParams } = new URL(req.url)
   const mode = searchParams.get('mode') ?? 'ready'
@@ -38,8 +39,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions)
-  if (!session?.user?.id) return new Response('Unauthorized', { status: 401 })
-  const userId = session.user.id
+  if (!session?.user) return new Response('Unauthorized', { status: 401 })
+  const userId = (session.user as { id?: string }).id ?? session.user.email ?? ''
+  if (!userId) return new Response('Unauthorized', { status: 401 })
 
   try {
     const { intent, sourceMsg, notBefore, dueAt } = await req.json()
@@ -60,8 +62,9 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   const session = await getServerSession(authOptions)
-  if (!session?.user?.id) return new Response('Unauthorized', { status: 401 })
-  const userId = session.user.id
+  if (!session?.user) return new Response('Unauthorized', { status: 401 })
+  const userId = (session.user as { id?: string }).id ?? session.user.email ?? ''
+  if (!userId) return new Response('Unauthorized', { status: 401 })
 
   try {
     const { id, status } = await req.json()
