@@ -59,21 +59,19 @@ export async function loadThreadContext(userId: string): Promise<{
     await ensureThreadSchema()
 
     // Load compressed summaries
-    const summaryRes = await query(
+    const summaryRes = await query<{ content: string }>(
       `SELECT content FROM sparkie_threads WHERE user_id = $1 AND is_compressed = TRUE ORDER BY created_at ASC`,
       [userId]
     )
-    const compressedSummary = summaryRes.rows.map((r: { content: string }) => r.content).join('\n\n')
+    const compressedSummary = summaryRes.rows.map((r) => r.content).join('\n\n')
 
     // Load pinned tool pairs (never compressed)
-    const pinnedRes = await query(
+    const pinnedRes = await query<{ role: 'user'|'assistant'|'tool'; content: string; tool_call_id: string|null; is_tool_result: boolean }>(
       `SELECT role, content, tool_call_id, is_tool_result FROM sparkie_threads
        WHERE user_id = $1 AND is_pinned = TRUE ORDER BY created_at ASC`,
       [userId]
     )
-    const pinnedPairs = pinnedRes.rows.map((r: {
-      role: 'user'|'assistant'|'tool'; content: string; tool_call_id: string|null; is_tool_result: boolean
-    }) => ({
+    const pinnedPairs = pinnedRes.rows.map((r) => ({
       role: r.role,
       content: r.content,
       tool_call_id: r.tool_call_id ?? undefined,
@@ -81,16 +79,14 @@ export async function loadThreadContext(userId: string): Promise<{
     }))
 
     // Load recent uncompressed (newest first, up to token budget)
-    const recentRes = await query(
+    const recentRes = await query<{ role: 'user'|'assistant'|'tool'; content: string; token_estimate: number }>(
       `SELECT role, content, token_estimate FROM sparkie_threads
        WHERE user_id = $1 AND is_compressed = FALSE AND is_pinned = FALSE
        ORDER BY created_at DESC LIMIT 30`,
       [userId]
     )
     // Reverse to chronological order
-    const recentMessages: ThreadMessage[] = recentRes.rows.reverse().map((r: {
-      role: 'user'|'assistant'|'tool'; content: string; token_estimate: number
-    }) => ({
+    const recentMessages: ThreadMessage[] = recentRes.rows.reverse().map((r) => ({
       role: r.role,
       content: r.content,
       token_estimate: r.token_estimate,
@@ -118,7 +114,7 @@ export async function writeSessionSnapshot(userId: string, snapshot: string): Pr
 // ── Read session snapshot for continuity check ────────────────────────────────
 export async function readSessionSnapshot(userId: string): Promise<string> {
   try {
-    const res = await query(
+    const res = await query<{ content: string }>(
       `SELECT content FROM user_identity_files WHERE user_id = $1 AND file_type = 'snapshot'`,
       [userId]
     )
@@ -129,7 +125,7 @@ export async function readSessionSnapshot(userId: string): Promise<string> {
 // ── Count uncompressed tokens for a user ─────────────────────────────────────
 export async function getUncompressedTokenCount(userId: string): Promise<number> {
   try {
-    const res = await query(
+    const res = await query<{ total: string }>(
       `SELECT COALESCE(SUM(token_estimate), 0) as total FROM sparkie_threads
        WHERE user_id = $1 AND is_compressed = FALSE AND is_pinned = FALSE`,
       [userId]
@@ -146,12 +142,12 @@ export async function compressOldestBatch(
 ): Promise<void> {
   try {
     // Get the IDs of the oldest COMPRESS_BATCH_SIZE uncompressed, unpinned messages
-    const res = await query(
+    const res = await query<{ id: number }>(
       `SELECT id FROM sparkie_threads WHERE user_id = $1 AND is_compressed = FALSE AND is_pinned = FALSE
        ORDER BY created_at ASC LIMIT $2`,
       [userId, COMPRESS_BATCH_SIZE]
     )
-    const ids = res.rows.map((r: { id: number }) => r.id)
+    const ids = res.rows.map((r) => r.id)
     if (ids.length === 0) return
 
     // Mark them as compressed (content replaced by summary marker)

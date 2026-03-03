@@ -26,7 +26,7 @@ export async function recordUserActivity(userId: string): Promise<void> {
 
 async function getLastUserActivity(userId: string): Promise<number> {
   try {
-    const res = await query(
+    const res = await query<{ updated_at: string }>(
       `SELECT updated_at FROM user_identity_files WHERE user_id = $1 AND file_type = 'last_activity'`,
       [userId]
     )
@@ -77,7 +77,7 @@ async function checkServerHealth(): Promise<'healthy' | 'degraded' | 'down'> {
 // ── Get last deploy status from worklog ───────────────────────────────────────
 async function getLastDeployInfo(): Promise<{ sha: string; status: 'success' | 'failed' | 'unknown' }> {
   try {
-    const res = await query(
+    const res = await query<{ content: string; metadata: Record<string, unknown> }>(
       `SELECT content, metadata FROM sparkie_worklog
        WHERE type = 'code_push' ORDER BY created_at DESC LIMIT 1`
     )
@@ -150,7 +150,7 @@ ${ctx.autonomyLevel === 'heavy' || ctx.autonomyLevel === 'maximum' ? '→ User i
 // Check if we should debounce (user just sent rapid-fire messages)
 export async function shouldDebounce(userId: string, debounceMs = 800): Promise<boolean> {
   try {
-    const res = await query(
+    const res = await query<{ created_at: string }>(
       `SELECT created_at FROM chat_messages WHERE user_id = $1 ORDER BY created_at DESC LIMIT 2`,
       [userId]
     )
@@ -170,7 +170,7 @@ export async function detectFileConflict(
     if (msSince > 30 * 1000) return { conflict: false, reason: '' } // User idle > 30s — safe
 
     // Check if this file was recently pushed in worklog
-    const res = await query(
+    const res = await query<{ created_at: string; content: string }>(
       `SELECT created_at, content FROM sparkie_worklog
        WHERE user_id = $1 AND type = 'code_push'
        AND metadata->>'file_path' = $2

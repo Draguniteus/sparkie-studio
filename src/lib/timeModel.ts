@@ -100,16 +100,16 @@ export async function saveDeferredIntent(
 export async function loadReadyDeferredIntents(userId: string): Promise<DeferredIntent[]> {
   try {
     await ensureDeferredIntentsSchema()
-    const res = await query(
+    const res = await query<{
+      id: string; user_id: string; intent: string; source_msg: string;
+      not_before: Date; due_at: Date | null; status: string; created_at: Date
+    }>(
       `SELECT * FROM sparkie_deferred_intents
        WHERE user_id = $1 AND status = 'pending' AND not_before <= NOW()
        ORDER BY COALESCE(due_at, not_before) ASC LIMIT 5`,
       [userId]
     )
-    return res.rows.map((r: {
-      id: string; user_id: string; intent: string; source_msg: string;
-      not_before: Date; due_at: Date | null; status: string; created_at: Date
-    }) => ({
+    return res.rows.map((r) => ({
       id: r.id,
       userId: r.user_id,
       intent: r.intent,
