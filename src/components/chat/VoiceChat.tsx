@@ -6,8 +6,8 @@ import Image from "next/image"
 
 const STORAGE_KEY      = "sparkie_voice_pref"
 const DEFAULT_VOICE    = "English_radiant_girl"
-const SILENCE_THRESH   = 0.015
-const SILENCE_MS       = 1400
+const SILENCE_THRESH   = 0.012
+const SILENCE_MS       = 800
 const MS_PER_WORD      = 420
 
 const SPARKIE_VOICES = [
