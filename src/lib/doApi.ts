@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-export const DO_APP_ID = "app-52793cd9-3899-4de4-a41b-0903eed35e88";
+export const DO_APP_ID = "fb3d58ac-f1b5-4e65-89b5-c12834d8119a";
 
 /** Raw DO App Platform API call. Throws on non-2xx. */
 export async function doApi<T = unknown>(
