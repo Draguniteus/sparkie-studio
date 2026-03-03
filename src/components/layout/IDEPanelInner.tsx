@@ -192,8 +192,11 @@ export function IDEPanelInner() {
       <div className="flex items-center h-10 px-3 bg-hive-700 border-b border-hive-border shrink-0 gap-1">
         {tabs.map(t => (
           <button key={t.id} onClick={() => setIdeTab(t.id)}
-            className={`px-3 py-1 text-xs font-medium rounded transition-colors
-              ${ideTab === t.id ? 'bg-hive-500 text-text-primary' : 'text-text-muted hover:text-text-secondary hover:bg-hive-hover'}`}>
+            className={`px-3 py-1 text-xs font-medium transition-colors rounded relative
+              ${ideTab === t.id
+                ? 'text-text-primary after:absolute after:bottom-0 after:left-0 after:right-0 after:h-[2px] after:bg-honey-500 after:rounded-t bg-hive-500/40'
+                : 'text-text-muted hover:text-text-secondary hover:bg-hive-hover'
+              }`}>
             {t.id === 'terminal' && (
               <span className={`inline-block w-1.5 h-1.5 rounded-full mr-1.5 ${wcDot}
                 ${!['idle','ready','error'].includes(containerStatus) ? 'animate-pulse' : ''}`} />
@@ -234,17 +237,23 @@ export function IDEPanelInner() {
         )}
 
         {ideTab === 'files' && (
-          <div className="h-full flex overflow-hidden relative">
-            {showExplorer && (
-              <div className="w-48 shrink-0 border-r border-hive-border overflow-y-auto">
-                <FileExplorer />
-              </div>
-            )}
-            <div className="flex-1 overflow-hidden flex flex-col">
-              <button onClick={() => setShowExplorer(v => !v)}
-                className={`absolute top-1 p-0.5 bg-hive-700 border border-hive-border rounded-r text-text-muted hover:text-text-secondary z-10 transition-all ${showExplorer ? 'left-48' : 'left-0'}`}>
-                {showExplorer ? <ChevronLeft size={12}/> : <ChevronRight size={12}/>}
+          <div className="h-full flex overflow-hidden">
+            {/* File explorer — fixed width, full height */}
+            <div className={`shrink-0 border-r border-hive-border overflow-hidden flex flex-col transition-all duration-200 ${showExplorer ? 'w-52' : 'w-0'}`}>
+              {showExplorer && <FileExplorer />}
+            </div>
+            {/* Toggle sidebar button */}
+            <div className="relative shrink-0">
+              <button
+                onClick={() => setShowExplorer(v => !v)}
+                className="absolute top-2 -left-0 w-4 h-8 bg-hive-700 border border-hive-border rounded-r flex items-center justify-center text-text-muted hover:text-text-secondary z-10 transition-colors"
+                title={showExplorer ? "Hide explorer" : "Show explorer"}
+              >
+                {showExplorer ? <ChevronLeft size={10}/> : <ChevronRight size={10}/>}
               </button>
+            </div>
+            {/* Code editor — takes all remaining space */}
+            <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
               <CodeEditor />
             </div>
           </div>
