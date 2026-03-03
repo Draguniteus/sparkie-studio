@@ -294,7 +294,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       liveCode: '',
       liveCodeFiles: [],
       isExecuting: false,
-  longTaskLabel: null,
       isStreaming: false,
       ideTab: 'process',
       containerStatus: 'idle',
@@ -331,6 +330,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   ideOpen: false,
   ideTab: 'process',
   isExecuting: false,
+  longTaskLabel: null,
   liveCode: '',
   liveCodeFiles: [],
 
