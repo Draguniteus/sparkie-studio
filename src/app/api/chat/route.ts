@@ -2675,7 +2675,22 @@ async function executeTool(
 
       case 'send_discord': {
         if (!userId) return 'Not authenticated'
-        return await executeConnectorTool('DISCORD_SEND_MESSAGE', args, userId)
+        const { channel_id, message: discordMsg } = args as { channel_id?: string; message: string }
+        // HITL gate: Discord messages are irreversible
+        const taskId = `hitl_discord_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+        await query(
+          `INSERT INTO sparkie_tasks (id, user_id, action, label, payload, status, executor, trigger_type, why_human, created_at)
+           VALUES ($1, $2, $3, $4, $5, 'pending', 'human', 'manual', $6, NOW())`,
+          [taskId, userId,
+           `executeConnectorTool('DISCORD_SEND_MESSAGE', ${JSON.stringify(args)})`,
+           `Discord message: "${discordMsg.slice(0, 60)}${discordMsg.length > 60 ? '...' : ''}"`,
+           JSON.stringify(args),
+           'Discord message requires your approval before sending']
+        ).catch(() => {})
+        return `HITL_TASK:${JSON.stringify({
+          id: taskId, action: 'DISCORD_SEND_MESSAGE', label: 'Send Discord message',
+          payload: { channel_id, message: discordMsg, preview: discordMsg.slice(0, 120) }, status: 'pending'
+        })}`
       }
 
       case 'repo_ingest': {
@@ -2767,16 +2782,34 @@ async function executeTool(
         const { platform, text, media_url, subreddit, title } = args as {
           platform: string; text: string; media_url?: string; subreddit?: string; title?: string
         }
+        // Phase 4 HITL hardening: irreversible social posts always require user approval
+        const taskId = `hitl_social_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+        let connectorAction = ''
+        let connectorArgs: Record<string, unknown> = {}
         if (platform === 'twitter') {
-          return await executeConnectorTool('TWITTER_CREATE_TWEET', { text }, userId)
+          connectorAction = 'TWITTER_CREATE_TWEET'; connectorArgs = { text }
         } else if (platform === 'instagram' && media_url) {
-          return await executeConnectorTool('INSTAGRAM_CREATE_PHOTO_POST', { image_url: media_url, caption: text }, userId)
+          connectorAction = 'INSTAGRAM_CREATE_PHOTO_POST'; connectorArgs = { image_url: media_url, caption: text }
         } else if (platform === 'tiktok' && media_url) {
-          return await executeConnectorTool('TIKTOK_CREATE_POST', { video_url: media_url, caption: text }, userId)
+          connectorAction = 'TIKTOK_CREATE_POST'; connectorArgs = { video_url: media_url, caption: text }
         } else if (platform === 'reddit') {
-          return await executeConnectorTool('REDDIT_CREATE_POST', { subreddit: subreddit || 'test', title: title || text.slice(0, 80), text }, userId)
+          connectorAction = 'REDDIT_CREATE_POST'; connectorArgs = { subreddit: subreddit || 'test', title: title || text.slice(0, 80), text }
         }
-        return 'post_to_social: platform not recognized or missing required media_url'
+        if (!connectorAction) return 'post_to_social: platform not recognized or missing required media_url'
+        // Store task for human approval
+        await query(
+          `INSERT INTO sparkie_tasks (id, user_id, action, label, payload, status, executor, trigger_type, why_human, created_at)
+           VALUES ($1, $2, $3, $4, $5, 'pending', 'human', 'manual', $6, NOW())`,
+          [taskId, userId,
+           `executeConnectorTool('${connectorAction}', ${JSON.stringify(connectorArgs)})`,
+           `Post to ${platform}: "${text.slice(0, 60)}${text.length > 60 ? '...' : ''}"`,
+           JSON.stringify({ platform, connectorAction, connectorArgs }),
+           `Social post to ${platform} — requires your approval before publishing`]
+        ).catch(() => {})
+        return `HITL_TASK:${JSON.stringify({
+          id: taskId, action: connectorAction, label: `Post to ${platform}`,
+          payload: { platform, text, preview: text.slice(0, 120) }, status: 'pending'
+        })}`
       }
 
       default:
