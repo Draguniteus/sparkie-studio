@@ -8,10 +8,9 @@ import { CodeEditor } from "@/components/ide/CodeEditor"
 import { Preview } from "@/components/ide/Preview"
 import { LiveCodeView } from "@/components/ide/LiveCodeView"
 import { Terminal } from "@/components/ide/Terminal"
-import { Download, ChevronLeft, ChevronRight } from "lucide-react"
+import { Download, ChevronLeft, ChevronRight, Brain } from "lucide-react"
 import { TaskQueuePanel } from "@/components/ide/TaskQueuePanel"
 import { MemoryTab } from "@/components/ide/MemoryTab"
-import { Brain } from "lucide-react"
 
 
 function WorklogPanel() {
