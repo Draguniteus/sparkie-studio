@@ -10,6 +10,7 @@ import { getAttempts, formatAttemptBlock } from '@/lib/attemptHistory'
 import { getUserModel, formatUserModelBlock, ingestSessionSignal } from '@/lib/userModel'
 import { readSessionSnapshot, writeSessionSnapshot } from '@/lib/threadStore'
 import { writeWorklog, writeMsgBatch } from '@/lib/worklog'
+import { ingestRepo, getProjectContext, addKnownIssue, resolveKnownIssue, formatProjectContextBlock } from '@/lib/repoIngestion'
 
 export const runtime = 'nodejs'
 export const maxDuration = 180
@@ -1422,6 +1423,40 @@ const SPARKIE_TOOLS = [
         required: ['channel_id', 'message'],
       },
     },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'repo_ingest',
+      description: 'Ingest the sparkie-studio repo into project context — reads the file tree, key source files, tech stack, and API routes. Call this when you need to understand the codebase before making code changes, debugging TS errors, or planning a new feature. Context expires after 2 hours.',
+      parameters: {
+        type: 'object',
+        properties: {
+          owner: { type: 'string', description: 'GitHub owner (default: Draguniteus)' },
+          repo_name: { type: 'string', description: 'Repo name (default: sparkie-studio)' },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'patch_file',
+      description: 'Read a file from the repo, apply a targeted patch (search & replace or full rewrite), and commit it. Use for TS fixes, feature additions, or config changes. Always read the file first with get_github so you know exact content.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'File path relative to repo root, e.g. src/lib/scheduler.ts' },
+          search: { type: 'string', description: 'Exact string to find and replace (targeted patch).' },
+          replace: { type: 'string', description: 'Replacement string (targeted patch).' },
+          full_content: { type: 'string', description: 'Full new file content (full rewrite). Use only when rewriting the whole file.' },
+          message: { type: 'string', description: 'Git commit message.' },
+          dry_run: { type: 'boolean', description: 'If true, return patched content without committing.' },
+        },
+        required: ['path', 'message'],
+      },
+    },
   }]
 
 // ── Memory helpers ─────────────────────────────────────────────────────────────
@@ -2597,6 +2632,90 @@ async function executeTool(
         return await executeConnectorTool('DISCORD_SEND_MESSAGE', args, userId)
       }
 
+      case 'repo_ingest': {
+        const { owner: riOwner = 'Draguniteus', repo: riRepo = 'sparkie-studio' } = args as {
+          owner?: string; repo?: string
+        }
+        try {
+          const ctx = await ingestRepo(userId ?? 'system', riOwner, riRepo)
+          const fileCount = Object.keys(ctx.keyFiles).length
+          return `✅ Repo ingested: ${ctx.repo}\nStack: ${ctx.techStack.slice(0, 5).join(', ')}\nKey files mapped: ${fileCount}\n${ctx.summary}\n\nProject context is now active — I have structural awareness of the codebase.`
+        } catch (e) {
+          return `repo_ingest error: ${String(e)}`
+        }
+      }
+
+      case 'patch_file': {
+        const { path: patchPath, search: searchStr, replace: replaceStr, full_content: fullContent, message: patchMsg, dry_run: dryRun = false } = args as {
+          path: string; search?: string; replace?: string; full_content?: string; message: string; dry_run?: boolean
+        }
+        try {
+          const GITHUB_TOKEN = process.env.GITHUB_TOKEN ?? process.env.GITHUB_PAT ?? ''
+          if (!GITHUB_TOKEN) return 'GITHUB_TOKEN not configured'
+          const owner = 'Draguniteus'
+          const repo = 'sparkie-studio'
+
+          // Fetch current file
+          const fetchRes = await fetch(
+            `https://api.github.com/repos/${owner}/${repo}/contents/${patchPath}`,
+            { headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: 'application/vnd.github.v3+json' }, signal: AbortSignal.timeout(8000) }
+          )
+          if (!fetchRes.ok) return `patch_file: could not read ${patchPath} (${fetchRes.status})`
+          const fetchData = await fetchRes.json() as { content: string; sha: string; encoding: string }
+          const currentContent = Buffer.from(fetchData.content.replace(/\n/g, ''), 'base64').toString('utf-8')
+          const currentSha = fetchData.sha
+
+          // Apply patch
+          let newContent: string
+          if (fullContent) {
+            newContent = fullContent
+          } else if (searchStr !== undefined && replaceStr !== undefined) {
+            if (!currentContent.includes(searchStr)) {
+              return `patch_file: search string not found in ${patchPath}. Cannot apply patch.\nSearch string (${searchStr.length} chars): ${searchStr.slice(0, 100)}...`
+            }
+            newContent = currentContent.replace(searchStr, replaceStr)
+          } else {
+            return 'patch_file: provide either search+replace or full_content'
+          }
+
+          if (dryRun) {
+            const linesChanged = newContent.split('\n').length - currentContent.split('\n').length
+            return `[DRY RUN] patch_file: ${patchPath}\nLines: ${currentContent.split('\n').length} → ${newContent.split('\n').length} (${linesChanged > 0 ? '+' : ''}${linesChanged})\n\nPatched preview (first 600 chars):\n${newContent.slice(0, 600)}`
+          }
+
+          // Commit
+          const pushRes = await fetch(
+            `https://api.github.com/repos/${owner}/${repo}/contents/${patchPath}`,
+            {
+              method: 'PUT',
+              headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: 'application/vnd.github.v3+json', 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                message: patchMsg,
+                content: Buffer.from(newContent).toString('base64'),
+                sha: currentSha,
+                branch: 'master',
+              }),
+            }
+          )
+          if (!pushRes.ok) {
+            const errText = await pushRes.text()
+            return `patch_file push failed (${pushRes.status}): ${errText.slice(0, 300)}`
+          }
+          const pushData = await pushRes.json() as { commit: { sha: string } }
+          const commitSha = pushData.commit?.sha?.slice(0, 12) ?? '?'
+
+          // If this was a TS fix, auto-resolve from known issues
+          if (userId && (patchMsg.includes('fix') || patchMsg.includes('TS'))) {
+            resolveKnownIssue('Draguniteus/sparkie-studio', patchPath).catch(() => {})
+          }
+
+          writeWorklog(userId ?? 'system', 'code_push', `patch_file: ${patchPath} — ${patchMsg}`, { commit: commitSha, path: patchPath }).catch(() => {})
+          return `✅ Patched and committed: ${patchPath}\nCommit: ${commitSha}\nMessage: ${patchMsg}\nDeploy started automatically.`
+        } catch (e) {
+          return `patch_file error: ${String(e)}`
+        }
+      }
+
       case 'post_to_social': {
         if (!userId) return 'Not authenticated'
         const { platform, text, media_url, subreddit, title } = args as {
@@ -3298,6 +3417,16 @@ export async function POST(req: NextRequest) {
       // Inject behavioral user model (Phase 3)
       if (userModel && userModel.sessionCount >= 5) {
         systemContent += formatUserModelBlock(userModel)
+      }
+
+      // Inject project context (Phase 3 residual) — if repo was ingested, add structural awareness
+      const projectCtx = await getProjectContext(userId, 'Draguniteus/sparkie-studio')
+      if (projectCtx) {
+        // Auto-refresh if stale (> 2 hours)
+        const ageMs = Date.now() - new Date(projectCtx.lastIngestedAt).getTime()
+        if (ageMs < 2 * 60 * 60 * 1000) {
+          systemContent += '\n\n' + formatProjectContextBlock(projectCtx)
+        }
       }
 
       // Inject session snapshot for continuity (if recent session exists and this looks like continuation)
