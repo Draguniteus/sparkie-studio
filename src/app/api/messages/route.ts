@@ -22,7 +22,7 @@ async function ensureTable() {
   await query(`CREATE INDEX IF NOT EXISTS idx_chat_messages_created_at ON chat_messages(user_id, created_at)`)
 }
 
-// GET /api/messages — load the user's full chat history (last 200 messages)
+// GET /api/messages — load the user's most recent 500 messages (ordered oldest→newest for display)
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions)
   const userId = (session?.user as { id?: string } | undefined)?.id
@@ -33,11 +33,13 @@ export async function GET(req: NextRequest) {
     const result = await query<{
       id: string; role: string; content: string; msg_type: string; metadata: Record<string, unknown> | null; created_at: string
     }>(
-      `SELECT id, role, content, msg_type, metadata, created_at
-       FROM chat_messages
-       WHERE user_id = $1
-       ORDER BY created_at ASC
-       LIMIT 200`,
+      `SELECT id, role, content, msg_type, metadata, created_at FROM (
+         SELECT id, role, content, msg_type, metadata, created_at
+         FROM chat_messages
+         WHERE user_id = $1
+         ORDER BY created_at DESC
+         LIMIT 500
+       ) AS recent ORDER BY created_at ASC`,
       [userId]
     )
     const messages = (result.rows as any[]).map(r => ({
