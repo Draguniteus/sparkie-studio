@@ -1,6 +1,6 @@
 import { query } from '@/lib/db'
 
-export type IdentityFileType = 'user' | 'memory' | 'session' | 'heartbeat' | 'context' | 'actions'
+export type IdentityFileType = 'user' | 'memory' | 'session' | 'heartbeat' | 'context' | 'actions' | 'snapshot' | 'last_activity' | 'env_context' | 'heartbeat_state'
 
 export interface IdentityFiles {
   user: string
@@ -9,6 +9,7 @@ export interface IdentityFiles {
   heartbeat: string
   context: string   // L3: live state — what's currently happening, active threads, known blockers
   actions: string   // L6: action chain — what Sparkie is tracking, next steps, pending items
+  snapshot: string  // session snapshot — one paragraph written at end of session
 }
 
 /**
@@ -32,9 +33,10 @@ export async function loadIdentityFiles(userId: string): Promise<IdentityFiles> 
       heartbeat: files.heartbeat ?? '',
       context:   files.context   ?? '',
       actions:   files.actions   ?? '',
+      snapshot:  files.snapshot  ?? '',
     }
   } catch {
-    return { user: '', memory: '', session: '', heartbeat: '', context: '', actions: '' }
+    return { user: '', memory: '', session: '', heartbeat: '', context: '', actions: '', snapshot: '' }
   }
 }
 
@@ -105,6 +107,14 @@ export function buildIdentityBlock(files: IdentityFiles, username?: string): str
       `These are your tracked next steps and pending items.\n` +
       `Items marked (AI) you can execute. Items marked (Waiting) are blocked. Items marked (User) need their input.\n\n` +
       files.actions
+    )
+  }
+
+  if (files.snapshot) {
+    sections.push(
+      `## LAST SESSION SNAPSHOT\n` +
+      `Where you left off — read before responding if this looks like a continuation.\n\n` +
+      files.snapshot
     )
   }
 

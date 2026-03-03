@@ -3,6 +3,9 @@ import { getServerSession } from 'next-auth/next'
 import { authOptions } from '@/lib/auth'
 import { query } from '@/lib/db'
 import { loadIdentityFiles, buildIdentityBlock, updateSessionFile, updateContextFile, updateActionsFile } from '@/lib/identity'
+import { buildEnvironmentalContext, formatEnvContextBlock, recordUserActivity } from '@/lib/environmentalContext'
+import { extractDeferredIntent, saveDeferredIntent, loadReadyDeferredIntents, markDeferredIntentSurfaced } from '@/lib/timeModel'
+import { readSessionSnapshot, writeSessionSnapshot } from '@/lib/threadStore'
 import { writeWorklog, writeMsgBatch } from '@/lib/worklog'
 
 export const runtime = 'nodejs'
@@ -3212,10 +3215,16 @@ export async function POST(req: NextRequest) {
     let shouldBrief = false
 
     if (userId) {
-      const [memoriesText, awareness, identityFiles] = await Promise.all([
+      // Record user activity for presence/autonomy model
+      recordUserActivity(userId).catch(() => {})
+
+      const [memoriesText, awareness, identityFiles, envCtx, sessionSnapshot, readyIntents] = await Promise.all([
         loadMemories(userId, messages.filter((m: { role: string; content: string }) => m.role === 'user').at(-1)?.content?.slice(0, 200)),
         getAwareness(userId),
         loadIdentityFiles(userId),
+        buildEnvironmentalContext(userId),
+        readSessionSnapshot(userId),
+        loadReadyDeferredIntents(userId),
       ])
       shouldBrief = awareness.shouldBrief && messages.length <= 2 // Only brief on session open
 
@@ -3230,6 +3239,22 @@ export async function POST(req: NextRequest) {
       }
 
       systemContent += `\n\n## RIGHT NOW\n- Time of day: ${awareness.timeLabel}\n- Sessions together: ${awareness.sessionCount}\n- Days since last visit: ${awareness.daysSince === 0 ? 'same day' : `${awareness.daysSince} day${awareness.daysSince === 1 ? '' : 's'} ago`}`
+
+      // Inject environmental context
+      systemContent += '\n\n' + formatEnvContextBlock(envCtx)
+
+      // Inject session snapshot for continuity (if recent session exists and this looks like continuation)
+      if (sessionSnapshot && messages.length <= 3) {
+        systemContent += `\n\n## LAST SESSION\nWhere you left off: ${sessionSnapshot.slice(0, 600)}`
+      }
+
+      // Surface any ready deferred intents at session start
+      if (readyIntents.length > 0 && messages.length <= 2) {
+        const intentList = readyIntents.map((i: { id: string; intent: string }) => `- ${i.intent}`).join('\n')
+        systemContent += `\n\n## DEFERRED INTENTS — READY TO SURFACE\nThings mentioned in passing that are now due. Mention naturally if relevant:\n${intentList}`
+        // Mark them as surfaced
+        readyIntents.forEach((i: { id: string }) => markDeferredIntentSurfaced(i.id).catch(() => {}))
+      }
 
       if (shouldBrief) {
         systemContent += `\n\n## THIS IS A RETURN VISIT — GIVE THE BRIEF
@@ -3641,6 +3666,14 @@ Rules:
               `${m.role === 'user' ? 'User' : 'Sparkie'}: ${m.content.slice(0, 400)}`
             ).join('\n')
             extractAndSaveMemories(userId, snap, apiKey)
+            // Extract deferred intents from the user's message
+            const lastUserMsg = messages.filter((m: { role: string }) => m.role === 'user').at(-1)?.content ?? ''
+            if (lastUserMsg) {
+              const deferred = extractDeferredIntent(lastUserMsg)
+              if (deferred.found) {
+                saveDeferredIntent(userId, deferred.intent, lastUserMsg, deferred.notBefore, deferred.dueAt).catch(() => {})
+              }
+            }
       // Write message batch to worklog (fire-and-forget)
       writeMsgBatch(userId, messages.filter((m: { role: string }) => m.role === 'user').length).catch(() => {})
             const lastUser = messages.slice().reverse().find((m: { role: string; content: string }) => m.role === 'user')?.content ?? ''

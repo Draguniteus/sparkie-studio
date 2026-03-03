@@ -32,7 +32,8 @@ export async function GET(req: NextRequest) {
   const result = await query(
     `SELECT id, type, content, metadata, created_at, 
             COALESCE(status, 'done') as status,
-            decision_type, reasoning, estimated_duration_ms, actual_duration_ms, signal_priority
+            decision_type, reasoning, estimated_duration_ms, actual_duration_ms, signal_priority,
+            confidence, COALESCE(depends_on, '[]'::jsonb) as depends_on, side_effect_of
      FROM sparkie_worklog
      WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
     [userId, limit, offset]
@@ -76,9 +77,16 @@ export async function POST(req: NextRequest) {
 
   await ensureTable()
   const id = crypto.randomUUID()
+  const { depends_on, side_effect_of, confidence, status: wlStatus, decision_type, reasoning, estimated_duration_ms, signal_priority, ...restMeta } = (body.metadata ?? {}) as Record<string, unknown>
   await query(
-    `INSERT INTO sparkie_worklog (id, user_id, type, content, metadata) VALUES ($1, $2, $3, $4, $5)`,
-    [id, userId, body.type, body.content, JSON.stringify(body.metadata ?? {})]
+    `INSERT INTO sparkie_worklog (id, user_id, type, content, metadata, status, decision_type, reasoning, estimated_duration_ms, signal_priority, confidence, depends_on, side_effect_of)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+    [id, userId, body.type, body.content, JSON.stringify(restMeta),
+     wlStatus ?? 'done', decision_type ?? null, reasoning ?? null,
+     estimated_duration_ms ?? null, signal_priority ?? null,
+     confidence ?? null,
+     depends_on ? JSON.stringify(depends_on) : null,
+     side_effect_of ?? null]
   )
   return NextResponse.json({ id, success: true })
 }

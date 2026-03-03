@@ -3,6 +3,7 @@ import { writeWorklog } from '@/lib/worklog'
 import { runAuthHealthSweep } from '@/lib/authHealth'
 import { classifyHeartbeatSignal } from '@/lib/signalQueue'
 import { pruneToolCache } from '@/lib/toolCallWrapper'
+import { loadReadyDeferredIntents, markDeferredIntentSurfaced } from '@/lib/timeModel'
 
 const INTERNAL_SECRET = process.env.SPARKIE_INTERNAL_SECRET ?? ''
 const SCHEDULER_INTERVAL_MS = 60_000 // 1 minute
@@ -252,6 +253,25 @@ async function heartbeatTick(baseUrl: string): Promise<void> {
 
       // Prune expired tool cache entries
       pruneToolCache()
+
+      // ── Surface ready deferred intents ─────────────────────────────────────
+      // Check all active users for deferred intents that are now ready
+      const activeUsers = await query<{ user_id: string }>(
+        `SELECT DISTINCT user_id FROM user_sessions WHERE last_seen_at > NOW() - INTERVAL '7 days'`
+      ).catch(() => ({ rows: [] as { user_id: string }[] }))
+
+      for (const { user_id } of activeUsers.rows.slice(0, 10)) {
+        const readyIntents = await loadReadyDeferredIntents(user_id)
+        for (const intent of readyIntents) {
+          // Surface as worklog entry + mark as surfaced
+          await writeWorklog(user_id, 'decision', intent.intent, {
+            decision_type: 'proactive',
+            reasoning: `Deferred intent from ${intent.createdAt.toLocaleDateString()}: "${intent.sourceMsg.slice(0, 80)}"`,
+            signal_priority: intent.dueAt && intent.dueAt < new Date() ? 'P1' : 'P2',
+          })
+          await markDeferredIntentSurfaced(intent.id)
+        }
+      }
 
       if (dueUsers.rows.length === 0) return
 

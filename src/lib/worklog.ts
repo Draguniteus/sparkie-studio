@@ -40,6 +40,8 @@ export interface WorklogMeta {
   reasoning?: string
   signal_priority?: 'P0' | 'P1' | 'P2' | 'P3'
   confidence?: number
+  depends_on?: string[]      // worklog entry IDs this depends on
+  side_effect_of?: string    // worklog entry ID that triggered this
   [key: string]: unknown
 }
 
@@ -62,6 +64,9 @@ async function ensureTable() {
   await query(`ALTER TABLE sparkie_worklog ADD COLUMN IF NOT EXISTS estimated_duration_ms INT`).catch(() => {})
   await query(`ALTER TABLE sparkie_worklog ADD COLUMN IF NOT EXISTS actual_duration_ms INT`).catch(() => {})
   await query(`ALTER TABLE sparkie_worklog ADD COLUMN IF NOT EXISTS signal_priority TEXT`).catch(() => {})
+  await query(`ALTER TABLE sparkie_worklog ADD COLUMN IF NOT EXISTS depends_on JSONB DEFAULT '[]'`).catch(() => {})
+  await query(`ALTER TABLE sparkie_worklog ADD COLUMN IF NOT EXISTS side_effect_of TEXT`).catch(() => {})
+  await query(`ALTER TABLE sparkie_worklog ADD COLUMN IF NOT EXISTS confidence FLOAT`).catch(() => {})
 }
 
 export async function writeWorklog(
@@ -73,10 +78,10 @@ export async function writeWorklog(
   try {
     await ensureTable()
     const id = crypto.randomUUID()
-    const { status, decision_type, reasoning, estimated_duration_ms, actual_duration_ms, signal_priority, ...restMeta } = metadata
+    const { status, decision_type, reasoning, estimated_duration_ms, actual_duration_ms, signal_priority, confidence, depends_on, side_effect_of, ...restMeta } = metadata
     await query(
-      `INSERT INTO sparkie_worklog (id, user_id, type, content, metadata, status, decision_type, reasoning, estimated_duration_ms, actual_duration_ms, signal_priority)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      `INSERT INTO sparkie_worklog (id, user_id, type, content, metadata, status, decision_type, reasoning, estimated_duration_ms, actual_duration_ms, signal_priority, confidence, depends_on, side_effect_of)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
       [
         id, userId, type, content, JSON.stringify(restMeta),
         status ?? 'done',
@@ -85,6 +90,9 @@ export async function writeWorklog(
         estimated_duration_ms ?? null,
         actual_duration_ms ?? null,
         signal_priority ?? null,
+        confidence ?? null,
+        depends_on ? JSON.stringify(depends_on) : null,
+        side_effect_of ?? null,
       ]
     )
   } catch (e) {
