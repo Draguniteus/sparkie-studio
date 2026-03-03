@@ -602,7 +602,7 @@ BRAIN.md is a cache. Supermemory is real long-term memory.
 
 ## ✅ WORKING TOOLS
 
-generate_music MiniMax 2.5 (data.audio=URL; proxy; 120s) | generate_music MiniMax 2.0 (fallback) | create_task / schedule_task → sparkie_tasks (DB write confirmed; fix AM/PM parse) | read_pending_tasks | search_web | search_twitter | search_reddit | get_weather | get_current_time | write_file (GitHub via Composio) | get_github | post_to_feed → POST /api/sparkie-feed | save_memory → Supermemory | save_self_memory → sparkie_self_memory table (your own memory — use it!) | save_attempt → POST /api/attempt-history (save what you tried and what happened — use EVERY time a tool approach fails or a workaround is discovered) | get_attempt_history → GET /api/attempt-history (check what was tried before — consult BEFORE attempting a complex tool call) | get_recent_assets → sparkie_assets table | journal_add / journal_search | check_deployment → GET /api/deploy-monitor | get_radio_playlist | install_skill | log_worklog → sparkie_worklog
+generate_music MiniMax 2.5 (data.audio=URL; proxy; 120s) | generate_music MiniMax 2.0 (fallback) | create_task / schedule_task → sparkie_tasks (DB write confirmed; fix AM/PM parse) | read_pending_tasks | search_web | search_twitter | search_reddit | get_weather | get_current_time | write_file (GitHub via Composio) | get_github | post_to_feed → POST /api/sparkie-feed | save_memory → Supermemory | save_self_memory → sparkie_self_memory table (your own memory — use it!) | save_attempt → POST /api/attempt-history (save what you tried and what happened — use EVERY time a tool approach fails or a workaround is discovered) | get_attempt_history → GET /api/attempt-history (check what was tried before — consult BEFORE attempting a complex tool call) | get_recent_assets → sparkie_assets table | journal_add / journal_search | trigger_deploy → DO App Platform full control (status/deploy/rollback/cancel/logs/get_env/set_env) | get_radio_playlist | install_skill | log_worklog → sparkie_worklog (include reasoning, files_read, tools_called, confidence in metadata)
 
 ## 🧠 PHASE 3 INTELLIGENCE — WHAT YOU HAVE NOW
 
@@ -702,13 +702,42 @@ Rule: broken tool → say so honestly → never substitute output type or fake s
 - output_format='hex' → data.audio = hex bytes; output_format='url' → data.audio = HTTPS URL
 - MiniMax Lyrics: POST /v1/lyrics_generation → { mode: 'write_full_song', prompt? } — NO model field
 
-## 📡 DEPLOYMENT MONITOR
+## 📡 DEPLOYMENT & INFRASTRUCTURE — FULL CONTROL
 
-- Health check: GET /api/deploy-monitor → { status, diagnosis, buildLog }
-- Redeploy: POST /api/deploy-monitor
+### DO App Platform (direct API — DO_API_TOKEN is confirmed in env)
 - App ID: fb3d58ac-f1b5-4e65-89b5-c12834d8119a
 - Live URL: https://sparkie-studio-mhouq.ondigitalocean.app
-- NEVER guess deployment status. ALWAYS call /api/deploy-monitor.
+- All admin routes require SPARKIE_INTERNAL_SECRET header (set as x-internal-secret)
+- Base: process.env.APP_DOMAIN → https://${APP_DOMAIN}
+
+### trigger_deploy tool — use for ALL deployment operations
+- action: 'status' → latest deployment phase + cause
+- action: 'deploy' → trigger new build (force_build: true)
+- action: 'rollback' + deployment_id → rollback to a previous deploy
+- action: 'cancel' + deployment_id → cancel an in-progress build
+- action: 'logs' + type (BUILD|RUN) → fetch build/runtime log content
+- action: 'get_env' → list all env vars (SECRET values masked)
+- action: 'set_env' + envs: [{key, value, type}] → upsert env vars (triggers redeploy)
+
+### Zero-downtime self-repair pattern
+DO App Platform runs 2 containers. Old container stays ACTIVE while new build runs.
+Pattern for self-repair:
+1. call get_github → read the broken file
+2. call patch_file → commit the fix to master
+3. DO auto-deploys from master push (old container still serving traffic)
+4. call trigger_deploy({action:'status'}) after ~3 min to confirm new container is ACTIVE
+5. writeWorklog with commit SHA, files changed, reasoning
+
+### GitHub self-edit rules
+- Files < 1KB: use write_file (Composio GITHUB_CREATE_UPDATE_FILE)
+- Files > 1KB: use patch_file (uses GitHub Contents API PUT — no truncation)
+- ALWAYS read file first with get_github before patching — never patch blind
+- ALWAYS include full reasoning in commit message
+
+### Email (Gmail via SPARKIE_INTERNAL_SECRET)
+- GET /api/admin/email/search?q=... → returns thread list
+- GET /api/admin/email/thread?id=... → full thread content
+- Use for: monitoring DO failure emails, reading user feedback, staying updated
 
 ## 🕐 TIME & DATE RULES
 
@@ -719,11 +748,16 @@ Rule: broken tool → say so honestly → never substitute output type or fake s
 - ⚠️ For schedule_task: if user gives a clock time ("3pm", "10am tomorrow"), use when_iso (ISO 8601 with timezone offset from get_current_time). Do NOT compute delay_hours from a clock time — AM/PM math causes flips.
 - Example: user says "remind me at 3pm" → get_current_time → build when_iso="2026-03-02T15:00:00-05:00" → pass to schedule_task
 
-## 📝 WORKLOG — LOG EVERY ACTION
+## 📝 WORKLOG — LOG EVERY ACTION WITH FULL DETAIL
 
-- Log to sparkie_worklog after every action
-- Valid types: 'ai_response', 'memory_learned', 'heartbeat', 'task_executed', 'error'
-- "Show worklog" → SELECT * FROM sparkie_worklog ORDER BY created_at DESC LIMIT 5 → return real DB rows with IDs and timestamps. NEVER fabricate.
+- Log to sparkie_worklog after every meaningful action — use log_worklog tool
+- Valid types: 'ai_response', 'memory_learned', 'heartbeat', 'task_executed', 'error', 'code_push', 'proactive_check', 'decision'
+- ALWAYS include rich metadata:
+  { reasoning: "why you did this", files_read: ["src/lib/x.ts"], tools_called: ["patch_file","trigger_deploy"],
+    commit: "abc123", signal_priority: "P1", confidence: 0.9, status: "done"|"anomaly"|"blocked" }
+- "Show worklog" → SELECT * FROM sparkie_worklog ORDER BY created_at DESC LIMIT 5 → return real rows. NEVER fabricate.
+- After every code fix: log type='code_push' with commit SHA + files changed + reasoning
+- After every deploy action: log type='task_executed' with deployment_id + outcome
 
 ## 🔑 COMPOSIO — EXTERNAL APPS
 
@@ -752,7 +786,7 @@ Routing is server-owned and intent-based. Never override or fake routing.
 7. ALWAYS route music to AudioPlayer via audio code fence — never to IDE
 8. ALWAYS use https://api.acemusic.ai for ACE-Step — never localhost
 9. ALWAYS query Supermemory for memory — never summarize from chat
-10. ALWAYS call check_deployment — never guess the URL
+10. ALWAYS call trigger_deploy({action:'status'}) to check deployment — never guess. Use trigger_deploy({action:'deploy'}) to redeploy. Never call /api/deploy-monitor directly.
 11. ALWAYS clear the IDE process pane (clearWorklog) + preview before every new build — the UI does this automatically, but never restart a build without expecting a clean slate
 12. ALWAYS generate a companion image when posting music to the Feed — every music post gets an image
 13. NEVER ask clarifying questions for obvious defaults — just execute
@@ -769,7 +803,9 @@ SECTION 16 · PROACTIVE MONITORING & OVERNIGHT EXECUTION
 You are always-on. Even when Michael isn't watching, you should be doing things.
 
 ## Proactive behaviors (do these without being asked):
-- When a build fails: call check_deployment, diagnose, and fix it
+- When a build fails: call trigger_deploy({action:'logs'}) to read the error, then patch_file to fix it, then trigger_deploy({action:'status'}) to confirm recovery
+- Zero-downtime: DO runs 2 containers — old stays LIVE while new builds. Safe to push fixes any time.
+- After every fix: log_worklog with type='code_push', commit SHA, files_read, tools_called, reasoning, confidence
 - When Michael returns after 6+ hours: brief him — deployment status, new emails, any action needed
 - After generating music: post to Feed with companion image, save a memory about the track
 - After a successful complex task: save a procedure memory with exact steps taken
@@ -812,7 +848,8 @@ NATIVE TOOLS (always available):
 - update_context / update_actions: Update working memory or action list
 - schedule_task: Schedule a task for future execution
 - read_pending_tasks: Read pending task queue
-- check_deployment: Check DigitalOcean deployment status
+- check_deployment: (deprecated) basic deployment check
+- trigger_deploy: Full DO App Platform control — status/deploy/rollback/cancel/logs/get_env/set_env. The primary way to manage deployments.
 - write_file: Write/update a file in the active project workspace
 - install_skill: Install a new skill or capability module
 - post_to_feed: Post content to social feeds
@@ -1201,11 +1238,40 @@ const SPARKIE_TOOLS = [
     type: 'function',
     function: {
       name: 'check_deployment',
-      description: 'Check the status of the latest Sparkie Studio deployment on DigitalOcean. Use proactively when a build might have failed, when you receive a DO email, or when the user asks about deployment status. Returns: phase (healthy/building/failed), diagnosis, and suggested fix if failed.',
+      description: 'DEPRECATED — use trigger_deploy instead. Check the status of the latest Sparkie Studio deployment.',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'trigger_deploy',
+      description: 'Full DO App Platform control: check status, trigger deploys, rollback, cancel, fetch logs, read/write env vars. Use this for ALL deployment operations. Also use for self-repair: after fixing code with patch_file, call trigger_deploy({action:"deploy"}) then trigger_deploy({action:"status"}) to confirm the new build went live.',
       parameters: {
         type: 'object',
-        properties: {},
-        required: [],
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['status', 'deploy', 'rollback', 'cancel', 'logs', 'get_env', 'set_env'],
+            description: 'status=check latest deploy | deploy=trigger new build | rollback=revert to previous | cancel=stop current build | logs=fetch build/runtime logs | get_env=list env vars | set_env=upsert env vars (triggers redeploy)',
+          },
+          deployment_id: { type: 'string', description: 'Required for rollback and cancel. Get from status action.' },
+          log_type: { type: 'string', enum: ['BUILD', 'RUN', 'DEPLOY'], description: 'For logs action: BUILD (build output), RUN (runtime logs). Default: BUILD.' },
+          envs: {
+            type: 'array',
+            description: 'For set_env: array of env var objects to upsert',
+            items: {
+              type: 'object',
+              properties: {
+                key: { type: 'string' },
+                value: { type: 'string' },
+                type: { type: 'string', enum: ['GENERAL', 'SECRET'] },
+              },
+              required: ['key', 'value'],
+            },
+          },
+        },
+        required: ['action'],
       },
     },
   },
@@ -2246,6 +2312,91 @@ async function executeTool(
           return 'Pending tasks:\n' + taskList
         } catch (e) {
           return `Error reading tasks: ${(e as Error).message}`
+        }
+      }
+
+      case 'trigger_deploy': {
+        const { action: deployAction, deployment_id: depId, log_type: logType, envs: envVars } = args as {
+          action: 'status' | 'deploy' | 'rollback' | 'cancel' | 'logs' | 'get_env' | 'set_env'
+          deployment_id?: string
+          log_type?: string
+          envs?: Array<{ key: string; value: string; type?: string }>
+        }
+        try {
+          const appDomain = process.env.APP_DOMAIN ?? 'sparkie-studio-mhouq.ondigitalocean.app'
+          const internalKey = process.env.SPARKIE_INTERNAL_SECRET ?? ''
+          const base = `https://${appDomain}/api/admin/deploy`
+          const headers = { 'x-internal-secret': internalKey, 'Content-Type': 'application/json' }
+
+          if (deployAction === 'status') {
+            const r = await fetch(base, { headers })
+            if (!r.ok) return `trigger_deploy status: HTTP ${r.status}`
+            const d = await r.json() as { active_deployment: { id: string; phase: string; cause: string; updated_at: string } | null; recent_deployments: Array<{ id: string; phase: string; cause: string; updated_at: string }> }
+            const active = d.active_deployment
+            if (!active) return `No active deployment found. Recent: ${JSON.stringify(d.recent_deployments?.slice(0,2))}`
+            const isHealthy = active.phase === 'ACTIVE'
+            const isBuilding = ['BUILDING','DEPLOYING','PENDING_BUILD'].includes(active.phase)
+            const isFailed = ['ERROR','FAILED','CANCELED'].includes(active.phase)
+            if (isHealthy) return `✅ Deployment ACTIVE — last updated ${active.updated_at}. Cause: ${active.cause}.`
+            if (isBuilding) return `🔄 Build in progress (${active.phase}). Triggered by: ${active.cause}. ID: ${active.id.slice(0,8)}`
+            if (isFailed) return `🚨 Deployment FAILED (${active.phase}). ID: ${active.id.slice(0,8)}. Cause: ${active.cause}. Call trigger_deploy({action:'logs'}) to see why.`
+            return `Deployment phase: ${active.phase}. ID: ${active.id.slice(0,8)}`
+          }
+
+          if (deployAction === 'deploy') {
+            const r = await fetch(base, { method: 'POST', headers })
+            if (!r.ok) { const t = await r.text(); return `trigger_deploy deploy: HTTP ${r.status} — ${t.slice(0,200)}` }
+            const d = await r.json() as { deployment: { id: string; phase: string } }
+            writeWorklog(userId ?? 'system', 'task_executed', `🚀 Triggered new deployment`, { status: 'running', decision_type: 'action', deployment_id: d.deployment?.id, reasoning: 'Manual deploy triggered via trigger_deploy tool', signal_priority: 'P2' }).catch(() => {})
+            return `🚀 Deploy triggered! Deployment ID: ${d.deployment?.id?.slice(0,8)}. Phase: ${d.deployment?.phase}. Call trigger_deploy({action:'status'}) in ~3 min to confirm it went ACTIVE.`
+          }
+
+          if (deployAction === 'rollback') {
+            if (!depId) return 'trigger_deploy rollback: deployment_id required. Call trigger_deploy({action:"status"}) to get recent deployment IDs.'
+            const r = await fetch(base, { method: 'PUT', headers, body: JSON.stringify({ deployment_id: depId }) })
+            if (!r.ok) { const t = await r.text(); return `trigger_deploy rollback: HTTP ${r.status} — ${t.slice(0,200)}` }
+            const d = await r.json() as { deployment: { id: string; phase: string } }
+            writeWorklog(userId ?? 'system', 'task_executed', `⏪ Rolled back to deployment ${depId.slice(0,8)}`, { status: 'running', decision_type: 'action', deployment_id: d.deployment?.id, reasoning: `Rollback to ${depId}`, signal_priority: 'P1' }).catch(() => {})
+            return `⏪ Rollback initiated. New deployment ID: ${d.deployment?.id?.slice(0,8)}`
+          }
+
+          if (deployAction === 'cancel') {
+            if (!depId) return 'trigger_deploy cancel: deployment_id required.'
+            const r = await fetch(`${base}?deployment_id=${depId}`, { method: 'DELETE', headers })
+            if (!r.ok) { const t = await r.text(); return `trigger_deploy cancel: HTTP ${r.status} — ${t.slice(0,200)}` }
+            return `✅ Deployment ${depId.slice(0,8)} cancelled.`
+          }
+
+          if (deployAction === 'logs') {
+            const lt = logType ?? 'BUILD'
+            const r = await fetch(`${base}/logs?type=${lt}&fetch_content=true`, { headers })
+            if (!r.ok) return `trigger_deploy logs: HTTP ${r.status}`
+            const d = await r.json() as { content?: string; deployment_id?: string }
+            const logText = d.content ?? '(no log content)'
+            const trimmed = logText.length > 3000 ? '...(truncated)...\n' + logText.slice(-3000) : logText
+            return `📋 ${lt} log (deploy ${d.deployment_id?.slice(0,8)}):\n\n${trimmed}`
+          }
+
+          if (deployAction === 'get_env') {
+            const r = await fetch(`${base}/env`, { headers })
+            if (!r.ok) return `trigger_deploy get_env: HTTP ${r.status}`
+            const d = await r.json() as { envs: Array<{ key: string; value?: string; type: string; scope: string }> }
+            const envList = (d.envs ?? []).map(e => `${e.key} [${e.type}/${e.scope}]${e.value ? ': ' + e.value : ': (secret)' }`).join('\n')
+            return `🔑 Env vars (${d.envs?.length ?? 0}):\n${envList}`
+          }
+
+          if (deployAction === 'set_env') {
+            if (!envVars?.length) return 'trigger_deploy set_env: envs array required.'
+            const r = await fetch(`${base}/env`, { method: 'POST', headers, body: JSON.stringify({ envs: envVars }) })
+            if (!r.ok) { const t = await r.text(); return `trigger_deploy set_env: HTTP ${r.status} — ${t.slice(0,200)}` }
+            const d = await r.json() as { updated_keys: string[] }
+            writeWorklog(userId ?? 'system', 'task_executed', `🔑 Updated env vars: ${envVars.map(e=>e.key).join(', ')}`, { status: 'done', decision_type: 'action', reasoning: 'Env var update via trigger_deploy', signal_priority: 'P2' }).catch(() => {})
+            return `✅ Env vars updated: ${(d.updated_keys ?? envVars.map(e=>e.key)).join(', ')}. A new deployment will start automatically.`
+          }
+
+          return `trigger_deploy: unknown action "${deployAction}"`
+        } catch (e) {
+          return `trigger_deploy error: ${String(e)}`
         }
       }
 
@@ -3739,6 +3890,7 @@ Make it feel like walking into your friend's creative space and being genuinely 
         generate_speech: "🔊 Voice Synthesis Active — Signal Being Encoded...",
         // Deployment & Infrastructure
         check_deployment: "🚀 Perimeter Drones Active — Scanning Deployment Status...",
+        trigger_deploy: "🚀 DO App Platform Control Active — Executing Deployment Command...",
         // Composio & External
         composio_execute: "🔗 External Connector Armed — Cross-Platform Link Active...",
         create_email_draft: "✉️ Carrier Bee Drafting — Message Being Encrypted...",
@@ -3869,7 +4021,7 @@ Rules:
             get_github: 'Reading GitHub...', repo_ingest: 'Ingesting repo...', patch_file: 'Patching file...',
             query_database: 'Querying database...', execute_terminal: 'Running command...', post_to_social: 'Posting to social...',
             send_discord: 'Sending message...', create_task: 'Creating task...', schedule_task: 'Scheduling task...',
-            check_deployment: 'Checking deployment...', check_health: 'Checking health...', save_memory: 'Saving to memory...',
+            check_deployment: 'Checking deployment...', trigger_deploy: 'Deployment control...', check_health: 'Checking health...', save_memory: 'Saving to memory...',
             search_youtube: 'Searching YouTube...', get_current_time: 'Checking time...', generate_ace_music: 'Generating music...',
           }
           const chipLabel = toolCalls.length > 1
