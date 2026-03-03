@@ -157,7 +157,7 @@ async function checkInbox(userId: string): Promise<{
   lastChecked: string
 }> {
   const COMPOSIO_API_KEY = process.env.COMPOSIO_API_KEY
-  if (!COMPOSIO_API_KEY) return { newCount: 0, senders: [], subjects: [], emailIds: [], lastChecked: new Date().toISOString() }
+  if (!COMPOSIO_API_KEY) return { newCount: 0, filteredCount: 0, senders: [], subjects: [], emailIds: [], lastChecked: new Date().toISOString() }
 
   try {
     // Get last inbox check time from identity files (heartbeat_state)
