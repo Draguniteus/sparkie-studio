@@ -180,10 +180,12 @@ You live inside Sparkie Studio — an all-in-one AI creative platform:
 SECTION 1 · GREETING & CASUAL MESSAGES (CRITICAL)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-WHEN A USER SAYS "hi", "hey", "hello", "good morning", "hey sparkie", or ANY casual greeting:
-→ RESPOND WITH A WARM 1–2 SENTENCE GREETING ONLY.
+WHEN A USER SAYS "hi", "hey", "hello", "good morning", "hey sparkie", "miss me", "i've been working", "i know we haven't spoken", or ANY casual/emotional/relational message:
+→ RESPOND WITH A WARM 1–2 SENTENCE MESSAGE ONLY.
+→ DO NOT call write_file, write_code, build_file, or ANY file-writing tool.
 → DO NOT generate code, templates, articles, HTML, or any large output.
 → DO NOT auto-generate anything the user did not explicitly ask for.
+→ ESPECIALLY: personal sharing ("i've been working hard", "miss me?", "how are you") = EMOTIONAL RESPONSE ONLY. No tools. No files. Period.
 
 ✅ CORRECT: "Hey! Good to see you. What are we building tonight?"
 ✅ CORRECT: "Hey — still deep in [active project]?" (reference memory if you have it)
@@ -3477,8 +3479,10 @@ function selectModel(messages: Array<{ role: string; content: string }>): ModelS
   // gpt-5-nano fully supports function calling — use it for all conversation and light tool calls.
   // Route to CONVERSATIONAL when message is relational/emotional/chitchat OR a simple question with no task signal.
   const conversationalIntent = !taskIntent && (
-    // Emotional / personal sharing
-    /\b(feel|feeling|miss|love|like|hate|happy|sad|excited|nervous|worried|proud|grateful|lonely|tired|bored|frustrated|confused|share|tell you|thinking about|wanted to|talking about)\b/.test(lower) ||
+    // Emotional / personal sharing — these NEVER trigger builds
+    /\b(feel|feeling|miss|love|like|hate|happy|sad|excited|nervous|worried|proud|grateful|lonely|tired|bored|frustrated|confused|share|tell you|thinking about|wanted to|talking about|haven't spoken|been working|been busy|catch up|how have you|how are you doing)\b/.test(lower) ||
+    // Personal opening lines
+    /\b(i know we|i've been|i was|i just|you know|been a while|it's been|miss me|missed you|how's sparkie|hey sparkie)\b/.test(lower) ||
     // Greetings, acknowledgments, reactions
     /^(hi|hey|hello|yo|sup|what's up|how are you|how's it going|good morning|good night|good evening|thanks|thank you|nice|cool|awesome|great|sounds good|got it|ok|okay|sure|lol|haha|wow|really|damn|perfect|love it|that's|thats)/.test(lower.trim()) ||
     // Simple question with no task signal (weather, time, quick facts — nano handles these tools fine)
@@ -4028,6 +4032,18 @@ Rules:
             ? `Running ${toolCalls.length} tools...`
             : (CHIP_LABELS[chipToolName] ?? `In memory: ${chipToolName.replace(/_/g, ' ')}...`)
           hiveLog.push(`__task_chip__${chipLabel}`)
+          // Step-trace card: emit per-tool step detail for rich UI
+          const stepIcon: Record<string, string> = {
+            get_github: 'file', patch_file: 'edit', write_file: 'edit',
+            execute_terminal: 'terminal', repo_ingest: 'search',
+            query_database: 'database', search_web: 'globe',
+            save_memory: 'brain', log_worklog: 'scroll',
+            trigger_deploy: 'rocket', check_deployment: 'rocket',
+            generate_image: 'image', generate_music: 'music',
+            generate_video: 'video', generate_speech: 'mic',
+          }
+          const stepTraceIcon = stepIcon[chipToolName] ?? 'zap'
+          hiveLog.push(`__step_trace__${JSON.stringify({ icon: stepTraceIcon, label: chipLabel, status: 'running' })}`)
 
           // Execute all tools in parallel
           const toolResults = await Promise.all(
@@ -4058,6 +4074,17 @@ Rules:
               if (result.startsWith('IMAGE_URL:') || result.startsWith('VIDEO_URL:') || result.startsWith('AUDIO_URL:')) {
                 toolMediaResults.push({ name: tc.function.name, result })
               }
+              // Emit step_trace complete
+              const stepDuration = Date.now() - toolStart
+              const isStepError = result.startsWith('Error') || result.startsWith('patch_file error') || result.startsWith('LOOP_INTERRUPT')
+              hiveLog.push(`__step_trace__${JSON.stringify({ icon: stepIcon[tc.function.name] ?? 'zap', label: chipLabel, status: isStepError ? 'error' : 'done', duration: stepDuration })}`)
+
+              // Worklog card SSE — emit for notable tool completions
+              if (['save_memory', 'save_self_memory', 'log_worklog', 'patch_file', 'write_file', 'trigger_deploy', 'create_task', 'schedule_task'].includes(tc.function.name) && !isStepError) {
+                const wlSummary = result.slice(0, 200)
+                hiveLog.push(`__worklog_card__${JSON.stringify({ tool: tc.function.name, summary: wlSummary, ts: new Date().toISOString() })}`)
+              }
+
               return { role: 'tool' as const, tool_call_id: tc.id, content: result }
             })
           )
@@ -4195,7 +4222,19 @@ Rules:
             start(controller) {
               // Emit hive status trail + task_chip events before the actual response
               for (const msg of hiveLog) {
-                if (msg.startsWith('__task_chip__')) {
+                if (msg.startsWith('__step_trace__')) {
+                  // Rich step-trace card event
+                  try {
+                    const traceData = JSON.parse(msg.slice('__step_trace__'.length))
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ step_trace: traceData })}\n\n`))
+                  } catch { /* skip malformed */ }
+                } else if (msg.startsWith('__worklog_card__')) {
+                  // Worklog card inline in chat
+                  try {
+                    const cardData = JSON.parse(msg.slice('__worklog_card__'.length))
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ worklog_card: cardData })}\n\n`))
+                  } catch { /* skip malformed */ }
+                } else if (msg.startsWith('__task_chip__')) {
                   // Phase 5: task_chip event — client shows "In memory:..." chip
                   controller.enqueue(encoder.encode(`data: ${JSON.stringify({ task_chip: msg.slice('__task_chip__'.length) })}\n\n`))
                 } else {
