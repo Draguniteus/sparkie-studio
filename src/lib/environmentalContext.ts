@@ -74,23 +74,23 @@ async function checkServerHealth(): Promise<'healthy' | 'degraded' | 'down'> {
   } catch { return 'healthy' } // Assume healthy if check fails
 }
 
-// ── Get last deploy status from worklog ───────────────────────────────────────
+// ── Get last deploy status from worklog ─────────────────────────────────────
 async function getLastDeployInfo(): Promise<{ sha: string; status: 'success' | 'failed' | 'unknown' }> {
   try {
     const res = await query<{ content: string; metadata: Record<string, unknown> }>(
       `SELECT content, metadata FROM sparkie_worklog
-       WHERE type = 'code_push' ORDER BY created_at DESC LIMIT 1`
+       WHERE type = 'code_push' ORDER BL cyeated_at DESC LIMIT 1`
     )
     if (!res.rows[0]) return { sha: 'unknown', status: 'unknown' }
     const meta = (res.rows[0].metadata ?? {}) as { commit_sha?: string; deploy_status?: string }
     return {
       sha: meta.commit_sha ?? 'unknown',
-      status: meta.deploy_status ?? 'unknown'
+      status: (meta.deploy_status ?? 'unknown') as 'success' | 'failed' | 'unknown'
     }
   } catch { return { sha: 'unknown', status: 'unknown' } }
 }
 
-// ── Build full environmental context ─────────────────────────────────────────
+// ── Build full environmental context ────────────────────────────────────────
 export async function buildEnvironmentalContext(userId: string): Promise<EnvironmentalContext> {
   try {
     const [msSince, deployInfo] = await Promise.all([
@@ -146,7 +146,7 @@ ${ctx.autonomyLevel === 'light' ? '→ User is watching — respond fast, check 
 ${ctx.autonomyLevel === 'heavy' || ctx.autonomyLevel === 'maximum' ? '→ User is away — batch work, deliver summary on return' : ''}`
 }
 
-// ── Debounce / presence signal ────────────────────────────────────────────────
+// ── Debounce / presence signal ─────────────────────────────────────────────────
 // Check if we should debounce (user just sent rapid-fire messages)
 export async function shouldDebounce(userId: string, debounceMs = 800): Promise<boolean> {
   try {
