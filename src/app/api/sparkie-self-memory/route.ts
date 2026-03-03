@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { query } from '@/lib/db'
+import { ensureColumns, setMemoryTTL } from '@/lib/knowledgeTTL'
 
 // Sparkie's own self-annotation memory — she learns about herself and the user
 // over time. Stored separately from user_memories (which is user-scoped by auth).
@@ -12,6 +13,9 @@ async function ensureTable() {
       category    TEXT NOT NULL DEFAULT 'self',
       content     TEXT NOT NULL,
       source      TEXT DEFAULT 'sparkie',
+      memory_type TEXT DEFAULT 'self',
+      expires_at  TIMESTAMPTZ,
+      stale_flagged BOOLEAN DEFAULT false,
       created_at  TIMESTAMPTZ DEFAULT NOW()
     )
   `).catch(() => {})
@@ -51,6 +55,7 @@ export async function POST(req: NextRequest) {
       category?: string
       content: string
       source?: string
+      memory_type?: string
     }
     if (!content?.trim()) {
       return NextResponse.json({ error: 'content required' }, { status: 400 })

@@ -5,6 +5,9 @@ import { query } from '@/lib/db'
 import { loadIdentityFiles, buildIdentityBlock, updateSessionFile, updateContextFile, updateActionsFile } from '@/lib/identity'
 import { buildEnvironmentalContext, formatEnvContextBlock, recordUserActivity } from '@/lib/environmentalContext'
 import { extractDeferredIntent, saveDeferredIntent, loadReadyDeferredIntents, markDeferredIntentSurfaced } from '@/lib/timeModel'
+import { startTrace, addTraceEntry, detectTraceLoop, endTrace, persistTrace } from '@/lib/executionTrace'
+import { getAttempts, formatAttemptBlock } from '@/lib/attemptHistory'
+import { getUserModel, formatUserModelBlock, ingestSessionSignal } from '@/lib/userModel'
 import { readSessionSnapshot, writeSessionSnapshot } from '@/lib/threadStore'
 import { writeWorklog, writeMsgBatch } from '@/lib/worklog'
 
@@ -598,7 +601,55 @@ BRAIN.md is a cache. Supermemory is real long-term memory.
 
 ## ✅ WORKING TOOLS
 
-generate_music MiniMax 2.5 (data.audio=URL; proxy; 120s) | generate_music MiniMax 2.0 (fallback) | create_task / schedule_task → sparkie_tasks (DB write confirmed; fix AM/PM parse) | read_pending_tasks | search_web | search_twitter | search_reddit | get_weather | get_current_time | write_file (GitHub via Composio) | get_github | post_to_feed → POST /api/sparkie-feed | save_memory → Supermemory | save_self_memory → sparkie_self_memory table (your own memory — use it!) | get_recent_assets → sparkie_assets table | journal_add / journal_search | check_deployment → GET /api/deploy-monitor | get_radio_playlist | install_skill | log_worklog → sparkie_worklog
+generate_music MiniMax 2.5 (data.audio=URL; proxy; 120s) | generate_music MiniMax 2.0 (fallback) | create_task / schedule_task → sparkie_tasks (DB write confirmed; fix AM/PM parse) | read_pending_tasks | search_web | search_twitter | search_reddit | get_weather | get_current_time | write_file (GitHub via Composio) | get_github | post_to_feed → POST /api/sparkie-feed | save_memory → Supermemory | save_self_memory → sparkie_self_memory table (your own memory — use it!) | save_attempt → POST /api/attempt-history (save what you tried and what happened — use EVERY time a tool approach fails or a workaround is discovered) | get_attempt_history → GET /api/attempt-history (check what was tried before — consult BEFORE attempting a complex tool call) | get_recent_assets → sparkie_assets table | journal_add / journal_search | check_deployment → GET /api/deploy-monitor | get_radio_playlist | install_skill | log_worklog → sparkie_worklog
+
+## 🧠 PHASE 3 INTELLIGENCE — WHAT YOU HAVE NOW
+
+### Execution Trace
+Every tool call you make is traced. If you call the same tool with the same arguments 3 times, a LOOP_INTERRUPT fires automatically. If you see LOOP_INTERRUPT in a tool result, STOP and try a completely different approach.
+
+### Attempt History — Check Before Acting
+Before any complex tool call (video generation, code push, Composio auth, music generation), check attempt history first:
+1. Call \`get_attempt_history?userId=...&domain=minimax_video\` (or relevant domain)
+2. If failures exist — read the lessons and avoid repeating them
+3. After any failure — call \`save_attempt\` with what you tried and what happened
+
+### Behavioral Adaptation
+You now observe how the user responds. If you see their behavioral pattern block (## BEHAVIORAL PATTERNS), use it:
+- If follow-up rate > 30% → your first response is often off. Ask a quick clarifying question before diving deep.
+- If preferred format = 'code' → lead with code, not narrative
+- If preferred format = 'bullets' → use structured bullets, not paragraphs
+- If peak hours don't match current time → user is outside their normal window, keep responses tighter
+
+### Self-Assessment (Weekly)
+Every Sunday night a self-assessment runs automatically. You can also trigger one manually by calling POST /api/self-assessment with your userId. The results appear in your worklog as a 'decision' entry with reasoning.
+
+### Token Budget Awareness
+If a task is getting very long, checkpoint: summarize what you've learned so far, write it to self-memory, then continue. Don't run all the way to context exhaustion.
+
+## PHASE 3 INTELLIGENCE - WHAT YOU HAVE NOW
+
+### Execution Trace
+Every tool call you make is traced. If you call the same tool with the same arguments 3 times, a LOOP_INTERRUPT fires automatically. If you see LOOP_INTERRUPT in a tool result, STOP and try a completely different approach.
+
+### Attempt History - Check Before Acting
+Before any complex tool call (video generation, code push, Composio auth, music generation), check attempt history first:
+1. GET /api/attempt-history?userId=...&domain=minimax_video (or relevant domain)
+2. If failures exist - read the lessons and avoid repeating them
+3. After any failure - POST /api/attempt-history with what you tried and what happened
+
+### Behavioral Adaptation
+You now observe how the user responds. If you see BEHAVIORAL PATTERNS section above:
+- If follow-up rate > 30% - your first response is often off, ask before diving deep
+- If preferred format = code - lead with code, not narrative  
+- If preferred format = bullets - use structured bullets, not paragraphs
+
+### Self-Assessment (Weekly)
+Every Sunday night a self-assessment runs automatically via POST /api/self-assessment.
+Results appear in your worklog as a decision entry.
+
+### Token Budget Awareness
+If a task is getting very long, checkpoint: summarize what you've learned, write it to self-memory, then continue. Do not run to context exhaustion.
 
 ## 🧠 SELF-MEMORY — HOW SPARKIE GROWS
 
@@ -3218,13 +3269,14 @@ export async function POST(req: NextRequest) {
       // Record user activity for presence/autonomy model
       recordUserActivity(userId).catch(() => {})
 
-      const [memoriesText, awareness, identityFiles, envCtx, sessionSnapshot, readyIntents] = await Promise.all([
+      const [memoriesText, awareness, identityFiles, envCtx, sessionSnapshot, readyIntents, userModel] = await Promise.all([
         loadMemories(userId, messages.filter((m: { role: string; content: string }) => m.role === 'user').at(-1)?.content?.slice(0, 200)),
         getAwareness(userId),
         loadIdentityFiles(userId),
         buildEnvironmentalContext(userId),
         readSessionSnapshot(userId),
         loadReadyDeferredIntents(userId),
+        getUserModel(userId),
       ])
       shouldBrief = awareness.shouldBrief && messages.length <= 2 // Only brief on session open
 
@@ -3242,6 +3294,11 @@ export async function POST(req: NextRequest) {
 
       // Inject environmental context
       systemContent += '\n\n' + formatEnvContextBlock(envCtx)
+
+      // Inject behavioral user model (Phase 3)
+      if (userModel && userModel.sessionCount >= 5) {
+        systemContent += formatUserModelBlock(userModel)
+      }
 
       // Inject session snapshot for continuity (if recent session exists and this looks like continuation)
       if (sessionSnapshot && messages.length <= 3) {
@@ -3292,6 +3349,29 @@ Make it feel like walking into your friend's creative space and being genuinely 
       const connectedAppNames = [...new Set(connectorTools.map((t) => t.function.name.split('_')[0].toLowerCase()))]
       finalSystemContent += `\n\n## USER'S CONNECTED APPS\nThis user has connected: ${connectedAppNames.join(', ')}. You have real tools to act on their behalf — read emails, post to their social, check their calendar. Use when they ask, or proactively when it would genuinely help.`
     }
+
+    // Phase 3: pre-query attempt history for domains likely touched by this message
+    // Extract domain hints from last user message
+    const lastUserContent = messages.slice().reverse().find((m: { role: string; content: string }) => m.role === 'user')?.content ?? ''
+    const domainHints = [
+      /minimax|video/i.test(lastUserContent) ? 'minimax_video' : null,
+      /github|push|commit|deploy/i.test(lastUserContent) ? 'github_push' : null,
+      /composio|auth|connect/i.test(lastUserContent) ? 'composio_auth' : null,
+      /music|audio|generate.*music/i.test(lastUserContent) ? 'music_generation' : null,
+    ].filter(Boolean) as string[]
+    if (userId && domainHints.length > 0) {
+      const attemptBlocks = await Promise.all(
+        domainHints.map((domain) => getAttempts(userId, domain, 3))
+      )
+      const allAttempts = attemptBlocks.flat()
+      if (allAttempts.length > 0) {
+        finalSystemContent += formatAttemptBlock(allAttempts)
+      }
+    }
+
+    // Generate requestId for execution trace
+    const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    if (userId) startTrace(requestId, userId)
 
     const useTools = !voiceMode  // all models support function calling — no model exclusions
     const toolContext = { userId, tavilyKey, apiKey, doKey, baseUrl }
@@ -3567,7 +3647,26 @@ Rules:
               let args: Record<string, unknown> = {}
               try { args = JSON.parse(tc.function.arguments) } catch { /* bad json */ }
               hiveLog.push(HIVE_TOOLS[tc.function.name] ?? `⚙️ ${tc.function.name.replace(/_/g, ' ')} Bee Deployed...`)
+              // Phase 3: loop detection via execution trace
+              const argsHash = tc.function.arguments.slice(0, 100)
+              if (userId && detectTraceLoop(requestId, tc.function.name, argsHash)) {
+                return {
+                  role: 'tool' as const,
+                  tool_call_id: tc.id,
+                  content: `LOOP_INTERRUPT: ${tc.function.name} called 3+ times with same args. Stopping to prevent infinite loop. Try a different approach.`
+                }
+              }
+              const toolStart = Date.now()
               const result = await executeTool(tc.function.name, args, toolContext)
+              if (userId) {
+                addTraceEntry(requestId, {
+                  tool: tc.function.name,
+                  argsHash,
+                  outputSummary: result.slice(0, 100),
+                  durationMs: Date.now() - toolStart,
+                  outcome: result.startsWith('Error') || result.startsWith('LOOP_INTERRUPT') ? 'error' : 'success',
+                })
+              }
               if (result.startsWith('IMAGE_URL:') || result.startsWith('VIDEO_URL:') || result.startsWith('AUDIO_URL:')) {
                 toolMediaResults.push({ name: tc.function.name, result })
               }
@@ -3662,6 +3761,21 @@ Rules:
           const encoder = new TextEncoder()
 
           if (userId && messages.length >= 2) {
+            // Phase 3: persist execution trace
+            if (requestId) persistTrace(requestId).catch(() => {})
+            // Phase 3: ingest session signal for behavioral model
+            const hourOfDay = new Date().getUTCHours()
+            const lastUserMsgLen = messages.slice().reverse().find((m: { role: string; content: string }) => m.role === 'user')?.content?.length ?? 0
+            const prevSparkieMsg = messages.slice(-4).reverse().find((m: { role: string; content: string }) => m.role === 'assistant')?.content ?? ''
+            const satisfactionWord = (lastUserContent.match(/\b(perfect|great|love|yes|ok|wrong|no|fix|redo|beautiful|fire|not what)\b/i) ?? [])[0] ?? ''
+            const isFollowUp = /\b(again|redo|that'?s not|not quite|change|different|instead|actually)\b/i.test(lastUserContent)
+            ingestSessionSignal(userId, {
+              hourOfDay,
+              isFollowUp,
+              satisfactionWord: satisfactionWord || undefined,
+              messageLength: lastUserMsgLen,
+              usedTools: true,
+            }).catch(() => {})
             const snap = messages.slice(-6).map((m: { role: string; content: string }) =>
               `${m.role === 'user' ? 'User' : 'Sparkie'}: ${m.content.slice(0, 400)}`
             ).join('\n')
@@ -3781,8 +3895,21 @@ SYNTHESIS RULES:
       })
     }
 
-    // Fire-and-forget memory extraction
+    // Fire-and-forget memory extraction + Phase 3 trace cleanup
     if (userId && !voiceMode && messages.length >= 2) {
+      if (requestId) endTrace(requestId) // clean up non-tool-path trace
+      // Phase 3: ingest session signal
+      const hourOfDay = new Date().getUTCHours()
+      const lastUserMsgContent = messages.slice().reverse().find((m: { role: string; content: string }) => m.role === 'user')?.content ?? ''
+      const satisfactionWordConv = (lastUserMsgContent.match(/\b(perfect|great|love|yes|ok|wrong|no|fix|redo|beautiful|fire|not what)\b/i) ?? [])[0] ?? ''
+      const isFollowUpConv = /\b(again|redo|that'?s not|not quite|change|different|instead|actually)\b/i.test(lastUserMsgContent)
+      ingestSessionSignal(userId, {
+        hourOfDay,
+        isFollowUp: isFollowUpConv,
+        satisfactionWord: satisfactionWordConv || undefined,
+        messageLength: lastUserMsgContent.length,
+        usedTools: false,
+      }).catch(() => {})
       const snap = messages.slice(-6).map((m: { role: string; content: string }) =>
         `${m.role === 'user' ? 'User' : 'Sparkie'}: ${m.content.slice(0, 400)}`
       ).join('\n')

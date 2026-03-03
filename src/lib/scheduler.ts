@@ -4,6 +4,8 @@ import { runAuthHealthSweep } from '@/lib/authHealth'
 import { classifyHeartbeatSignal } from '@/lib/signalQueue'
 import { pruneToolCache } from '@/lib/toolCallWrapper'
 import { loadReadyDeferredIntents, markDeferredIntentSurfaced } from '@/lib/timeModel'
+import { runTTLDecaySweep } from '@/lib/knowledgeTTL'
+import { computeUserModel } from '@/lib/userModel'
 
 const INTERNAL_SECRET = process.env.SPARKIE_INTERNAL_SECRET ?? ''
 const SCHEDULER_INTERVAL_MS = 60_000 // 1 minute
@@ -270,6 +272,33 @@ async function heartbeatTick(baseUrl: string): Promise<void> {
             signal_priority: intent.dueAt && intent.dueAt < new Date() ? 'P1' : 'P2',
           })
           await markDeferredIntentSurfaced(intent.id)
+        }
+      }
+
+      // ── TTL decay sweep — flag stale self-memory entries ────────────────────
+      const staleFlagged = await runTTLDecaySweep().catch(() => 0)
+      if (staleFlagged > 0) {
+        console.log(`[scheduler] TTL sweep: ${staleFlagged} stale memories flagged`)
+      }
+
+      // ── Weekly self-assessment (Sunday 23:00 UTC) ─────────────────────────────
+      const now = new Date()
+      const isSundayNight = now.getUTCDay() === 0 && now.getUTCHours() === 23
+      if (isSundayNight) {
+        for (const { user_id } of activeUsers.rows.slice(0, 5)) {
+          fetch(`${baseUrl}/api/self-assessment`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-internal-secret': INTERNAL_SECRET },
+            body: JSON.stringify({ userId: user_id }),
+          }).catch(() => {})
+        }
+      }
+
+      // ── Behavioral model compute (weekly, Saturday 02:00 UTC) ─────────────────
+      const isSaturdayEarly = now.getUTCDay() === 6 && now.getUTCHours() === 2
+      if (isSaturdayEarly) {
+        for (const { user_id } of activeUsers.rows.slice(0, 10)) {
+          computeUserModel(user_id).catch(() => {})
         }
       }
 

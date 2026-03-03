@@ -18,6 +18,7 @@ export type WorklogType =
   | 'tool_call'
   | 'decision'
   | 'hold'
+  | 'self_assessment'
 
 export type WorklogStatus = 'running' | 'done' | 'blocked' | 'anomaly' | 'skipped'
 export type WorklogDecisionType = 'action' | 'skip' | 'hold' | 'escalate' | 'proactive'
@@ -42,6 +43,10 @@ export interface WorklogMeta {
   confidence?: number
   depends_on?: string[]      // worklog entry IDs this depends on
   side_effect_of?: string    // worklog entry ID that triggered this
+  // Phase 3: intelligence fields
+  attempt_domain?: string    // for attempt_history linking
+  loop_count?: number        // how many times this tool was called in this trace
+  token_budget_pct?: number  // token usage % at time of entry
   [key: string]: unknown
 }
 
