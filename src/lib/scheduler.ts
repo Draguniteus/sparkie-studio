@@ -187,6 +187,96 @@ async function deploymentHealthSweep(userId: string): Promise<void> {
   } catch { /* non-critical */ }
 }
 
+
+// ── Deployment health sweep ───────────────────────────────────────────────────
+// Runs every ~10 ticks (~10 min). Detects failed DO builds and auto-retries transient failures.
+const DO_TOKEN = process.env.DO_API_TOKEN ?? ''
+const DO_APP_ID_DEPLOY = 'fb3d58ac-f1b5-4e65-89b5-c12834d8119a'
+
+interface DODeployment {
+  id: string
+  phase: string
+  cause: string
+  progress?: { steps?: Array<{ name: string; status: string; reason?: string }> }
+}
+
+async function deploymentHealthSweep(userId: string): Promise<void> {
+  if (!DO_TOKEN) return
+  try {
+    const res = await fetch(
+      `https://api.digitalocean.com/v2/apps/${DO_APP_ID_DEPLOY}/deployments?page=1&per_page=3`,
+      {
+        headers: { Authorization: `Bearer ${DO_TOKEN}` },
+        signal: AbortSignal.timeout(8000),
+      }
+    )
+    if (!res.ok) return
+    const data = await res.json() as { deployments?: DODeployment[] }
+    const deployments = data.deployments ?? []
+    if (deployments.length === 0) return
+
+    const latest = deployments[0]
+
+    if (latest.phase === 'ERROR' || latest.phase === 'FAILED') {
+      // Avoid duplicate handling
+      const existing = await query<{ id: string }>(
+        `SELECT id FROM sparkie_worklogs WHERE user_id = $1 AND type = 'error'
+         AND metadata::text LIKE $2 LIMIT 1`,
+        [userId, `%${latest.id}%`]
+      ).catch(() => ({ rows: [] as { id: string }[] }))
+      if (existing.rows.length > 0) return
+
+      const failReason = latest.progress?.steps?.find(s => s.status === 'ERROR')?.reason ?? 'Unknown error'
+      await writeWorklog(userId, 'error', `🚨 Deployment failed: ${failReason}`, {
+        status: 'anomaly',
+        decision_type: 'escalate',
+        deployment_id: latest.id,
+        reasoning: `DO deployment phase=${latest.phase} cause=${latest.cause}`,
+        signal_priority: 'P1',
+      })
+
+      // Auto-retry only if previous deployment was healthy (transient failure heuristic)
+      const prevPhase = deployments[1]?.phase
+      if (prevPhase && prevPhase !== 'ERROR' && prevPhase !== 'FAILED') {
+        await fetch(
+          `https://api.digitalocean.com/v2/apps/${DO_APP_ID_DEPLOY}/deployments`,
+          {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${DO_TOKEN}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ force_build: true }),
+            signal: AbortSignal.timeout(8000),
+          }
+        )
+        await writeWorklog(userId, 'task_executed', `🔁 Auto-retried deployment after transient build failure`, {
+          status: 'done',
+          decision_type: 'action',
+          deployment_id: latest.id,
+          reasoning: 'Previous deployment healthy — auto-redeploy triggered for transient failure',
+          signal_priority: 'P1',
+        })
+      }
+    } else if (latest.phase === 'ACTIVE') {
+      const prevPhase = deployments[1]?.phase
+      if (prevPhase === 'ERROR' || prevPhase === 'FAILED') {
+        const existing = await query<{ id: string }>(
+          `SELECT id FROM sparkie_worklogs WHERE user_id = $1 AND type = 'task_executed'
+           AND metadata::text LIKE $2 AND content LIKE '%recovered%' LIMIT 1`,
+          [userId, `%${latest.id}%`]
+        ).catch(() => ({ rows: [] as { id: string }[] }))
+        if (existing.rows.length === 0) {
+          await writeWorklog(userId, 'task_executed', `✅ Deployment recovered — now ACTIVE`, {
+            status: 'done',
+            decision_type: 'proactive',
+            deployment_id: latest.id,
+            reasoning: 'Deployment phase transitioned from ERROR/FAILED to ACTIVE',
+            signal_priority: 'P2',
+          })
+        }
+      }
+    }
+  } catch { /* non-critical */ }
+}
+
 const INTERNAL_SECRET = process.env.SPARKIE_INTERNAL_SECRET ?? ''
 const SCHEDULER_INTERVAL_MS = 60_000 // 1 minute
 
@@ -435,6 +525,12 @@ async function heartbeatTick(baseUrl: string): Promise<void> {
 
       // Prune expired tool cache entries
       pruneToolCache()
+      // Deployment health sweep — once every ~10 ticks (10 min)
+      if (shouldRunAuthCheck) {
+        const sweepUser = dueUsers.rows[0]?.user_id ?? authCheckUsers.rows[0]?.user_id
+        if (sweepUser) deploymentHealthSweep(sweepUser).catch(() => {})
+      }
+
       // Deployment health sweep — once every ~10 ticks (10 min)
       if (shouldRunAuthCheck) {
         const sweepUser = dueUsers.rows[0]?.user_id ?? authCheckUsers.rows[0]?.user_id
