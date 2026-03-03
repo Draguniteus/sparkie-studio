@@ -158,7 +158,7 @@ interface AppState {
   deleteFile: (id: string) => void
   setActiveFile: (id: string | null) => void
   setFiles: (files: FileNode[]) => void
-  saveChatFiles: (chatId: string, files: FileNode[]) => void
+  savechatFiles: (chatId: string, files: FileNode[]) => void
   openIDE: () => void
   toggleIDE: () => void
   setIdeTab: (tab: IDETab) => void
@@ -294,7 +294,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       liveCode: '',
       liveCodeFiles: [],
       isExecuting: false,
-  longTaskLabel: null,
       isStreaming: false,
       ideTab: 'process',
       containerStatus: 'idle',
@@ -331,6 +330,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   ideOpen: false,
   ideTab: 'process',
   isExecuting: false,
+  longTaskLabel: null,
   liveCode: '',
   liveCodeFiles: [],
 
@@ -345,7 +345,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   deleteFile: (id) => set((s) => ({ files: s.files.filter((f) => f.id !== id) })),
   setActiveFile: (id) => set({ activeFileId: id }),
   setFiles: (files) => set({ files }),
-  saveChatFiles: (chatId, files) => set((s) => ({
+  saveChat​Files: (chatId, files) => set((s) => ({
     chats: s.chats.map((c) => c.id === chatId ? { ...c, files } : c),
   })),
   openIDE: () => set({ ideOpen: true }),
