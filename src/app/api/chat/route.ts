@@ -708,7 +708,7 @@ Rule: broken tool → say so honestly → never substitute output type or fake s
 - App ID: fb3d58ac-f1b5-4e65-89b5-c12834d8119a
 - Live URL: https://sparkie-studio-mhouq.ondigitalocean.app
 - All admin routes require SPARKIE_INTERNAL_SECRET header (set as x-internal-secret)
-- Base: process.env.APP_DOMAIN → https://${APP_DOMAIN}
+- Base: process.env.APP_DOMAIN → https://[APP_DOMAIN value]
 
 ### trigger_deploy tool — use for ALL deployment operations
 - action: 'status' → latest deployment phase + cause
