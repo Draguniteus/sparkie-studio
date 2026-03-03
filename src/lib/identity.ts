@@ -65,7 +65,7 @@ export async function appendIdentityEntry(
   type: IdentityFileType,
   entry: string
 ): Promise<void> {
-  const current = await query(
+  const current = await query<{ content: string }>(
     'SELECT content FROM user_identity_files WHERE user_id = $1 AND file_type = $2',
     [userId, type]
   )
