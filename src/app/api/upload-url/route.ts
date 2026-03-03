@@ -3,6 +3,9 @@ import { getServerSession } from 'next-auth/next'
 import { authOptions } from '@/lib/auth'
 import { createHmac, createHash } from 'crypto'
 
+export const runtime = 'nodejs'
+export const maxDuration = 30
+
 // Generates a presigned PUT URL for DigitalOcean Spaces (S3-compatible)
 // Uses only Node.js built-in crypto -- no external AWS SDK needed
 // Client PUTs directly to Spaces; server never handles binary data

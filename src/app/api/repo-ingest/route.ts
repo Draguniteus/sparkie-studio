@@ -3,6 +3,9 @@ import { getServerSession } from 'next-auth/next'
 import { authOptions } from '@/lib/auth'
 import { ingestRepo, getProjectContext } from '@/lib/repoIngestion'
 
+export const runtime = 'nodejs'
+export const maxDuration = 60
+
 export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
@@ -38,7 +41,7 @@ export async function GET(req: NextRequest) {
     const ctx = await getProjectContext(userId, repo)
     if (!ctx) return NextResponse.json({ error: 'Not ingested yet' }, { status: 404 })
     return NextResponse.json(ctx)
-  } catch (e) {
+  } catch e) {
     return NextResponse.json({ error: String(e) }, { status: 500 })
   }
 }
