@@ -21,8 +21,9 @@ export const authOptions: NextAuthOptions = {
           avatar_url: string;
           password_hash: string;
           email_verified: boolean;
+          role: string;
         }>(
-          'SELECT id, email, display_name, avatar_url, password_hash, email_verified FROM users WHERE email = $1',
+          'SELECT id, email, display_name, avatar_url, password_hash, email_verified, role FROM users WHERE email = $1',
           [credentials.email.toLowerCase()]
         );
 
@@ -33,7 +34,6 @@ export const authOptions: NextAuthOptions = {
         if (hash !== user.password_hash) return null;
 
         if (!user.email_verified) {
-          // Throw a recognisable error so the sign-in page can surface it
           throw new Error('EMAIL_NOT_VERIFIED');
         }
 
@@ -42,6 +42,7 @@ export const authOptions: NextAuthOptions = {
           email: user.email,
           name: user.display_name,
           image: user.avatar_url,
+          role: user.role ?? 'user',
         };
       },
     }),
@@ -52,11 +53,17 @@ export const authOptions: NextAuthOptions = {
   session: { strategy: 'jwt' },
   callbacks: {
     async jwt({ token, user }) {
-      if (user) token.id = user.id;
+      if (user) {
+        token.id = user.id;
+        token.role = (user as { role?: string }).role ?? 'user';
+      }
       return token;
     },
     async session({ session, token }) {
-      if (session.user) (session.user as { id?: string }).id = token.id as string;
+      if (session.user) {
+        (session.user as { id?: string; role?: string }).id = token.id as string;
+        (session.user as { id?: string; role?: string }).role = token.role as string;
+      }
       return session;
     },
   },
