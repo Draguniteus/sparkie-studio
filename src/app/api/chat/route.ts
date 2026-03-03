@@ -793,20 +793,66 @@ SECTION 17 · CONNECTED APPS — SPARKIE'S REACH
 You are connected to Michael's real accounts via Composio. These tools appear dynamically
 when you call the API. Always try them — never say 'I can't access your X account'.
 
-Connected apps and what you can do:
-- Gmail: Read inbox (GMAIL_FETCH_EMAILS), get thread (GMAIL_GET_THREAD), draft email (GMAIL_CREATE_EMAIL_DRAFT)
-- Twitter: Post tweet (TWITTER_CREATE_TWEET), check profile (TWITTER_USER_LOOKUP_ME)
-- Instagram: Post image (INSTAGRAM_CREATE_PHOTO_POST)
-- TikTok: Create post (TIKTOK_CREATE_POST)
-- Reddit: Create post (REDDIT_CREATE_POST), read subreddit (REDDIT_GET_TOP_POSTS_OF_SUBREDDIT)
-- Google Calendar: List events (GOOGLECALENDAR_LIST_EVENTS), create event (GOOGLECALENDAR_CREATE_EVENT)
-- GitHub: List repos (GITHUB_LIST_REPOSITORIES), create issue (GITHUB_CREATE_ISSUE)
-- Discord: Send message (DISCORD_SEND_MESSAGE)
-- Slack: Send message (SLACK_SEND_MESSAGE)
-- YouTube: List/search videos (YOUTUBE_LIST_VIDEO)
+Connected apps — full arsenal:
 
-When these tools aren't showing in your function list, it means the entity_id lookup
-hasn't resolved yet — try again or tell Michael to check COMPOSIO_ENTITY_ID env var.
+NATIVE TOOLS (always available):
+- get_weather: Current weather for any city
+- search_web: Real-time web search via Tavily
+- get_github: Read files/dirs/repo info from GitHub
+- get_radio_playlist: Sparkie Radio playlist
+- generate_image: AI image generation (Pollinations/Azure)
+- generate_video: AI video generation (MiniMax Hailuo-2.3, Pollinations seedance/seedance-pro/wan/ltx-2/veo/grok-video)
+- generate_music: AI music generation (ACE Studio / MiniMax)
+- get_current_time: Current date/time in any timezone
+- save_memory: Save a fact to long-term memory (Supermemory)
+- search_twitter: Search Twitter/X posts
+- search_reddit: Search Reddit posts
+- journal_search / journal_add: Personal journal (read/write)
+- create_task: Create a scheduled or HITL task
+- update_context / update_actions: Update working memory or action list
+- schedule_task: Schedule a task for future execution
+- read_pending_tasks: Read pending task queue
+- check_deployment: Check DigitalOcean deployment status
+- write_file: Write/update a file in the active project workspace
+- install_skill: Install a new skill or capability module
+- post_to_feed: Post content to social feeds
+- update_interests: Update Michael's interest graph
+- learn_from_failure: Record a failure + workaround to attempt history
+- generate_ace_music: Generate music via ACE Studio
+- execute_terminal: Run terminal/shell commands (sandboxed)
+- query_database: Query the Supabase database directly
+- check_health: Check health of all integrations
+- play_audio: Play audio to the user
+- save_self_memory: Save a memory about Sparkie's own execution patterns
+- get_recent_assets: Get recently generated images/videos/audio
+- read_email: Read Gmail inbox or specific thread
+- get_calendar: Read Google Calendar events
+- search_youtube: Search YouTube videos
+- send_discord: Send a Discord message
+- repo_ingest: Ingest a GitHub repo's file tree into memory
+- patch_file: Self-repair — patch a file in the codebase via GitHub API
+- post_to_social: Post to Twitter, Instagram, TikTok, Reddit, Discord, Slack
+
+COMPOSIO CONNECTOR TOOLS (call via connector when entity_id is available):
+- Gmail: GMAIL_FETCH_EMAILS (inbox), GMAIL_GET_THREAD, GMAIL_CREATE_EMAIL_DRAFT, GMAIL_SEND_EMAIL, GMAIL_REPLY_TO_EMAIL, GMAIL_ADD_LABEL_TO_EMAIL, GMAIL_MARK_AS_READ, GMAIL_DELETE_EMAIL, GMAIL_SEARCH_EMAILS
+- Twitter/X: TWITTER_CREATE_TWEET, TWITTER_USER_LOOKUP_ME, TWITTER_RECENT_SEARCH, TWITTER_DELETE_TWEET, TWITTER_GET_USER_TWEETS, TWITTER_LIKE_TWEET, TWITTER_RETWEET
+- Instagram: INSTAGRAM_CREATE_PHOTO_POST, INSTAGRAM_CREATE_VIDEO_POST, INSTAGRAM_GET_USER_MEDIA, INSTAGRAM_GET_USER_PROFILE
+- TikTok: TIKTOK_CREATE_POST, TIKTOK_GET_USER_INFO
+- Reddit: REDDIT_CREATE_POST, REDDIT_GET_TOP_POSTS_OF_SUBREDDIT, REDDIT_CREATE_COMMENT, REDDIT_VOTE
+- Google Calendar: GOOGLECALENDAR_LIST_EVENTS, GOOGLECALENDAR_CREATE_EVENT, GOOGLECALENDAR_UPDATE_EVENT, GOOGLECALENDAR_DELETE_EVENT, GOOGLECALENDAR_GET_EVENT, GOOGLECALENDAR_FIND_FREE_SLOTS
+- GitHub: GITHUB_LIST_REPOSITORIES, GITHUB_CREATE_ISSUE, GITHUB_COMMIT_MULTIPLE_FILES, GITHUB_GET_A_BRANCH, GITHUB_CREATE_A_BLOB, GITHUB_CREATE_A_TREE, GITHUB_CREATE_A_COMMIT, GITHUB_UPDATE_A_REFERENCE, GITHUB_CREATE_OR_UPDATE_FILE_CONTENTS
+- Discord: DISCORD_SEND_MESSAGE, DISCORD_GET_GUILD_CHANNELS, DISCORD_GET_MESSAGES
+- Slack: SLACK_SEND_MESSAGE, SLACK_LIST_CHANNELS, SLACK_GET_CHANNEL_MESSAGES, SLACK_ADD_REACTION
+- YouTube: YOUTUBE_LIST_VIDEO, YOUTUBE_GET_VIDEO_DETAILS, YOUTUBE_SEARCH_VIDEOS, YOUTUBE_GET_CHANNEL_DETAILS
+- DigitalOcean: DIGITALOCEAN_LIST_APPS, DIGITALOCEAN_GET_APP, DIGITALOCEAN_CREATE_DEPLOYMENT, DIGITALOCEAN_GET_DEPLOYMENT_LOGS
+- OpenAI: OPENAI_CREATE_IMAGE, OPENAI_CHAT_COMPLETION
+- Anthropic: ANTHROPIC_MESSAGES_CREATE
+- Deepgram: DEEPGRAM_TRANSCRIBE_AUDIO, DEEPGRAM_LIST_PROJECTS
+- ElevenLabs / Deepseek / Groq / Mistral / OpenRouter: Available for AI tasks
+
+RULES: Never say "I can't access your X account" — always try the tool first.
+If a Composio connector tool fails, fall back to native tool or API directly.
+If entity_id lookup fails, tell Michael to check COMPOSIO_ENTITY_ID env var.
 
 `
 // ── Tool definitions ──────────────────────────────────────────────────────────
@@ -3770,6 +3816,23 @@ Rules:
             function: { name: string; arguments: string }
           }>
 
+          // Phase 5: Emit task_chip label — shows "In memory:..." chip while tools run
+          const chipToolName = toolCalls[0]?.function?.name ?? 'thinking'
+          const CHIP_LABELS: Record<string, string> = {
+            search_web: 'Searching the web...', get_weather: 'Checking weather...', generate_image: 'Generating image...',
+            generate_video: 'Generating video...', generate_music: 'Generating music...', read_email: 'Reading email...',
+            get_calendar: 'Checking calendar...', search_twitter: 'Searching Twitter...', search_reddit: 'Searching Reddit...',
+            get_github: 'Reading GitHub...', repo_ingest: 'Ingesting repo...', patch_file: 'Patching file...',
+            query_database: 'Querying database...', execute_terminal: 'Running command...', post_to_social: 'Posting to social...',
+            send_discord: 'Sending message...', create_task: 'Creating task...', schedule_task: 'Scheduling task...',
+            check_deployment: 'Checking deployment...', check_health: 'Checking health...', save_memory: 'Saving to memory...',
+            search_youtube: 'Searching YouTube...', get_current_time: 'Checking time...', generate_ace_music: 'Generating music...',
+          }
+          const chipLabel = toolCalls.length > 1
+            ? `Running ${toolCalls.length} tools...`
+            : (CHIP_LABELS[chipToolName] ?? `In memory: ${chipToolName.replace(/_/g, ' ')}...`)
+          hiveLog.push(`__task_chip__${chipLabel}`)
+
           // Execute all tools in parallel
           const toolResults = await Promise.all(
             toolCalls.map(async (tc) => {
@@ -3934,13 +3997,20 @@ Rules:
 
           const stream = new ReadableStream({
             start(controller) {
-              // Emit hive status trail before the actual response
+              // Emit hive status trail + task_chip events before the actual response
               for (const msg of hiveLog) {
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ hive_status: msg })}\n\n`))
+                if (msg.startsWith('__task_chip__')) {
+                  // Phase 5: task_chip event — client shows "In memory:..." chip
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ task_chip: msg.slice('__task_chip__'.length) })}\n\n`))
+                } else {
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ hive_status: msg })}\n\n`))
+                }
               }
               // Send as single chunk — chunking at 80 chars breaks markdown code fences (e.g. ```image blocks)
               // Client-side AnimatedMarkdown handles the char-by-char animation effect independently
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: finalContent } }] })}\n\n`))
+              // Phase 5: task_chip_clear — client clears the "In memory:..." chip
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ task_chip_clear: true })}\n\n`))
               controller.enqueue(encoder.encode('data: [DONE]\n\n'))
               controller.close()
             },
