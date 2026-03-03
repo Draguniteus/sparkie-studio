@@ -39,6 +39,8 @@ async function ensureTable() {
   `, [])
   await query(`ALTER TABLE dream_journal ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'night_dreams'`, []).catch(() => {})
   await query(`ALTER TABLE dream_journal ADD COLUMN IF NOT EXISTS title TEXT`, []).catch(() => {})
+  await query(`ALTER TABLE dream_journal ADD COLUMN IF NOT EXISTS images TEXT[] DEFAULT '{}'`, []).catch(() => {})
+  await query(`ALTER TABLE dream_journal ADD COLUMN IF NOT EXISTS theme TEXT DEFAULT 'default'`, []).catch(() => {})
   await query(`
     CREATE TABLE IF NOT EXISTS dream_journal_lock (
       user_id TEXT PRIMARY KEY,
@@ -66,8 +68,8 @@ export async function GET(req: Request) {
   if (action === 'get_entry') {
     const id = searchParams.get('id')
     if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
-    const res = await query<{ id: string; title: string; content: string; category: string; created_at: string }>(
-      'SELECT id, title, content, category, created_at FROM dream_journal WHERE id = $1 AND user_id = $2',
+    const res = await query<{ id: string; title: string; content: string; category: string; images: string[]; theme: string; created_at: string }>(
+      'SELECT id, title, content, category, images, theme, created_at FROM dream_journal WHERE id = $1 AND user_id = $2',
       [id, session.user.email]
     )
     if (!res.rows.length) return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -96,8 +98,8 @@ export async function GET(req: Request) {
   }
 
   // entries (default)
-  const res = await query<{ id: string; title: string; content: string; category: string; created_at: string }>(
-    'SELECT id, title, content, category, created_at FROM dream_journal WHERE user_id = $1 ORDER BY created_at DESC',
+  const res = await query<{ id: string; title: string; content: string; category: string; images: string[]; theme: string; created_at: string }>(
+    'SELECT id, title, content, category, images, theme, created_at FROM dream_journal WHERE user_id = $1 ORDER BY created_at DESC',
     [session.user.email]
   )
   return NextResponse.json({ entries: res.rows })
@@ -148,15 +150,17 @@ export async function POST(req: Request) {
   }
 
   if (action === 'create') {
-    const { title, content, category } = body
+    const { title, content, category, images, theme } = body
     if (!title?.trim()) return NextResponse.json({ error: 'Title required' }, { status: 400 })
     if (!content?.trim() || content === '<br>') return NextResponse.json({ error: 'Content required' }, { status: 400 })
+    const imgArray = Array.isArray(images) ? images : []
+    const entryTheme = (typeof theme === 'string' && theme) ? theme : 'default'
     const res = await query<{ id: string; created_at: string }>(
-      `INSERT INTO dream_journal (user_id, title, content, category) VALUES ($1, $2, $3, $4) RETURNING id, created_at`,
-      [session.user.email, title.trim(), content, category || 'night_dreams']
+      `INSERT INTO dream_journal (user_id, title, content, category, images, theme) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, created_at`,
+      [session.user.email, title.trim(), content, category || 'night_dreams', imgArray, entryTheme]
     )
     return NextResponse.json({
-      entry: { id: res.rows[0].id, created_at: res.rows[0].created_at, title, content, category: category || 'night_dreams' }
+      entry: { id: res.rows[0].id, created_at: res.rows[0].created_at, title, content, category: category || 'night_dreams', images: imgArray, theme: entryTheme }
     })
   }
 
@@ -166,10 +170,11 @@ export async function POST(req: Request) {
   }
 
   if (action === 'update') {
-    const { id, title, content, category } = body
+    const { id, title, content, category, images, theme } = body
+    const imgArray = Array.isArray(images) ? images : []
     await query(
-      'UPDATE dream_journal SET title=$1, content=$2, category=$3, updated_at=NOW() WHERE id=$4 AND user_id=$5',
-      [title?.trim() || null, content, category || 'night_dreams', id, session.user.email]
+      'UPDATE dream_journal SET title=$1, content=$2, category=$3, images=$6, theme=COALESCE($7,theme), updated_at=NOW() WHERE id=$4 AND user_id=$5',
+      [title?.trim() || null, content, category || 'night_dreams', id, session.user.email, imgArray, theme ?? null]
     )
     return NextResponse.json({ success: true })
   }
