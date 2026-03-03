@@ -150,6 +150,7 @@ async function executeDueTasks(userId: string, host: string, proto: string, cook
 /** Check Composio for user's Gmail new emails since last check */
 async function checkInbox(userId: string): Promise<{
   newCount: number
+  filteredCount: number
   senders: string[]
   subjects: string[]
   emailIds: string[]
@@ -195,14 +196,21 @@ async function checkInbox(userId: string): Promise<{
     }
     const messages = execData.data?.messages ?? []
 
-    // Filter: only emails newer than last check, exclude automated/noreply
+    // Filter: only emails newer than last check
+    // Phase 1: Exclude trash/deleted/spam at both API level (include_spam_trash: false)
+    // and client-side (label check + skip patterns)
     const skipPatterns = /noreply|no-reply|notifications?@|alerts?@|support@|donotreply/i
-    const newEmails = messages.filter((m) => {
+    const skipLabels = new Set(['TRASH', 'DELETED', 'SPAM', 'CATEGORY_PROMOTIONS'])
+    const allMessages = messages
+    const newEmails = messages.filter((m: { id: string; from?: string; subject?: string; date?: string; internalDate?: string; labelIds?: string[] }) => {
       const msgDate = m.date ? new Date(m.date) : (m.internalDate ? new Date(parseInt(m.internalDate)) : null)
       if (!msgDate || msgDate <= lastCheck) return false
       if (skipPatterns.test(m.from ?? '')) return false
+      // Exclude if any skip labels present
+      if (m.labelIds?.some((l: string) => skipLabels.has(l))) return false
       return true
     })
+    const filteredCount = allMessages.length - newEmails.length
 
     // Update last check time
     const newState = { ...heartbeatState, last_inbox_check: new Date().toISOString() }
@@ -215,9 +223,10 @@ async function checkInbox(userId: string): Promise<{
 
     return {
       newCount: newEmails.length,
-      senders: newEmails.map((m) => (m.from ?? '').replace(/<.*>/, '').trim()).slice(0, 5),
-      subjects: newEmails.map((m) => m.subject ?? '(no subject)').slice(0, 5),
-      emailIds: newEmails.map((m) => m.id).slice(0, 5),
+      filteredCount,
+      senders: newEmails.map((m: { from?: string }) => (m.from ?? '').replace(/<.*>/, '').trim()).slice(0, 5),
+      subjects: newEmails.map((m: { subject?: string }) => m.subject ?? '(no subject)').slice(0, 5),
+      emailIds: newEmails.map((m: { id: string }) => m.id).slice(0, 5),
       lastChecked: new Date().toISOString()
     }
   } catch (e) {

@@ -1,5 +1,8 @@
 import { query } from '@/lib/db'
 import { writeWorklog } from '@/lib/worklog'
+import { runAuthHealthSweep } from '@/lib/authHealth'
+import { classifyHeartbeatSignal } from '@/lib/signalQueue'
+import { pruneToolCache } from '@/lib/toolCallWrapper'
 
 const INTERNAL_SECRET = process.env.SPARKIE_INTERNAL_SECRET ?? ''
 const SCHEDULER_INTERVAL_MS = 60_000 // 1 minute
@@ -68,6 +71,39 @@ async function withHeartbeatLock(fn: () => Promise<void>): Promise<void> {
   }
 }
 
+// ── Loop detection: prevent infinite retry loops ──────────────────────────────
+interface LoopTracker {
+  tool: string
+  argsHash: string
+  count: number
+  lastSeen: number
+}
+const loopTracker = new Map<string, LoopTracker>()
+
+function detectLoop(taskId: string, tool: string, args: string): boolean {
+  const key = `${taskId}:${tool}`
+  const existing = loopTracker.get(key)
+  const now = Date.now()
+
+  if (existing && existing.argsHash === args && now - existing.lastSeen < 120_000) {
+    existing.count++
+    existing.lastSeen = now
+    if (existing.count >= 3) {
+      console.warn(`[scheduler] Loop detected: ${tool} called ${existing.count}x for task ${taskId}`)
+      return true
+    }
+  } else {
+    loopTracker.set(key, { tool, argsHash: args, count: 1, lastSeen: now })
+  }
+  return false
+}
+
+function clearLoopTracker(taskId: string): void {
+  for (const key of loopTracker.keys()) {
+    if (key.startsWith(taskId + ':')) loopTracker.delete(key)
+  }
+}
+
 // ── Execute due AI tasks for a single user ────────────────────────────────────
 async function executeUserTasks(
   userId: string,
@@ -88,6 +124,19 @@ async function executeUserTasks(
   const executed: Array<{ id: string; label: string; result: string }> = []
 
   for (const task of dueTasks.rows) {
+    // Loop detection: check if this task has been retried too many times recently
+    if (detectLoop(task.id, 'task_execution', task.label.slice(0, 50))) {
+      await writeWorklog(userId, 'error', `⏸ Task paused: "${task.label}" — loop detected (3+ retries in 2 min). Holding for review.`, {
+        taskLabel: task.label,
+        taskId: task.id,
+        status: 'blocked',
+        decision_type: 'hold',
+        reasoning: 'Same task attempted 3+ times in quick succession — pausing to prevent infinite loop'
+      })
+      await query(`UPDATE sparkie_tasks SET status = 'failed' WHERE id = $1`, [task.id])
+      continue
+    }
+
     try {
       await query(`UPDATE sparkie_tasks SET status = 'in_progress' WHERE id = $1`, [task.id])
 
@@ -149,11 +198,18 @@ async function executeUserTasks(
         )
       }
 
-      // Write to worklog so user sees the result in the Worklog panel
+      clearLoopTracker(task.id)
+
+      // Classify signal priority for worklog
+      const priority = classifyHeartbeatSignal('task_complete', { label: task.label })
+
       await writeWorklog(userId, 'task_executed', result, {
         taskLabel: task.label,
         taskId: task.id,
         trigger: task.trigger_type,
+        status: 'done',
+        decision_type: 'action',
+        signal_priority: priority,
       })
 
       executed.push({ id: task.id, label: task.label, result })
@@ -161,7 +217,10 @@ async function executeUserTasks(
     } catch (e) {
       await query(`UPDATE sparkie_tasks SET status = 'failed' WHERE id = $1`, [task.id])
       await writeWorklog(userId, 'error', `Task failed: ${task.label}`, {
-        taskLabel: task.label, taskId: task.id
+        taskLabel: task.label, taskId: task.id,
+        status: 'anomaly',
+        decision_type: 'escalate',
+        reasoning: e instanceof Error ? e.message : String(e)
       })
       console.error(`[scheduler] Task ${task.id} failed:`, e)
     }
@@ -179,6 +238,20 @@ async function heartbeatTick(baseUrl: string): Promise<void> {
          WHERE executor = 'ai' AND status = 'pending'
          AND scheduled_at IS NOT NULL AND scheduled_at <= NOW()`
       )
+
+      // Auth health sweep — once every 10 ticks (10 minutes) per user
+      const authCheckUsers = await query<{ user_id: string }>(
+        `SELECT DISTINCT user_id FROM sparkie_tasks WHERE executor = 'ai' LIMIT 20`
+      )
+      const shouldRunAuthCheck = Math.floor(Date.now() / 1000) % 600 < 60 // true once per ~10 min
+      if (shouldRunAuthCheck && authCheckUsers.rows.length > 0) {
+        for (const { user_id } of authCheckUsers.rows.slice(0, 3)) {
+          runAuthHealthSweep(user_id).catch(() => {})
+        }
+      }
+
+      // Prune expired tool cache entries
+      pruneToolCache()
 
       if (dueUsers.rows.length === 0) return
 

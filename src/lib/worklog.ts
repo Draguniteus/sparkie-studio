@@ -13,6 +13,14 @@ export type WorklogType =
   | 'error'
   | 'heartbeat'
   | 'ai_response'
+  | 'signal_skipped'
+  | 'auth_check'
+  | 'tool_call'
+  | 'decision'
+  | 'hold'
+
+export type WorklogStatus = 'running' | 'done' | 'blocked' | 'anomaly' | 'skipped'
+export type WorklogDecisionType = 'action' | 'skip' | 'hold' | 'escalate' | 'proactive'
 
 export interface WorklogMeta {
   subject?: string
@@ -23,6 +31,15 @@ export interface WorklogMeta {
   category?: string
   commit?: string
   taskLabel?: string
+  taskId?: string
+  tool?: string
+  duration_ms?: number
+  estimated_duration_ms?: number
+  status?: WorklogStatus
+  decision_type?: WorklogDecisionType
+  reasoning?: string
+  signal_priority?: 'P0' | 'P1' | 'P2' | 'P3'
+  confidence?: number
   [key: string]: unknown
 }
 
@@ -38,6 +55,13 @@ async function ensureTable() {
     )
   `).catch(() => {})
   await query(`CREATE INDEX IF NOT EXISTS idx_worklog_user_time ON sparkie_worklog(user_id, created_at DESC)`).catch(() => {})
+  // Add new columns if they don't exist (non-breaking migration)
+  await query(`ALTER TABLE sparkie_worklog ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'done'`).catch(() => {})
+  await query(`ALTER TABLE sparkie_worklog ADD COLUMN IF NOT EXISTS decision_type TEXT`).catch(() => {})
+  await query(`ALTER TABLE sparkie_worklog ADD COLUMN IF NOT EXISTS reasoning TEXT`).catch(() => {})
+  await query(`ALTER TABLE sparkie_worklog ADD COLUMN IF NOT EXISTS estimated_duration_ms INT`).catch(() => {})
+  await query(`ALTER TABLE sparkie_worklog ADD COLUMN IF NOT EXISTS actual_duration_ms INT`).catch(() => {})
+  await query(`ALTER TABLE sparkie_worklog ADD COLUMN IF NOT EXISTS signal_priority TEXT`).catch(() => {})
 }
 
 export async function writeWorklog(
@@ -49,9 +73,19 @@ export async function writeWorklog(
   try {
     await ensureTable()
     const id = crypto.randomUUID()
+    const { status, decision_type, reasoning, estimated_duration_ms, actual_duration_ms, signal_priority, ...restMeta } = metadata
     await query(
-      `INSERT INTO sparkie_worklog (id, user_id, type, content, metadata) VALUES ($1, $2, $3, $4, $5)`,
-      [id, userId, type, content, JSON.stringify(metadata)]
+      `INSERT INTO sparkie_worklog (id, user_id, type, content, metadata, status, decision_type, reasoning, estimated_duration_ms, actual_duration_ms, signal_priority)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [
+        id, userId, type, content, JSON.stringify(restMeta),
+        status ?? 'done',
+        decision_type ?? null,
+        reasoning ?? null,
+        estimated_duration_ms ?? null,
+        actual_duration_ms ?? null,
+        signal_priority ?? null,
+      ]
     )
   } catch (e) {
     console.error('[worklog] write failed:', e)

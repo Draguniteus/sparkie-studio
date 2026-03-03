@@ -95,10 +95,17 @@ export interface Asset {
 
 export type WorklogEntry = {
   id: string
-  type: 'thinking' | 'action' | 'result' | 'error' | 'code'
+  type: string
   content: string
   timestamp: Date
-  status?: 'running' | 'done' | 'error'
+  created_at?: string
+  metadata?: Record<string, unknown>
+  status?: 'running' | 'done' | 'blocked' | 'anomaly' | 'skipped' | 'error'
+  decision_type?: 'action' | 'skip' | 'hold' | 'escalate' | 'proactive'
+  reasoning?: string
+  estimated_duration_ms?: number
+  actual_duration_ms?: number
+  signal_priority?: 'P0' | 'P1' | 'P2' | 'P3'
   duration?: number
 }
 
