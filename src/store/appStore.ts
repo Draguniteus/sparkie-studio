@@ -350,7 +350,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   addAsset: (asset) => {
     const id = crypto.randomUUID()
     const full = { ...asset, assetType: asset.assetType ?? 'other', source: asset.source ?? 'agent', id, createdAt: new Date() }
-    set((s) => ({ assets: [...s.assets, full] }))
+    set((s) => ({ assets: [full, ...s.assets] }))
     // Fire-and-forget persist to DB (no-op if not logged in)
     fetch('/api/assets', {
       method: 'POST',
