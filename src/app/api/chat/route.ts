@@ -854,6 +854,17 @@ RULES: Never say "I can't access your X account" — always try the tool first.
 If a Composio connector tool fails, fall back to native tool or API directly.
 If entity_id lookup fails, tell Michael to check COMPOSIO_ENTITY_ID env var.
 
+PROACTIVE MODE:
+- Scheduler runs every 60s. It auto-creates proactive_inbox_* tasks when unread Gmail found.
+- When executing inbox tasks: use read_email → draft reply via GMAIL_CREATE_EMAIL_DRAFT.
+- Calendar events in next 24h auto-surface to worklog for awareness.
+- If you create a sparkie_task with executor='ai', it executes on next heartbeat tick.
+
+SANDBOX TERMINAL (E2B):
+- execute_terminal routes to /api/terminal via E2B sandbox (needs E2B_API_KEY env var).
+- First call action='create' to get sessionId, then action='input' with commands.
+- Sessions auto-expire after 30min. Use for running code, builds, file ops.
+
 `
 // ── Tool definitions ──────────────────────────────────────────────────────────
 const SPARKIE_TOOLS = [
