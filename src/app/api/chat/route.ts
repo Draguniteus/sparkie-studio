@@ -1626,8 +1626,9 @@ async function executeTool(
           try {
             const seed = Math.floor(Math.random() * 999999)
             const polUrl = 'https://gen.pollinations.ai/image/' + encodeURIComponent(prompt) + '?model=' + polModel + '&width=1024&height=1024&nologo=true&seed=' + seed
+            const polAuthKey = process.env.POLLINATIONS_API_KEY
             const imgRes = await fetch(polUrl, {
-              headers: { 'User-Agent': 'SparkieStudio/1.0' },
+              headers: { 'User-Agent': 'SparkieStudio/1.0', ...(polAuthKey ? { Authorization: `Bearer ${polAuthKey}` } : {}) },
               signal: AbortSignal.timeout(25000),
             })
             if (imgRes.ok) {
@@ -1643,39 +1644,81 @@ async function executeTool(
       }
 
       case 'generate_video': {
+        const prompt = args.prompt as string
+        if (!prompt?.trim()) return 'No prompt provided for video generation'
+        const duration = (args.duration as number) === 10 ? 10 : 6
+        const requestedModel = (args.model as string) || 'MiniMax-Hailuo-2.3'
+
+        // Pollinations video models — synchronous, return video via proxy URL
+        const POLLINATIONS_VIDEO_MODELS = ['seedance', 'seedance-pro', 'grok-video', 'wan', 'ltx-2', 'veo']
+        if (POLLINATIONS_VIDEO_MODELS.includes(requestedModel)) {
+          const polKey = process.env.POLLINATIONS_API_KEY
+          const polUrl = 'https://gen.pollinations.ai/video/' + encodeURIComponent(prompt) +
+            '?model=' + requestedModel + '&duration=' + duration + '&aspectRatio=16%3A9&nologo=true'
+          try {
+            const vidRes = await fetch(polUrl, {
+              headers: { 'User-Agent': 'SparkieStudio/1.0', ...(polKey ? { Authorization: `Bearer ${polKey}` } : {}) },
+              signal: AbortSignal.timeout(120000),
+            })
+            if (!vidRes.ok) return `Video generation failed (${requestedModel}): upstream ${vidRes.status}`
+            const ct = vidRes.headers.get('content-type') || 'video/mp4'
+            const buf = await vidRes.arrayBuffer()
+            const b64 = Buffer.from(buf).toString('base64')
+            return 'VIDEO_URL:data:' + ct + ';base64,' + b64
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : 'timeout'
+            return `Video generation failed (${requestedModel}): ${msg}`
+          }
+        }
+
+        // MiniMax async video models
         const minimaxKey = process.env.MINIMAX_API_KEY
         if (!minimaxKey) return 'Video generation not available (MINIMAX_API_KEY missing)'
-        const prompt = args.prompt as string
-        const duration = (args.duration as number) === 10 ? 10 : 6
+        // Valid MiniMax T2V models
+        const validMinimax = ['MiniMax-Hailuo-2.3', 'MiniMax-Hailuo-02', 'T2V-01-Director', 'T2V-01']
+        const minimaxModel = validMinimax.includes(requestedModel) ? requestedModel : 'MiniMax-Hailuo-2.3'
 
         const submitRes = await fetch(`${MINIMAX_BASE}/video_generation`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${minimaxKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: 'video-01', prompt, duration }),
-          signal: AbortSignal.timeout(15000),
+          body: JSON.stringify({ model: minimaxModel, prompt, duration }),
+          signal: AbortSignal.timeout(30000),
         })
-        if (!submitRes.ok) return `Video job failed: ${submitRes.status}`
-        const { task_id } = await submitRes.json() as { task_id: string }
+        if (!submitRes.ok) {
+          const errBody = await submitRes.json().catch(() => ({})) as Record<string, unknown>
+          const mmErr = (errBody as { base_resp?: { status_msg?: string } })?.base_resp?.status_msg || `HTTP ${submitRes.status}`
+          return `Video job failed: ${mmErr}`
+        }
+        const submitData = await submitRes.json() as { task_id?: string; base_resp?: { status_code: number; status_msg?: string } }
+        if (submitData.base_resp?.status_code !== 0) return `MiniMax error: ${submitData.base_resp?.status_msg || 'submit failed'}`
+        const task_id = submitData.task_id
+        if (!task_id) return 'No task_id returned from MiniMax'
 
-        // Poll (max 30 × 5s = 150s)
+        // Poll (max 30 × 5s = 150s total)
         for (let i = 0; i < 30; i++) {
           await new Promise(r => setTimeout(r, 5000))
           const pollRes = await fetch(`${MINIMAX_BASE}/query/video_generation?task_id=${task_id}`, {
             headers: { Authorization: `Bearer ${minimaxKey}` },
+            signal: AbortSignal.timeout(10000),
           })
-          const pd = await pollRes.json() as { status: string; file_id?: string }
-          if (pd.status === 'Success' && pd.file_id) {
+          if (!pollRes.ok) continue
+          const pd = await pollRes.json() as { status: string; file_id?: string; base_resp?: { status_code: number } }
+          if (pd.base_resp?.status_code !== 0) continue
+          // MiniMax status can be 'Success' or 'Fail' (capital S/F)
+          if ((pd.status === 'Success' || pd.status === 'success') && pd.file_id) {
             const fileRes = await fetch(`${MINIMAX_BASE}/files/retrieve?file_id=${pd.file_id}`, {
               headers: { Authorization: `Bearer ${minimaxKey}` },
+              signal: AbortSignal.timeout(10000),
             })
+            if (!fileRes.ok) return 'File retrieve failed'
             const fd = await fileRes.json() as { file?: { download_url: string } }
-            const url = fd.file?.download_url
-            if (url) return `VIDEO_URL:${url}`
+            const videoUrl = fd.file?.download_url
+            if (videoUrl) return `VIDEO_URL:${videoUrl}`
             return 'Video generated but no URL returned'
           }
-          if (pd.status === 'Fail') return 'Video generation failed'
+          if (pd.status === 'Fail' || pd.status === 'fail') return 'Video generation failed'
         }
-        return 'Video generation timed out'
+        return 'Video generation timed out (MiniMax)'
       }
 
       case 'generate_image_azure': {
