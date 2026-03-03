@@ -11,6 +11,7 @@ import { Terminal } from "@/components/ide/Terminal"
 import { Download, ChevronLeft, ChevronRight, Brain } from "lucide-react"
 import { TaskQueuePanel } from "@/components/ide/TaskQueuePanel"
 import { MemoryTab } from "@/components/ide/MemoryTab"
+import { RealScorePanel } from "@/components/ide/RealScorePanel"
 
 
 function WorklogPanel() {
@@ -174,6 +175,7 @@ export function IDEPanelInner() {
     { id: 'process',  label: 'Process'  },
     { id: 'worklog',  label: 'Worklog'  },
     { id: 'memory',   label: 'Memory'   },
+    { id: 'real',     label: 'REAL'     },
     { id: 'tasks',    label: 'Tasks'    },
     { id: 'files',    label: 'Files'    },
     { id: 'terminal', label: 'Terminal' },
@@ -218,6 +220,9 @@ export function IDEPanelInner() {
         )}
         {ideTab === 'memory' && (
           <MemoryTab />
+        )}
+        {ideTab === 'real' && (
+          <RealScorePanel />
         )}
         {ideTab === 'tasks' && (
           <TaskQueuePanel />
