@@ -211,3 +211,50 @@ html, body {
   75%       { transform: translateX(-3px); }
   90%       { transform: translateX(3px); }
 }
+
+/* Rainbow sliding gradient for station announcement banner */
+@keyframes rainbowSlide {
+  0%   { background-position: 0% 50%; }
+  100% { background-position: 300% 50%; }
+}
+
+.rainbow-broadcast {
+  background: linear-gradient(90deg,#ff0055,#ff6600,#ffee00,#00ff88,#00ccff,#aa44ff,#ff0055);
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: rainbowSlide 3s linear infinite;
+  font-weight: 700;
+}
+
+/* Dream Journal background themes */
+.journal-theme-starfield {
+  background: radial-gradient(ellipse at 20% 50%, rgba(30,60,120,0.4) 0%, transparent 60%),
+              radial-gradient(ellipse at 80% 20%, rgba(60,30,120,0.3) 0%, transparent 50%),
+              linear-gradient(180deg, #050b1a 0%, #0a0f24 100%);
+}
+.journal-theme-aurora {
+  background: radial-gradient(ellipse at 30% 60%, rgba(0,180,80,0.25) 0%, transparent 60%),
+              radial-gradient(ellipse at 70% 20%, rgba(0,200,180,0.2) 0%, transparent 50%),
+              linear-gradient(180deg, #061a10 0%, #071a0d 100%);
+}
+.journal-theme-embers {
+  background: radial-gradient(ellipse at 50% 80%, rgba(255,100,0,0.3) 0%, transparent 60%),
+              radial-gradient(ellipse at 20% 30%, rgba(255,50,0,0.2) 0%, transparent 50%),
+              linear-gradient(180deg, #1a0700 0%, #120500 100%);
+}
+.journal-theme-ocean {
+  background: radial-gradient(ellipse at 60% 40%, rgba(0,120,200,0.3) 0%, transparent 60%),
+              radial-gradient(ellipse at 30% 80%, rgba(0,200,220,0.2) 0%, transparent 50%),
+              linear-gradient(180deg, #010d1a 0%, #001525 100%);
+}
+.journal-theme-cosmos {
+  background: radial-gradient(ellipse at 40% 30%, rgba(160,0,220,0.3) 0%, transparent 55%),
+              radial-gradient(ellipse at 70% 70%, rgba(80,0,180,0.25) 0%, transparent 55%),
+              linear-gradient(180deg, #0d0010 0%, #050008 100%);
+}
+.journal-theme-parchment {
+  background: radial-gradient(ellipse at 50% 20%, rgba(180,140,60,0.2) 0%, transparent 70%),
+              linear-gradient(180deg, #1a1510 0%, #130f0a 100%);
+}
