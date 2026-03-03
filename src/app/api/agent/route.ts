@@ -176,9 +176,9 @@ async function checkInbox(userId: string): Promise<{
       'https://backend.composio.dev/api/v3/connected_accounts?user_id=sparkie_user_' + userId + '&status=ACTIVE&toolkit_slug=gmail&limit=1',
       { headers: { 'x-api-key': COMPOSIO_API_KEY } }
     )
-    if (!connRes.ok) return { newCount: 0, senders: [], subjects: [], emailIds: [], lastChecked: new Date().toISOString() }
+    if (!connRes.ok) return { newCount: 0, filteredCount: 0, senders: [], subjects: [], emailIds: [], lastChecked: new Date().toISOString() }
     const connData = await connRes.json() as { items?: Array<{ id: string }> }
-    if (!connData.items?.length) return { newCount: 0, senders: [], subjects: [], emailIds: [], lastChecked: new Date().toISOString() }
+    if (!connData.items?.length) return { newCount: 0, filteredCount: 0, senders: [], subjects: [], emailIds: [], lastChecked: new Date().toISOString() }
 
     // Fetch recent emails (last 10 from inbox)
     const execRes = await fetch('https://backend.composio.dev/api/v2/actions/GMAIL_FETCH_EMAILS/execute', {
@@ -189,7 +189,7 @@ async function checkInbox(userId: string): Promise<{
         input: { max_results: 10, label_ids: ['INBOX'], include_spam_trash: false }
       })
     })
-    if (!execRes.ok) return { newCount: 0, senders: [], subjects: [], emailIds: [], lastChecked: new Date().toISOString() }
+    if (!execRes.ok) return { newCount: 0, filteredCount: 0, senders: [], subjects: [], emailIds: [], lastChecked: new Date().toISOString() }
 
     const execData = await execRes.json() as {
       data?: { messages?: Array<{ id: string; from?: string; subject?: string; date?: string; internalDate?: string }> }
@@ -231,7 +231,7 @@ async function checkInbox(userId: string): Promise<{
     }
   } catch (e) {
     console.error('inbox check error:', e)
-    return { newCount: 0, senders: [], subjects: [], emailIds: [], lastChecked: new Date().toISOString() }
+    return { newCount: 0, filteredCount: 0, senders: [], subjects: [], emailIds: [], lastChecked: new Date().toISOString() }
   }
 }
 
