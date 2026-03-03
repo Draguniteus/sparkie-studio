@@ -55,7 +55,7 @@ function getAutonomyLevel(state: EnvironmentalContext['userActivityState']): Env
 async function checkServerHealth(): Promise<'healthy' | 'degraded' | 'down'> {
   try {
     const composioKey = process.env.COMPOSIO_API_KEY
-    if (!composioKey) return 'unknown' as 'healthy'
+    if (!composioKey) return 'healthy'
 
     // Check our own API health via a known-good endpoint
     const controller = new AbortController()
@@ -118,7 +118,7 @@ export async function buildEnvironmentalContext(userId: string): Promise<Environ
       deploymentStatus: 'unknown',
       serverHealth: 'healthy',
       currentEnvironment: 'production',
-      userActivityState: 'unknown' as 'active',
+      userActivityState: 'active' as EnvironmentalContext['userActivityState'],
       lastUserSeenMs: -1,
       userMode: 'unknown',
       lastDeploySha: 'unknown',

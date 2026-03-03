@@ -24,7 +24,7 @@ export async function loadIdentityFiles(userId: string): Promise<IdentityFiles> 
     )
     const files: Partial<IdentityFiles> = {}
     for (const row of result.rows) {
-      files[row.file_type as IdentityFileType] = row.content
+      files[row.file_type as keyof IdentityFiles] = row.content
     }
     return {
       user:      files.user      ?? '',
