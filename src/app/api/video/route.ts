@@ -44,21 +44,16 @@ export async function GET(req: NextRequest) {
 
     const statusData = await statusRes.json()
 
-    if (statusData?.base_resp?.status_code !== 0) {
-      return NextResponse.json({
-        status: 'error',
-        error: statusData.base_resp?.status_msg || 'Task query failed',
-      })
+    // NOTE: MiniMax poll response has NO base_resp wrapper
+    // Status values (capitalized): Preparing, Queueing, Processing, Success, Fail
+    const taskStatus = statusData?.status as string | undefined
+    const fileId = statusData?.file_id as string | undefined
+
+    if (taskStatus === 'Fail') {
+      return NextResponse.json({ status: 'error', error: 'Video generation failed' })
     }
 
-    const taskStatus = statusData?.status  // 'processing' | 'success' | 'failed'
-    const fileId = statusData?.file_id
-
-    if (taskStatus === 'failed') {
-      return NextResponse.json({ status: 'error', error: statusData.message || 'Video generation failed' })
-    }
-
-    if (taskStatus === 'success' && fileId) {
+    if (taskStatus === 'Success' && fileId) {
       // Retrieve download URL from file management API
       const fileRes = await fetch(`${MINIMAX_BASE}/files/retrieve?file_id=${fileId}`, {
         headers: { Authorization: `Bearer ${apiKey}` },
