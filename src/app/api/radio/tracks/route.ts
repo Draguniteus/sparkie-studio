@@ -110,3 +110,28 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: 'Failed to delete' }, { status: 500 })
   }
 }
+
+// PATCH /api/radio/tracks — update title/artist/coverUrl for a single track (admin only)
+export async function PATCH(req: NextRequest) {
+  const session = await getServerSession(authOptions)
+  const userId = (session?.user as { id?: string } | undefined)?.id
+  const userEmail = (session?.user as { email?: string } | undefined)?.email?.toLowerCase()
+  if (!userId || userEmail !== 'draguniteus@gmail.com') {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  try {
+    await ensureTable()
+    const { id, title, artist, coverUrl } = await req.json()
+    if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
+
+    await query(
+      `UPDATE sparkie_radio_tracks SET title=COALESCE($1,title), artist=$2, cover_url=$3 WHERE id=$4 AND user_id=$5`,
+      [title ?? null, artist ?? null, coverUrl ?? null, id, userId]
+    )
+    return NextResponse.json({ ok: true })
+  } catch (err) {
+    console.error('PATCH /api/radio/tracks error:', err)
+    return NextResponse.json({ error: 'Failed to update track' }, { status: 500 })
+  }
+}
