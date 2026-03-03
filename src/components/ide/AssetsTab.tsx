@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react"
 import { useAppStore, AssetType, AssetSource } from "@/store/appStore"
-import { Download, Search, X, ExternalLink, MessageSquare, FileCode, Globe, FileText, Music, Video, Table, Presentation, File, ChevronDown } from "lucide-react"
+import { Download, Search, X, ExternalLink, MessageSquare, FileCode, Globe, FileText, Music, Video, Table, Presentation, File, ChevronDown, Trash2 } from "lucide-react"
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -98,11 +98,18 @@ function AssetThumbnail({ name, content, type }: { name: string; content: string
   }
 
   if (type === "video") {
-    // URL-based video (Pollinations or /api/image? proxy) — show video thumbnail
+    // URL-based video — seek to 0.5s after metadata loads to ensure a visible first frame
     if (isMediaUrl(content)) {
       return (
         <div className="w-full h-full flex items-center justify-center bg-[#0a0a0a] rounded-t-lg overflow-hidden relative ring-1 ring-blue-500/30">
-          <video src={content} className="w-full h-full object-cover" muted autoPlay loop playsInline preload="metadata" />
+          <video
+            src={content}
+            className="w-full h-full object-cover"
+            muted
+            playsInline
+            preload="metadata"
+            onLoadedMetadata={e => { (e.target as HTMLVideoElement).currentTime = 0.5 }}
+          />
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="w-8 h-8 rounded-full bg-black/60 flex items-center justify-center">
               <Video size={14} className="text-white ml-0.5" />
@@ -170,7 +177,7 @@ interface PreviewModal {
 }
 
 export function AssetsTab() {
-  const { assets, setCurrentChat, setActiveTab } = useAppStore()
+  const { assets, setCurrentChat, setActiveTab, removeAsset } = useAppStore()
   const [filterTab, setFilterTab] = useState<FilterTab>("all")
   const [sourceFilter, setSourceFilter] = useState<AssetSource | "all">("all")
   const [search, setSearch] = useState("")
@@ -247,6 +254,18 @@ export function AssetsTab() {
 
   function openInNewWindow(content: string, name: string, type: AssetType) {
     const ext = name.split(".").pop()?.toLowerCase() || ""
+    // Safely open a data URL via Blob — browsers block window.open() with data: URLs
+    function openDataUrl(dataUrl: string, mime: string) {
+      try {
+        const byteStr = atob(dataUrl.split(',')[1])
+        const arr = new Uint8Array(byteStr.length)
+        for (let i = 0; i < byteStr.length; i++) arr[i] = byteStr.charCodeAt(i)
+        const blobUrl = URL.createObjectURL(new Blob([arr], { type: mime }))
+        const win = window.open(blobUrl, '_blank')
+        if (win) setTimeout(() => URL.revokeObjectURL(blobUrl), 60000)
+        else URL.revokeObjectURL(blobUrl)
+      } catch { window.open(dataUrl, '_blank') }
+    }
     if (type === "website" && (ext === "html" || ext === "htm")) {
       const win = window.open("", "_blank")
       if (win) {
@@ -254,13 +273,19 @@ export function AssetsTab() {
         win.document.write(content)
         win.document.close()
       }
-    } else if (type === "image" || type === "video") {
-      // URL-based (Pollinations) — open directly
-      if (isMediaUrl(content)) {
-        window.open(content, "_blank")
+    } else if (type === "image") {
+      if (content.startsWith('data:')) {
+        openDataUrl(content, content.match(/data:([^;]+)/)?.[1] ?? 'image/jpeg')
       } else if (ext === "svg") {
-        const dataUri = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(content)}`
-        window.open(dataUri, "_blank")
+        window.open(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(content)}`, "_blank")
+      } else {
+        window.open(content, "_blank")
+      }
+    } else if (type === "video") {
+      if (content.startsWith('data:')) {
+        openDataUrl(content, content.match(/data:([^;]+)/)?.[1] ?? 'video/mp4')
+      } else {
+        window.open(content, "_blank")
       }
     } else if (type === "audio") {
       if (isMediaUrl(content)) window.open(content, "_blank")
@@ -343,6 +368,13 @@ export function AssetsTab() {
                   >
                     <Download size={12} />
                   </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); if (window.confirm('Delete this asset?')) removeAsset(asset.id) }}
+                    className="opacity-0 group-hover:opacity-100 p-1 rounded-md hover:bg-red-500/20 text-text-muted hover:text-red-400 transition-all"
+                    title="Delete"
+                  >
+                    <Trash2 size={12} />
+                  </button>
                 </div>
               </div>
             ))}
@@ -396,6 +428,13 @@ export function AssetsTab() {
                   title="Download"
                 >
                   <Download size={14} />
+                </button>
+                <button
+                  onClick={() => { if (window.confirm('Delete this asset?')) { removeAsset(preview.id); setPreview(null) } }}
+                  className="p-1.5 rounded-lg text-text-secondary hover:bg-hive-hover hover:text-red-400 transition-colors border border-hive-border"
+                  title="Delete asset"
+                >
+                  <Trash2 size={14} />
                 </button>
                 <button
                   onClick={() => setPreview(null)}
