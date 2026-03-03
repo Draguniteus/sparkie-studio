@@ -1,5 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 
+// Auth header — key stored in POLLINATIONS_API_KEY env var
+function pollinationsHeaders(): Record<string, string> {
+  const key = process.env.POLLINATIONS_API_KEY
+  const h: Record<string, string> = { 'User-Agent': 'SparkieStudio/1.0' }
+  if (key) h['Authorization'] = `Bearer ${key}`
+  return h
+}
+
 export const runtime = 'nodejs'
 export const maxDuration = 300
 
@@ -82,7 +90,7 @@ export async function GET(req: NextRequest) {
 // POST /api/video → submit generation task, returns { taskId }
 export async function POST(req: NextRequest) {
   const apiKey = process.env.MINIMAX_API_KEY
-  // Note: Pollinations models don't need apiKey — key check happens after Pollinations early return
+  // Pollinations models use POLLINATIONS_API_KEY env var (passed via pollinationsHeaders())
 
   let body: Record<string, unknown>
   try {
@@ -119,10 +127,10 @@ export async function POST(req: NextRequest) {
   if (POLLINATIONS_VIDEO_MODELS.includes(model as string)) {
     try {
       const dur = typeof duration === 'number' ? Math.min(Math.max(duration, 2), 10) : 6
-      const polUrl = 'https://gen.pollinations.ai/image/' + encodeURIComponent(prompt || '') +
-        '?model=' + model + '&duration=' + dur + '&width=854&height=480&nologo=true'
+      const polUrl = 'https://gen.pollinations.ai/video/' + encodeURIComponent(prompt || '') +
+        '?model=' + model + '&duration=' + dur + '&aspectRatio=16%3A9&nologo=true'
       const vidRes = await fetch(polUrl, {
-        headers: { 'User-Agent': 'SparkieStudio/1.0' },
+        headers: pollinationsHeaders(),
         signal: AbortSignal.timeout(120000),
       })
       if (!vidRes.ok) {
