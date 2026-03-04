@@ -3603,11 +3603,20 @@ async function tryLLMCall(
         signal: AbortSignal.timeout(isStream ? 90000 : 30000),
       })
       if (res.ok) return { response: res, modelUsed: m }
-      if (res.status === 429 || res.status === 402 || res.status >= 500 || res.status === 400 || res.status === 403) {
+      if (res.status === 429 || res.status === 402 || res.status === 422 || res.status >= 500 || res.status === 400 || res.status === 403) {
         const txt = await res.text().catch(() => res.status.toString())
         lastError = `${m}: ${res.status} ${txt.slice(0, 80)}`
         await new Promise(r => setTimeout(r, 500)) // brief backoff before next model
         continue
+      }
+      if (!res.ok) {
+        // Catch any remaining non-2xx — fallback if response mentions unavailability
+        const txt = await res.clone().text().catch(() => '')
+        if (/not available|unavailable|plan|quota/i.test(txt)) {
+          lastError = `${m}: ${res.status} ${txt.slice(0, 80)}`
+          await new Promise(r => setTimeout(r, 500))
+          continue
+        }
       }
       return { response: res, modelUsed: m }
     } catch (e) {
