@@ -773,6 +773,11 @@ export function ChatInput() {
       .map((m) => ({ role: m.role, content: m.content }))
     const assistantMsgId = addMessage(chatId, { role: "assistant", content: "", model: selectedModel, isStreaming: true })
     setStreaming(true)
+    // ── Worklog framing: open IDE + log session start ──
+    clearWorklog()
+    if (!ideOpen) openIDE()
+    setIDETab('worklog')
+    addWorklogEntry({ type: 'action', content: 'Query received — routing...', status: 'running' })
     try {
       const userProfile = useAppStore.getState().userProfile
       const response = await fetch("/api/chat", {
@@ -843,9 +848,10 @@ export function ChatInput() {
               useAppStore.getState().setLongTaskLabel(null)
               continue
             }
-            // Hive status update — show as animated status pill only (not in worklog — real steps go in worklog via step_trace above)
+            // Hive status update — animated pill + persist in worklog as thinking step
             if (parsed.hive_status) {
               setHiveStatus(parsed.hive_status)
+              addWorklogEntry({ type: 'thinking', content: parsed.hive_status as string, status: 'done' })
               continue
             }
             // HITL task approval event
@@ -861,6 +867,10 @@ export function ChatInput() {
             }
             const delta = parsed.choices?.[0]?.delta
             if (delta?.content) {
+              if (!fullContent) {
+                // First token — Sparkie is now composing her response
+                addWorklogEntry({ type: 'result', content: 'Analyzed', status: 'done' })
+              }
               fullContent += delta.content
               updateMessage(chatId, assistantMsgId, { content: fullContent })
             }
@@ -879,13 +889,16 @@ export function ChatInput() {
       const finalContent = fullContent || "👋"
       updateMessage(chatId, assistantMsgId, { content: finalContent, isStreaming: false })
       saveMessage('assistant', finalContent)
+      // ── Worklog framing: log response sent ──
+      addWorklogEntry({ type: 'ai_response', content: `Responded`, status: 'done' })
     } catch {
       updateMessage(chatId, assistantMsgId, { content: "Connection error.", isStreaming: false })
+      addWorklogEntry({ type: 'error', content: 'Connection error', status: 'error' })
     } finally {
       setHiveStatus(null)
       setStreaming(false)
     }
-  }, [selectedModel, addMessage, updateMessage, setStreaming, setHiveStatus, saveMessage])
+  }, [selectedModel, addMessage, updateMessage, setStreaming, setHiveStatus, saveMessage, clearWorklog, openIDE, ideOpen, setIDETab, addWorklogEntry])
   // eslint-disable-next-line react-hooks/exhaustive-deps -- streamAgent is stable at runtime (defined after, useCallback ref)
 
   // ── streamAgent: Planner → Builder → Reviewer with inline thinking ────────
