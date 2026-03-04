@@ -4024,7 +4024,33 @@ Rules:
         } catch { /* planning call failed — continue without plan */ }
       }
 
-      while (round < MAX_TOOL_ROUNDS) {
+      // Phase 5: Live SSE stream — emit step_trace/task_chip events IN REAL-TIME during tool loop
+      // TransformStream created before loop; controller captured for immediate enqueue during execution
+      const liveEncoder = new TextEncoder()
+      let liveController: ReadableStreamDefaultController<Uint8Array> | null = null
+      const liveChunks: Uint8Array[] = []
+      const liveStream = new ReadableStream<Uint8Array>({
+        start(ctrl) { liveController = ctrl }
+      })
+      // Helper: enqueue SSE event immediately (during loop) or buffer if controller not yet ready
+      function liveEnqueue(event: Record<string, unknown>) {
+        const chunk = liveEncoder.encode(`data: ${JSON.stringify(event)}\n\n`)
+        if (liveController) {
+          liveController.enqueue(chunk)
+        } else {
+          liveChunks.push(chunk)
+        }
+      }
+      // Flush any buffered chunks once controller is ready
+      function flushLiveChunks() {
+        if (liveController && liveChunks.length > 0) {
+          for (const c of liveChunks) liveController.enqueue(c)
+          liveChunks.length = 0
+        }
+      }
+      void liveStream // consumed when building final response stream
+
+            while (round < MAX_TOOL_ROUNDS) {
         round++
         hiveLog.push(pickHive(HIVE_ROUND[round] ?? HIVE_ROUND[3]))
         const { response: loopRes, modelUsed: loopModel } = await tryLLMCall({
@@ -4063,7 +4089,9 @@ Rules:
           const chipLabel = toolCalls.length > 1
             ? `Running ${toolCalls.length} tools...`
             : (CHIP_LABELS[chipToolName] ?? `In memory: ${chipToolName.replace(/_/g, ' ')}...`)
-          hiveLog.push(`__task_chip__${chipLabel}`)
+          // Live emit task_chip immediately when tool call detected
+          liveEnqueue({ task_chip: chipLabel })
+          flushLiveChunks()
           // Step-trace card: emit per-tool step detail for rich UI
           const stepIcon: Record<string, string> = {
             get_github: 'file', patch_file: 'edit', write_file: 'edit',
@@ -4075,7 +4103,8 @@ Rules:
             generate_video: 'video', generate_speech: 'mic',
           }
           const stepTraceIcon = stepIcon[chipToolName] ?? 'zap'
-          hiveLog.push(`__step_trace__${JSON.stringify({ icon: stepTraceIcon, label: chipLabel, status: 'running' })}`)
+          // Live emit running step_trace immediately
+          liveEnqueue({ step_trace: { icon: stepTraceIcon, label: chipLabel, status: 'running' } })
 
           // Execute all tools in parallel
           const toolResults = await Promise.all(
@@ -4109,7 +4138,8 @@ Rules:
               // Emit step_trace complete
               const stepDuration = Date.now() - toolStart
               const isStepError = result.startsWith('Error') || result.startsWith('patch_file error') || result.startsWith('LOOP_INTERRUPT')
-              hiveLog.push(`__step_trace__${JSON.stringify({ icon: stepIcon[tc.function.name] ?? 'zap', label: chipLabel, status: isStepError ? 'error' : 'done', duration: stepDuration })}`)
+              // Live emit done/error step_trace immediately after each tool completes
+              liveEnqueue({ step_trace: { icon: stepIcon[tc.function.name] ?? 'zap', label: chipLabel, status: isStepError ? 'error' : 'done', duration: stepDuration } })
 
               // Worklog card SSE — emit for notable tool completions
               if (['save_memory', 'save_self_memory', 'log_worklog', 'patch_file', 'write_file', 'trigger_deploy', 'create_task', 'schedule_task'].includes(tc.function.name) && !isStepError) {
@@ -4250,25 +4280,22 @@ Rules:
 
 
 
+          // Close live stream — all real-time events already emitted during loop
+          if (liveController) liveController.close()
+
+          // Build final response: live events (already streamed) + hive_status trail + worklog_cards + final content
           const stream = new ReadableStream({
             start(controller) {
-              // Emit hive status trail + task_chip events before the actual response
+              // Emit remaining hiveLog entries (hive_status text + worklog_cards only — step_trace/task_chip already live-emitted)
               for (const msg of hiveLog) {
-                if (msg.startsWith('__step_trace__')) {
-                  // Rich step-trace card event
-                  try {
-                    const traceData = JSON.parse(msg.slice('__step_trace__'.length))
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ step_trace: traceData })}\n\n`))
-                  } catch { /* skip malformed */ }
+                if (msg.startsWith('__step_trace__') || msg.startsWith('__task_chip__')) {
+                  // Already live-emitted during tool loop — skip to avoid duplicates
+                  continue
                 } else if (msg.startsWith('__worklog_card__')) {
-                  // Worklog card inline in chat
                   try {
                     const cardData = JSON.parse(msg.slice('__worklog_card__'.length))
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({ worklog_card: cardData })}\n\n`))
                   } catch { /* skip malformed */ }
-                } else if (msg.startsWith('__task_chip__')) {
-                  // Phase 5: task_chip event — client shows "In memory:..." chip
-                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ task_chip: msg.slice('__task_chip__'.length) })}\n\n`))
                 } else {
                   controller.enqueue(encoder.encode(`data: ${JSON.stringify({ hive_status: msg })}\n\n`))
                 }
@@ -4276,13 +4303,33 @@ Rules:
               // Send as single chunk — chunking at 80 chars breaks markdown code fences (e.g. ```image blocks)
               // Client-side AnimatedMarkdown handles the char-by-char animation effect independently
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: finalContent } }] })}\n\n`))
-              // Phase 5: task_chip_clear — client clears the "In memory:..." chip
+              // Phase 5: task_chip_clear — client clears the "In memory:..." chip after response arrives
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({ task_chip_clear: true })}\n\n`))
               controller.enqueue(encoder.encode('data: [DONE]\n\n'))
               controller.close()
             },
           })
-          return new Response(stream, {
+          // Concatenate live stream (real-time events) + final stream (hive trail + response)
+          const combinedReader1 = liveStream.getReader()
+          const combinedReader2 = stream.getReader()
+          const combinedStream = new ReadableStream({
+            async start(controller) {
+              // Drain live stream first (already contains step_trace + task_chip events)
+              while (true) {
+                const { done, value } = await combinedReader1.read()
+                if (done) break
+                controller.enqueue(value)
+              }
+              // Then drain final stream (hive_status + content + [DONE])
+              while (true) {
+                const { done, value } = await combinedReader2.read()
+                if (done) break
+                controller.enqueue(value)
+              }
+              controller.close()
+            },
+          })
+          return new Response(combinedStream, {
             headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
           })
         } else {
@@ -4318,7 +4365,7 @@ SYNTHESIS RULES:
               .filter(Boolean)
           )] as string[]
           if (toolNames.length > 0) {
-            // Fire-and-forget auto-worklog entry
+            // Fire-and-forget auto-memory + proactive worklog entry
             fetch(`https://${process.env.APP_DOMAIN ?? 'sparkie-studio-mhouq.ondigitalocean.app'}/api/sparkie-self-memory`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -4328,6 +4375,13 @@ SYNTHESIS RULES:
                 source: 'auto_agent_loop',
               })
             }).catch(() => {}) // fire-and-forget
+            // Tag every tool session as proactive — drives Proactive Agency REAL score leg
+            if (userId) {
+              writeWorklog(userId, 'tool_call',
+                `Tool session: ${toolNames.slice(0,3).join(', ')}${toolNames.length > 3 ? ` +${toolNames.length-3} more` : ''}`,
+                { decision_type: 'proactive', reasoning: 'Agent autonomously executed tool calls to fulfill user request', signal_priority: 'P1' }
+              ).catch(() => {})
+            }
           }
         }
 
