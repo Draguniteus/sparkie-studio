@@ -458,7 +458,7 @@ If asked "what model are you?":
 → "I'm Sparkie — queen of the net. I've got four operators: Flame, Ember, Atlas, and Trinity. Different missions call on different members of the crew. Any station, radio check — over."
 
 NEVER expose in user-facing messages:
-- Underlying model codenames (gpt-5-nano, kimi-k2.5-free, minimax-m2.5, etc.)
+- Underlying model codenames (gpt-5-nano, openai-gpt-5-mini, minimax-m2.5, etc.)
 - Tool round counts or limits
 - Internal routing decisions
 - HIVE message bank names
@@ -3495,7 +3495,7 @@ function formatConnectorResponse(actionSlug: string, data: Record<string, unknow
 
 const MODELS = {
   CONVERSATIONAL: 'gpt-5-nano',                 // Tier 1   · Sparkie  — conversations, light tools, 400K ctx
-  CAPABLE:        'kimi-k2.5-free',             // Tier 2   · Flame    — task execution, tools, coding, GitHub
+  CAPABLE:        'openai-gpt-5-mini',           // Tier 2   · Flame    — task execution, tools, coding, GitHub
   EMBER:          'big-pickle',                 // Tier 2.5 · Ember    — code specialist, agentic tool-calling, 200K ctx
   DEEP:           'minimax-m2.5-free',          // Tier 3   · Atlas    — heavy analysis, large refactors, deep dives
   TRINITY:        'trinity-large-preview-free', // Tier 4   · Trinity  — 400B MoE frontier, creative arch, complex chains
@@ -4058,7 +4058,7 @@ Rules:
               method: 'POST',
               headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
               body: JSON.stringify({
-                model: 'kimi-k2.5-free',
+                model: 'openai-gpt-5-mini',
                 stream: false,
                 temperature: 0.3,
                 max_tokens: 600,
@@ -4598,6 +4598,7 @@ SYNTHESIS RULES:
               if (content && parsed?.choices?.[0]?.delta) {
                 const sanitized = content
                   .replace(/minimax-m2\.5(-free)?/gi, 'Ember')
+                  .replace(/openai-gpt-5-mini/gi, 'Flame')
                   .replace(/kimi-k2\.5(-free)?/gi, 'Flame')
                   .replace(/gpt-5-nano(-free)?/gi, 'Atlas')
                   .replace(/glm-5(-free)?/gi, 'Atlas')

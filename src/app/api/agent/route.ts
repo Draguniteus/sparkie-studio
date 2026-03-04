@@ -112,7 +112,7 @@ async function executeDueTasks(userId: string, host: string, proto: string, cook
         const chatRes = await fetch(proto + '://' + host + '/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Cookie': cookieHeader },
-          body: JSON.stringify({ messages: [{ role: 'user', content: taskPrompt }], model: 'kimi-k2.5-free' }),
+          body: JSON.stringify({ messages: [{ role: 'user', content: taskPrompt }], model: 'openai-gpt-5-mini' }),
           signal: AbortSignal.timeout(45000),
         })
         if (chatRes.ok) {
