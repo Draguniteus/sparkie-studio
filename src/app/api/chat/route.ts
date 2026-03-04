@@ -4163,14 +4163,67 @@ Rules:
           // Phase 5: Emit task_chip label — shows "In memory:..." chip while tools run
           const chipToolName = toolCalls[0]?.function?.name ?? 'thinking'
           const CHIP_LABELS: Record<string, string> = {
-            search_web: 'Searching the web...', get_weather: 'Checking weather...', generate_image: 'Generating image...',
-            generate_video: 'Generating video...', generate_music: 'Generating music...', read_email: 'Reading email...',
-            get_calendar: 'Checking calendar...', search_twitter: 'Searching Twitter...', search_reddit: 'Searching Reddit...',
-            get_github: 'Reading GitHub...', repo_ingest: 'Ingesting repo...', patch_file: 'Patching file...',
-            query_database: 'Querying database...', execute_terminal: 'Running command...', post_to_social: 'Posting to social...',
-            send_discord: 'Sending message...', create_task: 'Creating task...', schedule_task: 'Scheduling task...',
-            check_deployment: 'Checking deployment...', trigger_deploy: 'Deployment control...', check_health: 'Checking health...', save_memory: 'Saving to memory...',
-            search_youtube: 'Searching YouTube...', get_current_time: 'Checking time...', generate_ace_music: 'Generating music...',
+            // Intelligence & Search
+            search_web: 'Searching the web...', get_weather: 'Checking weather...',
+            search_twitter: 'Searching Twitter...', search_reddit: 'Searching Reddit...',
+            search_youtube: 'Searching YouTube...', get_current_time: 'Checking time...',
+            // GitHub & Files
+            get_github: 'Let me take a look at this file', repo_ingest: 'Reading the codebase...',
+            patch_file: 'Editing the file...', write_file: 'Writing the file...',
+            read_file: 'Let me take a look at this file',
+            // Memory & Cognition
+            save_memory: 'Memory recalled', save_self_memory: 'Memory recalled',
+            query_database: 'Running a remote command', log_worklog: 'Logging to worklog...',
+            get_attempt_history: 'Memory recalled', save_attempt: 'Memory recalled',
+            journal_search: 'Memory recalled', journal_add: 'Saving to journal...',
+            // Terminal & Code execution
+            execute_terminal: 'Running a remote command', check_health: 'Running a remote command',
+            // Media Generation
+            generate_image: 'Generating image...', generate_video: 'Generating video...',
+            generate_music: 'Generating music...', generate_ace_music: 'Generating music...',
+            generate_speech: 'Generating speech...',
+            // Tasks & Deploy
+            create_task: 'Creating task...', schedule_task: 'Scheduling task...',
+            read_pending_tasks: 'Checking task queue...',
+            check_deployment: 'Checking deployment...', trigger_deploy: 'Running deployment command...',
+            // Comms & Social
+            post_to_social: 'Posting to social...', send_discord: 'Sending message...',
+            post_to_feed: 'Posting to feed...', read_email: 'Reading email...',
+            get_calendar: 'Checking calendar...',
+            // Skills & Context
+            install_skill: 'Installing skill...', update_context: 'Updating context...',
+            update_actions: 'Updating action plan...',
+          }
+          // Human-readable worklog step labels (shown in worklog trace, richer than chip labels)
+          const WORKLOG_STEP_LABELS: Record<string, string> = {
+            search_web: 'Searching the web', get_weather: 'Checking weather',
+            search_twitter: 'Searching Twitter', search_reddit: 'Searching Reddit',
+            search_youtube: 'Searching YouTube', get_current_time: 'Checking current time',
+            get_github: 'Let me take a look at this file', repo_ingest: 'Reading the codebase',
+            patch_file: 'Editing the file', write_file: 'Writing the file', read_file: 'Let me take a look at this file',
+            save_memory: 'Memory recalled', save_self_memory: 'Memory recalled',
+            query_database: 'Running a remote command', log_worklog: 'Writing to worklog',
+            get_attempt_history: 'Memory recalled', save_attempt: 'Saving attempt to memory',
+            journal_search: 'Memory recalled', journal_add: 'Saving to journal',
+            execute_terminal: 'Running a remote command', check_health: 'Running health check',
+            generate_image: 'Running the tool — image generation',
+            generate_video: 'Running the tool — video generation',
+            generate_music: 'Running the tool — music generation',
+            generate_ace_music: 'Running the tool — music generation',
+            generate_speech: 'Running the tool — speech synthesis',
+            create_task: 'Running the tool — creating task',
+            schedule_task: 'Running the tool — scheduling task',
+            read_pending_tasks: 'Checking pending tasks',
+            check_deployment: 'Running the tool — checking deployment',
+            trigger_deploy: 'Running the tool — triggering deployment',
+            post_to_social: 'Running the tool — posting to social',
+            send_discord: 'Running the tool — sending message',
+            post_to_feed: 'Running the tool — posting to feed',
+            read_email: 'Running the tool — reading email',
+            get_calendar: 'Running the tool — checking calendar',
+            install_skill: 'Running the tool — installing skill',
+            update_context: 'Running the tool — updating context',
+            update_actions: 'Running the tool — updating action plan',
           }
           const chipLabel = toolCalls.length > 1
             ? `Running ${toolCalls.length} tools...`
@@ -4179,17 +4232,23 @@ Rules:
           liveEnqueue({ task_chip: chipLabel })
           // Step-trace card: emit per-tool step detail for rich UI
           const stepIcon: Record<string, string> = {
-            get_github: 'file', patch_file: 'edit', write_file: 'edit',
+            get_github: 'file', patch_file: 'edit', write_file: 'edit', read_file: 'file',
             execute_terminal: 'terminal', repo_ingest: 'search',
             query_database: 'database', search_web: 'globe',
-            save_memory: 'brain', log_worklog: 'scroll',
+            save_memory: 'brain', save_self_memory: 'brain', get_attempt_history: 'brain',
+            save_attempt: 'brain', journal_search: 'brain', log_worklog: 'scroll',
             trigger_deploy: 'rocket', check_deployment: 'rocket',
             generate_image: 'image', generate_music: 'music',
             generate_video: 'video', generate_speech: 'mic',
+            post_to_social: 'zap', send_discord: 'zap', post_to_feed: 'zap',
           }
           const stepTraceIcon = stepIcon[chipToolName] ?? 'zap'
+          // Use WORKLOG_STEP_LABELS for the running trace label (human-readable)
+          const runningLabel = toolCalls.length > 1
+            ? `Running ${toolCalls.length} tools...`
+            : (WORKLOG_STEP_LABELS[chipToolName] ?? chipLabel)
           // Live emit running step_trace immediately
-          liveEnqueue({ step_trace: { icon: stepTraceIcon, label: chipLabel, status: 'running' } })
+          liveEnqueue({ step_trace: { icon: stepTraceIcon, label: runningLabel, status: 'running' } })
 
           // Execute all tools in parallel
           const toolResults = await Promise.all(
@@ -4224,8 +4283,13 @@ Rules:
               const stepDuration = Date.now() - toolStart
               const isStepError = result.startsWith('Error') || result.startsWith('patch_file error') || result.startsWith('LOOP_INTERRUPT')
               // Live emit done/error step_trace immediately after each tool completes
-              const toolLabel = CHIP_LABELS[tc.function.name] ?? `${tc.function.name.replace(/_/g, ' ')}...`
-              liveEnqueue({ step_trace: { icon: stepIcon[tc.function.name] ?? 'zap', label: toolLabel, status: isStepError ? 'error' : 'done', duration: stepDuration } })
+              // Extract file/path context from args for richer labels
+              const toolArgs = args as Record<string, unknown>
+              const pathHint = (toolArgs.path ?? toolArgs.repo ?? toolArgs.file ?? '') as string
+              const pathShort = pathHint ? ` — ${String(pathHint).split('/').pop()}` : ''
+              const baseStepLabel = WORKLOG_STEP_LABELS[tc.function.name] ?? `Running the tool — ${tc.function.name.replace(/_/g, ' ')}`
+              const richStepLabel = pathShort ? `${baseStepLabel}${pathShort}` : baseStepLabel
+              liveEnqueue({ step_trace: { icon: stepIcon[tc.function.name] ?? 'zap', label: richStepLabel, status: isStepError ? 'error' : 'done', duration: stepDuration } })
 
               // Worklog card SSE — emit for notable tool completions
               if (['save_memory', 'save_self_memory', 'log_worklog', 'patch_file', 'write_file', 'trigger_deploy', 'create_task', 'schedule_task'].includes(tc.function.name) && !isStepError) {
