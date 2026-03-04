@@ -4277,7 +4277,7 @@ Rules:
 
 
           // Close live stream — all real-time events already emitted during loop
-          if (liveController) liveController.close()
+          liveController?.close()
 
           // Build final response: live events (already streamed) + hive_status trail + worklog_cards + final content
           const stream = new ReadableStream({
