@@ -453,8 +453,13 @@ async function heartbeatTick(baseUrl: string): Promise<void> {
       // ── Proactive inbox + calendar sweeps ──────────────────────────────────
       // Run once every 5 ticks (~5 min) for all active users to avoid hammering APIs
       const shouldRunProactive = Math.floor(Date.now() / 1000) % 300 < 60
-      if (shouldRunProactive && dueUsers.rows.length > 0) {
-        for (const { user_id } of dueUsers.rows.slice(0, 2)) {
+      if (shouldRunProactive) {
+        // Run for active users independently of whether they have pending tasks
+        // (proactive = acting WITHOUT being asked — never gate on task queue)
+        const sweepTargets = activeUsers.rows.length > 0
+          ? activeUsers.rows.slice(0, 2)
+          : dueUsers.rows.slice(0, 2)
+        for (const { user_id } of sweepTargets) {
           proactiveInboxSweep(user_id).catch(() => {})
           proactiveCalendarSweep(user_id).catch(() => {})
         }
