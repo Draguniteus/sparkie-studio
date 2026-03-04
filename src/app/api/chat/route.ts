@@ -3548,7 +3548,7 @@ function selectModel(messages: Array<{ role: string; content: string }>): ModelS
     // Simple question with no task signal (weather, time, quick facts — nano handles these tools fine)
     (!taskIntent && msgLen < 150 && /\b(who|what|why|when|where|how|date|today)\b/.test(lower) && !/\b(weather|time|news|current|currently|latest|live|price|stock|code|file|repo|deploy|build|task|email|tweet|post|github|happening|situation|conflict|war|crisis|election|politics)\b/.test(lower)) ||
     // Short messages with zero task signal
-    (msgLen < 60 && !taskIntent && !/\\b(currently|happening|going on|what.{0,10}(between|with|about).{0,30}(and|now)|situation|conflict|war|crisis|news|weather|price|stock|live|latest)\\b/.test(lower))
+    (msgLen < 60 && !taskIntent && !/\b(currently|happening|going on|what.{0,10}(between|with|about).{0,30}(and|now)|situation|conflict|war|crisis|news|weather|price|stock|live|latest)\b/.test(lower))
   )
 
   // ── Tier 4: TRINITY — frontier reasoning, creative architecture, massive scale ──
@@ -3586,19 +3586,27 @@ function selectModel(messages: Array<{ role: string; content: string }>): ModelS
 }
 
 
+// Models served via opencode.ai/zen — only nano lives here
+const OPENCODE_MODELS = new Set(['openai-gpt-5-nano'])
+
 async function tryLLMCall(
   payload: Record<string, unknown>,
   modelSelection: ModelSelection,
   apiKey: string,
+  doKey?: string,
 ): Promise<{ response: Response; modelUsed: ModelTier }> {
   const candidates: ModelTier[] = [modelSelection.primary, ...modelSelection.fallbacks]
   let lastError = ''
   for (const m of candidates) {
     try {
       const isStream = payload.stream === true
-      const res = await fetch(`${OPENCODE_BASE}/chat/completions`, {
+      // Route to the correct endpoint: opencode for nano, DO Inference for everything else
+      const isOpencode = OPENCODE_MODELS.has(m)
+      const endpoint = isOpencode ? `${OPENCODE_BASE}/chat/completions` : `${DO_INFERENCE_BASE}/chat/completions`
+      const key = isOpencode ? apiKey : (doKey ?? apiKey)
+      const res = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
         body: JSON.stringify({ ...payload, model: m }),
         signal: AbortSignal.timeout(isStream ? 90000 : 30000),
       })
@@ -4128,7 +4136,7 @@ Rules:
           tools: [...SPARKIE_TOOLS, ...connectorTools],
           tool_choice: 'auto',
           messages: [{ role: 'system', content: systemContent }, ...loopMessages],
-        }, modelSelection, apiKey)
+        }, modelSelection, apiKey, doKey)
         void loopModel // tracked internally; not exposed to user
 
         if (!loopRes.ok) break
@@ -4510,7 +4518,7 @@ SYNTHESIS RULES:
     const { response: streamRes } = await tryLLMCall({
       stream: true, temperature: 0.8, max_tokens: 8192,
       messages: [{ role: 'system', content: finalSystemContent }, ...finalMessages],
-    }, modelSelection, apiKey)
+    }, modelSelection, apiKey, doKey)
 
     if (!streamRes.ok) {
       const errBody = await streamRes.text()
