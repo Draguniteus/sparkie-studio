@@ -4339,6 +4339,13 @@ Rules:
             const lastUser = messages.slice().reverse().find((m: { role: string; content: string }) => m.role === 'user')?.content ?? ''
             const lastSparkie = messages.slice().reverse().find((m: { role: string; content: string }) => m.role === 'assistant')?.content ?? ''
             updateSessionFile(userId, lastUser, lastSparkie)
+            // Log ai_response to worklog so "I've sent you a message" appears
+            if (lastSparkie) {
+              writeWorklog(userId, 'ai_response',
+                `You just sent me a message:\n${lastUser.slice(0, 120)}${lastUser.length > 120 ? '…' : ''}`,
+                { status: 'done', decision_type: 'action', signal_priority: 'P2' }
+              ).catch(() => {})
+            }
           }
 
           // If media was collected, append blocks after text
@@ -4536,6 +4543,13 @@ SYNTHESIS RULES:
       const lastUserMsg = messages.slice().reverse().find((m: { role: string; content: string }) => m.role === 'user')?.content ?? ''
       const lastSparkieMsg = messages.slice().reverse().find((m: { role: string; content: string }) => m.role === 'assistant')?.content ?? ''
       updateSessionFile(userId, lastUserMsg, lastSparkieMsg)
+      // Log ai_response to worklog so "I've sent you a message" appears
+      if (lastSparkieMsg) {
+        writeWorklog(userId, 'ai_response',
+          `You just sent me a message:\n${lastUserMsg.slice(0, 120)}${lastUserMsg.length > 120 ? '…' : ''}`,
+          { status: 'done', decision_type: 'action', signal_priority: 'P2' }
+        ).catch(() => {})
+      }
     }
 
     // If there are media results, we need to append them after the stream completes
