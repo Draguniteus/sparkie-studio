@@ -452,6 +452,10 @@ async function heartbeatTick(baseUrl: string): Promise<void> {
 
       // ── Proactive inbox + calendar sweeps ──────────────────────────────────
       // Run once every 5 ticks (~5 min) for all active users to avoid hammering APIs
+      const activeUsers = await query<{ user_id: string }>(
+        `SELECT DISTINCT user_id FROM user_sessions WHERE last_seen_at > NOW() - INTERVAL '7 days'`
+      ).catch(() => ({ rows: [] as { user_id: string }[] }))
+
       const shouldRunProactive = Math.floor(Date.now() / 1000) % 300 < 60
       if (shouldRunProactive) {
         // Run for active users independently of whether they have pending tasks
@@ -467,9 +471,6 @@ async function heartbeatTick(baseUrl: string): Promise<void> {
 
       // ── Surface ready deferred intents ─────────────────────────────────────
       // Check all active users for deferred intents that are now ready
-      const activeUsers = await query<{ user_id: string }>(
-        `SELECT DISTINCT user_id FROM user_sessions WHERE last_seen_at > NOW() - INTERVAL '7 days'`
-      ).catch(() => ({ rows: [] as { user_id: string }[] }))
 
       for (const { user_id } of activeUsers.rows.slice(0, 10)) {
         const readyIntents = await loadReadyDeferredIntents(user_id)
