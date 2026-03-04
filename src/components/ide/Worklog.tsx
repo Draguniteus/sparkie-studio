@@ -2,12 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { useAppStore, WorklogEntry } from "@/store/appStore"
-import {
-  Brain, Zap, CheckCircle, AlertCircle, Code, Loader2,
-  Mail, SkipForward, ShieldCheck, Wrench, Calendar, Cpu,
-  BookOpen, Sparkles, RefreshCw, MessageSquare, Send,
-  Activity, Eye
-} from "lucide-react"
+import { Brain, Loader2, Mail, MessageSquare, Send, Activity, Eye } from "lucide-react"
 
 function formatTime(ts: Date | number | string | undefined) {
   if (!ts) return ""
