@@ -4319,7 +4319,7 @@ SYNTHESIS RULES:
           )] as string[]
           if (toolNames.length > 0) {
             // Fire-and-forget auto-worklog entry
-            fetch(`${appDomain}/api/sparkie-self-memory`, {
+            fetch(`https://${process.env.APP_DOMAIN ?? 'sparkie-studio-mhouq.ondigitalocean.app'}/api/sparkie-self-memory`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
