@@ -782,7 +782,7 @@ export function ChatInput() {
       })
       if (!response.ok) {
         const err = await response.json().catch(() => ({ error: `HTTP ${response.status}` }))
-        const msg = response.status === 429 ? "Rate limited — wait a moment and try again." : response.status === 401 ? "This model isn't available on the current plan." : `Error: ${err.error || response.status}`
+        const msg = response.status === 429 ? "Rate limited — wait a moment and try again." : response.status === 401 ? "Authentication error — please refresh the page." : `Error: ${err.error || response.status}`
         updateMessage(chatId, assistantMsgId, { content: msg, isStreaming: false })
         setStreaming(false); return
       }
