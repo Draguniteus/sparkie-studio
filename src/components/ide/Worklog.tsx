@@ -236,55 +236,64 @@ export function Worklog({ compact = false }: WorklogProps) {
   const [dbLoaded, setDbLoaded] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  // Seed worklog from DB on mount
+  // Merge DB worklog entries (newest first from API, oldest first in store for timeline)
+  const mergeDbEntries = (entries: { type: string; content: string; status: string; created_at: string; decision_type?: string; reasoning?: string; metadata?: Record<string,unknown> }[]) => {
+    const store = useAppStore.getState()
+    const existingContents = new Set(store.worklog.map(w => w.content + String(w.created_at ?? w.timestamp)))
+    // entries come newest-first from API; reverse so oldest go in first (timeline order)
+    for (const e of [...entries].reverse()) {
+      const key = e.content + e.created_at
+      if (!existingContents.has(key)) {
+        addWorklogEntry({
+          type: e.type as WorklogEntry["type"],
+          content: e.content,
+          status: (e.status as unknown as WorklogEntry["status"]) ?? "done",
+          decision_type: (e.decision_type as unknown as WorklogEntry["decision_type"]),
+          reasoning: e.reasoning,
+          metadata: e.metadata,
+          created_at: e.created_at,
+        })
+        existingContents.add(key)
+      }
+    }
+  }
+
+  // Seed worklog from DB on mount — always merge, never skip
   useEffect(() => {
     if (dbLoaded) return
     fetch("/api/worklog?limit=30")
       .then(r => r.json())
       .then((d: { entries?: { type: string; content: string; status: string; created_at: string; decision_type?: string; reasoning?: string; metadata?: Record<string,unknown> }[] }) => {
-        if (d.entries && d.entries.length > 0) {
-          if (useAppStore.getState().worklog.length === 0) {
-            for (const e of d.entries.slice(0, 20)) {
-              addWorklogEntry({
-                type: e.type as WorklogEntry["type"],
-                content: e.content,
-                status: (e.status as unknown as WorklogEntry["status"]) ?? "done",
-                decision_type: (e.decision_type as unknown as WorklogEntry["decision_type"]),
-                reasoning: e.reasoning,
-                metadata: e.metadata,
-              })
-            }
-          }
-        }
+        if (d.entries && d.entries.length > 0) mergeDbEntries(d.entries)
         setDbLoaded(true)
       })
       .catch(() => setDbLoaded(true))
   }, [dbLoaded, addWorklogEntry])
 
-  // Auto-refresh after every tool session
+  // Poll DB every 30s to pick up background entries (scheduler, proactive sweeps, etc.)
+  useEffect(() => {
+    if (!dbLoaded) return
+    const t = setInterval(() => {
+      fetch("/api/worklog?limit=10")
+        .then(r => r.json())
+        .then((d: { entries?: { type: string; content: string; status: string; created_at: string; decision_type?: string; reasoning?: string; metadata?: Record<string,unknown> }[] }) => {
+          if (d.entries && d.entries.length > 0) mergeDbEntries(d.entries)
+        })
+        .catch(() => {})
+    }, 30_000)
+    return () => clearInterval(t)
+  }, [dbLoaded, addWorklogEntry])
+
+  // Auto-refresh after every tool session completes
   useEffect(() => {
     const handler = (ev: Event) => {
       const trace = (ev as CustomEvent<{ status: string }>).detail
       if (trace?.status === "done") {
         setTimeout(() => {
-          fetch("/api/worklog?limit=5")
+          fetch("/api/worklog?limit=10")
             .then(r => r.json())
             .then((d: { entries?: { type: string; content: string; status: string; created_at: string; decision_type?: string; reasoning?: string; metadata?: Record<string,unknown> }[] }) => {
-              if (d.entries) {
-                for (const e of d.entries) {
-                  const existing = useAppStore.getState().worklog.find(w => w.content === e.content)
-                  if (!existing) {
-                    addWorklogEntry({
-                      type: e.type as WorklogEntry["type"],
-                      content: e.content,
-                      status: (e.status as unknown as WorklogEntry["status"]) ?? "done",
-                      decision_type: (e.decision_type as unknown as WorklogEntry["decision_type"]),
-                      reasoning: e.reasoning,
-                      metadata: e.metadata,
-                    })
-                  }
-                }
-              }
+              if (d.entries && d.entries.length > 0) mergeDbEntries(d.entries)
             })
             .catch(() => {})
         }, 1500)
@@ -292,7 +301,7 @@ export function Worklog({ compact = false }: WorklogProps) {
     }
     window.addEventListener("sparkie_step_trace", handler)
     return () => window.removeEventListener("sparkie_step_trace", handler)
-  }, [addWorklogEntry])
+  }, [addWorklogEntry, dbLoaded])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
