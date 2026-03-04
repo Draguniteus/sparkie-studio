@@ -3495,7 +3495,7 @@ function formatConnectorResponse(actionSlug: string, data: Record<string, unknow
 
 const MODELS = {
   CONVERSATIONAL: 'gpt-5-nano',                 // Tier 1   · Sparkie  — conversations, light tools, 400K ctx
-  CAPABLE:        'openai-gpt-5-mini',           // Tier 2   · Flame    — task execution, tools, coding, GitHub
+  CAPABLE:        'kimi-k2.5',                   // Tier 2   · Flame    — task execution, tools, coding, GitHub
   EMBER:          'big-pickle',                 // Tier 2.5 · Ember    — code specialist, agentic tool-calling, 200K ctx
   DEEP:           'minimax-m2.5-free',          // Tier 3   · Atlas    — heavy analysis, large refactors, deep dives
   TRINITY:        'trinity-large-preview-free', // Tier 4   · Trinity  — 400B MoE frontier, creative arch, complex chains
@@ -3603,7 +3603,7 @@ async function tryLLMCall(
         signal: AbortSignal.timeout(isStream ? 90000 : 30000),
       })
       if (res.ok) return { response: res, modelUsed: m }
-      if (res.status === 429 || res.status >= 500) {
+      if (res.status === 429 || res.status >= 500 || res.status === 400 || res.status === 403) {
         const txt = await res.text().catch(() => res.status.toString())
         lastError = `${m}: ${res.status} ${txt.slice(0, 80)}`
         await new Promise(r => setTimeout(r, 500)) // brief backoff before next model
