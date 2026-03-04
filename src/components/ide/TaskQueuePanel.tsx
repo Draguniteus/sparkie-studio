@@ -1,27 +1,29 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { CheckCircle2, Clock, Loader2, XCircle, RefreshCw, Calendar, Mail, Zap } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { CheckCircle2, Clock, Loader2, XCircle, RefreshCw, Calendar, Mail, Zap, StopCircle, HelpCircle } from 'lucide-react'
 
 interface SparkieTask {
   id: string
   label: string
   action: string
-  status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped'
+  status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped' | 'cancelled'
   executor: 'ai' | 'human'
   trigger_type: string
   scheduled_at: string | null
   created_at: string
   resolved_at: string | null
   payload: Record<string, unknown>
+  why_human?: string
 }
 
 const statusConfig = {
-  pending:     { icon: Clock,       color: 'text-amber-400',    bg: 'bg-amber-400/10',  label: 'Pending'     },
-  in_progress: { icon: Loader2,     color: 'text-blue-400',     bg: 'bg-blue-400/10',   label: 'Running'     },
-  completed:   { icon: CheckCircle2,color: 'text-green-400',    bg: 'bg-green-400/10',  label: 'Done'        },
-  failed:      { icon: XCircle,     color: 'text-red-400',      bg: 'bg-red-400/10',    label: 'Failed'      },
-  skipped:     { icon: XCircle,     color: 'text-zinc-500',     bg: 'bg-zinc-500/10',   label: 'Skipped'     },
+  pending:     { icon: Clock,        color: 'text-amber-400',    bg: 'bg-amber-400/10',   label: 'Pending'    },
+  in_progress: { icon: Loader2,      color: 'text-blue-400',     bg: 'bg-blue-400/10',    label: 'Running'    },
+  completed:   { icon: CheckCircle2, color: 'text-green-400',    bg: 'bg-green-400/10',   label: 'Done'       },
+  failed:      { icon: XCircle,      color: 'text-red-400',      bg: 'bg-red-400/10',     label: 'Failed'     },
+  skipped:     { icon: XCircle,      color: 'text-zinc-500',     bg: 'bg-zinc-500/10',    label: 'Skipped'    },
+  cancelled:   { icon: StopCircle,   color: 'text-orange-400',   bg: 'bg-orange-400/10',  label: 'Stopped'    },
 }
 
 function actionIcon(action: string) {
@@ -60,6 +62,9 @@ export function TaskQueuePanel() {
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<'all' | 'pending' | 'ai' | 'human'>('all')
   const [actioning, setActioning] = useState<string | null>(null)
+  const [sseConnected, setSseConnected] = useState(false)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const sseRef = useRef<EventSource | null>(null)
 
   const fetchTasks = useCallback(async () => {
     try {
@@ -73,11 +78,47 @@ export function TaskQueuePanel() {
     }
   }, [])
 
-  // Auto-poll every 10s so new tasks appear live without manual refresh
+  // Try SSE first; fall back to polling if SSE unavailable
   useEffect(() => {
     fetchTasks()
-    const interval = setInterval(fetchTasks, 10_000)
-    return () => clearInterval(interval)
+
+    try {
+      const es = new EventSource('/api/tasks/stream')
+      sseRef.current = es
+
+      es.onopen = () => {
+        setSseConnected(true)
+        // SSE connected — clear fallback poll if running
+        if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+      }
+
+      es.addEventListener('tasks', (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data)
+          if (data.tasks) setTasks(data.tasks)
+        } catch { /* ignore */ }
+      })
+
+      es.onerror = () => {
+        setSseConnected(false)
+        es.close()
+        // Fall back to polling
+        if (!pollRef.current) {
+          pollRef.current = setInterval(fetchTasks, 10_000)
+        }
+      }
+    } catch {
+      // EventSource not available — use polling
+      pollRef.current = setInterval(fetchTasks, 10_000)
+    }
+
+    // Fallback poll also starts initially — SSE onopen will clear it if connected
+    pollRef.current = setInterval(fetchTasks, 10_000)
+
+    return () => {
+      sseRef.current?.close()
+      if (pollRef.current) clearInterval(pollRef.current)
+    }
   }, [fetchTasks])
 
   const handleAction = async (taskId: string, action: 'approved' | 'rejected') => {
@@ -94,6 +135,17 @@ export function TaskQueuePanel() {
     }
   }
 
+  const handleStop = async (taskId: string) => {
+    setActioning(taskId)
+    try {
+      await fetch(`/api/tasks?id=${taskId}`, { method: 'DELETE' })
+      // Optimistic update
+      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: 'cancelled' } : t))
+    } finally {
+      setActioning(null)
+    }
+  }
+
   const filtered = tasks.filter(t => {
     if (filter === 'pending') return t.status === 'pending'
     if (filter === 'ai') return t.executor === 'ai'
@@ -102,6 +154,7 @@ export function TaskQueuePanel() {
   })
 
   const pendingCount = tasks.filter(t => t.status === 'pending' && t.executor === 'human').length
+  const runningCount = tasks.filter(t => t.status === 'in_progress').length
 
   return (
     <div className="flex flex-col h-full bg-bg-primary text-text-primary">
@@ -114,9 +167,18 @@ export function TaskQueuePanel() {
               {pendingCount} pending
             </span>
           )}
+          {runningCount > 0 && (
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30 flex items-center gap-1">
+              <Loader2 className="w-2.5 h-2.5 animate-spin" />
+              {runningCount} running
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-full bg-green-500/60 animate-pulse" title="Live — refreshing every 10s" />
+          <span
+            className={`w-1.5 h-1.5 rounded-full ${sseConnected ? 'bg-green-500/80 animate-pulse' : 'bg-amber-500/60'}`}
+            title={sseConnected ? 'Live — real-time updates' : 'Polling every 10s'}
+          />
           <button
             onClick={fetchTasks}
             className="p-1 rounded hover:bg-white/5 text-text-secondary hover:text-text-primary transition-colors"
@@ -166,6 +228,7 @@ export function TaskQueuePanel() {
               const Icon = cfg.icon
               const isActioning = actioning === task.id
               const isPendingHuman = task.status === 'pending' && task.executor === 'human'
+              const isRunningAI = task.status === 'in_progress' && task.executor === 'ai'
               const scheduledDisplay = formatScheduled(task.scheduled_at, task.trigger_type === 'cron' ? (task.payload as Record<string, unknown>)?.cron_expression as string | undefined : undefined)
 
               return (
@@ -176,11 +239,16 @@ export function TaskQueuePanel() {
                       <div className="flex items-center gap-1.5 flex-wrap">
                         {actionIcon(task.action)}
                         <span className="text-xs font-medium text-text-primary leading-tight">{task.label}</span>
+                        {task.why_human && (
+                          <span title={task.why_human} className="cursor-help text-text-muted">
+                            <HelpCircle className="w-3 h-3" />
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                         <span className={`text-[10px] font-semibold ${cfg.color}`}>{cfg.label}</span>
                         <span className="text-[10px] text-text-secondary">
-                          {task.executor === 'ai' ? '⚡ Sparkie' : '👤 You'}
+                          {task.executor === 'ai' ? '🤖 Sparkie' : '👤 You'}
                         </span>
                         {scheduledDisplay && (
                           <span className="text-[10px] text-blue-400">🕐 {scheduledDisplay}</span>
@@ -202,6 +270,18 @@ export function TaskQueuePanel() {
                             className="px-2 py-0.5 rounded text-[10px] font-semibold bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors disabled:opacity-50"
                           >
                             Reject
+                          </button>
+                        </div>
+                      )}
+                      {isRunningAI && (
+                        <div className="flex gap-1.5 mt-1.5">
+                          <button
+                            onClick={() => handleStop(task.id)}
+                            disabled={isActioning}
+                            className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-orange-500/10 text-orange-400 border border-orange-500/20 hover:bg-orange-500/20 transition-colors disabled:opacity-50"
+                          >
+                            <StopCircle className="w-2.5 h-2.5" />
+                            {isActioning ? '...' : 'Stop'}
                           </button>
                         </div>
                       )}
