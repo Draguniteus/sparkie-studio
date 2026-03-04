@@ -1562,6 +1562,18 @@ export function ChatInput() {
           </div>
         </div>
       )}
+      {/* ── Attached file chip ──────────────────────────────────────── */}
+      {attachedFile && (
+        <div className="flex items-center gap-2 px-3 pt-2 pb-0">
+          <div className="flex items-center gap-1.5 bg-hive-hover text-text-secondary text-xs px-2.5 py-1 rounded-full max-w-[240px]">
+            <Paperclip size={11} className="shrink-0 text-honey-500" />
+            <span className="truncate">{attachedFile.name}</span>
+            <button onClick={() => setAttachedFile(null)} className="ml-0.5 hover:text-text-primary shrink-0">
+              <X size={11} />
+            </button>
+          </div>
+        </div>
+      )}
       <div className="rounded-2xl bg-hive-surface border border-hive-border focus-within:border-honey-500/40 transition-colors">
         <textarea
           ref={textareaRef} value={input} onChange={handleInput} onKeyDown={handleKeyDown}
