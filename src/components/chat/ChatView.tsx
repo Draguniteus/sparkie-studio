@@ -4,8 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '@/store/appStore'
 import { ChatInput } from './ChatInput'
 import { MessageBubble } from './MessageBubble'
-import { Code, Share, MoreHorizontal, Brain, ChevronRight, X, CheckCircle, AlertCircle, Loader2 } from 'lucide-react'
-import { useAuth } from '@/hooks/useAuth'
+import { Code, Share, MoreHorizontal, Brain, ChevronRight, CheckCircle, AlertCircle, Loader2 } from 'lucide-react'
 
 // Step trace type (matches ChatInput)
 interface StepTrace { icon: string; label: string; status: 'running' | 'done' | 'error'; duration?: number }
