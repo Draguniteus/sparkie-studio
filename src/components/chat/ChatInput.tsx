@@ -806,6 +806,8 @@ export function ChatInput() {
             // Step-trace card
             if (parsed.step_trace) {
               const trace = parsed.step_trace as StepTrace
+              // Auto-open IDE panel so user sees live activity — same as streamAgent
+              if (!ideOpen) openIDE()
               _setStepTraces(prev => {
                 const existing = prev.findIndex(t => t.label === trace.label && t.status === 'running')
                 if (existing >= 0 && (trace.status === 'done' || trace.status === 'error')) {
