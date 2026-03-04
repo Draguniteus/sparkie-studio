@@ -3495,7 +3495,7 @@ function formatConnectorResponse(actionSlug: string, data: Record<string, unknow
 
 const MODELS = {
   CONVERSATIONAL: 'gpt-5-nano',                 // Tier 1   · Sparkie  — conversations, light tools, 400K ctx
-  CAPABLE:        'openai-gpt-5-mini',           // Tier 2   · Flame    — task execution, tools, coding, GitHub
+  CAPABLE:        'llama3.3-70b-instruct',           // Tier 2   · Flame    — task execution, tools, coding, GitHub
   EMBER:          'big-pickle',                 // Tier 2.5 · Ember    — code specialist, agentic tool-calling, 200K ctx
   DEEP:           'minimax-m2.5-free',          // Tier 3   · Atlas    — heavy analysis, large refactors, deep dives
   TRINITY:        'trinity-large-preview-free', // Tier 4   · Trinity  — 400B MoE frontier, creative arch, complex chains
@@ -4058,7 +4058,7 @@ Rules:
               method: 'POST',
               headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
               body: JSON.stringify({
-                model: 'openai-gpt-5-mini',
+                model: 'llama3.3-70b-instruct',
                 stream: false,
                 temperature: 0.3,
                 max_tokens: 600,
