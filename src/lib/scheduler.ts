@@ -536,6 +536,21 @@ export function startScheduler(baseUrl: string): void {
 
   console.log(`[scheduler] Heartbeat scheduler started — ${SCHEDULER_INTERVAL_MS / 1000}s interval, base: ${baseUrl}`)
 
+  // Auto-migrate: ensure all memory seeds are loaded on cold boot
+  // Runs once 3s after boot — idempotent (DELETE WHERE source='seedX' + INSERT ON CONFLICT DO NOTHING)
+  setTimeout(async () => {
+    try {
+      const secret = process.env.MIGRATE_SECRET
+      if (secret) {
+        const res = await fetch(`${baseUrl}/api/admin/migrate?secret=${secret}`)
+        if (res.ok) console.log('[scheduler] Auto-migrate: memory seeds loaded')
+        else console.warn('[scheduler] Auto-migrate: non-ok response', res.status)
+      }
+    } catch (e) {
+      console.warn('[scheduler] Auto-migrate failed (non-fatal):', e)
+    }
+  }, 3_000)
+
   // Fire once 5s after boot (catches tasks due during downtime)
   setTimeout(() => heartbeatTick(baseUrl), 5_000)
 
