@@ -1783,16 +1783,22 @@ async function executeTool(
 
       case 'search_web': {
         if (!tavilyKey) return 'Web search not available'
+        const searchQuery = (args.query as string).slice(0, 200)
+        // Check cache first (60s TTL) — avoids duplicate Tavily hits in same session
+        const cached = getCachedSearch(searchQuery)
+        if (cached) return cached
         const res = await fetch('https://api.tavily.com/search', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${tavilyKey}` },
-          body: JSON.stringify({ query: (args.query as string).slice(0, 200), max_results: 4, search_depth: 'basic' }),
+          body: JSON.stringify({ query: searchQuery, max_results: 5, search_depth: 'basic' }),
           signal: AbortSignal.timeout(8000),
         })
         if (!res.ok) return `Search failed: ${res.status}`
         const d = await res.json()
-        const results = (d.results ?? []).slice(0, 4) as Array<{ title: string; content: string; url: string }>
-        return results.map((r) => `**${r.title}**\n${r.content}\nSource: ${r.url}`).join('\n\n')
+        const results = (d.results ?? []).slice(0, 5) as Array<{ title: string; content: string; url: string }>
+        const output = results.map((r) => `**${r.title}**\n${r.content}\nSource: ${r.url}`).join('\n\n')
+        setCachedSearch(searchQuery, output)
+        return output
       }
 
       case 'get_github': {
@@ -3597,6 +3603,22 @@ async function tryLLMCall(
 // ── POST handler ──────────────────────────────────────────────────────────────
 
 // ── Simple in-memory rate limiter (30 req/min per user) ──────────────────────
+// ── Search result cache — avoid duplicate Tavily hits within 60s ──────────────
+const _searchCache = new Map<string, { result: string; expiresAt: number }>()
+function getCachedSearch(query: string): string | null {
+  const entry = _searchCache.get(query)
+  if (!entry || entry.expiresAt < Date.now()) { _searchCache.delete(query); return null }
+  return entry.result
+}
+function setCachedSearch(query: string, result: string): void {
+  // Cap cache size at 50 entries — evict oldest
+  if (_searchCache.size >= 50) {
+    const oldest = [..._searchCache.entries()].sort((a,b) => a[1].expiresAt - b[1].expiresAt)[0]
+    if (oldest) _searchCache.delete(oldest[0])
+  }
+  _searchCache.set(query, { result, expiresAt: Date.now() + 60_000 })
+}
+
 const _rlMap = new Map<string, { count: number; resetAt: number }>()
 function checkRateLimit(key: string): boolean {
   const now = Date.now()
@@ -3746,7 +3768,11 @@ Make it feel like walking into your friend's creative space and being genuinely 
       systemContent += `\n\n## ACTIVE VOICE SESSION\nLive voice conversation. Keep responses short and natural — spoken dialogue. No markdown. Max 3-4 sentences.`
     }
 
-    const recentMessages = messages.slice(-12)
+    // Smarter rolling window: keep first 2 messages (session intent/context anchors)
+    // + last 10 for recency. Prevents context amnesia on long conversations.
+    const recentMessages = messages.length <= 12
+      ? messages
+      : [...messages.slice(0, 2), ...messages.slice(-10)]
 
     // Await user's connector tools (was started in parallel with system prompt build)
     const connectorTools = await connectorToolsPromise
