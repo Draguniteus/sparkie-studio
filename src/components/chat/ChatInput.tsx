@@ -814,7 +814,6 @@ export function ChatInput() {
             if (parsed.step_trace) {
               const trace = parsed.step_trace as StepTrace
               setStepTraces(prev => {
-                // Update last running entry to done/error, or add new running entry
                 const existing = prev.findIndex(t => t.label === trace.label && t.status === 'running')
                 if (existing >= 0 && (trace.status === 'done' || trace.status === 'error')) {
                   return prev.map((t, i) => i === existing ? trace : t)
@@ -822,6 +821,8 @@ export function ChatInput() {
                 if (trace.status === 'running') return [...prev, trace]
                 return [...prev, trace]
               })
+              // Broadcast to ChatView so the in-stream chip can show it
+              window.dispatchEvent(new CustomEvent('sparkie_step_trace', { detail: trace }))
               continue
             }
             // Worklog card inline
@@ -1533,53 +1534,6 @@ export function ChatInput() {
               <span className="text-honey-500 font-mono text-sm font-semibold">{s.cmd}</span>
               <span className="text-xs text-text-muted">{s.desc}</span>
             </button>
-          ))}
-        </div>
-      )}
-
-      {/* Step-trace cards — show per-tool execution steps like SureThing */}
-      {stepTraces.length > 0 && (
-        <div className="mb-2 flex flex-col gap-1">
-          {stepTraces.slice(-6).map((trace, i) => (
-            <div key={i} className={`flex items-center gap-2.5 px-3 py-1.5 rounded-lg border text-xs w-fit max-w-full transition-all ${
-              trace.status === 'running'
-                ? 'bg-honey-500/8 border-honey-500/20 text-honey-400'
-                : trace.status === 'error'
-                ? 'bg-red-500/8 border-red-500/20 text-red-400'
-                : 'bg-hive-elevated/60 border-white/5 text-text-muted'
-            }`}>
-              <span className="shrink-0 text-[13px]">{STEP_ICON_MAP[trace.icon] ?? '⚡'}</span>
-              <span className="font-medium truncate max-w-[260px]">{trace.label}</span>
-              {trace.status === 'running' && (
-                <span className="shrink-0 flex gap-[3px] items-center">
-                  {[0,1,2].map(d => (
-                    <span key={d} className="w-1 h-1 rounded-full bg-honey-400 animate-bounce" style={{ animationDelay: `${d * 0.15}s` }} />
-                  ))}
-                </span>
-              )}
-              {trace.status === 'done' && <span className="shrink-0 text-green-400">✓</span>}
-              {trace.status === 'error' && <span className="shrink-0 text-red-400">✕</span>}
-              {trace.duration && trace.status !== 'running' && (
-                <span className="shrink-0 text-text-muted text-[10px] tabular-nums">{trace.duration < 1000 ? `${trace.duration}ms` : `${(trace.duration/1000).toFixed(1)}s`}</span>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Inline worklog cards — memory/code/task actions shown in chat feed */}
-      {inlineFeedCards.length > 0 && (
-        <div className="mb-2 flex flex-col gap-1.5">
-          {inlineFeedCards.map((card, i) => (
-            <div key={i} className="flex items-start gap-2.5 px-3 py-2 rounded-xl bg-gradient-to-r from-purple-900/20 to-purple-950/10 border border-purple-500/20 text-xs w-fit max-w-full">
-              <div className="w-5 h-5 rounded-md bg-purple-500/20 flex items-center justify-center shrink-0 mt-0.5">
-                <span className="text-[11px]">🧠</span>
-              </div>
-              <div className="flex-1 min-w-0">
-                <span className="text-purple-300 font-medium">{WORKLOG_TOOL_LABEL[card.tool] ?? card.tool.replace(/_/g,' ')}</span>
-                <p className="text-text-muted mt-0.5 leading-snug line-clamp-2">{card.summary}</p>
-              </div>
-            </div>
           ))}
         </div>
       )}
