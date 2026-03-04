@@ -4324,7 +4324,7 @@ SYNTHESIS RULES:
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 category: 'self',
-                content: `Completed tool session: ${toolNames.join(', ')}. ${round} round${round>1?'s':''} used. Task: ${userMessageContent.slice(0, 120)}`,
+                content: `Completed tool session: ${toolNames.join(', ')}. ${round} round${round>1?'s':''} used. Task: ${lastUserContent.slice(0, 120)}`,
                 source: 'auto_agent_loop',
               })
             }).catch(() => {}) // fire-and-forget
