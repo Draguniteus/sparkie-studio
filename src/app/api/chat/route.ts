@@ -4024,33 +4024,30 @@ Rules:
         } catch { /* planning call failed — continue without plan */ }
       }
 
-      // Phase 5: Live SSE stream — emit step_trace/task_chip events IN REAL-TIME during tool loop
-      // TransformStream created before loop; controller captured for immediate enqueue during execution
+      // Phase 5: Live SSE stream — emit step_trace/task_chip IN REAL-TIME during tool loop
+      // ReadableStream created before loop; controller captured for immediate enqueue during execution
       const liveEncoder = new TextEncoder()
       let liveController: ReadableStreamDefaultController<Uint8Array> | null = null
       const liveChunks: Uint8Array[] = []
       const liveStream = new ReadableStream<Uint8Array>({
-        start(ctrl) { liveController = ctrl }
+        start(ctrl) {
+          liveController = ctrl
+          // Flush any chunks buffered before controller was ready
+          for (const c of liveChunks) ctrl.enqueue(c)
+          liveChunks.splice(0)
+        },
       })
-      // Helper: enqueue SSE event immediately (during loop) or buffer if controller not yet ready
-      function liveEnqueue(event: Record<string, unknown>) {
-        const chunk = liveEncoder.encode(`data: ${JSON.stringify(event)}\n\n`)
+      // Helper: enqueue SSE event immediately or buffer if controller not yet started
+      function liveEnqueue(eventPayload: Record<string, unknown>): void {
+        const chunk = liveEncoder.encode(`data: ${JSON.stringify(eventPayload)}\n\n`)
         if (liveController) {
           liveController.enqueue(chunk)
         } else {
           liveChunks.push(chunk)
         }
       }
-      // Flush any buffered chunks once controller is ready
-      function flushLiveChunks() {
-        if (liveController && liveChunks.length > 0) {
-          for (const c of liveChunks) liveController.enqueue(c)
-          liveChunks.length = 0
-        }
-      }
-      void liveStream // consumed when building final response stream
 
-            while (round < MAX_TOOL_ROUNDS) {
+      while (round < MAX_TOOL_ROUNDS) {
         round++
         hiveLog.push(pickHive(HIVE_ROUND[round] ?? HIVE_ROUND[3]))
         const { response: loopRes, modelUsed: loopModel } = await tryLLMCall({
@@ -4091,7 +4088,6 @@ Rules:
             : (CHIP_LABELS[chipToolName] ?? `In memory: ${chipToolName.replace(/_/g, ' ')}...`)
           // Live emit task_chip immediately when tool call detected
           liveEnqueue({ task_chip: chipLabel })
-          flushLiveChunks()
           // Step-trace card: emit per-tool step detail for rich UI
           const stepIcon: Record<string, string> = {
             get_github: 'file', patch_file: 'edit', write_file: 'edit',
@@ -4294,18 +4290,18 @@ Rules:
                 } else if (msg.startsWith('__worklog_card__')) {
                   try {
                     const cardData = JSON.parse(msg.slice('__worklog_card__'.length))
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ worklog_card: cardData })}\n\n`))
+                    controller.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ worklog_card: cardData })}\n\n`))
                   } catch { /* skip malformed */ }
                 } else {
-                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ hive_status: msg })}\n\n`))
+                  controller.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ hive_status: msg })}\n\n`))
                 }
               }
               // Send as single chunk — chunking at 80 chars breaks markdown code fences (e.g. ```image blocks)
               // Client-side AnimatedMarkdown handles the char-by-char animation effect independently
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: finalContent } }] })}\n\n`))
+              controller.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: finalContent } }] })}\n\n`))
               // Phase 5: task_chip_clear — client clears the "In memory:..." chip after response arrives
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ task_chip_clear: true })}\n\n`))
-              controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+              controller.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ task_chip_clear: true })}\n\n`))
+              controller.enqueue(liveEncoder.encode('data: [DONE]\n\n'))
               controller.close()
             },
           })
