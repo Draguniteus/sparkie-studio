@@ -148,6 +148,8 @@ export function ChatInput() {
   const [selectedVoiceId, setSelectedVoiceId] = useState("English_CalmWoman")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const videoFileRef = useRef<HTMLInputElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [attachedFile, setAttachedFile] = useState<{ name: string; dataUrl: string; mimeType: string } | null>(null)
   const agentAbortRef = useRef<AbortController | null>(null)
   const chatAbortRef = useRef<AbortController | null>(null)
   const [isRecording, setIsRecording] = useState(false)
@@ -1313,7 +1315,7 @@ export function ChatInput() {
   }, [currentChatId, createChat, addMessage, updateMessage, selectedModel])
 
   const handleSubmit = useCallback(async () => {
-    if (!input.trim() || isStreaming) return
+    if ((!input.trim() && !attachedFile) || isStreaming) return
 
     // ─── Slash commands ────────────────────────────────────────────────────
     const trimmed = input.trim()
@@ -1388,8 +1390,20 @@ export function ChatInput() {
     let chatId = getOrCreateSingleChat()
 
     const userContent = input.trim()
-    addMessage(chatId, { role: "user", content: userContent })
-    saveMessage('user', userContent)
+    // ── Include attached file in message ────────────────────────────────────
+    let messageContent = userContent
+    let messageImageUrl: string | undefined
+    if (attachedFile) {
+      if (attachedFile.mimeType.startsWith('image/')) {
+        messageContent = userContent ? userContent + '\n[Image: ' + attachedFile.name + ']' : '[Image: ' + attachedFile.name + ']'
+        messageImageUrl = attachedFile.dataUrl
+      } else {
+        messageContent = userContent ? userContent + '\n[Attached: ' + attachedFile.name + ']' : '[Attached: ' + attachedFile.name + ']'
+      }
+      setAttachedFile(null)
+    }
+    addMessage(chatId, { role: "user", content: messageContent, ...(messageImageUrl ? { imageUrl: messageImageUrl } : {}) })
+    saveMessage('user', messageContent)
     setInput("")
 
     if (textareaRef.current) textareaRef.current.style.height = "auto"
@@ -1536,6 +1550,18 @@ export function ChatInput() {
           <span className="truncate font-medium">{hiveStatus}</span>
         </div>
       )}
+      {/* ── Attached file chip ──────────────────────────────────────── */}
+      {attachedFile && (
+        <div className="flex items-center gap-2 px-3 pt-2 pb-0">
+          <div className="flex items-center gap-1.5 bg-hive-hover text-text-secondary text-xs px-2.5 py-1 rounded-full max-w-[240px]">
+            <Paperclip size={11} className="shrink-0 text-honey-500" />
+            <span className="truncate">{attachedFile.name}</span>
+            <button onClick={() => setAttachedFile(null)} className="ml-0.5 hover:text-text-primary shrink-0">
+              <X size={11} />
+            </button>
+          </div>
+        </div>
+      )}
       <div className="rounded-2xl bg-hive-surface border border-hive-border focus-within:border-honey-500/40 transition-colors">
         <textarea
           ref={textareaRef} value={input} onChange={handleInput} onKeyDown={handleKeyDown}
@@ -1544,7 +1570,28 @@ export function ChatInput() {
         />
         <div className="flex items-center justify-between px-3 pb-2">
           <div className="flex items-center gap-1">
-            <button className="p-1.5 rounded-md hover:bg-hive-hover text-text-muted hover:text-text-secondary transition-colors" title="Attach file">
+            {/* ── General file attach ─────────────────────────────────── */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,video/*,audio/*,.pdf,.txt,.doc,.docx,.csv,.json,.md"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                if (!file) return
+                const reader = new FileReader()
+                reader.onload = (ev) => {
+                  setAttachedFile({ name: file.name, dataUrl: ev.target?.result as string, mimeType: file.type })
+                }
+                reader.readAsDataURL(file)
+                e.target.value = ""
+              }}
+            />
+            <button
+              className={`p-1.5 rounded-md transition-colors ${attachedFile ? 'bg-honey-500/20 text-honey-500' : 'hover:bg-hive-hover text-text-muted hover:text-text-secondary'}`}
+              title="Attach file"
+              onClick={() => fileInputRef.current?.click()}
+            >
               <Paperclip size={15} />
             </button>
             {/* I2V: Image upload for video mode */}
