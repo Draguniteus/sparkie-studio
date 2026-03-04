@@ -814,6 +814,14 @@ export function ChatInput() {
                 if (trace.status === 'running') return [...prev, trace]
                 return [...prev, trace]
               })
+              // Log real step to worklog so Live Activity shows what Sparkie is actually doing
+              if (trace.status === 'running') {
+                addWorklogEntry({ type: 'action', content: trace.label, status: 'running' })
+              } else if (trace.status === 'done') {
+                addWorklogEntry({ type: 'result', content: trace.label + (trace.duration ? ` (${trace.duration < 1000 ? trace.duration + 'ms' : (trace.duration / 1000).toFixed(1) + 's'})` : ''), status: 'done' })
+              } else if (trace.status === 'error') {
+                addWorklogEntry({ type: 'error', content: trace.label, status: 'error' })
+              }
               // Broadcast to ChatView so the in-stream chip can show it
               window.dispatchEvent(new CustomEvent('sparkie_step_trace', { detail: trace }))
               continue
@@ -833,10 +841,9 @@ export function ChatInput() {
               useAppStore.getState().setLongTaskLabel(null)
               continue
             }
-            // Hive status update — show as animated status pill + log to worklog
+            // Hive status update — show as animated status pill only (not in worklog — real steps go in worklog via step_trace above)
             if (parsed.hive_status) {
               setHiveStatus(parsed.hive_status)
-              addWorklogEntry({ type: 'action', content: parsed.hive_status, status: 'running' })
               continue
             }
             // HITL task approval event
