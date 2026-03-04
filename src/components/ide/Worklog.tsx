@@ -136,9 +136,9 @@ function EmailEntry({ entry }: { entry: WorklogEntry }) {
       <div className="flex items-center gap-2 flex-wrap">
         <Mail size={11} className={isAlert ? "text-red-400" : "text-blue-400"} />
         <span className="text-[11px] text-text-secondary">{entry.content.length > 60 ? entry.content.slice(0,60)+"…" : entry.content}</span>
-        {entry.metadata && (entry.metadata as Record<string,unknown>).from && (
+        {!!(entry.metadata && (entry.metadata as Record<string,unknown>).from) ? (
           <ContextPill label={String((entry.metadata as Record<string,unknown>).from).split("<")[0].trim().slice(0,25)} color={isAlert ? "red" : "blue"} />
-        )}
+        ) : null}
         <span className="text-[10px] text-text-muted">{formatTime(entry.created_at ?? entry.timestamp)}</span>
       </div>
     </div>
