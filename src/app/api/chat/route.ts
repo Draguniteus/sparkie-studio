@@ -3587,7 +3587,8 @@ function selectModel(messages: Array<{ role: string; content: string }>): ModelS
 
 
 // Models served via opencode.ai/zen — only nano lives here
-const OPENCODE_MODELS = new Set(['openai-gpt-5-nano'])
+// Only gpt-5-mini is served via DigitalOcean Inference — all other models go through opencode.ai/zen
+const DO_MODELS = new Set(['openai-gpt-5-mini'])
 
 async function tryLLMCall(
   payload: Record<string, unknown>,
@@ -3600,10 +3601,10 @@ async function tryLLMCall(
   for (const m of candidates) {
     try {
       const isStream = payload.stream === true
-      // Route to the correct endpoint: opencode for nano, DO Inference for everything else
-      const isOpencode = OPENCODE_MODELS.has(m)
-      const endpoint = isOpencode ? `${OPENCODE_BASE}/chat/completions` : `${DO_INFERENCE_BASE}/chat/completions`
-      const key = isOpencode ? apiKey : (doKey ?? apiKey)
+      // Route gpt-5-mini to DO Inference; everything else (free models) to opencode.ai/zen
+      const isDO = DO_MODELS.has(m)
+      const endpoint = isDO ? `${DO_INFERENCE_BASE}/chat/completions` : `${OPENCODE_BASE}/chat/completions`
+      const key = isDO ? (doKey ?? apiKey) : apiKey
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
