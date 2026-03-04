@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, ElementType } from "react"
+import { useEffect, useRef, useState, ElementType } from "react"
 import { useAppStore, WorklogEntry } from "@/store/appStore"
 import {
   Brain, Zap, CheckCircle, AlertCircle, Code, Loader2,
@@ -126,7 +126,53 @@ interface WorklogProps {
 }
 
 export function Worklog({ compact = false }: WorklogProps) {
-  const { worklog, isExecuting } = useAppStore()
+  const { worklog, isExecuting, addWorklogEntry } = useAppStore()
+  const [dbLoaded, setDbLoaded] = useState(false)
+
+  // Seed worklog from DB on mount (appStore worklog is in-memory only; DB has full history)
+  useEffect(() => {
+    if (dbLoaded) return
+    fetch('/api/worklog?limit=30')
+      .then(r => r.json())
+      .then((d: { entries?: { type: string; content: string; status: string; created_at: string }[] }) => {
+        if (d.entries && d.entries.length > 0) {
+          // Only pre-populate if appStore worklog is empty (avoid duplicates)
+          if (useAppStore.getState().worklog.length === 0) {
+            for (const e of d.entries.slice(0, 20)) {
+              addWorklogEntry({ type: e.type as WorklogEntry['type'], content: e.content, status: (e.status as WorklogEntry['status']) ?? 'done' })
+            }
+          }
+        }
+        setDbLoaded(true)
+      })
+      .catch(() => setDbLoaded(true))
+  }, [dbLoaded, addWorklogEntry])
+
+  // Auto-refresh worklog after every tool session completes
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const trace = (e as CustomEvent<{ status: string }>).detail
+      if (trace?.status === 'done') {
+        setTimeout(() => {
+          fetch('/api/worklog?limit=5')
+            .then(r => r.json())
+            .then((d: { entries?: { type: string; content: string; status: string; created_at: string }[] }) => {
+              if (d.entries) {
+                for (const e of d.entries) {
+                  const existing = useAppStore.getState().worklog.find(w => w.content === e.content)
+                  if (!existing) {
+                    addWorklogEntry({ type: e.type as WorklogEntry['type'], content: e.content, status: (e.status as WorklogEntry['status']) ?? 'done' })
+                  }
+                }
+              }
+            })
+            .catch(() => {})
+        }, 1500)
+      }
+    }
+    window.addEventListener('sparkie_step_trace', handler)
+    return () => window.removeEventListener('sparkie_step_trace', handler)
+  }, [addWorklogEntry])
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
