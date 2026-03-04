@@ -39,6 +39,21 @@ export function RealScorePanel() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // Auto-refresh REAL score after every tool session (sparkie_step_trace 'done' event)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const trace = (e as CustomEvent<{ status: string }>).detail
+      if (trace?.status === 'done') {
+        setTimeout(() => fetch('/api/real-score')
+          .then(r => r.json())
+          .then(d => setData(d))
+          .catch(() => {}), 1500) // slight delay to let DB writes settle
+      }
+    }
+    window.addEventListener('sparkie_step_trace', handler)
+    return () => window.removeEventListener('sparkie_step_trace', handler)
+  }, [])
+
   useEffect(() => {
     fetch("/api/real-score")
       .then(r => r.json())
