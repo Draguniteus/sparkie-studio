@@ -4022,7 +4022,12 @@ Make it feel like walking into your friend's creative space and being genuinely 
       const pickHive = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)]
       hiveLog.push(pickHive(HIVE_INIT))
       const tierKey = modelSelection.tier as string
-      if (HIVE_TIER[tierKey]) hiveLog.push(pickHive(HIVE_TIER[tierKey]))
+      if (HIVE_TIER[tierKey]) {
+        const tierMsg = pickHive(HIVE_TIER[tierKey])
+        hiveLog.push(tierMsg)
+        // Emit tier selection as a step_trace so it appears in the live panel
+        liveEnqueue({ step_trace: { icon: 'brain', label: tierMsg, status: 'done' } })
+      }
 
       // ── TWO-PHASE AGENT LOOP: Flame Plans → Atlas Executes ─────────────────────
       // Activates for Atlas (deep) and complex Flame (capable) tasks.
@@ -4098,7 +4103,9 @@ Rules:
                   ).join('\n')
                   systemContent = systemContent + `\n\n## FLAME'S EXECUTION PLAN\nGoal: ${plan.goal}\nComplexity: ${plan.complexity}\n\nSteps:\n${planSummary}\n\nExecute this plan step by step using the tools available. Follow the order, use the suggested tools, and report clearly.`
                   finalSystemContent = systemContent
-                  hiveLog.push(`⚡ Plan Locked — ${plan.steps.length} Steps, ${plan.complexity} Complexity — Atlas Executing...`)
+                  const planMsg = `⚡ Plan Locked — ${plan.steps.length} Steps, ${plan.complexity} Complexity — Atlas Executing...`
+                  hiveLog.push(planMsg)
+                  liveEnqueue({ step_trace: { icon: 'brain', label: planMsg, status: 'done' } })
                 }
               } catch { /* plan parse failed — continue without it */ }
             }
@@ -4217,7 +4224,8 @@ Rules:
               const stepDuration = Date.now() - toolStart
               const isStepError = result.startsWith('Error') || result.startsWith('patch_file error') || result.startsWith('LOOP_INTERRUPT')
               // Live emit done/error step_trace immediately after each tool completes
-              liveEnqueue({ step_trace: { icon: stepIcon[tc.function.name] ?? 'zap', label: chipLabel, status: isStepError ? 'error' : 'done', duration: stepDuration } })
+              const toolLabel = CHIP_LABELS[tc.function.name] ?? `${tc.function.name.replace(/_/g, ' ')}...`
+              liveEnqueue({ step_trace: { icon: stepIcon[tc.function.name] ?? 'zap', label: toolLabel, status: isStepError ? 'error' : 'done', duration: stepDuration } })
 
               // Worklog card SSE — emit for notable tool completions
               if (['save_memory', 'save_self_memory', 'log_worklog', 'patch_file', 'write_file', 'trigger_deploy', 'create_task', 'schedule_task'].includes(tc.function.name) && !isStepError) {
