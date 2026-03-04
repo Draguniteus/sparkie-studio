@@ -324,7 +324,8 @@ async function executeUserTasks(
 
   const executed: Array<{ id: string; label: string; result: string }> = []
 
-  for (const task of dueTasks.rows) {
+  // Execute tasks in parallel batches of 3 for speed
+  const runTask = async (task: typeof dueTasks.rows[0]) => {
     // Loop detection: check if this task has been retried too many times recently
     if (detectLoop(task.id, 'task_execution', task.label.slice(0, 50))) {
       await writeWorklog(userId, 'error', `⏸ Task paused: "${task.label}" — loop detected (3+ retries in 2 min). Holding for review.`, {
@@ -413,7 +414,7 @@ async function executeUserTasks(
         signal_priority: priority,
       })
 
-      executed.push({ id: task.id, label: task.label, result })
+      return { id: task.id, label: task.label, result }
       console.log(`[scheduler] Task "${task.label}" completed for user ${userId}`)
     } catch (e) {
       await query(`UPDATE sparkie_tasks SET status = 'failed' WHERE id = $1`, [task.id])
@@ -427,6 +428,15 @@ async function executeUserTasks(
     }
   }
 
+  // Batch execution — 3 tasks at a time
+  for (let i = 0; i < dueTasks.rows.length; i += 3) {
+    const batch = dueTasks.rows.slice(i, i + 3)
+    const results = await Promise.allSettled(batch.map(t => runTask(t)))
+    for (const r of results) {
+      if (r.status === 'fulfilled' && r.value) executed.push(r.value)
+    }
+  }
+
   return executed
 }
 
@@ -434,7 +444,15 @@ async function executeUserTasks(
 async function heartbeatTick(baseUrl: string): Promise<void> {
   await withHeartbeatLock(async () => {
     try {
+      // ── Stale in_progress recovery: tasks stuck > 5 min → reset to pending ──────
+      await query(
+        `UPDATE sparkie_tasks SET status = 'pending'
+         WHERE status = 'in_progress'
+           AND created_at < NOW() - INTERVAL '5 minutes'`
+      ).catch(() => {})
+
       const dueUsers = await query<{ user_id: string }>(
+
         `SELECT DISTINCT user_id FROM sparkie_tasks
          WHERE executor = 'ai' AND status = 'pending'
          AND scheduled_at IS NOT NULL AND scheduled_at <= NOW()`
