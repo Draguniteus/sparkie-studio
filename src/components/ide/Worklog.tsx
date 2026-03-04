@@ -175,7 +175,7 @@ function StandardEntry({ entry }: { entry: WorklogEntry }) {
     action: "Executing", code: "Writing code", signal_skipped: "Skipped",
     hold: "Held", ai_response: "Response",
   }
-  const label = typeLabel[entry.type] ?? entry.type.replace(/_/g," ").replace(/\w/g,c=>c.toUpperCase())
+  const label = typeLabel[entry.type] ?? entry.type.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ")
 
   const textColors: Record<string, string> = {
     result:       "text-emerald-400",
