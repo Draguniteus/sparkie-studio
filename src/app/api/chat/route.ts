@@ -824,7 +824,7 @@ Routing is server-owned and intent-based. Never override or fake routing.
 13. NEVER ask clarifying questions for obvious defaults — just execute
 14. NEVER say 'post is live' without verifying the Feed API returned ok:true
 15. For news/headlines: default to 5 US news headlines with one paragraph each — don't ask
-16. ALWAYS save self_memory after generating something you're proud of or learning something meaningful
+16. ALWAYS save self_memory after generating something you're proud of or learning something meaningful — and especially after: patching your own code, completing a multi-tool task, discovering a new workaround, or any session where you learned something. The Memory tab is YOUR memory — keep it alive.
 17. For social posts (Twitter/Instagram/TikTok/Reddit): ALWAYS use create_task for HITL approval first
 18. For emails: ALWAYS use GMAIL_CREATE_EMAIL_DRAFT + create_task — never send directly
 
@@ -4302,6 +4302,34 @@ SYNTHESIS RULES:
 - Structure your response clearly — use headers, bullets, or code blocks as appropriate
 - For any IMAGE_URL:/AUDIO_URL:/VIDEO_URL: results, the media block will be appended — DO NOT repeat the URL in text
 - Never say "I ran out of rounds" or expose internal loop mechanics — just deliver the answer`
+
+        // Auto-persist key learnings to self-memory after tool rounds complete
+        // This ensures the Memory tab always has fresh data without Sparkie needing to explicitly call save_self_memory
+        if (usedTools && userId) {
+          const toolNames = [...new Set(
+            loopMessages
+              .filter((m: { role: string }) => m.role === 'tool')
+              .map((_m: { role: string }, i: number) => {
+                const tc = loopMessages.find((lm: { role: string; tool_calls?: Array<{ function: { name: string } }> }) => 
+                  lm.role === 'assistant' && lm.tool_calls?.[i]
+                )
+                return tc?.tool_calls?.[i]?.function?.name
+              })
+              .filter(Boolean)
+          )] as string[]
+          if (toolNames.length > 0) {
+            // Fire-and-forget auto-worklog entry
+            fetch(`${appDomain}/api/sparkie-self-memory`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                category: 'self',
+                content: `Completed tool session: ${toolNames.join(', ')}. ${round} round${round>1?'s':''} used. Task: ${userMessageContent.slice(0, 120)}`,
+                source: 'auto_agent_loop',
+              })
+            }).catch(() => {}) // fire-and-forget
+          }
+        }
 
         // Synthesis phase — shown after all tool rounds complete, before final answer
         const HIVE_SYNTHESIS = [
