@@ -4027,11 +4027,11 @@ Rules:
       // Phase 5: Live SSE stream — emit step_trace/task_chip IN REAL-TIME during tool loop
       // ReadableStream created before loop; controller captured for immediate enqueue during execution
       const liveEncoder = new TextEncoder()
-      let liveController: ReadableStreamDefaultController<Uint8Array> | null = null
+      const liveRef = { controller: null as ReadableStreamDefaultController<Uint8Array> | null }
       const liveChunks: Uint8Array[] = []
       const liveStream = new ReadableStream<Uint8Array>({
         start(ctrl) {
-          liveController = ctrl
+          liveRef.controller = ctrl
           // Flush any chunks buffered before controller was ready
           for (const c of liveChunks) ctrl.enqueue(c)
           liveChunks.splice(0)
@@ -4040,8 +4040,8 @@ Rules:
       // Helper: enqueue SSE event immediately or buffer if controller not yet started
       function liveEnqueue(eventPayload: Record<string, unknown>): void {
         const chunk = liveEncoder.encode(`data: ${JSON.stringify(eventPayload)}\n\n`)
-        if (liveController) {
-          liveController.enqueue(chunk)
+        if (liveRef.controller) {
+          liveRef.controller.enqueue(chunk)
         } else {
           liveChunks.push(chunk)
         }
@@ -4277,7 +4277,7 @@ Rules:
 
 
           // Close live stream — all real-time events already emitted during loop
-          liveController?.close()
+          liveRef.controller?.close()
 
           // Build final response: live events (already streamed) + hive_status trail + worklog_cards + final content
           const stream = new ReadableStream({
