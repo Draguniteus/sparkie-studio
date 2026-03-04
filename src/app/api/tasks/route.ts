@@ -90,7 +90,7 @@ export async function GET(req: NextRequest) {
     }
 
     const res = await query(
-      `SELECT id, label, action, status, executor, trigger_type, scheduled_at, created_at, resolved_at, payload
+      `SELECT id, label, action, status, executor, trigger_type, scheduled_at, created_at, resolved_at, payload, why_human
        FROM sparkie_tasks WHERE ${whereClause}
        ORDER BY
          CASE status WHEN 'pending' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END,
@@ -106,6 +106,26 @@ export async function GET(req: NextRequest) {
   }
 }
 
+// DELETE /api/tasks?id=xxx — cancel/stop a task immediately
+export async function DELETE(req: NextRequest) {
+  try {
+    const session = await getServerSession(authOptions)
+    const userId = (session?.user as { id?: string } | undefined)?.id
+    if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    await ensureTable()
+    const id = req.nextUrl.searchParams.get('id')
+    if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
+    await query(
+      `UPDATE sparkie_tasks SET status = 'cancelled', resolved_at = NOW() WHERE id = $1 AND user_id = $2`,
+      [id, userId]
+    )
+    return NextResponse.json({ ok: true, status: 'cancelled' })
+  } catch (e) {
+    console.error('tasks DELETE error:', e)
+    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+  }
+}
+
 // PATCH /api/tasks — respond to a task (approve/reject) or update status
 export async function PATCH(req: NextRequest) {
   try {
@@ -117,14 +137,14 @@ export async function PATCH(req: NextRequest) {
     const { id, status } = await req.json() as { id: string; status: string }
     if (!id || !status) return NextResponse.json({ error: 'Missing id or status' }, { status: 400 })
 
-    const validStatuses = ['approved', 'rejected', 'completed', 'failed', 'skipped', 'pending']
+    const validStatuses = ['approved', 'rejected', 'completed', 'failed', 'skipped', 'pending', 'cancelled']
     if (!validStatuses.includes(status)) {
       return NextResponse.json({ error: 'Invalid status' }, { status: 400 })
     }
 
     // Map approved → completed for human tasks
     const resolvedStatus = status === 'approved' ? 'completed' : status === 'rejected' ? 'skipped' : status
-    const setResolved = ['completed', 'skipped', 'failed'].includes(resolvedStatus)
+    const setResolved = ['completed', 'skipped', 'failed', 'cancelled'].includes(resolvedStatus)
 
     await query(
       `UPDATE sparkie_tasks SET status = $1 ${setResolved ? ', resolved_at = NOW()' : ''}
