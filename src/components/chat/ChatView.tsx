@@ -1,24 +1,65 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '@/store/appStore'
 import { ChatInput } from './ChatInput'
 import { MessageBubble } from './MessageBubble'
-import { Code, Share, MoreHorizontal, Brain } from 'lucide-react'
+import { Code, Share, MoreHorizontal, Brain, ChevronRight, X, CheckCircle, AlertCircle, Loader2 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
+
+// Step trace type (matches ChatInput)
+interface StepTrace { icon: string; label: string; status: 'running' | 'done' | 'error'; duration?: number }
+const STEP_ICON_MAP: Record<string, string> = {
+  file: '📄', edit: '✏️', terminal: '⚡', search: '🔍',
+  database: '🗃️', globe: '🌐', brain: '🧠', scroll: '📋',
+  rocket: '🚀', image: '🎨', music: '🎵', video: '🎬', mic: '🎤', zap: '⚡',
+}
 
 export function ChatView() {
   const { chats, currentChatId, ideOpen, toggleIDE, userAvatarUrl, longTaskLabel } = useAppStore()
   const chat = chats.find(c => c.id === currentChatId)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const [traceOpen, setTraceOpen] = useState(false)
+  // Capture step traces from ChatInput via a custom event
+  const [streamTraces, setStreamTraces] = useState<StepTrace[]>([])
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
-  }, [chat?.messages])
+  }, [chat?.messages, longTaskLabel])
+
+  // Listen for step_trace events broadcast from ChatInput
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const trace = (e as CustomEvent<StepTrace>).detail
+      if (!trace) return
+      setStreamTraces(prev => {
+        if (trace.status === 'running') return [...prev, trace]
+        const existing = prev.findIndex(t => t.label === trace.label && t.status === 'running')
+        if (existing >= 0) return prev.map((t, i) => i === existing ? trace : t)
+        return [...prev, trace]
+      })
+    }
+    window.addEventListener('sparkie_step_trace', handler)
+    return () => window.removeEventListener('sparkie_step_trace', handler)
+  }, [])
+
+  // Clear traces when label clears (agent done)
+  useEffect(() => {
+    if (!longTaskLabel) {
+      // Keep traces visible for 3s after agent finishes, then fade
+      const t = setTimeout(() => setStreamTraces([]), 3000)
+      return () => clearTimeout(t)
+    }
+  }, [longTaskLabel])
 
   if (!chat) return null
+
+  const hasActivity = !!longTaskLabel || streamTraces.length > 0
+  const doneTraces = streamTraces.filter(t => t.status === 'done').length
+  const errorTraces = streamTraces.filter(t => t.status === 'error').length
+  const runningTrace = streamTraces.find(t => t.status === 'running')
 
   return (
     <div className="flex-1 flex flex-col h-full">
@@ -53,14 +94,54 @@ export function ChatView() {
         {chat.messages.filter(msg => msg.isStreaming || msg.content).map((msg) => (
           <MessageBubble key={msg.id} message={msg} userAvatarUrl={userAvatarUrl} />
         ))}
-      </div>
 
-      {/* "In memory:..." long-task chip — slides in during extended AI operations */}
-      <div className={`px-3 md:px-4 overflow-hidden transition-all duration-300 ease-out ${longTaskLabel ? 'max-h-10 opacity-100 mb-1.5' : 'max-h-0 opacity-0'}`}>
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-gradient-to-r from-purple-600/15 via-blue-600/10 to-honey-500/10 border border-purple-500/20 w-fit max-w-full">
-          <Brain size={11} className="text-purple-400 shrink-0 animate-pulse" />
-          <span className="text-[11px] text-purple-300/80 truncate font-medium">{longTaskLabel ?? ''}</span>
-        </div>
+        {/* ── IN-STREAM "In memory" chip — appears in message flow like SureThing ── */}
+        {hasActivity && (
+          <div className="flex flex-col gap-1.5 pb-1">
+            {/* Main chip */}
+            <button
+              onClick={() => setTraceOpen(v => !v)}
+              className="flex items-center gap-2.5 px-3 py-2 rounded-xl bg-gradient-to-r from-purple-600/12 via-blue-600/8 to-honey-500/8 border border-purple-500/25 w-fit max-w-full group hover:border-purple-500/40 transition-all"
+            >
+              <Brain size={12} className="text-purple-400 shrink-0 animate-pulse" />
+              <span className="text-[11px] text-purple-300/90 font-medium truncate max-w-[260px]">
+                {longTaskLabel
+                  ? `In memory: ${longTaskLabel}`
+                  : streamTraces.length > 0
+                    ? `In memory: ${doneTraces}/${streamTraces.length} steps${errorTraces > 0 ? ` · ${errorTraces} error` : ''}`
+                    : 'In memory: working…'
+                }
+              </span>
+              <ChevronRight
+                size={10}
+                className={`shrink-0 text-purple-400/60 transition-transform ${traceOpen ? 'rotate-90' : ''}`}
+              />
+            </button>
+
+            {/* Expandable step trace drawer */}
+            {traceOpen && streamTraces.length > 0 && (
+              <div className="ml-2 flex flex-col gap-1 border-l-2 border-purple-500/20 pl-3">
+                {streamTraces.map((trace, i) => (
+                  <div key={i} className={`flex items-center gap-2 text-[11px] ${
+                    trace.status === 'running' ? 'text-honey-400' :
+                    trace.status === 'error' ? 'text-red-400' : 'text-text-muted'
+                  }`}>
+                    <span className="text-[12px] shrink-0">{STEP_ICON_MAP[trace.icon] ?? '⚡'}</span>
+                    <span className="flex-1 truncate">{trace.label}</span>
+                    {trace.status === 'running' && <Loader2 size={9} className="animate-spin shrink-0" />}
+                    {trace.status === 'done' && <CheckCircle size={9} className="text-green-400 shrink-0" />}
+                    {trace.status === 'error' && <AlertCircle size={9} className="text-red-400 shrink-0" />}
+                    {trace.duration != null && trace.status !== 'running' && (
+                      <span className="text-[9px] tabular-nums shrink-0 text-text-muted">
+                        {trace.duration < 1000 ? `${trace.duration}ms` : `${(trace.duration/1000).toFixed(1)}s`}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Chat Input */}
