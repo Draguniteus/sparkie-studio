@@ -7,17 +7,8 @@ import { useAppStore } from "@/store/appStore"
 interface StepTrace { icon: string; label: string; status: 'running' | 'done' | 'error'; duration?: number }
 interface WorklogCard { tool: string; summary: string; ts: string }
 
-const STEP_ICON_MAP: Record<string, string> = {
-  file: '📄', edit: '✏️', terminal: '⚡', search: '🔍',
-  database: '🗃️', globe: '🌐', brain: '🧠', scroll: '📋',
-  rocket: '🚀', image: '🎨', music: '🎵', video: '🎬', mic: '🎤', zap: '⚡',
-}
-const WORKLOG_TOOL_LABEL: Record<string, string> = {
-  save_memory: 'Saved to memory', save_self_memory: 'Self-memory updated',
-  log_worklog: 'Worklog entry', patch_file: 'Code patched',
-  write_file: 'File written', trigger_deploy: 'Deploy action',
-  create_task: 'Task queued', schedule_task: 'Task scheduled',
-}
+// STEP_ICON_MAP moved to ChatView
+// WORKLOG_TOOL_LABEL moved to ChatView
 import { parseAIResponse, getLanguageFromFilename, deriveProjectName } from "@/lib/fileParser"
 import { Paperclip, ArrowUp, Sparkles, ChevronDown, Image as ImageIcon, Video, Music, Mic, MicOff, FileText, Headphones, Phone, Film, X, Square } from "lucide-react"
 import { VoiceChat } from "@/components/chat/VoiceChat"
@@ -144,8 +135,8 @@ export function ChatInput() {
   const [input, setInput] = useState("")
   const [showModels, setShowModels] = useState(false)
   const [hiveStatus, setHiveStatus] = useState<string | null>(null)
-  const [stepTraces, setStepTraces] = useState<StepTrace[]>([])
-  const [inlineFeedCards, setInlineFeedCards] = useState<WorklogCard[]>([])
+  const [_stepTraces, _setStepTraces] = useState<StepTrace[]>([])
+  const [_inlineFeedCards, _setInlineFeedCards] = useState<WorklogCard[]>([])
   const [genMode, setGenMode] = useState<GenMode>("chat")
   const [slashSuggestions, setSlashSuggestions] = useState<Array<{ cmd: string; desc: string }>>([])
   const [selectedImageModel, setSelectedImageModel] = useState("flux")
@@ -813,7 +804,7 @@ export function ChatInput() {
             // Step-trace card
             if (parsed.step_trace) {
               const trace = parsed.step_trace as StepTrace
-              setStepTraces(prev => {
+              _setStepTraces(prev => {
                 const existing = prev.findIndex(t => t.label === trace.label && t.status === 'running')
                 if (existing >= 0 && (trace.status === 'done' || trace.status === 'error')) {
                   return prev.map((t, i) => i === existing ? trace : t)
@@ -827,7 +818,7 @@ export function ChatInput() {
             }
             // Worklog card inline
             if (parsed.worklog_card) {
-              setInlineFeedCards(prev => [...prev, parsed.worklog_card as WorklogCard])
+              _setInlineFeedCards(prev => [...prev, parsed.worklog_card as WorklogCard])
               continue
             }
             // Phase 5: task_chip — show "In memory:..." chip while tools run
