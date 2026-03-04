@@ -71,6 +71,18 @@ export function MemoryTab() {
 
   useEffect(() => { load() }, [load])
 
+  // Auto-refresh memory after every tool session (auto-save fires after agent loop)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const trace = (e as CustomEvent<{ status: string }>).detail
+      if (trace?.status === 'done') {
+        setTimeout(() => load(), 2000) // delay to let DB write settle
+      }
+    }
+    window.addEventListener('sparkie_step_trace', handler)
+    return () => window.removeEventListener('sparkie_step_trace', handler)
+  }, [load])
+
   const forget = async (id: number) => {
     setForgetting(prev => new Set(prev).add(id))
     try {
