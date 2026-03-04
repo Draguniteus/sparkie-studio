@@ -139,7 +139,7 @@ export function Worklog({ compact = false }: WorklogProps) {
           // Only pre-populate if appStore worklog is empty (avoid duplicates)
           if (useAppStore.getState().worklog.length === 0) {
             for (const e of d.entries.slice(0, 20)) {
-              addWorklogEntry({ type: e.type as WorklogEntry['type'], content: e.content, status: (e.status as WorklogEntry['status']) ?? 'done' })
+              addWorklogEntry({ type: e.type as WorklogEntry['type'], content: e.content, status: (e.status as unknown as WorklogEntry['status']) ?? 'done' })
             }
           }
         }
@@ -161,7 +161,7 @@ export function Worklog({ compact = false }: WorklogProps) {
                 for (const e of d.entries) {
                   const existing = useAppStore.getState().worklog.find(w => w.content === e.content)
                   if (!existing) {
-                    addWorklogEntry({ type: e.type as WorklogEntry['type'], content: e.content, status: (e.status as WorklogEntry['status']) ?? 'done' })
+                    addWorklogEntry({ type: e.type as WorklogEntry['type'], content: e.content, status: (e.status as unknown as WorklogEntry['status']) ?? 'done' })
                   }
                 }
               }
