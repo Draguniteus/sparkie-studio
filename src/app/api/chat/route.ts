@@ -3620,6 +3620,10 @@ function setCachedSearch(query: string, result: string): void {
 }
 
 const _rlMap = new Map<string, { count: number; resetAt: number }>()
+
+// ── Session-level abort: kill previous in-flight request when same user sends new one ──
+// Prevents two parallel responses competing for the same SSE stream
+const _activeAbortMap = new Map<string, AbortController>()
 function checkRateLimit(key: string): boolean {
   const now = Date.now()
   const entry = _rlMap.get(key)
@@ -3668,6 +3672,18 @@ export async function POST(req: NextRequest) {
           status: 429, headers: { 'Content-Type': 'application/json', 'Retry-After': '60' },
         })
       }
+    }
+
+    // ── Session abort: kill any previous in-flight request for this user ────────
+    if (userId) {
+      const prev = _activeAbortMap.get(userId)
+      if (prev) { try { prev.abort() } catch { /* ignore */ } }
+      const abortCtrl = new AbortController()
+      _activeAbortMap.set(userId, abortCtrl)
+      // Clean up when this request finishes (client disconnects)
+      req.signal.addEventListener('abort', () => {
+        if (_activeAbortMap.get(userId) === abortCtrl) _activeAbortMap.delete(userId)
+      })
     }
 
     const host = req.headers.get('host') ?? 'localhost:3000'
