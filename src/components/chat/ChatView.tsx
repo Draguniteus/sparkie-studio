@@ -14,7 +14,7 @@ const STEP_ICON_MAP: Record<string, string> = {
 }
 
 export function ChatView() {
-  const { chats, currentChatId, ideOpen, toggleIDE, userAvatarUrl, longTaskLabel, isStreaming } = useAppStore()
+  const { chats, currentChatId, ideOpen, toggleIDE, userAvatarUrl, longTaskLabel } = useAppStore()
   const chat = chats.find(c => c.id === currentChatId)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [traceOpen, setTraceOpen] = useState(false)
@@ -67,15 +67,6 @@ export function ChatView() {
     window.addEventListener('sparkie_step_trace', handler)
     return () => window.removeEventListener('sparkie_step_trace', handler)
   }, [])
-
-  // Clear traces immediately when a new message starts (isStreaming goes true)
-  // Prevents stale step traces from previous conversation bleeding into new one
-  useEffect(() => {
-    if (isStreaming) {
-      setStreamTraces([])
-      setTraceOpen(false)
-    }
-  }, [isStreaming])
 
   if (!chat) return null
 
