@@ -3494,12 +3494,12 @@ function formatConnectorResponse(actionSlug: string, data: Record<string, unknow
 // Three-tier model selection. Users never see model names — Sparkie picks automatically.
 
 const MODELS = {
-  CONVERSATIONAL: 'openai-gpt-5-nano',                 // Tier 1   · Sparkie  — conversations, light tools, 400K ctx
+  CONVERSATIONAL: 'gpt-5-nano',                 // Tier 1   · Sparkie  — conversations, light tools, 400K ctx
   CAPABLE:        'openai-gpt-5-mini',           // Tier 2   · Flame    — task execution, tools, coding, GitHub
   EMBER:          'big-pickle',                 // Tier 2.5 · Ember    — code specialist, agentic tool-calling, 200K ctx
   DEEP:           'minimax-m2.5-free',          // Tier 3   · Atlas    — heavy analysis, large refactors, deep dives
   TRINITY:        'trinity-large-preview-free', // Tier 4   · Trinity  — 400B MoE frontier, creative arch, complex chains
-  TRINITY_FB:     'trinity-large-preview',      // Tier 4   · Trinity fallback (without -free suffix)
+  TRINITY_FB:     'trinity-large-preview-free',      // Tier 4   · Trinity fallback (without -free suffix)
 } as const
 
 type ModelTier = typeof MODELS[keyof typeof MODELS]
