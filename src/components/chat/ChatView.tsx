@@ -48,6 +48,26 @@ export function ChatView() {
     }
   }, [longTaskLabel])
 
+  // Clear stale traces when a brand-new tool session starts (first 'running' trace of new message)
+  // Detects new session by checking if all existing traces are already settled (done/error)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const trace = (e as CustomEvent<{ status: string }>).detail
+      if (trace?.status === 'running') {
+        setStreamTraces(prev => {
+          const allSettled = prev.length > 0 && prev.every(t => t.status !== 'running')
+          if (allSettled) {
+            setTraceOpen(false)
+            return []
+          }
+          return prev
+        })
+      }
+    }
+    window.addEventListener('sparkie_step_trace', handler)
+    return () => window.removeEventListener('sparkie_step_trace', handler)
+  }, [])
+
   // Clear traces immediately when a new message starts (isStreaming goes true)
   // Prevents stale step traces from previous conversation bleeding into new one
   useEffect(() => {
