@@ -3546,9 +3546,9 @@ function selectModel(messages: Array<{ role: string; content: string }>): ModelS
     // Greetings, acknowledgments, reactions
     /^(hi|hey|hello|yo|sup|what's up|how are you|how's it going|good morning|good night|good evening|thanks|thank you|nice|cool|awesome|great|sounds good|got it|ok|okay|sure|lol|haha|wow|really|damn|perfect|love it|that's|thats)/.test(lower.trim()) ||
     // Simple question with no task signal (weather, time, quick facts — nano handles these tools fine)
-    (!taskIntent && msgLen < 150 && /\b(who|what|why|when|where|how|date|today)\b/.test(lower) && !/\b(weather|time|news|current|latest|live|price|stock|code|file|repo|deploy|build|task|email|tweet|post|github)\b/.test(lower)) ||
+    (!taskIntent && msgLen < 150 && /\b(who|what|why|when|where|how|date|today)\b/.test(lower) && !/\b(weather|time|news|current|currently|latest|live|price|stock|code|file|repo|deploy|build|task|email|tweet|post|github|happening|situation|conflict|war|crisis|election|politics)\b/.test(lower)) ||
     // Short messages with zero task signal
-    (msgLen < 60 && !taskIntent)
+    (msgLen < 60 && !taskIntent && !/\\b(currently|happening|going on|what.{0,10}(between|with|about).{0,30}(and|now)|situation|conflict|war|crisis|news|weather|price|stock|live|latest)\\b/.test(lower))
   )
 
   // ── Tier 4: TRINITY — frontier reasoning, creative architecture, massive scale ──
