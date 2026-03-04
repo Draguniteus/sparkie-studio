@@ -32,8 +32,16 @@ async function proactiveInboxSweep(userId: string): Promise<void> {
     if (!emailRes.ok) return
     const emailData = await emailRes.json() as { data?: { messages?: Array<{ subject: string; from: string; snippet: string; id: string }> } }
     const messages = emailData?.data?.messages ?? []
-    if (messages.length === 0) return
     emailsJson = JSON.stringify(messages.slice(0, 3))
+    // Write a proactive entry even when inbox is empty — the act of checking IS proactive
+    if (messages.length === 0) {
+      await writeWorklog(userId, 'proactive_signal', '📬 Inbox checked — no unread emails', {
+        status: 'done', decision_type: 'proactive',
+        reasoning: 'Proactive inbox sweep ran: inbox clear',
+        signal_priority: 'P3',
+      }).catch(() => {})
+      return
+    }
   } catch { return }
 
   // 2. Check if we already have a pending inbox task for this user (debounce)
@@ -84,7 +92,15 @@ async function proactiveCalendarSweep(userId: string): Promise<void> {
     if (!calRes.ok) return
     const calData = await calRes.json() as { data?: { items?: Array<{ summary: string; start?: { dateTime?: string }; attendees?: unknown[] }> } }
     const events = calData?.data?.items ?? []
-    if (events.length === 0) return
+    // Write a proactive entry even when calendar is clear — the act of checking IS proactive
+    if (events.length === 0) {
+      await writeWorklog(userId, 'proactive_signal', '📅 Calendar checked — clear for next 24h', {
+        status: 'done', decision_type: 'proactive',
+        reasoning: 'Proactive calendar sweep ran: no upcoming events',
+        signal_priority: 'P3',
+      }).catch(() => {})
+      return
+    }
 
     // Surface calendar events to worklog (no task creation needed — just awareness)
     const eventSummary = events.slice(0, 3).map(e => `${e.summary} at ${e.start?.dateTime ?? 'TBD'}`).join('; ')
