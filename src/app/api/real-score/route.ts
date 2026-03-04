@@ -42,12 +42,13 @@ export async function GET(req: NextRequest) {
       : `${autoRow.completed}/${autoTotal} tasks resolved autonomously (7d)`
 
     // Leg 2: Memory Depth
+    // Memory leg: reads sparkie_self_memory (no user_id — global table; fresh = last 3 days)
     const memRes = await query<{ count: string; fresh: string }>(`
       SELECT
         COUNT(*) AS count,
-        COUNT(*) FILTER (WHERE updated_at > NOW() - INTERVAL '3 days') AS fresh
-      FROM sparkie_memories WHERE user_id = $1
-    `, [userId]).catch(() => ({ rows: [{ count: '0', fresh: '0' }] }))
+        COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '3 days') AS fresh
+      FROM sparkie_self_memory
+    `).catch(() => ({ rows: [{ count: '0', fresh: '0' }] }))
     const memRow = memRes.rows[0] ?? { count: '0', fresh: '0' }
     const memCount = parseInt(memRow.count)
     const memFresh = parseInt(memRow.fresh)
@@ -55,7 +56,7 @@ export async function GET(req: NextRequest) {
     const freshBonus = memCount > 0 ? Math.round((memFresh / memCount) * 20) : 0
     const memScore = Math.min(100, memBase + freshBonus)
     const memSignal = memCount === 0 ? 'No memories stored yet — use Sparkie more to build memory depth'
-      : `${memCount} memories, ${memFresh} updated in last 3 days`
+      : `${memCount} memories, ${memFresh} added in last 3 days`
 
     // Leg 3: Proactive Agency
     const proRes = await query<{ proactive: string; total: string }>(`
@@ -68,7 +69,7 @@ export async function GET(req: NextRequest) {
     const proRow = proRes.rows[0] ?? { proactive: '0', total: '0' }
     const proTotal = parseInt(proRow.total)
     const proActive = parseInt(proRow.proactive)
-    const proScore = proTotal < 5 ? 60
+    const proScore = proTotal < 3 ? Math.min(40, proTotal * 10)
       : Math.min(100, Math.round((proActive / proTotal) * 250))
     const proSignal = proTotal < 5 ? 'Not enough worklog history yet'
       : `${proActive} proactive actions out of ${proTotal} total (7d)`
