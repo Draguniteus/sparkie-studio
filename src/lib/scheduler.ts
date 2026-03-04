@@ -336,7 +336,7 @@ async function executeUserTasks(
         reasoning: 'Same task attempted 3+ times in quick succession — pausing to prevent infinite loop'
       })
       await query(`UPDATE sparkie_tasks SET status = 'failed' WHERE id = $1`, [task.id])
-      continue
+      return undefined
     }
 
     try {
@@ -415,7 +415,6 @@ async function executeUserTasks(
       })
 
       return { id: task.id, label: task.label, result }
-      console.log(`[scheduler] Task "${task.label}" completed for user ${userId}`)
     } catch (e) {
       await query(`UPDATE sparkie_tasks SET status = 'failed' WHERE id = $1`, [task.id])
       await writeWorklog(userId, 'error', `Task failed: ${task.label}`, {
