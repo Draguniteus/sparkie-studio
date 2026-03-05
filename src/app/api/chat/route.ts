@@ -3494,7 +3494,7 @@ function formatConnectorResponse(actionSlug: string, data: Record<string, unknow
 // Three-tier model selection. Users never see model names — Sparkie picks automatically.
 
 const MODELS = {
-  CONVERSATIONAL: 'claude-haiku-4-5',                 // Tier 1   · Sparkie  — conversations, light tools (opencode free)
+  CONVERSATIONAL: 'anthropic-claude-4.5-haiku',        // Tier 1   · Sparkie  — conversations, light tools (DO Inference)
   CAPABLE:        'openai-gpt-4.1',                      // Tier 2   · Flame    — task execution, tools, coding, GitHub
   EMBER:          'big-pickle',                 // Tier 2.5 · Ember    — code specialist, agentic tool-calling, 200K ctx
   DEEP:           'minimax-m2.5-free',          // Tier 3   · Atlas    — heavy analysis, large refactors, deep dives
@@ -3588,7 +3588,7 @@ function selectModel(messages: Array<{ role: string; content: string }>): ModelS
 
 // claude-haiku-4-5 and gpt-4.1 are served via DigitalOcean Inference
 // All other free models (big-pickle, minimax, trinity) go through opencode.ai/zen
-const DO_MODELS = new Set(['openai-gpt-4.1'])
+const DO_MODELS = new Set(['anthropic-claude-4.5-haiku', 'openai-gpt-4.1'])
 
 async function tryLLMCall(
   payload: Record<string, unknown>,
@@ -4702,7 +4702,7 @@ SYNTHESIS RULES:
               // Sanitize model name leaks before sending to client
               if (content && parsed?.choices?.[0]?.delta) {
                 const sanitized = content
-                  .replace(/claude-haiku-4-5/gi, 'Sparkie')
+                  .replace(/anthropic-claude-4\.5-haiku/gi, 'Sparkie')
                   .replace(/openai-gpt-4\.1/gi, 'Flame')
                   .replace(/minimax-m2\.5(-free)?/gi, 'Atlas')
                   .replace(/big-pickle/gi, 'Ember')
