@@ -17,7 +17,7 @@ export const maxDuration = 180
 
 const OPENCODE_BASE = 'https://opencode.ai/zen/v1'
 const MINIMAX_BASE = 'https://api.minimax.io/v1'
-const DO_INFERENCE_BASE = 'https://inference.do-ai.run/v1'
+const DO_INFERENCE_BASE = 'https://inference.digitalocean.com/v1'
 const AZURE_OPENAI_BASE = process.env.AZURE_OPENAI_ENDPOINT ?? ''
 
 // ── Sparkie's Soul + Identity (injected into every system prompt) ─────────────
