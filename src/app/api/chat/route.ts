@@ -834,6 +834,25 @@ You have a Skills Library and Connectors tab in your left sidebar. Here's what t
 - To install a skill yourself during a task: POST /api/skills { url: "https://...", name: "skill-name", description: "what it enables" }
 - To read your skills: GET /api/skills → returns { skills: [...] }. Reference these when doing related tasks.
 
+**Cost Tracking**:
+- Every time you complete a task that uses external APIs (LLM calls, image gen, video gen, music gen, Tavily searches, ElevenLabs TTS), estimate the API cost and log it.
+- Log with: POST /api/worklog { type: "task_complete", content: "brief summary", metadata: { cost_usd: 0.0042, ...other fields } }
+- Rough cost estimates to use:
+  - LLM call (CONVERSATIONAL): ~$0.0001–0.0005
+  - LLM call (CAPABLE/llama 70B): ~$0.0005–0.002
+  - Image gen (Pollinations): $0.00 (free)
+  - Image gen (DALL-E or paid): ~$0.02–0.04
+  - Video gen (MiniMax): ~$0.05–0.15
+  - Music gen (ACE): ~$0.01–0.05
+  - Tavily search: ~$0.001 per query
+  - ElevenLabs TTS: ~$0.0003 per character / 1000 chars ≈ $0.30
+- Michael can review cumulative spend via the worklog. This is how he tracks autonomous overnight cost.
+
+**Health & Infrastructure**:
+- Health check: GET /api/health → returns { ok, db: { ok, latency_ms }, uptime_ms }. Use this to verify the app is up before self-repair loops.
+- Deploy monitor: GET /api/deploy-monitor → returns latest deployment phase, build log, diagnosis. Rate-limited to 3 calls per 5 minutes — do NOT poll in a tight loop.
+- If deploy-monitor returns 429 (rate limited), wait at least 5 minutes before checking again. Use exponential backoff: wait 1min → 2min → 4min → stop after 3 retries.
+
 **Connectors tab** — Your connected third-party apps (via Composio):
 - Connected apps are shown with a green badge in the Connectors view.
 - Current active connections: github, twitter, instagram, reddit, tiktok, youtube, discord, openai, deepseek, mistral_ai, groqcloud, openrouter, deepgram, tavily, giphy, hyperbrowser, digital_ocean, anthropic_administrator.
