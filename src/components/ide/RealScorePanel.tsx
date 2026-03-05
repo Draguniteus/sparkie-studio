@@ -1,7 +1,19 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import type { RealScoreResponse, RealLeg } from "@/app/api/real-score/route"
+// Types inlined to avoid bundling server-side route code into the client
+interface RealLeg {
+  id: 'autonomous' | 'memory' | 'proactive' | 'security'
+  label: string
+  score: number
+  signal: string
+  trend: 'up' | 'stable' | 'down'
+}
+interface RealScoreResponse {
+  total: number
+  legs: RealLeg[]
+  computed_at: string
+}
 
 const LEG_COLORS: Record<string, { bar: string }> = {
   autonomous: { bar: "bg-purple-500" },
