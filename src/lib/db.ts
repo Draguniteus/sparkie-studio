@@ -25,7 +25,7 @@ pool.on('connect', () => {
   const idle = pool.idleCount
   const waiting = pool.waitingCount
   if (waiting > 3) {
-    console.warn(\`[db] Pool pressure: \${total} total, \${idle} idle, \${waiting} waiting\`)
+    console.warn('[db] Pool pressure: ' + total + ' total, ' + idle + ' idle, ' + waiting + ' waiting')
   }
 })
 
