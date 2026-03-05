@@ -1,4 +1,4 @@
-// force-trigger: 2026-03-05T04:41:45Z
+// force-trigger: 2026-03-05T04:42:01Z
 // deploy-trigger: 2026-03-05T02:19:00Z
 import { getToken } from 'next-auth/jwt';
 import { NextResponse } from 'next/server';
