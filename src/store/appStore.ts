@@ -418,9 +418,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   }),
   clearTerminalOutput: () => set({ terminalOutput: '' }),
 
-  // User memory profile — SSR-safe: always start null/false, hydrate client-side via useEffect
-  userProfile: null,
-  onboardingDone: false,
+  // User memory profile — read localStorage at store creation for instant hydration (no flash)
+  userProfile: ((): UserProfile | null => {
+    if (typeof window === 'undefined') return null
+    try {
+      const raw = localStorage.getItem('sparkie_user_profile')
+      return raw ? JSON.parse(raw) as UserProfile : null
+    } catch { return null }
+  })(),
+  onboardingDone: typeof window !== 'undefined' && localStorage.getItem('sparkie_onboarding_done') === 'true',
   setUserProfile: (profile) => {
     try { localStorage.setItem('sparkie_user_profile', JSON.stringify(profile)) } catch {}
     try { localStorage.setItem('sparkie_onboarding_done', 'true') } catch {}
