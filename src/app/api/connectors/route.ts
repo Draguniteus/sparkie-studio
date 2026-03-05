@@ -46,20 +46,63 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ connections })
     }
 
-    // Browse/search the app catalog (v1)
-    const q = searchParams.get('q') ?? ''
-    const cursor = searchParams.get('cursor') ?? ''
-
-    let url = `${V1}/apps?limit=50`
-    if (q) url += `&query=${encodeURIComponent(q)}`
-    if (cursor) url += `&cursor=${encodeURIComponent(cursor)}`
-
-    const res = await fetch(url, { headers: composioHeaders() })
-    if (!res.ok) {
-      const text = await res.text()
-      return NextResponse.json({ error: `Composio error: ${res.status}`, detail: text }, { status: 500 })
-    }
-    return NextResponse.json(await res.json())
+    // Browse/search the app catalog — curated static list (Composio v1 /apps is unreliable)
+    const q = (searchParams.get('q') ?? '').toLowerCase().trim()
+    const CATALOG: Array<{ slug: string; displayName: string; icon: string; categories: string[] }> = [
+      { slug: 'gmail', displayName: 'Gmail', icon: '📧', categories: ['Communication'] },
+      { slug: 'google-calendar', displayName: 'Google Calendar', icon: '📅', categories: ['Productivity'] },
+      { slug: 'google-drive', displayName: 'Google Drive', icon: '📁', categories: ['Productivity'] },
+      { slug: 'google-docs', displayName: 'Google Docs', icon: '📄', categories: ['Productivity'] },
+      { slug: 'google-sheets', displayName: 'Google Sheets', icon: '📊', categories: ['Productivity'] },
+      { slug: 'google-slides', displayName: 'Google Slides', icon: '📽️', categories: ['Productivity'] },
+      { slug: 'twitter', displayName: 'Twitter / X', icon: '🐦', categories: ['Social Media'] },
+      { slug: 'instagram', displayName: 'Instagram', icon: '📸', categories: ['Social Media'] },
+      { slug: 'reddit', displayName: 'Reddit', icon: '🤖', categories: ['Social Media'] },
+      { slug: 'tiktok', displayName: 'TikTok', icon: '🎵', categories: ['Social Media'] },
+      { slug: 'linkedin', displayName: 'LinkedIn', icon: '💼', categories: ['Social Media'] },
+      { slug: 'youtube', displayName: 'YouTube', icon: '▶️', categories: ['Social Media'] },
+      { slug: 'slack', displayName: 'Slack', icon: '💬', categories: ['Communication'] },
+      { slug: 'discord', displayName: 'Discord', icon: '🎮', categories: ['Communication'] },
+      { slug: 'telegram', displayName: 'Telegram', icon: '✈️', categories: ['Communication'] },
+      { slug: 'whatsapp', displayName: 'WhatsApp', icon: '💚', categories: ['Communication'] },
+      { slug: 'outlook', displayName: 'Outlook', icon: '📮', categories: ['Communication'] },
+      { slug: 'teams', displayName: 'Microsoft Teams', icon: '🟦', categories: ['Communication'] },
+      { slug: 'zoom', displayName: 'Zoom', icon: '📹', categories: ['Communication'] },
+      { slug: 'github', displayName: 'GitHub', icon: '🐙', categories: ['Developer'] },
+      { slug: 'gitlab', displayName: 'GitLab', icon: '🦊', categories: ['Developer'] },
+      { slug: 'jira', displayName: 'Jira', icon: '🔵', categories: ['Developer', 'Productivity'] },
+      { slug: 'linear', displayName: 'Linear', icon: '🟣', categories: ['Developer', 'Productivity'] },
+      { slug: 'vercel', displayName: 'Vercel', icon: '▲', categories: ['Developer'] },
+      { slug: 'supabase', displayName: 'Supabase', icon: '⚡', categories: ['Developer'] },
+      { slug: 'notion', displayName: 'Notion', icon: '🗒️', categories: ['Productivity'] },
+      { slug: 'trello', displayName: 'Trello', icon: '🟩', categories: ['Productivity'] },
+      { slug: 'asana', displayName: 'Asana', icon: '🟠', categories: ['Productivity'] },
+      { slug: 'airtable', displayName: 'Airtable', icon: '🟦', categories: ['Productivity'] },
+      { slug: 'clickup', displayName: 'ClickUp', icon: '🟡', categories: ['Productivity'] },
+      { slug: 'todoist', displayName: 'Todoist', icon: '🔴', categories: ['Productivity'] },
+      { slug: 'dropbox', displayName: 'Dropbox', icon: '📦', categories: ['Productivity'] },
+      { slug: 'hubspot', displayName: 'HubSpot', icon: '🟠', categories: ['CRM'] },
+      { slug: 'salesforce', displayName: 'Salesforce', icon: '☁️', categories: ['CRM'] },
+      { slug: 'pipedrive', displayName: 'Pipedrive', icon: '🟢', categories: ['CRM'] },
+      { slug: 'stripe', displayName: 'Stripe', icon: '💳', categories: ['Finance'] },
+      { slug: 'quickbooks', displayName: 'QuickBooks', icon: '💰', categories: ['Finance'] },
+      { slug: 'shopify', displayName: 'Shopify', icon: '🛍️', categories: ['Finance'] },
+      { slug: 'google-analytics', displayName: 'Google Analytics', icon: '📈', categories: ['Analytics'] },
+      { slug: 'mixpanel', displayName: 'Mixpanel', icon: '📉', categories: ['Analytics'] },
+      { slug: 'posthog', displayName: 'PostHog', icon: '🦔', categories: ['Analytics'] },
+      { slug: 'amplitude', displayName: 'Amplitude', icon: '📊', categories: ['Analytics'] },
+      { slug: 'sentry', displayName: 'Sentry', icon: '🔍', categories: ['Developer', 'Analytics'] },
+      { slug: 'datadog', displayName: 'Datadog', icon: '🐕', categories: ['Developer', 'Analytics'] },
+      { slug: 'figma', displayName: 'Figma', icon: '🎨', categories: ['Design'] },
+      { slug: 'canva', displayName: 'Canva', icon: '🖌️', categories: ['Design'] },
+      { slug: 'openai', displayName: 'OpenAI', icon: '🤖', categories: ['AI'] },
+      { slug: 'anthropic', displayName: 'Anthropic', icon: '🧠', categories: ['AI'] },
+      { slug: 'spotify', displayName: 'Spotify', icon: '🎵', categories: ['Entertainment'] },
+    ]
+    const filtered = q
+      ? CATALOG.filter(a => a.displayName.toLowerCase().includes(q) || a.slug.includes(q) || a.categories.some(c => c.toLowerCase().includes(q)))
+      : CATALOG
+    return NextResponse.json({ items: filtered, nextCursor: null })
   } catch (err) {
     console.error('[connectors GET]', err)
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })
