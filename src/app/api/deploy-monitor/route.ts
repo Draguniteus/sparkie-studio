@@ -9,6 +9,24 @@ const DO_TOKEN = process.env.DIGITALOCEAN_API_KEY ?? process.env.DO_API_TOKEN ??
 const APP_ID   = process.env.DO_APP_ID ?? 'fb3d58ac-f1b5-4e65-89b5-c12834d8119a'
 const DO_BASE  = 'https://api.digitalocean.com/v2'
 
+// Self-repair rate-limit guard: max 3 GET calls per 5-minute window per caller.
+// Prevents infinite loops if Sparkie polls deploy-monitor in a tight agent loop.
+const rateLimitMap = new Map<string, { count: number; windowStart: number }>()
+const RATE_LIMIT_MAX = 3
+const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000 // 5 minutes
+
+function checkRateLimit(key: string): boolean {
+  const now = Date.now()
+  const entry = rateLimitMap.get(key)
+  if (!entry || now - entry.windowStart > RATE_LIMIT_WINDOW_MS) {
+    rateLimitMap.set(key, { count: 1, windowStart: now })
+    return true // allowed
+  }
+  if (entry.count >= RATE_LIMIT_MAX) return false // blocked
+  entry.count++
+  return true
+}
+
 function doHeaders() {
   return {
     Authorization: `Bearer ${DO_TOKEN}`,
@@ -117,6 +135,15 @@ export async function GET(req: Request) {
 
   if (!DO_TOKEN) {
     return NextResponse.json({ error: 'DO_API_TOKEN not configured' }, { status: 500 })
+  }
+
+  // Rate-limit guard: cron calls use AGENT_CRON_SECRET, user calls use their session userId
+  const rateLimitKey = validCron ? 'cron' : ((await import('next-auth/next').then(m => m.getServerSession(authOptions)))?.user as { id?: string } | undefined)?.id ?? 'unknown'
+  if (!checkRateLimit(rateLimitKey)) {
+    return NextResponse.json(
+      { error: 'Rate limited: deploy-monitor called too frequently. Max 3 checks per 5 minutes.', retryAfterMs: RATE_LIMIT_WINDOW_MS },
+      { status: 429 }
+    )
   }
 
   try {
