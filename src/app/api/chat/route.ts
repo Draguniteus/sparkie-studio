@@ -4726,7 +4726,8 @@ SYNTHESIS RULES:
     return new Response(sanitizingStream, {
       headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
     })
-  } catch {
+  } catch (err) {
+    console.error('[/api/chat] Unhandled error:', err)
     return new Response(JSON.stringify({ error: 'Internal server error' }), {
       status: 500, headers: { 'Content-Type': 'application/json' },
     })
