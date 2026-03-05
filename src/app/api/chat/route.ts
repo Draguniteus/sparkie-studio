@@ -3794,7 +3794,7 @@ async function getUserConnectorTools(userId: string): Promise<Array<{
   try {
     const apiKey = process.env.COMPOSIO_API_KEY
     if (!apiKey) return []
-    const entityId = process.env.COMPOSIO_ENTITY_ID || ('sparkie_user_' + userId)
+    const entityId = 'sparkie_user_' + userId
     // Use v3 API for connected accounts (v1 only returns user-created integrations)
     const res = await fetch(
       'https://backend.composio.dev/api/v3/connected_accounts?user_id=' + entityId + '&status=ACTIVE',
@@ -3867,7 +3867,7 @@ async function executeConnectorTool(
   try {
     const apiKey = process.env.COMPOSIO_API_KEY
     if (!apiKey) return 'Connector not available'
-    const entity_id = process.env.COMPOSIO_ENTITY_ID || ('sparkie_user_' + userId)
+    const entity_id = 'sparkie_user_' + userId
     const res = await fetch(
       'https://backend.composio.dev/api/v3/tools/execute/' + actionSlug,
       {
