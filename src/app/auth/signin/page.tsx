@@ -2,11 +2,9 @@
 
 import { useState } from 'react';
 import { signIn } from 'next-auth/react';
-import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 
 export default function SignInPage() {
-  const router = useRouter();
   const [mode, setMode] = useState<'signin' | 'register'>('signin');
   const [registered, setRegistered] = useState(false);
 
@@ -34,7 +32,9 @@ export default function SignInPage() {
     if (res?.error) {
       setError(res.error === 'CredentialsSignin' ? 'Invalid email or password' : res.error);
     } else {
-      router.push('/');
+      // Full page navigation so the browser sends the fresh session cookie
+      // to the edge middleware — avoids the getToken() timing loop
+      window.location.href = '/';
     }
   }
 
