@@ -101,6 +101,46 @@ const MARKETPLACE_SKILLS = [
     icon: "✉️",
     badge: "Installed"
   },
+  {
+    name: "brave-search",
+    description: "Real-time web search with Brave's independent index. No tracking, no filter bubbles. Sparkie can search the web for any topic on demand.",
+    url: "https://api.search.brave.com/app/documentation/web-search/get-started",
+    category: "Search",
+    icon: "🦁",
+    badge: "Free"
+  },
+  {
+    name: "jina-reader",
+    description: "Convert any URL to clean markdown. Sparkie can fetch and read any webpage, article, or docs page as plain text — zero hallucination on current content.",
+    url: "https://jina.ai/reader/",
+    category: "Research",
+    icon: "📖",
+    badge: "Free"
+  },
+  {
+    name: "e2b-sandbox",
+    description: "Secure cloud code interpreter. Sparkie can run Python, JS, and shell scripts in an isolated sandbox — great for data analysis, file processing, and automation.",
+    url: "https://e2b.dev/docs",
+    category: "Code",
+    icon: "🧪",
+    badge: "Free"
+  },
+  {
+    name: "firecrawl-scraper",
+    description: "Turn any website into structured data. Sparkie can crawl, scrape, and extract content from any public webpage — even JavaScript-heavy sites.",
+    url: "https://docs.firecrawl.dev/introduction",
+    category: "Research",
+    icon: "🔥",
+    badge: "Free"
+  },
+  {
+    name: "sparkie-self-repair",
+    description: "Sparkie's own self-repair playbook. Documents the full patch → commit → deploy → verify loop so Sparkie can fix herself autonomously when builds break.",
+    url: "https://raw.githubusercontent.com/Draguniteus/sparkie-studio/master/DEVPLAYBOOK.md",
+    category: "AI",
+    icon: "⚡",
+    badge: "Free"
+  },
 ]
 
 const BADGE_STYLES: Record<string, string> = {
