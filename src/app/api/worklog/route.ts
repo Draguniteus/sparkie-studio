@@ -13,9 +13,12 @@ async function ensureTable() {
       type TEXT NOT NULL,
       content TEXT NOT NULL,
       metadata JSONB DEFAULT '{}',
+      cost_usd NUMERIC(10,6),
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
   `).catch(() => {})
+  // Idempotent: add cost_usd column if table already exists without it
+  await query(`ALTER TABLE sparkie_worklog ADD COLUMN IF NOT EXISTS cost_usd NUMERIC(10,6)`).catch(() => {})
   await query(`CREATE INDEX IF NOT EXISTS idx_worklog_user_time ON sparkie_worklog(user_id, created_at DESC)`).catch(() => {})
 }
 
@@ -77,16 +80,17 @@ export async function POST(req: NextRequest) {
 
   await ensureTable()
   const id = crypto.randomUUID()
-  const { depends_on, side_effect_of, confidence, status: wlStatus, decision_type, reasoning, estimated_duration_ms, signal_priority, ...restMeta } = (body.metadata ?? {}) as Record<string, unknown>
+  const { depends_on, side_effect_of, confidence, status: wlStatus, decision_type, reasoning, estimated_duration_ms, signal_priority, cost_usd, ...restMeta } = (body.metadata ?? {}) as Record<string, unknown>
   await query(
-    `INSERT INTO sparkie_worklog (id, user_id, type, content, metadata, status, decision_type, reasoning, estimated_duration_ms, signal_priority, confidence, depends_on, side_effect_of)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+    `INSERT INTO sparkie_worklog (id, user_id, type, content, metadata, status, decision_type, reasoning, estimated_duration_ms, signal_priority, confidence, depends_on, side_effect_of, cost_usd)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
     [id, userId, body.type, body.content, JSON.stringify(restMeta),
      wlStatus ?? 'done', decision_type ?? null, reasoning ?? null,
      estimated_duration_ms ?? null, signal_priority ?? null,
      confidence ?? null,
      depends_on ? JSON.stringify(depends_on) : null,
-     side_effect_of ?? null]
+     side_effect_of ?? null,
+     cost_usd != null ? Number(cost_usd) : null]
   )
   return NextResponse.json({ id, success: true })
 }
