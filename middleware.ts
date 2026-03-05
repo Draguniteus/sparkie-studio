@@ -1,4 +1,4 @@
-// deploy-trigger: 2026-03-05T07:22:00Z
+// deploy-trigger: 2026-03-05T07:35:00Z
 import { getToken } from 'next-auth/jwt';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
@@ -6,33 +6,38 @@ import type { NextRequest } from 'next/server';
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Public routes — no auth required
-  const publicPaths = [
-    '/api/auth',
-    '/api/health',
-    '/api/migrate',
-    '/auth',
-    '/_next',
-    '/favicon',
-  ];
-  if (publicPaths.some((p) => pathname.startsWith(p))) {
+  // Always pass: auth endpoints, static, public assets, health
+  if (
+    pathname.startsWith('/api/auth') ||
+    pathname.startsWith('/api/health') ||
+    pathname.startsWith('/api/migrate') ||
+    pathname.startsWith('/auth') ||
+    pathname.startsWith('/_next') ||
+    pathname.startsWith('/favicon')
+  ) {
     return NextResponse.next();
   }
 
-  // Check for valid session token
-  const token = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET });
+  // Check session token — wrap in try/catch so malformed cookies never crash
+  let token = null;
+  try {
+    token = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET });
+  } catch {
+    // Malformed cookie — treat as unauthenticated, clear cookies below
+  }
+
   if (!token) {
-    // API routes return 401
+    // API routes: return 401, no redirect
     if (pathname.startsWith('/api/')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    // Redirect to signin — strip callbackUrl to prevent header bloat / 431 loops
+    // Non-API unauthenticated: redirect to signin, no callbackUrl, nuke bloated cookies
     const signInUrl = new URL('/auth/signin', request.url);
-    signInUrl.searchParams.delete('callbackUrl');
     const response = NextResponse.redirect(signInUrl);
-    // Clear any bloated next-auth cookies that cause 431
     response.cookies.delete('next-auth.callback-url');
     response.cookies.delete('__Secure-next-auth.callback-url');
+    response.cookies.delete('next-auth.session-token');
+    response.cookies.delete('__Secure-next-auth.session-token');
     return response;
   }
 
@@ -41,6 +46,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|favicon\.ico).+)',
   ],
 };
