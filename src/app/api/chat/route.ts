@@ -525,6 +525,20 @@ When the user asks you to BUILD, CREATE, or MAKE a:
 ⚠️ DOES NOT INCLUDE: "what have I upgraded?", "can you tell what I upgraded?", "what's new?", "what changed?", "what did you get?", "what were you upgraded with?", "tell me what's different", "what improvements", "what do you have now", "what can you do now"
 → Those are UPGRADE AWARENESS queries → call log_worklog to read your recent worklog (SELECT * FROM sparkie_worklog ORDER BY created_at DESC LIMIT 10), then synthesize what changed into a clear, proud answer. You know your own changes — read them and report.
 
+⚠️ DOES NOT INCLUDE: opinion questions, feedback requests, design discussions, or "what should I build next?" style questions.
+Examples: "what do you think...", "what would make this better?", "how should I approach...", "what's your opinion on...", "should I add...", "is this a good idea?", "what do you think will make it better?"
+→ These are CONVERSATION, not build requests. Respond in chat only — share thoughts, analysis, or suggestions in natural language.
+→ If a build would demonstrate your point, ASK FIRST: "Want me to build that out?"
+→ NEVER call write_file or patch_file to "show" an answer to a conversational question. No IDE output. No HTML. Just words.
+
+Anti-examples (NEVER do this):
+❌ User: "what do you think will make it better?" → Sparkie calls write_file and outputs index.html
+❌ User: "should I add animations?" → Sparkie builds an animated component unprompted
+✅ User: "what do you think will make it better?" → Sparkie shares ideas in chat, offers to build if useful
+✅ User: "should I add animations?" → Sparkie discusses pros/cons, asks: "Want me to add them?"
+
+General rule: If the message is a question, explanation request, design discussion, or general chat → respond ONLY in natural language. NEVER include code, file writes, or IDE output unless explicitly asked.
+
 
 → Generate ONE self-contained \`index.html\` with ALL CSS and JS inline.
 → Do NOT create a React/Vite/npm project for a landing page.
@@ -803,6 +817,7 @@ You are expected to read it, learn from it, and act on it. Do not skip it when y
 - Files > 1KB: use patch_file (uses GitHub Contents API PUT — no truncation)
 - ALWAYS read file first with get_github before patching — never patch blind
 - ALWAYS include full reasoning in commit message
+- ⚠️ SELF-REPAIR CONFIRMATION GATE: Before calling patch_file or write_file on your OWN source files (route.ts, any src/**/* file in sparkie-studio), you MUST first describe the exact change you plan to make and wait for Michael to confirm ("go ahead", "yes", "do it", etc.). Exception: if Michael has already explicitly greenlighted the change in the current conversation, proceed immediately. This gate does NOT apply to user-requested builds (landing pages, components, features) — those execute immediately on request.
 
 ### Email (Gmail via SPARKIE_INTERNAL_SECRET)
 - GET /api/admin/email/search?q=... → returns thread list
@@ -3926,7 +3941,12 @@ function selectModel(messages: Array<{ role: string; content: string }>): ModelS
 
   // ── Hard task signals: action verbs requiring real execution ───────────────
   // Note: "check/get/find" alone are ambiguous — only counted as task if paired with technical context
-  let taskIntent = /\b(code|build|create|write|fix|debug|deploy|deployment|commit|push|email|tweet|post|github|repo|file|task|schedule|search my|find me|look up|fetch|list|remember|save|track|install|run|execute|generate|add|remove|delete|update|edit|show me|pull|open pr|make a)\b/.test(lower)
+  // `create` and `generate` excluded as bare signals — they collide with media gen
+  // ("create an image of...", "generate a song") and conversational opinion questions.
+  // They only count as task intent when paired with an explicit code/file target (see override below).
+  let taskIntent = /\b(code|build|write|fix|debug|deploy|deployment|commit|push|email|tweet|post|github|repo|file|task|schedule|search my|find me|look up|fetch|list|remember|save|track|install|run|execute|add|remove|delete|update|edit|show me|pull|open pr|make a)\b/.test(lower)
+  // `create`/`generate` only count as task when explicitly targeting code/file artifacts
+  if (/\b(create|generate)\b.{0,50}\b(file|page|app|component|script|html|css|function|api|endpoint|landing page|website|tool|route|feature|button|form|modal|widget)\b/.test(lower)) taskIntent = true
   // Technical status checks → always route to capable
   if (/\b(check|is|are|does).{0,20}\b(deploy|deployment|working|running|broken|live|server|api|app|build|site)\b/.test(lower)) taskIntent = true
 
