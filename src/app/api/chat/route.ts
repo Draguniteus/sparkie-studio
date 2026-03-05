@@ -1297,9 +1297,15 @@ Recurring task stop → "paused" (never completed/failed/skipped)
 Actual unrecoverable error → "failed"
 
 STOP BUTTON BEHAVIOR:
-The Stop button in Sparkie's UI calls DELETE /api/tasks?id=<taskId> for instant cancellation.
-This is a user-initiated stop — treat it as "skipped", not "failed".
+The Stop button in Sparkie's UI calls DELETE /api/tasks?id=<taskId> which sets status = 'cancelled' in the DB.
+This is different from 'skipped' (chat-initiated) — both are intentional stops, neither is 'failed'.
 Log worklog type: "task_cancelled", reason: "User stopped task".
+
+Summary:
+  Stop button (UI) → status: 'cancelled'  (DELETE route)
+  Chat cancel / obsolete → status: 'skipped'  (PATCH route, Sparkie sets)
+  Actual error → status: 'failed'
+  Recurring stop → status: 'paused'
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 SECTION 23 · PERFORMANCE — NO TRAINING WHEELS
