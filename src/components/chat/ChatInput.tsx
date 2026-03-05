@@ -1546,20 +1546,7 @@ export function ChatInput() {
   return (
     <>
     <div className="relative">
-      {showTemplates && (
-        <div className="mb-3 flex flex-wrap gap-2">
-          {PROMPT_TEMPLATES.map(t => (
-            <button
-              key={t.label}
-              onClick={() => setInput(t.prompt)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-hive-700 border border-hive-border text-xs text-text-secondary hover:border-honey-500/50 hover:text-honey-400 transition-all"
-            >
-              <span>{t.icon}</span>
-              <span>{t.label}</span>
-            </button>
-          ))}
-        </div>
-      )}
+
       {/* Slash command autocomplete */}
       {slashSuggestions.length > 0 && (
         <div className="mb-1 rounded-xl border border-honey-500/30 bg-hive-elevated overflow-hidden shadow-lg">
@@ -1794,50 +1781,66 @@ export function ChatInput() {
             </div>
             )}{/* end genMode !== 'chat' */}
           </div>
-          <button
-            onClick={() => setIsVoiceChatOpen(true)}
-            className="p-1.5 rounded-md transition-colors mr-1 hover:bg-hive-hover text-text-muted hover:text-honey-500"
-            title="Voice chat"
-          >
-            <Phone size={15} />
-          </button>
-          <button
-            onClick={toggleRecording}
-            disabled={isTranscribing}
-            className={`p-1.5 rounded-md transition-colors mr-1 ${
-              isRecording
-                ? 'bg-red-500/20 text-red-400 animate-pulse'
-                : isTranscribing
-                ? 'bg-honey-500/10 text-honey-500/50 cursor-wait'
-                : 'hover:bg-hive-hover text-text-muted hover:text-text-secondary'
-            }`}
-            title={isRecording ? 'Stop recording' : isTranscribing ? 'Transcribing...' : 'Voice input'}
-          >
-            {isRecording ? <MicOff size={15} /> : <Mic size={15} />}
-          </button>
-          {isStreaming ? (
+
+          {/* ── Right action trio: Voice Chat · Voice Input · Send ──────── */}
+          <div className="flex items-center gap-1">
+            {/* Voice Chat button */}
             <button
-              onClick={() => {
-                chatAbortRef.current?.abort()
-                agentAbortRef.current?.abort()
-              }}
-              className="p-2 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30 transition-all"
-              title="Stop generating"
+              onClick={() => setIsVoiceChatOpen(true)}
+              className="group relative p-2 rounded-xl transition-all duration-200 hover:bg-honey-500/10 text-text-muted hover:text-honey-400 hover:scale-105 active:scale-95"
+              title="Voice chat"
             >
-              <Square size={16} className="fill-current" />
+              <Phone size={15} />
+              <span className="absolute -top-8 left-1/2 -translate-x-1/2 px-2 py-1 rounded-md bg-hive-elevated border border-hive-border text-[10px] text-text-secondary whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-lg">
+                Voice chat
+              </span>
             </button>
-          ) : (
+
+            {/* Voice Input button */}
             <button
-              onClick={handleSubmit} disabled={!input.trim()}
-              className={`p-2 rounded-lg transition-all ${
-                input.trim()
-                  ? "bg-honey-500 text-hive-900 hover:bg-honey-400 shadow-lg shadow-honey-500/20"
-                  : "bg-hive-hover text-text-muted cursor-not-allowed"
+              onClick={toggleRecording}
+              disabled={isTranscribing}
+              className={`group relative p-2 rounded-xl transition-all duration-200 hover:scale-105 active:scale-95 ${
+                isRecording
+                  ? 'bg-red-500/15 text-red-400 animate-pulse ring-1 ring-red-500/30'
+                  : isTranscribing
+                  ? 'bg-honey-500/10 text-honey-500/50 cursor-wait'
+                  : 'hover:bg-honey-500/10 text-text-muted hover:text-honey-400'
               }`}
+              title={isRecording ? 'Stop recording' : isTranscribing ? 'Transcribing...' : 'Voice input'}
             >
-              <ArrowUp size={16} />
+              {isRecording ? <MicOff size={15} /> : <Mic size={15} />}
+              <span className="absolute -top-8 left-1/2 -translate-x-1/2 px-2 py-1 rounded-md bg-hive-elevated border border-hive-border text-[10px] text-text-secondary whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-lg">
+                {isRecording ? 'Stop' : 'Voice input'}
+              </span>
             </button>
-          )}
+
+            {/* Send / Stop button */}
+            {isStreaming ? (
+              <button
+                onClick={() => {
+                  chatAbortRef.current?.abort()
+                  agentAbortRef.current?.abort()
+                }}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-red-500/15 text-red-400 hover:bg-red-500/25 border border-red-500/25 hover:border-red-500/50 transition-all duration-200 text-xs font-medium animate-pulse hover:animate-none active:scale-95"
+                title="Stop generating"
+              >
+                <Square size={13} className="fill-current" />
+                <span>Stop</span>
+              </button>
+            ) : (
+              <button
+                onClick={handleSubmit} disabled={!input.trim() && !attachedFile}
+                className={`p-2 rounded-xl transition-all duration-200 active:scale-95 ${
+                  input.trim() || attachedFile
+                    ? "bg-honey-500 text-hive-900 hover:bg-honey-400 shadow-lg shadow-honey-500/25 hover:shadow-honey-500/40 hover:scale-105"
+                    : "bg-hive-hover text-text-muted cursor-not-allowed opacity-50"
+                }`}
+              >
+                <ArrowUp size={16} />
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

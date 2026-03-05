@@ -1,63 +1,43 @@
 'use client'
 
-import { useAppStore } from '@/store/appStore'
 import { ChatInput } from './ChatInput'
-import { Code, FileText, Search, Image, Sparkles, Zap } from 'lucide-react'
-
-const quickActions = [
-  { icon: Code, label: 'Build a Website', color: 'text-green-400' },
-  { icon: Search, label: 'Research', color: 'text-blue-400' },
-  { icon: Image, label: 'Generate Image', color: 'text-purple-400' },
-  { icon: FileText, label: 'Write Content', color: 'text-orange-400' },
-]
 
 export function WelcomeView() {
   return (
     <div className="flex-1 flex flex-col items-center justify-center px-3 md:px-4">
       <div className="max-w-2xl w-full flex flex-col items-center">
+
         {/* Logo & Title */}
-        <div className="mb-6 md:mb-8 text-center">
-          <div className="w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-honey-500/15 flex items-center justify-center mx-auto mb-3 md:mb-4 glow-honey">
-            <Sparkles size={26} className="text-honey-500" />
+        <div className="mb-8 md:mb-10 text-center flex flex-col items-center">
+          {/* Avatar with animated glow ring */}
+          <div className="relative mb-4 group">
+            <div className="absolute inset-0 rounded-full bg-honey-500/20 blur-xl scale-110 animate-pulse" />
+            <div className="relative w-20 h-20 md:w-24 md:h-24 rounded-full overflow-hidden ring-2 ring-honey-500/40 ring-offset-2 ring-offset-hive-900 shadow-[0_0_32px_rgba(234,179,8,0.25)] transition-all duration-300 group-hover:shadow-[0_0_48px_rgba(234,179,8,0.4)] group-hover:ring-honey-500/70">
+              <img
+                src="/sparkie-avatar.jpg"
+                alt="Sparkie"
+                className="w-full h-full object-cover"
+              />
+            </div>
+            {/* Online indicator */}
+            <span className="absolute bottom-1 right-1 w-3.5 h-3.5 rounded-full bg-green-400 border-2 border-hive-900 shadow-[0_0_8px_rgba(74,222,128,0.6)]" />
           </div>
-          <h1 className="text-xl md:text-2xl font-semibold mb-2">
-            <span className="text-honey-500 font-bold">Sparkie Studio</span>
+
+          <h1 className="text-2xl md:text-3xl font-bold mb-1.5 tracking-tight">
+            <span className="bg-gradient-to-r from-honey-400 via-honey-500 to-amber-400 bg-clip-text text-transparent">
+              Sparkie Studio
+            </span>
           </h1>
-          <p className="text-text-secondary text-sm">Your AI workspace. Chat, code, create.</p>
+          <p className="text-text-secondary text-sm md:text-base">
+            Your AI workspace. Chat, code, create.
+          </p>
         </div>
 
         {/* Chat Input */}
-        <div className="w-full mb-4 md:mb-6">
+        <div className="w-full">
           <ChatInput />
         </div>
 
-        {/* Quick Actions */}
-        <div className="flex gap-2 flex-wrap justify-center">
-          {quickActions.map(({ icon: Icon, label, color }) => (
-            <button
-              key={label}
-              className="flex items-center gap-2 px-3 md:px-4 py-2 rounded-full bg-hive-surface border border-hive-border hover:border-honey-500/30 hover:bg-hive-elevated transition-all text-xs md:text-sm text-text-secondary hover:text-text-primary"
-            >
-              <Icon size={14} className={color} />
-              {label}
-            </button>
-          ))}
-        </div>
-
-        {/* Expert Cards */}
-        <div className="mt-6 md:mt-10 grid grid-cols-3 gap-2 md:gap-3 w-full max-w-lg">
-          {[
-            { title: 'Coding', icon: '💻', desc: 'Build apps & scripts' },
-            { title: 'Research', icon: '🔍', desc: 'Deep web analysis' },
-            { title: 'Creative', icon: '🎨', desc: 'Images & content' },
-          ].map(({ title, icon, desc }) => (
-            <div key={title} className="p-3 md:p-4 rounded-xl bg-hive-surface border border-hive-border hover:border-honey-500/20 cursor-pointer transition-all group">
-              <div className="text-xl md:text-2xl mb-1 md:mb-2">{icon}</div>
-              <div className="text-xs md:text-sm font-medium text-text-primary group-hover:text-honey-500 transition-colors">{title}</div>
-              <div className="text-[10px] md:text-[11px] text-text-muted mt-0.5 hidden sm:block">{desc}</div>
-            </div>
-          ))}
-        </div>
       </div>
     </div>
   )

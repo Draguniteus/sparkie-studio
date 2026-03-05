@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist, createJSONStorage } from 'zustand/middleware'
 
 export interface BuildCardData {
   title: string           // derived project name (e.g. "ai-tools-directory")
@@ -203,7 +204,7 @@ interface AppState {
   setUserAvatarUrl: (url: string | null) => void
 }
 
-export const useAppStore = create<AppState>((set, get) => ({
+export const useAppStore = create<AppState>()(persist((set, get) => ({
   messages: [],
   chats: [],
   currentChatId: null,
@@ -484,4 +485,32 @@ export const useAppStore = create<AppState>((set, get) => ({
       } catch { /* assets load failed — start fresh */ }
     }, 0)
   },
-}))
+,
+  {
+    name: 'sparkie-chat-v1',
+    storage: createJSONStorage(() => localStorage),
+    // Only persist the chat history — not UI state, IDE state, worklog, etc.
+    partialize: (s) => ({
+      chats: s.chats.map(c => ({
+        ...c,
+        // Ensure Date survives JSON serialization
+        createdAt: c.createdAt instanceof Date ? c.createdAt.toISOString() : c.createdAt,
+        messages: c.messages.filter(m => !m.isStreaming),
+      })),
+      currentChatId: s.currentChatId,
+    }),
+    // Revive Date objects on hydration
+    merge: (persisted: unknown, current) => {
+      const p = persisted as Partial<typeof current> | null
+      if (!p) return current
+      return {
+        ...current,
+        ...p,
+        chats: (p.chats ?? []).map((c: Chat) => ({
+          ...c,
+          createdAt: c.createdAt ? new Date(c.createdAt as unknown as string) : new Date(),
+        })),
+      }
+    },
+  }
+))
