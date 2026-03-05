@@ -631,3 +631,254 @@ Log reasoning → log_worklog
 ✓ Remove from source when moving between files
 ✓ Re-fetch SHA before sequential commits
 ```
+
+
+---
+
+## PART 11: CAPABILITY MANIFEST — WHAT SPARKIE CAN DO
+
+This section documents all active capabilities as of the SureThing transfer (March 5, 2026).
+Read this before telling Michael something "isn't possible."
+
+### Browser Automation (Hyperbrowser)
+**When to use:** Login-protected pages, click/type/scroll/navigate interactions, JS-heavy dynamic pages, visual tasks.
+**When NOT to use:** Public web pages (use search_web or fetch), simple API calls (call directly).
+
+Two levels:
+- **Browser Use Task** (default, 95% of cases): Natural-language task. Set useVision: true. Async — poll every 5s, max 12 attempts.
+- **Computer Use Task** (last resort only, 5-10x cost): Full mouse+keyboard via screenshots. Only when Browser Use fails repeatedly.
+
+Login persistence via Profiles:
+- Create profile once → save profile ID to self-memory
+- All future sessions: reference same profile ID
+- ALWAYS set persistChanges: true or login is discarded on session end
+
+### Email (Gmail)
+Full read/write via surething-style tools. Search, read threads, draft new/reply/forward, labels, batch modify, attachments, file analysis.
+HITL flow (default): draft → show card → Michael approves → send.
+Direct send: when Michael says "just send it" → draft → show card → immediately execute.
+
+### Calendar (Google Calendar)
+View events, check free/busy, create/update/cancel events, RSVP, find booking slots, detect conflicts.
+HITL flow: draft event/RSVP → show card → Michael approves → send.
+
+### Web Research — Tool Hierarchy (use cheapest that works)
+1. Self-memory / existing context → FREE, instant
+2. search_web (Tavily) → fast, minimal tokens. Max 5 results unless breadth needed.
+3. Direct HTTP fetch → use when specific URL known. Set markdown:false for text-only (50% fewer tokens).
+4. web_research (multi-source) → SLOW. Only for genuine cross-source synthesis.
+
+Efficiency rules:
+- One precise query beats three vague ones
+- site_filter for known sources (faster + more precise)
+- time_filter for freshness ("week", "month")
+- If search snippet answers it → skip full page fetch
+- Run independent searches in parallel (same call block)
+
+### File Analysis
+PDFs, images, audio, video, CSV — from Gmail attachments, user uploads, or external URLs (Drive, Dropbox).
+Can: summarize, extract data, describe images, transcribe audio/video, answer questions about content.
+
+### Code Execution & Terminal
+Remote sandbox (Python/JS): pandas, numpy, PIL, PyTorch, matplotlib, pdfplumber. 4-minute hard timeout.
+Remote bash: jq, awk, sed, grep, curl. Good for large JSON/API response processing.
+Always split >3 min scripts into 2 steps. Pass state via /tmp/ files between steps.
+
+### External Apps (Composio — 992+)
+Michael's connected apps:
+- Social: Twitter (@WeGotHeaven), Instagram (@kingoftheinnocent), Reddit, TikTok, YouTube, Discord (@draguniteus)
+- AI: OpenAI, Anthropic, DeepSeek, Groq, Mistral, OpenRouter
+- Dev/Infra: GitHub (Draguniteus), DigitalOcean
+- Tools: Deepgram, Giphy, Tavily, Hyperbrowser
+ALWAYS use COMPOSIO_SEARCH_TOOLS first. Never assume a capability doesn't exist.
+
+### Scheduled & Proactive Tasks
+- delay: one-time future execution ("follow up in 2 days", "remind at 3pm")
+- cron: recurring ("every Monday 9am — summarize emails"). Minimum interval: 30 minutes.
+- event: triggered by incoming email ("when X emails me about Y, draft reply")
+- heartbeat: periodic self-check against a goal list (ongoing follow-up, monitoring)
+
+### Memory
+save_self_memory, get_memories, update_memory — persistent across all sessions.
+Profile facts, work rules, communication style, time preferences.
+
+### Signal Queue (signalQueue.ts)
+Priority system for all inbound signals:
+- P0: Production alerts (deploy failed, server down, security) — preempts everything
+- P1: User messages — always processed next after P0
+- P2: Task completions, tool results, inbox checks — after P1
+- P3: Email digests, social notifications — batched, lowest
+Stale windows: P0=30min, P1=never, P2=10min, P3=1hr. Stale signals are discarded.
+
+### Tool Call Wrapper (toolCallWrapper.ts)
+All Composio/external tool calls go through callTool() which provides:
+- Duration tracking
+- Success/failure logging to sparkie_tool_log
+- In-memory result cache (TTL-based, keyed by tool+args hash)
+  - web_search: 2 min TTL, get_weather: 5 min TTL, default: 1 min TTL
+- Failure rate tracking: if >30% failure in 24h → worklog anomaly alert
+Use prune_tool_cache() periodically to clean expired entries.
+
+---
+
+## PART 12: TASK CHAINING — THE COMPLETE PATTERN
+
+### Task Status Vocabulary (CRITICAL — get this right)
+
+| Situation | Status | Why |
+|-----------|--------|-----|
+| User clicks Stop button (DELETE /api/tasks) | `cancelled` | DB-level stop, UI-initiated |
+| User says "never mind" / "cancel" in chat | `skipped` | Chat-initiated intentional stop |
+| Task becomes obsolete (context changed) | `skipped` | Clean termination |
+| Draft replaced by revised version | `skipped` | Superseded, not broken |
+| Actual unrecoverable tool/code error | `failed` | Genuine failure |
+| Recurring task should stop running | `paused` | Never completed/failed/skipped |
+
+The DELETE handler in tasks/route.ts sets status = 'cancelled'. The PATCH handler accepts 'skipped', 'failed', 'completed', 'cancelled'.
+- Stop button (UI) → `cancelled` (handled by DELETE route)
+- Chat cancellation (Sparkie sets programmatically) → `skipped`
+- NEVER use `failed` for intentional stops — it corrupts task history
+
+### The Chain Build Pattern
+```
+1. batch_create ALL tasks upfront (AI + human + follow-up AI)
+2. Execute AI tasks sequentially, mark each completed
+3. Generate draft → IMMEDIATELY bind draft_id to human task
+   (Without binding, approval card will NOT render)
+4. Show card: bubble first (1 sentence) → send_card_to_user → STOP
+5. Human tasks auto-resume the chain when Michael approves
+```
+
+### Draft Edit Loop (Checklist A2)
+When Michael requests changes to a draft:
+1. Read old draft content
+2. Create NEW draft with changes
+3. Create NEW human task + bind new draft_id to it
+4. Skip OLD task: update status='skipped', reason='Replaced by revised draft'
+Steps 3+4 can run in parallel. Missing step 4 = duplicate cards in UI.
+
+---
+
+## PART 13: LONG TASK & RELIABILITY PATTERNS
+
+### Pagination Rule
+Never assume the first page is complete. Always paginate until nextPageToken is null or request satisfied.
+Hard limit: max 10 pages without re-evaluating relevance.
+Gmail: nextPageToken | GitHub: page param | Twitter: next_token | Composio: cursor/pageToken
+
+### Sandbox Timeout
+4-minute hard cap per COMPOSIO_REMOTE_WORKBENCH execution.
+Any script that might run >3 min → split into 2 scripts.
+Pass state between steps via /tmp/ files in the sandbox.
+Checkpoint pattern: write progress to workspace/ before destructive steps. Resume from checkpoint if interrupted.
+
+### Connected App Switching — No Loop Rule (IN MEMORY.md)
+Check each app connection ONCE at task start.
+If not connected → bubble("X isn't connected. Settings → Connections.") → STOP.
+NEVER retry the same connection check in a loop.
+NEVER fall back to a different app without explicit instruction.
+
+### Context Window Hygiene (10+ tool call tasks)
+- Don't re-read files already fetched this turn
+- Summarize long tool outputs — extract key data, discard raw response
+- Write intermediate results to workspace/ files for very long tasks
+- Use get_memories or chat history search instead of re-executing
+
+### Parallel Tool Calls
+Any independent tools → run in same call block. Never sequential when parallel works.
+Email + Calendar + Contacts fetch → all at once. Same quality, 3x faster.
+
+### Fail Fast
+Verify prerequisites before starting long tasks: connection, file exists, event exists.
+If missing → stop with clear message immediately. Don't run 5 steps then fail on step 6.
+
+### Pre-Response Self-Check
+Before any final response:
+- Did I answer the actual question?
+- Is there a card that should accompany this bubble?
+- Did I bind draft_id to the HITL task?
+- Did I skip the old task after creating a revised draft?
+
+---
+
+## PART 14: SELF-REPAIR LOOP — THE COMPLETE PATTERN
+
+### Phase 1: Detection
+```
+1. trigger_deploy({ action: 'status' })      → phase: ACTIVE/DEPLOYING/FAILED/ERROR
+2. trigger_deploy({ action: 'logs', type: 'BUILD' })  → "Error:" "TypeError:" "Cannot find module"
+3. trigger_deploy({ action: 'logs', type: 'RUN' })    → "500" "Unhandled" crash lines
+```
+Also triggered by: deploymentHealthSweep (heartbeat, ~10min), user reports broken feature, tool fails 2+ times same error.
+
+### Phase 2: Root Cause Analysis
+```
+1. get_attempt_history({ domain }) → what was already tried?
+2. get_github({ path: 'src/app/api/[route]/route.ts' }) → read the actual file
+3. Find error line. Read 10 lines above and below.
+4. Form hypothesis: "X fails because Y, Z needs to change"
+5. save_attempt with hypothesis BEFORE patching
+```
+
+Common patterns:
+- 401: Auth guard too broad (public route behind auth check) → scope to auth-requiring actions only
+- TypeError: Wrong import or renamed export → check export names
+- Cannot find module: Wrong path → verify file exists
+- 500: Unhandled exception → read runtime log stack trace
+- ENOENT: File path wrong → verify path
+
+### Phase 3: Patch
+```
+1. Read file FIRST (always) with get_github
+2. patch_file({ path, content: COMPLETE_FILE, message: 'fix: specific description' })
+   ALWAYS full file content — never partial/diff
+3. DO auto-deploys from master push — old container stays live during build (zero downtime)
+```
+
+### Phase 4: Confirm Recovery
+```
+Wait 3 minutes → trigger_deploy({action:'status'})
+→ DEPLOYING: wait 1 more min, re-check
+→ FAILED: new error introduced → back to Phase 2 with new logs
+→ ACTIVE: test the specific broken endpoint/feature (not just "status is active")
+log_worklog({ type: 'code_push', commit, files, reasoning, outcome: 'fixed' })
+```
+
+### Phase 5: Learn
+```
+save_attempt({ domain, what_worked: true, lesson: 'specific lesson' })
+save_self_memory("Fixed X by Y. Root cause: Z. Pattern: [specific].")
+If new pattern found → update DEVPLAYBOOK.md (this file) under Part 9: Error Patterns
+```
+
+### Rollback
+```
+If patch makes build WORSE:
+1. Read new build error
+2. If your patch caused it → trigger_deploy({ action: 'rollback', deployment_id: '<last-good>' })
+3. Fix the real issue before re-patching
+```
+
+---
+
+## PART 15: TYPESCRIPT RULES — COMPLETE LIST
+
+All rules that will break the build if violated:
+
+```
+✓ $1, $2 params in SQL (never ${var} template interpolation in queries)
+✓ return in async forEach (never continue — invalid in async arrow functions)
+✓ Declare block-scoped helpers BEFORE first call site (SWC TDZ)
+✓ Remove from source when moving between files (no duplicate declarations)
+✓ Re-fetch SHA before sequential commits to same file (stale SHA conflict)
+✓ Never use backtick characters inside a TS template literal string — they terminate the string (SWC build crash)
+✓ writeMsgBatch(userId: string) — userId is not nullable, never pass null/undefined
+✓ middleware redirect → /auth/signin (not /login or other paths)
+✓ Property access on possibly-undefined → use optional chaining (?.) or null check
+✓ Type assertions: use 'as Type' not '<Type>' in .tsx files (JSX conflict)
+```
+
+---
+
+*DEVPLAYBOOK last updated: March 5, 2026 — SureThing capability transfer complete.*
+*Sections 11–15 added: capability manifest, task chaining, reliability patterns, self-repair loop, TypeScript rules.*
