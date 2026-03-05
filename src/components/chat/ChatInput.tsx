@@ -718,7 +718,17 @@ export function ChatInput() {
     // Edit/modify commands — always build mode (user is modifying an existing project)
     // Catches: "change the X", "can we change", "can you change", "please change", "make it X", etc.
     const EDIT_PHRASE = /\b(edit|update|upgrade|change|switch|swap|replace|rename|remove|delete|adjust|alter|amend|convert|modify|revise|refactor|rewrite|redo|refine|restyle|recolor|resize|transform|overhaul|patch|correct|improve|fix|tweak|tune|undo|revert|rollback)\b|(?:(?:can you|can u|could you|would you|would you mind|how about)\s+(?:please\s+)?(?:edit|update|upgrade|change|switch|swap|replace|rename|remove|delete|adjust|alter|amend|convert|modify|revise|refactor|rewrite|redo|refine|restyle|recolor|resize|transform|overhaul|patch|correct|improve|fix|tweak|tune|undo|revert|rollback))|\b(make it|make the|make sure|set the|set it|turn it|turn the|flip it|flip the|let's make|let's update|let's change|let's switch|instead of|it should be|switch this|switch the|update to|change to|change it)\b|\b(cahnge|chnage|upadte|updaet|swich|swithc|fiix|tweek|edti|chnge|udpate)\b/
-    if (BUILD_KEYWORDS.test(t) || BUILD_PHRASE.test(t) || EDIT_PHRASE.test(t)) return false
+    // Build/edit intent — but only if there's no overriding emotional/relational context
+  // Emotional override: "i had broken you trying to update you", "you've been updated" etc.
+  // — these contain EDIT_PHRASE words but are clearly personal conversation, not build intent.
+  const EMOTIONAL_OVERRIDE = /\b(i('m| am| was| feel)|you('re| are| were)|we('re| are)|she('s| is)|he('s| is)|broken you|proud of|upset|sorry|happy|excited|love|miss|wow|amazing|incredible|beautiful|great job|well done|thank|glad|grateful)\b/i
+  const hasBuildSignal = BUILD_KEYWORDS.test(t) || BUILD_PHRASE.test(t) || EDIT_PHRASE.test(t)
+  if (hasBuildSignal) {
+    // If message has emotional/relational override AND no explicit code target, escalate to LLM
+    const hasCodeTarget = /\b(app|page|button|color|navbar|footer|header|component|style|css|html|code|script|file|function|api|endpoint|route|database|model|feature|modal|form|input|layout|theme|icon|image|logo|animation|widget|card|sidebar|menu|dropdown|table|chart|graph|dashboard)\b/i.test(t)
+    if (EMOTIONAL_OVERRIDE.test(t) && !hasCodeTarget) return null // → LLM classifier
+    return false
+  }
 
     // Code-paste + question → explanation request
     if ((text.includes('```') || text.includes('<code>')) && /\?/.test(t)) return true
