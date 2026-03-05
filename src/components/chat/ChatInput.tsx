@@ -1107,9 +1107,13 @@ export function ChatInput() {
                 }
               }
             } else if (parsed.event === 'error') {
-              updateMessage(chatId, ackMsgId, { content: `❌ ${parsed.message}`, isStreaming: false })
+              // Sanitize: never show raw JSON error blobs to the user
+              const rawErrMsg: string = parsed.message || 'Something went wrong'
+              const isRawJson = rawErrMsg.trimStart().startsWith('{') || rawErrMsg.includes('FreeUsageLimitError') || rawErrMsg.includes('"type":"error"')
+              const displayErr = isRawJson ? "I hit a snag — give me a moment and try again." : rawErrMsg
+              updateMessage(chatId, ackMsgId, { content: '❌ ' + displayErr, isStreaming: false })
               if (buildMsgId) updateMessage(chatId, buildMsgId, { content: '', isStreaming: false })
-              addWorklogEntry({ type: 'error', content: parsed.message, status: 'error' })
+              addWorklogEntry({ type: 'error', content: rawErrMsg, status: 'error' })
             }
           } catch { /* skip */ }
         }
