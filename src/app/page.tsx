@@ -1,8 +1,7 @@
 'use client'
 
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useSession } from 'next-auth/react'
-import { useRouter } from 'next/navigation'
 import { IDEPanel } from '@/components/layout/IDEPanel'
 import { MainPanel } from '@/components/layout/MainPanel'
 import { Sidebar } from '@/components/layout/Sidebar'
@@ -18,12 +17,10 @@ const DEFAULT_IDE_WIDTH = 520
 
 export default function Home() {
   const { status } = useSession()
-  const router = useRouter()
   const { ideOpen, onboardingDone, hydrateFromStorage } = useAppStore()
   const [mounted, setMounted] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
 
-  // Mount effect — theme + responsive sizing only (no auth needed)
   useEffect(() => {
     applyTheme(loadTheme())
     setMounted(true)
@@ -33,27 +30,20 @@ export default function Home() {
     return () => window.removeEventListener('resize', check)
   }, [])
 
-  // Auth-gated hydration — only load DB history once session is confirmed
-  // (setTimeout(0) fires before next-auth session cookie is ready, causing empty loads)
   useEffect(() => {
     if (status === 'authenticated') {
       hydrateFromStorage()
     }
   }, [status, hydrateFromStorage])
 
-  // Client-side guard — belt-and-suspenders behind middleware
-  useEffect(() => {
-    if (status === 'unauthenticated') {
-      router.replace('/auth/signin')
-    }
-  }, [status, router])
+  // NOTE: No client-side redirect — middleware handles unauthenticated access.
+  // Redirecting on 'unauthenticated' causes infinite loop: useSession briefly
+  // returns 'unauthenticated' before the JWT cookie is read after login.
 
-  // Sparkie proactive outreach — polls /api/agent every 60s when tab is focused
   useSparkieOutreach(status === 'authenticated')
 
   const [ideWidth, setIdeWidth] = useState(DEFAULT_IDE_WIDTH)
   const [isDragging, setIsDragging] = useState(false)
-
   const dragRef = useRef({ active: false, startX: 0, startWidth: 0 })
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -68,7 +58,6 @@ export default function Home() {
       )
       setIdeWidth(next)
     }
-
     const onUp = () => {
       if (!dragRef.current.active) return
       dragRef.current.active = false
@@ -76,7 +65,6 @@ export default function Home() {
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
     }
-
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
     return () => {
@@ -93,8 +81,7 @@ export default function Home() {
     document.body.style.userSelect = 'none'
   }
 
-  // Show nothing while checking auth or if not authed
-  if (status === 'loading' || status === 'unauthenticated') {
+  if (status === 'loading') {
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-[#0c0c14]">
         <div className="w-6 h-6 border-2 border-violet-500/40 border-t-violet-500 rounded-full animate-spin" />
@@ -102,7 +89,6 @@ export default function Home() {
     )
   }
 
-  // On mobile: full-screen main panel + bottom nav sidebar, no IDE panel
   const showIDE = ideOpen && !isMobile
 
   return (
@@ -112,46 +98,31 @@ export default function Home() {
       {isDragging && (
         <div className="fixed inset-0 z-[9999] cursor-col-resize" />
       )}
-
-      {/* Sidebar — hidden on mobile (rendered as bottom nav inside Sidebar component) */}
       <div className="hidden md:flex md:shrink-0">
         <Sidebar />
       </div>
-
-      {/* Mobile bottom nav */}
       <div className="md:hidden">
         <Sidebar />
       </div>
-
-      {/* Main content area */}
       <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
-        {/* On mobile: add bottom padding so content clears the bottom nav */}
         <div className="flex-1 min-h-0 overflow-hidden md:pb-0 pb-[60px]">
           <MainPanel />
         </div>
       </div>
-
-      {/* Sparkie's Brain splitter — desktop only */}
       {showIDE && (
         <div
           onMouseDown={onSplitterMouseDown}
           className="relative w-4 shrink-0 cursor-col-resize group flex items-center justify-center"
           title="Drag to resize"
         >
-          <div className={`absolute inset-y-0 w-px transition-colors ${
-            isDragging ? 'bg-honey-500' : 'bg-hive-border group-hover:bg-honey-500/60'
-          }`} />
+          <div className={`absolute inset-y-0 w-px transition-colors ${isDragging ? 'bg-honey-500' : 'bg-hive-border group-hover:bg-honey-500/60'}`} />
           <div className="relative z-10 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
             {[0, 1, 2].map(i => (
-              <span key={i} className={`w-1 h-1 rounded-full transition-colors ${
-                isDragging ? 'bg-honey-500' : 'bg-honey-500/70'
-              }`} />
+              <span key={i} className={`w-1 h-1 rounded-full transition-colors ${isDragging ? 'bg-honey-500' : 'bg-honey-500/70'}`} />
             ))}
           </div>
         </div>
       )}
-
-      {/* Sparkie's Brain panel — desktop only */}
       {showIDE && (
         <div style={{ width: ideWidth }} className="shrink-0 overflow-hidden hidden md:block">
           <IDEPanel />
