@@ -49,6 +49,7 @@ export const authOptions: NextAuthOptions = {
   ],
   pages: {
     signIn: '/auth/signin',
+    signOut: '/auth/signin',
   },
   session: { strategy: 'jwt' },
   callbacks: {
@@ -65,6 +66,16 @@ export const authOptions: NextAuthOptions = {
         (session.user as { id?: string; role?: string }).role = token.role as string;
       }
       return session;
+    },
+    async redirect({ url, baseUrl }) {
+      // After signout: always go to signin, never to / (avoids middleware loop)
+      if (url.includes('/api/auth/signout') || url === baseUrl + '/auth/signin') {
+        return baseUrl + '/auth/signin';
+      }
+      // After signin: go to / (the app)
+      if (url.startsWith(baseUrl)) return url;
+      if (url.startsWith('/')) return baseUrl + url;
+      return baseUrl + '/';
     },
   },
   secret: process.env.NEXTAUTH_SECRET,
