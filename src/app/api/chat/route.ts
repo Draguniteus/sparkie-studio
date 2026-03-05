@@ -3588,7 +3588,7 @@ function selectModel(messages: Array<{ role: string; content: string }>): ModelS
 
 // Models served via opencode.ai/zen — only nano lives here
 // Only gpt-5-mini is served via DigitalOcean Inference — all other models go through opencode.ai/zen
-const DO_MODELS = new Set(['openai-gpt-5-mini'])
+const DO_MODELS = new Set(['openai-gpt-5-mini', 'gpt-5-nano'])
 
 async function tryLLMCall(
   payload: Record<string, unknown>,
