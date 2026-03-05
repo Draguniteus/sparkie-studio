@@ -4401,7 +4401,7 @@ Rules:
               isFollowUp,
               satisfactionWord: satisfactionWord || undefined,
               messageLength: lastUserMsgLen,
-              usedTools: true,
+              usedTools: usedTools,
             }).catch(() => {})
             const snap = messages.slice(-6).map((m: { role: string; content: string }) =>
               `${m.role === 'user' ? 'User' : 'Sparkie'}: ${m.content.slice(0, 400)}`
@@ -4415,13 +4415,12 @@ Rules:
                 saveDeferredIntent(userId, deferred.intent, lastUserMsg, deferred.notBefore, deferred.dueAt).catch(() => {})
               }
             }
-      // Write message batch to worklog (fire-and-forget)
-      writeMsgBatch(userId, messages.filter((m: { role: string }) => m.role === 'user').length).catch(() => {})
+            // Write message batch to worklog (fire-and-forget)
+            writeMsgBatch(userId, messages.filter((m: { role: string }) => m.role === 'user').length).catch(() => {})
             const lastUser = messages.slice().reverse().find((m: { role: string; content: string }) => m.role === 'user')?.content ?? ''
-            const lastSparkie = messages.slice().reverse().find((m: { role: string; content: string }) => m.role === 'assistant')?.content ?? ''
-            updateSessionFile(userId, lastUser, lastSparkie)
+            updateSessionFile(userId, lastUser, content)
             // Log ai_response to worklog so "I've sent you a message" appears
-            if (lastSparkie) {
+            if (content) {
               writeWorklog(userId, 'ai_response',
                 `You just sent me a message:\n${lastUser.slice(0, 120)}${lastUser.length > 120 ? '…' : ''}`,
                 { status: 'done', decision_type: 'action', signal_priority: 'P2' }
