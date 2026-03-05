@@ -22,15 +22,14 @@ function entityId(userId: string) {
 //                   ?action=status
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    const userId = (session?.user as { id?: string } | undefined)?.id
-    if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
     const { searchParams } = req.nextUrl
     const action = searchParams.get('action') ?? 'apps'
 
     // List user's active connections (v3)
     if (action === 'status') {
+      const session = await getServerSession(authOptions)
+      const userId = (session?.user as { id?: string } | undefined)?.id
+      if (!userId) return NextResponse.json({ connections: [] })
       const res = await fetch(
         `${V3}/connected_accounts?user_id=${entityId(userId)}&status=ACTIVE`,
         { headers: composioHeaders() }
