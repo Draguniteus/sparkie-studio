@@ -17,7 +17,7 @@ export const maxDuration = 180
 
 const OPENCODE_BASE = 'https://opencode.ai/zen/v1'
 const MINIMAX_BASE = 'https://api.minimax.io/v1'
-const DO_INFERENCE_BASE = 'https://inference.do-ai.run/v1'
+const DO_INFERENCE_BASE = 'https://inference.digitalocean.com/v1'
 const AZURE_OPENAI_BASE = process.env.AZURE_OPENAI_ENDPOINT ?? ''
 
 // ── Sparkie's Soul + Identity (injected into every system prompt) ─────────────
@@ -3495,7 +3495,7 @@ function formatConnectorResponse(actionSlug: string, data: Record<string, unknow
 
 const MODELS = {
   CONVERSATIONAL: 'anthropic-claude-4.5-haiku',        // Tier 1   · Sparkie  — conversations, light tools (DO Inference)
-  CAPABLE:        'openai-gpt-4.1',                      // Tier 2   · Flame    — task execution, tools, coding, GitHub
+  CAPABLE:        'llama3.3-70b-instruct',               // Tier 2   · Flame    — task execution, tools, coding, GitHub
   EMBER:          'big-pickle',                 // Tier 2.5 · Ember    — code specialist, agentic tool-calling, 200K ctx
   DEEP:           'minimax-m2.5-free',          // Tier 3   · Atlas    — heavy analysis, large refactors, deep dives
   TRINITY:        'trinity-large-preview-free', // Tier 4   · Trinity  — 400B MoE frontier, creative arch, complex chains
@@ -3588,7 +3588,7 @@ function selectModel(messages: Array<{ role: string; content: string }>): ModelS
 
 // claude-haiku-4-5 and gpt-4.1 are served via DigitalOcean Inference
 // All other free models (big-pickle, minimax, trinity) go through opencode.ai/zen
-const DO_MODELS = new Set(['anthropic-claude-4.5-haiku', 'openai-gpt-4.1'])
+const DO_MODELS = new Set(['anthropic-claude-4.5-haiku', 'llama3.3-70b-instruct'])
 
 async function tryLLMCall(
   payload: Record<string, unknown>,
