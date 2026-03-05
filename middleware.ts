@@ -1,4 +1,4 @@
-// deploy-trigger: 2026-03-05T07:10:00Z
+// deploy-trigger: 2026-03-05T07:22:00Z
 import { getToken } from 'next-auth/jwt';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
@@ -26,8 +26,14 @@ export async function middleware(request: NextRequest) {
     if (pathname.startsWith('/api/')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    // All other routes redirect to login (correct path)
-    return NextResponse.redirect(new URL('/auth/signin', request.url));
+    // Redirect to signin — strip callbackUrl to prevent header bloat / 431 loops
+    const signInUrl = new URL('/auth/signin', request.url);
+    signInUrl.searchParams.delete('callbackUrl');
+    const response = NextResponse.redirect(signInUrl);
+    // Clear any bloated next-auth cookies that cause 431
+    response.cookies.delete('next-auth.callback-url');
+    response.cookies.delete('__Secure-next-auth.callback-url');
+    return response;
   }
 
   return NextResponse.next();
