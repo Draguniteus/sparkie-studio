@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server'
+import { pushMediaToGitHub } from '@/lib/github-media'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300
@@ -22,21 +23,21 @@ function normalizeLyricsTags(lyrics: string): string {
   return lyrics.replace(/\[([^\]]+)\]/g, (_, inner) => {
     const cleaned = inner.replace(/\s*[–—\-\(].*$/, '').replace(/\s+\d+$/, '').trim()
     const s = cleaned.toLowerCase()
-    if (/\bverse\b/.test(s))                           return '[Verse]'
-    if (/\bpre[\s\-]?chorus\b/.test(s))               return '[Pre Chorus]'
-    if (/\bpost[\s\-]?chorus\b/.test(s))              return '[Post Chorus]'
-    if (/\bfinal\s+chorus\b/.test(s))                 return '[Chorus]'
-    if (/\bchorus\b/.test(s))                          return '[Chorus]'
-    if (/\bbridge\b/.test(s))                          return '[Bridge]'
-    if (/\boutro\b/.test(s))                           return '[Outro]'
-    if (/\bintro\b/.test(s))                           return '[Intro]'
-    if (/\bhook\b/.test(s))                            return '[Hook]'
-    if (/\binterlude\b/.test(s))                       return '[Interlude]'
-    if (/\btransition\b/.test(s))                      return '[Transition]'
-    if (/\bbreak\b/.test(s))                           return '[Break]'
-    if (/\bbuild[\s\-]?up\b/.test(s))                 return '[Build Up]'
-    if (/\binst\b|\binstrumental\b/.test(s))          return '[Inst]'
-    if (/\bsolo\b/.test(s))                            return '[Solo]'
+    if (/\bverse\b/.test(s))                                   return '[Verse]'
+    if (/\bpre[\s\-]?chorus\b/.test(s))                       return '[Pre Chorus]'
+    if (/\bpost[\s\-]?chorus\b/.test(s))                      return '[Post Chorus]'
+    if (/\bfinal\s+chorus\b/.test(s))                         return '[Chorus]'
+    if (/\bchorus\b/.test(s))                                  return '[Chorus]'
+    if (/\bbridge\b/.test(s))                                  return '[Bridge]'
+    if (/\boutro\b/.test(s))                                   return '[Outro]'
+    if (/\bintro\b/.test(s))                                   return '[Intro]'
+    if (/\bhook\b/.test(s))                                    return '[Hook]'
+    if (/\binterlude\b/.test(s))                               return '[Interlude]'
+    if (/\btransition\b/.test(s))                              return '[Transition]'
+    if (/\bbreak\b/.test(s))                                   return '[Break]'
+    if (/\bbuild[\s\-]?up\b/.test(s))                         return '[Build Up]'
+    if (/\binst\b|\binstrumental\b/.test(s))                   return '[Inst]'
+    if (/\bsolo\b/.test(s))                                    return '[Solo]'
     return '[' + cleaned.charAt(0).toUpperCase() + cleaned.slice(1) + ']'
   })
 }
@@ -66,8 +67,7 @@ function parseMusicPrompt(raw: string): { stylePrompt: string; lyrics: string } 
       lyricParagraphs.length = 0
       lyricParagraphs.push(text.slice(tagMatch.index))
     } else {
-      // No section tags — this is a plain style prompt, not lyrics.
-      // Leave lyricParagraphs empty; lyrics-2.5 will generate them automatically.
+      // No section tags — plain style prompt, no lyrics
       stylePrompt = text.slice(0, 500)
       lyricParagraphs.length = 0
     }
@@ -76,6 +76,34 @@ function parseMusicPrompt(raw: string): { stylePrompt: string; lyrics: string } 
   let fullLyrics = lyricParagraphs.join('\n\n').trim()
   fullLyrics = normalizeLyricsTags(fullLyrics)
   return { stylePrompt: stylePrompt.trim(), lyrics: fullLyrics }
+}
+
+// Extract userId from Authorization Bearer token
+function extractUserId(req: NextRequest): string {
+  try {
+    const auth = req.headers.get('authorization') || ''
+    const token = auth.replace('Bearer ', '').trim()
+    if (!token) return 'anon'
+    const parts = token.split('.')
+    if (parts.length === 3) {
+      const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString())
+      return payload.sub || payload.id || token.slice(0, 12)
+    }
+    return token.slice(0, 12)
+  } catch {
+    return 'anon'
+  }
+}
+
+// Best-effort GitHub persist — never throws
+async function tryPersistAudio(url: string, userId: string): Promise<string> {
+  try {
+    const result = await pushMediaToGitHub('audio', url, userId, 'mp3')
+    return result.url
+  } catch (e) {
+    console.error('[/api/music] GitHub media push failed:', e)
+    return url
+  }
 }
 
 export async function GET(req: NextRequest) {
@@ -87,18 +115,18 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    let pollRes = await fetch(`${ACE_MUSIC_BASE}/query_result?task_id=${taskId}`, {
-      headers: { 'Authorization': `Bearer ${ACE_MUSIC_API_KEY}` },
+    let pollRes = await fetch(ACE_MUSIC_BASE + '/query_result?task_id=' + taskId, {
+      headers: { 'Authorization': 'Bearer ' + ACE_MUSIC_API_KEY },
       signal: AbortSignal.timeout(15000),
     })
 
     if (!pollRes.ok) {
       try {
-        pollRes = await fetch(`${ACE_MUSIC_BASE}/query_result`, {
+        pollRes = await fetch(ACE_MUSIC_BASE + '/query_result', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${ACE_MUSIC_API_KEY}`,
+            'Authorization': 'Bearer ' + ACE_MUSIC_API_KEY,
           },
           body: JSON.stringify({ task_ids: [taskId] }),
           signal: AbortSignal.timeout(15000),
@@ -152,18 +180,22 @@ export async function POST(req: NextRequest) {
   let rawPrompt: string
   let model: string
   let explicitLyrics: string | undefined
+  let bodyUserId: string | undefined
 
   try {
     const body = await req.json()
     rawPrompt = body.prompt
     model = body.model || 'music-2.5'
     explicitLyrics = body.lyrics
+    bodyUserId = body.userId
     if (!rawPrompt) throw new Error('Missing prompt')
   } catch {
     return new Response(JSON.stringify({ error: 'Invalid request body' }), {
       status: 400, headers: { 'Content-Type': 'application/json' },
     })
   }
+
+  const userId = bodyUserId || extractUserId(req)
 
   if (model === 'ace-step-free') {
     // ACE Music (api.acemusic.ai) is no longer available — provider shut down.
@@ -187,14 +219,14 @@ export async function POST(req: NextRequest) {
   let finalLyrics = (explicitLyrics || lyrics).trim()
   const finalPrompt = stylePrompt.trim()
 
-  // If no lyrics (e.g. user gave a plain prompt), auto-generate via MiniMax lyrics API
+  // If no lyrics, auto-generate via MiniMax lyrics API
   if (!finalLyrics) {
     try {
-      const lyricsRes = await fetch(`${MINIMAX_BASE}/lyrics_generation`, {
+      const lyricsRes = await fetch(MINIMAX_BASE + '/lyrics_generation', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
+          'Authorization': 'Bearer ' + apiKey,
         },
         body: JSON.stringify({ mode: 'write_full_song', prompt: rawPrompt }),
       })
@@ -225,11 +257,11 @@ export async function POST(req: NextRequest) {
       }, 15000)
 
       try {
-        const res = await fetch(`${MINIMAX_BASE}/music_generation`, {
+        const res = await fetch(MINIMAX_BASE + '/music_generation', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
+            'Authorization': 'Bearer ' + apiKey,
           },
           body: JSON.stringify(requestBody),
         })
@@ -237,8 +269,8 @@ export async function POST(req: NextRequest) {
         clearInterval(keepaliveInterval)
 
         if (!res.ok) {
-          const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
-          send(`data: ${JSON.stringify({ error: err.message || err.base_resp?.status_msg || err.error || `MiniMax error ${res.status}` })}\n\n`)
+          const err = await res.json().catch(() => ({ error: 'HTTP ' + res.status }))
+          send('data: ' + JSON.stringify({ error: err.message || err.base_resp?.status_msg || err.error || ('MiniMax error ' + res.status) }) + '\n\n')
           controller.close()
           return
         }
@@ -246,7 +278,7 @@ export async function POST(req: NextRequest) {
         const data = await res.json()
 
         if (data?.base_resp?.status_code !== 0) {
-          send(`data: ${JSON.stringify({ error: data.base_resp?.status_msg || 'MiniMax API error' })}\n\n`)
+          send('data: ' + JSON.stringify({ error: data.base_resp?.status_msg || 'MiniMax API error' }) + '\n\n')
           controller.close()
           return
         }
@@ -255,13 +287,13 @@ export async function POST(req: NextRequest) {
         // music-2.5: { data: { audioURL: "..." } } or { data: [{ audioURL: "..." }] }
         // music-2.0: { data: { audio_url: "..." } } or hex audio in { data: { audio: "hex" } }
         const dataPayload = Array.isArray(data?.data) ? data.data[0] : data?.data
-        // data.audio = URL when output_format:'url' (official MiniMax API field)
-        // data.audio = hex string when output_format:'hex'
-        // Check URL first, then fall back to hex decode
         const audioFieldValue = dataPayload?.audio_file || dataPayload?.audioURL
           || dataPayload?.audio_url || dataPayload?.audio || dataPayload?.url || dataPayload?.download_url
+
         if (audioFieldValue && (String(audioFieldValue).startsWith('http') || String(audioFieldValue).startsWith('data:'))) {
-          send(`data: ${JSON.stringify({ url: audioFieldValue, model: minimaxModel })}\n\n`)
+          // Persist to GitHub (best-effort) before sending to client
+          const persistentUrl = await tryPersistAudio(String(audioFieldValue), userId)
+          send('data: ' + JSON.stringify({ url: persistentUrl, model: minimaxModel, persistent: persistentUrl !== String(audioFieldValue) }) + '\n\n')
           controller.close()
           return
         }
@@ -270,7 +302,9 @@ export async function POST(req: NextRequest) {
         const hexAudio = dataPayload?.audio
         if (hexAudio && !String(hexAudio).startsWith('http')) {
           const audioBase64 = Buffer.from(hexAudio, 'hex').toString('base64')
-          send(`data: ${JSON.stringify({ url: `data:audio/mp3;base64,${audioBase64}`, model: minimaxModel })}\n\n`)
+          const dataUrl = 'data:audio/mp3;base64,' + audioBase64
+          const persistentUrl = await tryPersistAudio(dataUrl, userId)
+          send('data: ' + JSON.stringify({ url: persistentUrl, model: minimaxModel, persistent: persistentUrl !== dataUrl }) + '\n\n')
           controller.close()
           return
         }
@@ -280,14 +314,14 @@ export async function POST(req: NextRequest) {
         const dataKeys = Object.keys(dataPayload || {})
         const statusCode = data?.base_resp?.status_code
         const statusMsg = data?.base_resp?.status_msg || ''
-        send(`data: ${JSON.stringify({
-          error: `MiniMax returned success (status_code ${statusCode}) but no audio. Response keys: [${dataKeys.join(', ')}].${statusMsg ? ' ' + statusMsg + '.' : ''} This usually means the MiniMax account has no music generation credits or the model requires a paid tier. Check your MiniMax dashboard.`
-        })}\n\n`)
+        send('data: ' + JSON.stringify({
+          error: 'MiniMax returned success (status_code ' + statusCode + ') but no audio. Response keys: [' + dataKeys.join(', ') + '].' + (statusMsg ? ' ' + statusMsg + '.' : '') + ' This usually means the MiniMax account has no music generation credits or the model requires a paid tier. Check your MiniMax dashboard.'
+        }) + '\n\n')
         controller.close()
       } catch (err) {
         clearInterval(keepaliveInterval)
         const msg = err instanceof Error ? err.message : 'MiniMax generation failed'
-        try { send(`data: ${JSON.stringify({ error: msg })}\n\n`) } catch { /* ignore */ }
+        try { send('data: ' + JSON.stringify({ error: msg }) + '\n\n') } catch { /* ignore */ }
         controller.close()
       }
     }
