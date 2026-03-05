@@ -3612,7 +3612,7 @@ async function tryLLMCall(
         signal: AbortSignal.timeout(isStream ? 90000 : 30000),
       })
       if (res.ok) return { response: res, modelUsed: m }
-      if (res.status === 429 || res.status === 402 || res.status === 422 || res.status === 401 || res.status >= 500 || res.status === 400 || res.status === 403) {
+      if (res.status === 404 || res.status === 429 || res.status === 402 || res.status === 422 || res.status === 401 || res.status >= 500 || res.status === 400 || res.status === 403) {
         const txt = await res.text().catch(() => res.status.toString())
         lastError = `${m}: ${res.status} ${txt.slice(0, 80)}`
         await new Promise(r => setTimeout(r, 500)) // brief backoff before next model
@@ -4596,6 +4596,7 @@ SYNTHESIS RULES:
 
     if (!streamRes.ok) {
       const errBody = await streamRes.text()
+      console.error(`[chat] LLM error ${streamRes.status}:`, errBody.slice(0, 500))
       return new Response(JSON.stringify({ error: `OpenCode API error: ${streamRes.status}`, detail: errBody }), {
         status: streamRes.status, headers: { 'Content-Type': 'application/json' },
       })
