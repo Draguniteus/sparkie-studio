@@ -3804,7 +3804,7 @@ The user just opened Sparkie Studio after being away for ${awareness.daysSince =
 Give them a proper return brief — feel free to use multiple tools at once:
 1. A warm, personal welcome (use their name if you know it, reference something you remember)
 2. Check weather for their location with get_weather (or ask where they are if you don't know)
-3. Generate a motivating image based on what you know about them — something that fits their vibe
+3. Generate a motivating image — use a vivid, specific prompt like a cinematic nature scene, sunrise landscape, cosmic vista, or serene atmosphere. Avoid performers, stages, or crowds. Example: "Golden sunrise over mountain peaks, cinematic, rays of light through clouds" or "Deep ocean bioluminescence at night, surreal and beautiful"
 4. One question that shows you actually care about what's going on in their life
 5. Maybe generate a quick track if the mood feels right
 
