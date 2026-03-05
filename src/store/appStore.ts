@@ -485,7 +485,6 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
       } catch { /* assets load failed — start fresh */ }
     }, 0)
   },
-,
   {
     name: 'sparkie-chat-v1',
     storage: createJSONStorage(() => localStorage),
