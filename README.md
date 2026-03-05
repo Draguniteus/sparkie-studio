@@ -405,6 +405,6 @@ Unauthorized use, reproduction, or distribution is strictly prohibited.
 
 ---
 
-*🌱 Polleneer — Where AI Gets a Soul*
+*🌱 Pollen+Pioneer = Polleneer — The Pioneers who Pollen the Nations through Pollinations*
 
 </div>
