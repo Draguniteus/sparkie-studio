@@ -897,6 +897,7 @@ export function ChatInput() {
     } finally {
       setHiveStatus(null)
       setStreaming(false)
+      useAppStore.getState().setLongTaskLabel(null)  // always clear chip on completion/error
     }
   }, [selectedModel, addMessage, updateMessage, setStreaming, setHiveStatus, saveMessage, clearWorklog, openIDE, ideOpen, setIDETab, addWorklogEntry])
   // eslint-disable-next-line react-hooks/exhaustive-deps -- streamAgent is stable at runtime (defined after, useCallback ref)
