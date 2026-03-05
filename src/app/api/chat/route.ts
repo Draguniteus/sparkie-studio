@@ -3878,6 +3878,31 @@ Make it feel like walking into your friend's creative space and being genuinely 
       let round = 0
       let usedTools = false
 
+
+      // Phase 5: Live SSE stream — emit step_trace/task_chip IN REAL-TIME during tool loop
+      // ReadableStream created before loop; controller captured for immediate enqueue during execution
+      const liveEncoder = new TextEncoder()
+      const liveRef = { controller: null as ReadableStreamDefaultController<Uint8Array> | null }
+      const liveChunks: Uint8Array[] = []
+      const liveStream = new ReadableStream<Uint8Array>({
+        start(ctrl) {
+          liveRef.controller = ctrl
+          // Flush any chunks buffered before controller was ready
+          for (const c of liveChunks) ctrl.enqueue(c)
+          liveChunks.splice(0)
+        },
+      })
+      // Helper: enqueue SSE event immediately or buffer if controller not yet started
+      // NOTE: declared BEFORE HIVE_INIT so liveEnqueue() is available at L4029 (TDZ fix)
+      function liveEnqueue(eventPayload: Record<string, unknown>): void {
+        const chunk = liveEncoder.encode(`data: ${JSON.stringify(eventPayload)}\n\n`)
+        if (liveRef.controller) {
+          liveRef.controller.enqueue(chunk)
+        } else {
+          liveChunks.push(chunk)
+        }
+      }
+
       // ── Sparkie's Hive — The Five: Sparkie · Flame · Ember · Atlas · Trinity ──────
       const HIVE_INIT = [
         "🐝 Initiating Sparkie's Hive...",
@@ -4111,29 +4136,6 @@ Rules:
             }
           }
         } catch { /* planning call failed — continue without plan */ }
-      }
-
-      // Phase 5: Live SSE stream — emit step_trace/task_chip IN REAL-TIME during tool loop
-      // ReadableStream created before loop; controller captured for immediate enqueue during execution
-      const liveEncoder = new TextEncoder()
-      const liveRef = { controller: null as ReadableStreamDefaultController<Uint8Array> | null }
-      const liveChunks: Uint8Array[] = []
-      const liveStream = new ReadableStream<Uint8Array>({
-        start(ctrl) {
-          liveRef.controller = ctrl
-          // Flush any chunks buffered before controller was ready
-          for (const c of liveChunks) ctrl.enqueue(c)
-          liveChunks.splice(0)
-        },
-      })
-      // Helper: enqueue SSE event immediately or buffer if controller not yet started
-      function liveEnqueue(eventPayload: Record<string, unknown>): void {
-        const chunk = liveEncoder.encode(`data: ${JSON.stringify(eventPayload)}\n\n`)
-        if (liveRef.controller) {
-          liveRef.controller.enqueue(chunk)
-        } else {
-          liveChunks.push(chunk)
-        }
       }
 
       while (round < MAX_TOOL_ROUNDS) {
