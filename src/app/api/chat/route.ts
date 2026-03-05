@@ -3579,7 +3579,7 @@ function selectModel(messages: Array<{ role: string; content: string }>): ModelS
     return { primary: MODELS.EMBER, fallbacks: [MODELS.CAPABLE, MODELS.DEEP], tier: 'ember', needsTools: true }
   }
   if (conversationalIntent && deepCount === 0) {
-    return { primary: MODELS.CONVERSATIONAL, fallbacks: [MODELS.CAPABLE], tier: 'conversational', needsTools: true }
+    return { primary: MODELS.CONVERSATIONAL, fallbacks: [MODELS.CAPABLE], tier: 'conversational', needsTools: false }
   }
   // Default: CAPABLE — Flame handles most real tasks
   return { primary: MODELS.CAPABLE, fallbacks: [MODELS.DEEP, MODELS.CONVERSATIONAL], tier: 'capable', needsTools: true }
@@ -3861,7 +3861,7 @@ Make it feel like walking into your friend's creative space and being genuinely 
     const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
     if (userId) startTrace(requestId, userId)
 
-    const useTools = !voiceMode  // all models support function calling — no model exclusions
+    const useTools = !voiceMode && modelSelection.needsTools  // skip tool loop for conversational/chitchat tier
     const toolContext = { userId, tavilyKey, apiKey, doKey, baseUrl }
     const toolMediaResults: Array<{ name: string; result: string }> = []
 
@@ -3870,7 +3870,7 @@ Make it feel like walking into your friend's creative space and being genuinely 
     let hiveLog: string[] = []
 
     // Atlas (deep) and Trinity (frontier) need more rounds for heavy tasks
-    const MAX_TOOL_ROUNDS = (modelSelection.tier === 'deep' || modelSelection.tier === 'trinity') ? 10 : 6
+    const MAX_TOOL_ROUNDS = (modelSelection.tier === 'deep' || modelSelection.tier === 'trinity') ? 10 : (modelSelection.tier === 'capable' || modelSelection.tier === 'ember') ? 4 : 6
     if (useTools) {
       // Agent loop — up to MAX_TOOL_ROUNDS of tool execution
       // Multi-round agent loop — up to MAX_TOOL_ROUNDS iterations
