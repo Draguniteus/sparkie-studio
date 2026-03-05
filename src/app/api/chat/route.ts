@@ -3494,7 +3494,7 @@ function formatConnectorResponse(actionSlug: string, data: Record<string, unknow
 // Three-tier model selection. Users never see model names — Sparkie picks automatically.
 
 const MODELS = {
-  CONVERSATIONAL: 'gpt-5-nano',                 // Tier 1   · Sparkie  — conversations, light tools, 400K ctx
+  CONVERSATIONAL: 'openai-gpt-5-nano',                 // Tier 1   · Sparkie  — conversations, light tools, 400K ctx
   CAPABLE:        'openai-gpt-5-mini',           // Tier 2   · Flame    — task execution, tools, coding, GitHub
   EMBER:          'big-pickle',                 // Tier 2.5 · Ember    — code specialist, agentic tool-calling, 200K ctx
   DEEP:           'minimax-m2.5-free',          // Tier 3   · Atlas    — heavy analysis, large refactors, deep dives
@@ -3586,9 +3586,9 @@ function selectModel(messages: Array<{ role: string; content: string }>): ModelS
 }
 
 
-// Models served via opencode.ai/zen — only nano lives here
-// Only gpt-5-mini is served via DigitalOcean Inference — all other models go through opencode.ai/zen
-const DO_MODELS = new Set(['openai-gpt-5-mini', 'gpt-5-nano'])
+// gpt-5-mini and gpt-5-nano are served via DigitalOcean Inference (openai- prefix required)
+// All other free models (big-pickle, minimax, trinity) go through opencode.ai/zen
+const DO_MODELS = new Set(['openai-gpt-5-mini', 'openai-gpt-5-nano'])
 
 async function tryLLMCall(
   payload: Record<string, unknown>,
