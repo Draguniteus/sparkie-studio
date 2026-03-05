@@ -26,22 +26,48 @@ export async function GET(req: NextRequest) {
     const action = searchParams.get('action') ?? 'apps'
 
     // List user's active connections (v3)
+    // Strategy: query by entity first; if empty, fall back to global list
+    // (admin connections made via Composio dashboard land in the global list, not under user entity)
     if (action === 'status') {
       const session = await getServerSession(authOptions)
       const userId = (session?.user as { id?: string } | undefined)?.id
       if (!userId) return NextResponse.json({ connections: [] })
-      const res = await fetch(
-        `${V3}/connected_accounts?user_id=${entityId(userId)}&status=ACTIVE`,
-        { headers: composioHeaders() }
-      )
-      if (!res.ok) return NextResponse.json({ connections: [] })
-      const data = await res.json() as { items?: Array<{ id: string; toolkit?: { slug: string; name: string }; status: string; created_at: string }> }
-      const connections = (data.items ?? []).map(item => ({
+
+      type ConnItem = { id: string; toolkit?: { slug: string; name: string }; status: string; created_at: string }
+      const mapItems = (items: ConnItem[]) => items.map(item => ({
         id: item.id,
         appName: item.toolkit?.slug ?? '',
         status: item.status,
         createdAt: item.created_at,
       }))
+
+      // 1) Try entity-scoped connections
+      let connections: ReturnType<typeof mapItems> = []
+      try {
+        const res = await fetch(
+          `${V3}/connected_accounts?user_id=${entityId(userId)}&status=ACTIVE&limit=50`,
+          { headers: composioHeaders() }
+        )
+        if (res.ok) {
+          const d = await res.json() as { items?: ConnItem[] }
+          connections = mapItems(d.items ?? [])
+        }
+      } catch { /* fallthrough */ }
+
+      // 2) If entity has no connections, try global (covers admin/dashboard-created connections)
+      if (connections.length === 0) {
+        try {
+          const res = await fetch(
+            `${V3}/connected_accounts?status=ACTIVE&limit=50`,
+            { headers: composioHeaders() }
+          )
+          if (res.ok) {
+            const d = await res.json() as { items?: ConnItem[] }
+            connections = mapItems(d.items ?? [])
+          }
+        } catch { /* fallthrough */ }
+      }
+
       return NextResponse.json({ connections })
     }
 
