@@ -5049,9 +5049,23 @@ SYNTHESIS RULES:
 
     if (!streamRes.ok) {
       const errBody = await streamRes.text()
-      console.error(`[chat] LLM error ${streamRes.status}:`, errBody.slice(0, 500))
-      return new Response(JSON.stringify({ error: `OpenCode API error: ${streamRes.status}`, detail: errBody }), {
-        status: streamRes.status, headers: { 'Content-Type': 'application/json' },
+      console.error('[chat] LLM error ' + streamRes.status + ':', errBody.slice(0, 500))
+      // Detect specific error types for friendly messaging
+      const isFreeLimit = errBody.includes('FreeUsageLimitError') || errBody.includes('free usage') || errBody.includes('rate limit')
+      const friendlyMsg = isFreeLimit
+        ? "I'm running into a rate limit right now — give me a moment and try again."
+        : 'Something went wrong on my end. Try again in a moment.'
+      // Return as SSE stream so the frontend renders it in the chat bubble, not as raw JSON
+      const sseEncoder = new TextEncoder()
+      const errStream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(sseEncoder.encode('data: ' + JSON.stringify({ choices: [{ delta: { content: friendlyMsg } }] }) + '\n\n'))
+          controller.enqueue(sseEncoder.encode('data: [DONE]\n\n'))
+          controller.close()
+        },
+      })
+      return new Response(errStream, {
+        headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
       })
     }
 
