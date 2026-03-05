@@ -488,7 +488,7 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
 }),
   {
     name: 'sparkie-chat-v1',
-    storage: createJSONStorage(() => localStorage),
+    storage: createJSONStorage(() => typeof window !== 'undefined' ? localStorage : undefined as never),
     // Only persist the chat history — not UI state, IDE state, worklog, etc.
     partialize: (s) => ({
       chats: s.chats.map(c => ({
