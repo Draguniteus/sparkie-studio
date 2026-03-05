@@ -4035,7 +4035,7 @@ function selectModel(messages: Array<{ role: string; content: string }>): ModelS
     return { primary: MODELS.CONVERSATIONAL, fallbacks: [MODELS.CAPABLE], tier: 'conversational', needsTools: false }
   }
   // Default: CAPABLE — Flame handles most real tasks
-  return { primary: MODELS.CAPABLE, fallbacks: [MODELS.DEEP, MODELS.CONVERSATIONAL], tier: 'capable', needsTools: true }
+  return { primary: MODELS.CAPABLE, fallbacks: [MODELS.DEEP, MODELS.EMBER], tier: 'capable', needsTools: true }
 }
 
 
