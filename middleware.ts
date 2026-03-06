@@ -1,4 +1,4 @@
-// deploy-trigger: 2026-03-05T22:53:00Z
+// deploy-trigger: 2026-03-06T00:00:00Z
 import { getToken } from 'next-auth/jwt';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
@@ -46,6 +46,7 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon\.ico).+)',
+    // Match ALL routes including root '/'
+    '/((?!_next/static|_next/image|favicon\.ico).*)',
   ],
 };
