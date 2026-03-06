@@ -1,5 +1,10 @@
 'use client'
 
+// Force Next.js to never pre-render / cache this page as a static shell.
+// Without this, the CDN serves a build-time snapshot and middleware never runs,
+// so unauthenticated requests bypass auth and land straight in the app.
+export const dynamic = 'force-dynamic'
+
 import React, { useEffect, useRef, useState } from 'react'
 import { useSession } from 'next-auth/react'
 import { IDEPanel } from '@/components/layout/IDEPanel'
@@ -93,7 +98,7 @@ export default function Home() {
 
   return (
     <div ref={containerRef} className="flex h-[100dvh] w-screen overflow-hidden bg-hive-600">
-      {/* Only show onboarding for authenticated users who haven\'t completed it */}
+      {/* Only show onboarding for authenticated users who haven't completed it */}
       {mounted && status === 'authenticated' && !onboardingDone && <OnboardingModal />}
       <SettingsModal />
       {isDragging && (
