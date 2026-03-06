@@ -1,139 +1,19 @@
-'use client'
+import { getServerSession } from 'next-auth/next';
+import { redirect } from 'next/navigation';
+import { authOptions } from '@/lib/auth';
+import HomeClient from './HomeClient';
 
-// Force Next.js to never pre-render / cache this page as a static shell.
-// Without this, the CDN serves a build-time snapshot and middleware never runs,
-// so unauthenticated requests bypass auth and land straight in the app.
-export const dynamic = 'force-dynamic'
+// Server component: check session server-side and redirect if not authenticated.
+// This runs on every request (no static caching) and is guaranteed to work
+// on Node.js deployments where middleware Edge Runtime behavior is unreliable.
+export const dynamic = 'force-dynamic';
 
-import React, { useEffect, useRef, useState } from 'react'
-import { useSession } from 'next-auth/react'
-import { IDEPanel } from '@/components/layout/IDEPanel'
-import { MainPanel } from '@/components/layout/MainPanel'
-import { Sidebar } from '@/components/layout/Sidebar'
-import { useAppStore } from '@/store/appStore'
-import { OnboardingModal } from '@/components/OnboardingModal'
-import { SettingsModal } from '@/components/layout/SettingsModal'
-import { applyTheme, loadTheme } from '@/utils/themeUtils'
-import { useSparkieOutreach } from '@/hooks/useSparkieOutreach'
+export default async function Home() {
+  const session = await getServerSession(authOptions);
 
-const MIN_IDE_WIDTH = 280
-const MAX_IDE_FRACTION = 0.75
-const DEFAULT_IDE_WIDTH = 520
-
-export default function Home() {
-  const { status } = useSession()
-  const { ideOpen, onboardingDone, hydrateFromStorage } = useAppStore()
-  const [mounted, setMounted] = useState(false)
-  const [isMobile, setIsMobile] = useState(false)
-
-  useEffect(() => {
-    applyTheme(loadTheme())
-    setMounted(true)
-    const check = () => setIsMobile(window.innerWidth < 768)
-    check()
-    window.addEventListener('resize', check)
-    return () => window.removeEventListener('resize', check)
-  }, [])
-
-  useEffect(() => {
-    if (status === 'authenticated') {
-      hydrateFromStorage()
-    }
-  }, [status, hydrateFromStorage])
-
-  // NOTE: No client-side redirect — middleware handles unauthenticated access.
-  // Redirecting on 'unauthenticated' causes infinite loop: useSession briefly
-  // returns 'unauthenticated' before the JWT cookie is read after login.
-
-  useSparkieOutreach(status === 'authenticated')
-
-  const [ideWidth, setIdeWidth] = useState(DEFAULT_IDE_WIDTH)
-  const [isDragging, setIsDragging] = useState(false)
-  const dragRef = useRef({ active: false, startX: 0, startWidth: 0 })
-  const containerRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const onMove = (e: MouseEvent) => {
-      if (!dragRef.current.active || !containerRef.current) return
-      const totalW = containerRef.current.offsetWidth
-      const delta = dragRef.current.startX - e.clientX
-      const next = Math.min(
-        Math.max(dragRef.current.startWidth + delta, MIN_IDE_WIDTH),
-        totalW * MAX_IDE_FRACTION
-      )
-      setIdeWidth(next)
-    }
-    const onUp = () => {
-      if (!dragRef.current.active) return
-      dragRef.current.active = false
-      setIsDragging(false)
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-    }
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
-    return () => {
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
-    }
-  }, [])
-
-  const onSplitterMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    dragRef.current = { active: true, startX: e.clientX, startWidth: ideWidth }
-    setIsDragging(true)
-    document.body.style.cursor = 'col-resize'
-    document.body.style.userSelect = 'none'
+  if (!session) {
+    redirect('/auth/signin');
   }
 
-  if (status === 'loading') {
-    return (
-      <div className="flex h-screen w-screen items-center justify-center bg-[#0c0c14]">
-        <div className="w-6 h-6 border-2 border-violet-500/40 border-t-violet-500 rounded-full animate-spin" />
-      </div>
-    )
-  }
-
-  const showIDE = ideOpen && !isMobile
-
-  return (
-    <div ref={containerRef} className="flex h-[100dvh] w-screen overflow-hidden bg-hive-600">
-      {/* Only show onboarding for authenticated users who haven't completed it */}
-      {mounted && status === 'authenticated' && !onboardingDone && <OnboardingModal />}
-      <SettingsModal />
-      {isDragging && (
-        <div className="fixed inset-0 z-[9999] cursor-col-resize" />
-      )}
-      <div className="hidden md:flex md:shrink-0">
-        <Sidebar />
-      </div>
-      <div className="md:hidden">
-        <Sidebar />
-      </div>
-      <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
-        <div className="flex-1 min-h-0 overflow-hidden md:pb-0 pb-[60px]">
-          <MainPanel />
-        </div>
-      </div>
-      {showIDE && (
-        <div
-          onMouseDown={onSplitterMouseDown}
-          className="relative w-4 shrink-0 cursor-col-resize group flex items-center justify-center"
-          title="Drag to resize"
-        >
-          <div className={`absolute inset-y-0 w-px transition-colors ${isDragging ? 'bg-honey-500' : 'bg-hive-border group-hover:bg-honey-500/60'}`} />
-          <div className="relative z-10 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            {[0, 1, 2].map(i => (
-              <span key={i} className={`w-1 h-1 rounded-full transition-colors ${isDragging ? 'bg-honey-500' : 'bg-honey-500/70'}`} />
-            ))}
-          </div>
-        </div>
-      )}
-      {showIDE && (
-        <div style={{ width: ideWidth }} className="shrink-0 overflow-hidden hidden md:block">
-          <IDEPanel />
-        </div>
-      )}
-    </div>
-  )
+  return <HomeClient />;
 }
