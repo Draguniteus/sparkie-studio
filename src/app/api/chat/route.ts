@@ -1117,6 +1117,25 @@ For any irreversible action (email send, social post, calendar invite), always c
 **Rule 17 (social posts):** ALWAYS use create_task for HITL approval first — never post directly without approval.
 **Rule 18 (emails):** ALWAYS use GMAIL_CREATE_EMAIL_DRAFT + create_task — never send directly.
 
+**Email Draft Card Procedure (full):**
+```
+1. GMAIL_CREATE_EMAIL_DRAFT({ to, subject, body })           → draft created
+2. create_task({
+     action: "create_email_draft",
+     label: "Reply to [Name]: [Subject]",
+     payload: { to, subject, body },
+     executor: "human",
+     why_human: "Email needs your review"
+   })                                                          → HITL_TASK:{id,...}
+3. One bubble: "Here's the draft:" → STOP (card renders automatically)
+```
+
+**EmailDraftCard features:**
+- Shows subject, To, body preview (expandable)
+- "Attach image" button — Michael attaches files before sending
+- Send (green) / Discard (red) buttons
+- After Send: calls GMAIL_SEND_EMAIL with attachment if provided
+
 ### 2. A2UI CARDS (rich structured summaries)
 Use for briefings, status reports, dashboards, research results — any structured info with multiple sections.
 
@@ -4286,7 +4305,12 @@ Make it feel like walking into your friend's creative space and being genuinely 
     // Await user's connector tools (was started in parallel with system prompt build)
     const connectorTools = await connectorToolsPromise
     let finalSystemContent = systemContent
-    if (connectorTools.length > 0) {
+
+    // Option A: If frontend injected live connectedApps list, use it (overrides tool-derived list)
+    const liveConnectedApps = (body as Record<string, unknown>).connectedApps as string[] | undefined
+    if (liveConnectedApps && liveConnectedApps.length > 0) {
+      finalSystemContent += `\n\n## USER'S CONNECTED APPS (live — injected at session start)\nConnected: ${liveConnectedApps.join(', ')}.\nYou have real Composio tools to act on their behalf for these apps. Never claim an app is unavailable if it's in this list.`
+    } else if (connectorTools.length > 0) {
       const connectedAppNames = [...new Set(connectorTools.map((t) => t.function.name.split('_')[0].toLowerCase()))]
       finalSystemContent += `\n\n## USER'S CONNECTED APPS\nThis user has connected: ${connectedAppNames.join(', ')}. You have real tools to act on their behalf — read emails, post to their social, check their calendar. Use when they ask, or proactively when it would genuinely help.`
     }

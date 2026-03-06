@@ -325,10 +325,23 @@ export function ChatInput() {
 
     try {
       const userProfile = useAppStore.getState().userProfile
+      // Option A: inject live connectedApps list on first/early messages
+      let connectedApps: string[] | undefined
+      const allMsgs = useAppStore.getState().chats.find((c) => c.id === chatId)?.messages ?? []
+      if (allMsgs.length <= 4) {
+        try {
+          const connRes = await fetch('/api/connectors?action=status')
+          if (connRes.ok) {
+            const connData = await connRes.json() as { connections?: Array<{ appName: string }> }
+            connectedApps = [...new Set((connData.connections ?? []).map((c) => c.appName).filter(Boolean))]
+          }
+        } catch { /* non-fatal */ }
+      }
+
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: apiMessages, model: selectedModel, userProfile }),
+        body: JSON.stringify({ messages: apiMessages, model: selectedModel, userProfile, ...(connectedApps ? { connectedApps } : {}) }),
       })
 
       if (!response.ok) {
@@ -780,7 +793,19 @@ export function ChatInput() {
     if (!chat) return
     const apiMessages = chat.messages
       .filter((m) => m.type !== "image" && m.type !== "video")
-      .map((m) => ({ role: m.role, content: m.content }))
+      .map((m) => {
+        // Vision: if this message has an imageUrl, send as multipart content for model to see
+        if (m.imageUrl && m.role === 'user') {
+          return {
+            role: m.role,
+            content: [
+              { type: 'image_url', image_url: { url: m.imageUrl } },
+              { type: 'text', text: m.content || ' ' },
+            ],
+          }
+        }
+        return { role: m.role, content: m.content }
+      })
     const assistantMsgId = addMessage(chatId, { role: "assistant", content: "", model: selectedModel, isStreaming: true })
     setStreaming(true)
     // ── Worklog framing: open IDE + log session start ──
@@ -862,6 +887,19 @@ export function ChatInput() {
             if (parsed.hive_status) {
               setHiveStatus(parsed.hive_status)
               addWorklogEntry({ type: 'thinking', content: parsed.hive_status as string, status: 'done' })
+              continue
+            }
+            // Timer fired notification — show as a special message chip
+            if (parsed.timer_fired) {
+              const timerLabel = (parsed.label as string) ?? 'Scheduled task fired'
+              const timerType = (parsed.trigger_type as string) ?? 'delay'
+              addMessage(chatId, {
+                role: 'assistant',
+                content: timerLabel,
+                type: 'timer_fired' as 'text',  // cast to satisfy TS until type is added
+                model: timerType === 'cron' ? 'Recurring' : 'One-time',
+                isStreaming: false,
+              })
               continue
             }
             // HITL task approval event
