@@ -71,63 +71,67 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ connections })
     }
 
-    // Browse/search the app catalog — curated static list (Composio v1 /apps is unreliable)
+    // Browse/search the live Composio app catalog (v1 /apps)
+    // Returns real brand logo_url + categories per app — replaces old hardcoded 51-app static list
     const q = (searchParams.get('q') ?? '').toLowerCase().trim()
-    const CATALOG: Array<{ slug: string; name: string; displayName: string; icon: string; categories: string[] }> = [
-      { slug: 'gmail', name: 'gmail', displayName: 'Gmail', icon: '📧', categories: ['Communication'] },
-      { slug: 'google-calendar', name: 'google-calendar', displayName: 'Google Calendar', icon: '📅', categories: ['Productivity'] },
-      { slug: 'google-drive', name: 'google-drive', displayName: 'Google Drive', icon: '📁', categories: ['Productivity'] },
-      { slug: 'google-docs', name: 'google-docs', displayName: 'Google Docs', icon: '📄', categories: ['Productivity'] },
-      { slug: 'google-sheets', name: 'google-sheets', displayName: 'Google Sheets', icon: '📊', categories: ['Productivity'] },
-      { slug: 'google-slides', name: 'google-slides', displayName: 'Google Slides', icon: '📽️', categories: ['Productivity'] },
-      { slug: 'twitter', name: 'twitter', displayName: 'Twitter / X', icon: '🐦', categories: ['Social Media'] },
-      { slug: 'instagram', name: 'instagram', displayName: 'Instagram', icon: '📸', categories: ['Social Media'] },
-      { slug: 'reddit', name: 'reddit', displayName: 'Reddit', icon: '🤖', categories: ['Social Media'] },
-      { slug: 'tiktok', name: 'tiktok', displayName: 'TikTok', icon: '🎵', categories: ['Social Media'] },
-      { slug: 'linkedin', name: 'linkedin', displayName: 'LinkedIn', icon: '💼', categories: ['Social Media'] },
-      { slug: 'youtube', name: 'youtube', displayName: 'YouTube', icon: '▶️', categories: ['Social Media'] },
-      { slug: 'slack', name: 'slack', displayName: 'Slack', icon: '💬', categories: ['Communication'] },
-      { slug: 'discord', name: 'discord', displayName: 'Discord', icon: '🎮', categories: ['Communication'] },
-      { slug: 'telegram', name: 'telegram', displayName: 'Telegram', icon: '✈️', categories: ['Communication'] },
-      { slug: 'whatsapp', name: 'whatsapp', displayName: 'WhatsApp', icon: '💚', categories: ['Communication'] },
-      { slug: 'outlook', name: 'outlook', displayName: 'Outlook', icon: '📮', categories: ['Communication'] },
-      { slug: 'teams', name: 'teams', displayName: 'Microsoft Teams', icon: '🟦', categories: ['Communication'] },
-      { slug: 'zoom', name: 'zoom', displayName: 'Zoom', icon: '📹', categories: ['Communication'] },
-      { slug: 'github', name: 'github', displayName: 'GitHub', icon: '🐙', categories: ['Developer'] },
-      { slug: 'gitlab', name: 'gitlab', displayName: 'GitLab', icon: '🦊', categories: ['Developer'] },
-      { slug: 'jira', name: 'jira', displayName: 'Jira', icon: '🔵', categories: ['Developer', 'Productivity'] },
-      { slug: 'linear', name: 'linear', displayName: 'Linear', icon: '🟣', categories: ['Developer', 'Productivity'] },
-      { slug: 'vercel', name: 'vercel', displayName: 'Vercel', icon: '▲', categories: ['Developer'] },
-      { slug: 'supabase', name: 'supabase', displayName: 'Supabase', icon: '⚡', categories: ['Developer'] },
-      { slug: 'notion', name: 'notion', displayName: 'Notion', icon: '🗒️', categories: ['Productivity'] },
-      { slug: 'trello', name: 'trello', displayName: 'Trello', icon: '🟩', categories: ['Productivity'] },
-      { slug: 'asana', name: 'asana', displayName: 'Asana', icon: '🟠', categories: ['Productivity'] },
-      { slug: 'airtable', name: 'airtable', displayName: 'Airtable', icon: '🟦', categories: ['Productivity'] },
-      { slug: 'clickup', name: 'clickup', displayName: 'ClickUp', icon: '🟡', categories: ['Productivity'] },
-      { slug: 'todoist', name: 'todoist', displayName: 'Todoist', icon: '🔴', categories: ['Productivity'] },
-      { slug: 'dropbox', name: 'dropbox', displayName: 'Dropbox', icon: '📦', categories: ['Productivity'] },
-      { slug: 'hubspot', name: 'hubspot', displayName: 'HubSpot', icon: '🟠', categories: ['CRM'] },
-      { slug: 'salesforce', name: 'salesforce', displayName: 'Salesforce', icon: '☁️', categories: ['CRM'] },
-      { slug: 'pipedrive', name: 'pipedrive', displayName: 'Pipedrive', icon: '🟢', categories: ['CRM'] },
-      { slug: 'stripe', name: 'stripe', displayName: 'Stripe', icon: '💳', categories: ['Finance'] },
-      { slug: 'quickbooks', name: 'quickbooks', displayName: 'QuickBooks', icon: '💰', categories: ['Finance'] },
-      { slug: 'shopify', name: 'shopify', displayName: 'Shopify', icon: '🛍️', categories: ['Finance'] },
-      { slug: 'google-analytics', name: 'google-analytics', displayName: 'Google Analytics', icon: '📈', categories: ['Analytics'] },
-      { slug: 'mixpanel', name: 'mixpanel', displayName: 'Mixpanel', icon: '📉', categories: ['Analytics'] },
-      { slug: 'posthog', name: 'posthog', displayName: 'PostHog', icon: '🦔', categories: ['Analytics'] },
-      { slug: 'amplitude', name: 'amplitude', displayName: 'Amplitude', icon: '📊', categories: ['Analytics'] },
-      { slug: 'sentry', name: 'sentry', displayName: 'Sentry', icon: '🔍', categories: ['Developer', 'Analytics'] },
-      { slug: 'datadog', name: 'datadog', displayName: 'Datadog', icon: '🐕', categories: ['Developer', 'Analytics'] },
-      { slug: 'figma', name: 'figma', displayName: 'Figma', icon: '🎨', categories: ['Design'] },
-      { slug: 'canva', name: 'canva', displayName: 'Canva', icon: '🖌️', categories: ['Design'] },
-      { slug: 'openai', name: 'openai', displayName: 'OpenAI', icon: '🤖', categories: ['AI'] },
-      { slug: 'anthropic', name: 'anthropic', displayName: 'Anthropic', icon: '🧠', categories: ['AI'] },
-      { slug: 'spotify', name: 'spotify', displayName: 'Spotify', icon: '🎵', categories: ['Entertainment'] },
-    ]
+    const cursor = searchParams.get('cursor') ?? ''
+
+    type ComposioApp = {
+      key: string
+      name: string
+      logo?: string
+      categories?: string[]
+      tags?: string[]
+      description?: string
+      auth_schemes?: string[]
+    }
+
+    const catalogUrl = new URL(`${V1}/apps`)
+    catalogUrl.searchParams.set('limit', '100')
+    if (cursor) catalogUrl.searchParams.set('page', cursor)
+
+    const catalogRes = await fetch(catalogUrl.toString(), {
+      headers: composioHeaders(),
+      // @ts-ignore — Next.js fetch cache hint (not in standard RequestInit types)
+      next: { revalidate: 3600 },
+    })
+
+    if (!catalogRes.ok) {
+      console.error('[connectors GET] catalog fetch failed', catalogRes.status)
+      return NextResponse.json({ error: 'Failed to fetch app catalog' }, { status: 502 })
+    }
+
+    const catalogData = await catalogRes.json() as {
+      items?: ComposioApp[]
+      totalPages?: number
+      page?: number
+    }
+
+    const rawItems = catalogData.items ?? []
+
+    // Normalise to the shape the frontend expects
+    const items = rawItems.map(app => ({
+      slug: app.key,
+      name: app.key,
+      displayName: app.name,
+      logo: app.logo ?? '',
+      categories: app.categories ?? app.tags ?? [],
+    }))
+
+    // Filter by search query if provided
     const filtered = q
-      ? CATALOG.filter(a => a.displayName.toLowerCase().includes(q) || a.slug.includes(q) || a.categories.some(c => c.toLowerCase().includes(q)))
-      : CATALOG
-    return NextResponse.json({ items: filtered, nextCursor: null })
+      ? items.filter(a =>
+          a.displayName.toLowerCase().includes(q) ||
+          a.slug.includes(q) ||
+          a.categories.some((c: string) => c.toLowerCase().includes(q))
+        )
+      : items
+
+    const page = catalogData.page ?? 1
+    const totalPages = catalogData.totalPages ?? 1
+    const nextCursor = page < totalPages ? String(page + 1) : null
+
+    return NextResponse.json({ items: filtered, nextCursor })
   } catch (err) {
     console.error('[connectors GET]', err)
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })
