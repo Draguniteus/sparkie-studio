@@ -41,7 +41,8 @@ export const authOptions: NextAuthOptions = {
           id: user.id,
           email: user.email,
           name: user.display_name,
-          image: user.avatar_url,
+          // image intentionally excluded — avatar_url in JWT bloats the
+          // next-auth.session-token cookie past DO nginx's 8KB header limit → 431
           role: user.role ?? 'user',
         };
       },
