@@ -93,7 +93,8 @@ export default function Home() {
 
   return (
     <div ref={containerRef} className="flex h-[100dvh] w-screen overflow-hidden bg-hive-600">
-      {mounted && !onboardingDone && <OnboardingModal />}
+      {/* Only show onboarding for authenticated users who haven\'t completed it */}
+      {mounted && status === 'authenticated' && !onboardingDone && <OnboardingModal />}
       <SettingsModal />
       {isDragging && (
         <div className="fixed inset-0 z-[9999] cursor-col-resize" />
