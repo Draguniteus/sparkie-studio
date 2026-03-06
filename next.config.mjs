@@ -1,11 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   eslint: {
-    // ESLint errors shown in terminal but never block the production build
     ignoreDuringBuilds: true,
   },
-  // Instrumentation is auto-registered via src/instrumentation.ts in Next.js 14+
-  // (instrumentationHook config key was removed in Next.js 14)
 
   images: {
     remotePatterns: [
@@ -19,10 +16,11 @@ const nextConfig = {
   async headers() {
     return [
       {
-        source: '/(.*)',
+        source: '/((?!_next/static|_next/image|favicon.ico).*)',
         headers: [
+          { key: 'Cache-Control', value: 'no-store, no-cache, must-revalidate' },
           { key: 'Cross-Origin-Embedder-Policy', value: 'credentialless' },
-          { key: 'Cross-Origin-Opener-Policy',   value: 'same-origin'  },
+          { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
         ],
       },
     ]
