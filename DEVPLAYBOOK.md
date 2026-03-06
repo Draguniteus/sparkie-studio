@@ -882,3 +882,219 @@ All rules that will break the build if violated:
 
 *DEVPLAYBOOK last updated: March 5, 2026 — SureThing capability transfer complete.*
 *Sections 11–15 added: capability manifest, task chaining, reliability patterns, self-repair loop, TypeScript rules.*
+
+---
+
+## PART 16: GMAIL EMAIL DRAFT CARDS — FULL PROCEDURE
+
+*How to show an email draft in chat, let Michael attach images, and send via Gmail.*
+
+---
+
+### What the user sees
+
+When you draft an email, Michael sees a **purple email card** in chat with:
+- `Email` label + `Review` badge (turns `Sent` / `Discarded` after action)
+- Subject line (bold)
+- `To:` recipient
+- Body preview (expandable with "Show more")
+- **Attach image** button — Michael can attach a file before sending
+- `Send` (green) and `Discard` (red) buttons
+
+---
+
+### Step-by-step procedure
+
+**Step 1 — Draft via Composio Gmail**
+```
+GMAIL_CREATE_EMAIL_DRAFT({
+  to: "recipient@example.com",
+  subject: "Subject line",
+  body: "Full email body text"
+})
+→ returns: Draft ID (or 'created')
+```
+
+**Step 2 — Queue for HITL approval**
+```
+create_task({
+  action: "create_email_draft",
+  label: "Reply to [Name]: [Subject]",
+  payload: {
+    to: "recipient@example.com",
+    subject: "Subject line",
+    body: "Full email body — first 500 chars shown"
+  },
+  executor: "human",
+  why_human: "Email needs your review before sending"
+})
+→ returns: HITL_TASK:{ id, action, label, payload }
+```
+
+**Step 3 — Show card + stop**
+```
+"Here's the draft:" → sparkie_task event fires → EmailDraftCard renders in chat
+STOP — do not continue until user approves or discards
+```
+
+**Step 4 — When approved**
+
+The `PATCH /api/tasks` call resolves the task with `status: "approved"`.
+
+If Michael attached a file before approving, the PATCH body includes:
+```json
+{ "id": "task_xxx", "status": "approved", "attachment": { "name": "...", "dataUrl": "data:...", "mimeType": "..." } }
+```
+
+Your `/api/tasks` PATCH handler then:
+1. Calls `GMAIL_SEND_EMAIL` (or `GMAIL_REPLY_EMAIL`) with the draft content
+2. If `attachment` is present: use `GMAIL_SEND_EMAIL` with the attachment included in the body as a linked image or note
+
+**What to say after approval**
+```
+"Sent — [brief summary]."
+```
+
+---
+
+### Key rules
+
+```
+✓ ALWAYS use GMAIL_CREATE_EMAIL_DRAFT + create_task — never GMAIL_SEND_EMAIL directly
+✓ action must be "create_email_draft" to trigger the EmailDraftCard UI
+✓ Pass full body in payload.body — UI shows first ~280 chars with expand
+✓ Do NOT pass image_url in the draft — Michael attaches manually from the card
+✓ One-line bubble intro BEFORE the HITL card: "Here's the draft:"
+✓ STOP after showing the card — wait for Michael's decision
+✓ After "Sent": log_worklog with type:'action', outcome:'email_sent'
+```
+
+---
+
+### Image attachment note
+
+Gmail drafts don't support inline images through the Composio API. Michael attaches the image himself from the card before hitting Send. The card's attach button opens a file picker. After approval, the attachment travels with the PATCH request body and is processed server-side.
+
+---
+
+## PART 17: TIMER NOTIFICATION CONTAINER
+
+*How to set timers and display the orange "Timer fired" notification.*
+
+---
+
+### Setting a timer
+
+Use `schedule_task` with `trigger_type: "delay"`:
+```
+schedule_task({
+  label: "Check if [task] is done",
+  action: "Check and follow up on [task]",
+  trigger_type: "delay",
+  delay_hours: 2,          // OR
+  when_iso: "2026-03-06T15:00:00-05:00"  // exact time preferred
+})
+```
+
+For recurring timers:
+```
+schedule_task({
+  label: "Daily check",
+  action: "...",
+  trigger_type: "cron",
+  cron_expression: "0 9 * * *"
+})
+```
+
+---
+
+### What the timer notification looks like
+
+When a scheduled task fires (via the proactive scheduler), the chat receives a `timer_fired` message type that renders an **orange notification container**:
+
+```
+┌─────────────────────────────────────────────────┐  ← orange/brown bg, orange border
+│  ⚡🕐  Timer fired                [One-time]    │  ← gray "Timer fired" + orange badge
+│  Check & fix deployment of 04f6700               │  ← bold white task label
+└─────────────────────────────────────────────────┘
+```
+
+This is rendered by the `MessageBubble` component when `message.type === 'timer_fired'`.
+
+---
+
+### How the backend sends it
+
+When a scheduled task fires, the proactive scheduler emits a `timer_fired` SSE event:
+```json
+{ "timer_fired": true, "label": "Task label here", "trigger_type": "delay" }
+```
+
+The frontend catches this in the SSE stream and renders it as a `timer_fired` message type.
+
+---
+
+### Timer rules
+
+```
+✓ Always use exact when_iso for one-time reminders — never delay_hours for precise timing
+✓ After firing, immediately execute the task action before notifying
+✓ Timer chip shows in chat BEFORE your response message — user sees context
+✓ Recurring timers: trigger_type = 'cron'; One-time: trigger_type = 'delay'
+✓ Say what you did, not just "timer fired" — be specific about outcome
+```
+
+---
+
+## PART 18: CONNECTED APPS — LIVE INJECTION AT CHAT START (OPTION A)
+
+*How Sparkie knows exactly which apps are connected — no stale hardcoded list.*
+
+---
+
+### The problem
+
+Before this fix: Sparkie's system prompt had a hardcoded list of connected apps. If a user disconnected GitHub or added a new integration, Sparkie wouldn't know.
+
+### The solution (Option A — live injection)
+
+On every new session (first 1–2 messages), the frontend calls:
+```
+GET /api/connectors?action=status
+```
+
+This returns the real connected accounts from Composio for this user. The frontend injects the live list into the `/api/chat` request body as `connectedApps: string[]`.
+
+The `/api/chat` POST handler then overrides the system prompt block:
+```typescript
+// In POST handler, after connectorTools block:
+if (body.connectedApps && body.connectedApps.length > 0) {
+  finalSystemContent += `\n\n## USER'S CONNECTED APPS (live — injected at session start)\n` +
+    `Connected: ${body.connectedApps.join(', ')}\n` +
+    `You have real Composio tools to act on their behalf for these apps.`
+}
+```
+
+---
+
+### What Sparkie should do with this
+
+When Michael asks "what apps are you connected to?" or "can you post to Instagram?", Sparkie:
+1. Checks `## USER'S CONNECTED APPS (live...)` in her system prompt
+2. Answers from the live injected list — not the hardcoded one
+3. Knows exactly which Composio connector tools are available
+
+---
+
+### Rules
+
+```
+✓ Live list overrides hardcoded list — always trust the injected block
+✓ If connectedApps block is NOT present → fall back to tool-derived connectedAppNames
+✓ Never claim an app is connected if it's not in the live list
+✓ If user says "connect my [app]" → guide to Connectors page (POST /api/connectors)
+```
+
+---
+
+*DEVPLAYBOOK last updated: March 6, 2026 — Parts 16–18 added: Gmail email draft cards, timer notifications, live connector injection.*

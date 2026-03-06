@@ -106,6 +106,28 @@ export function MessageBubble({ message, userAvatarUrl }: Props) {
   const isAudio = (message.type === "music" || message.type === "speech") && message.imageUrl
   const isBuildCard = message.type === "build_card" && message.buildCard
   const isPendingTask = !!message.pendingTask
+  const isTimerFired = (message.type as string) === "timer_fired"
+
+  // Timer fired notification — render as standalone orange notification container, no bubble wrapper
+  if (isTimerFired) {
+    const triggerType = message.model ?? 'One-time'  // model field reused for trigger badge
+    return (
+      <div className="flex gap-3 animate-fade-in">
+        <div className="flex-1 max-w-[90%] md:max-w-[80%]">
+          <div className="rounded-xl border border-orange-500/40 bg-orange-950/30 px-4 py-3 flex items-center gap-3">
+            <div className="flex items-center gap-2 shrink-0">
+              <Clock size={14} className="text-orange-400/70" />
+              <span className="text-xs text-text-muted">Timer fired</span>
+            </div>
+            <span className="flex-1 text-sm font-semibold text-text-primary">{message.content}</span>
+            <span className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-400">
+              {triggerType}
+            </span>
+          </div>
+        </div>
+      </div>
+    )
+  }
   const { updateMessage, currentChatId } = useAppStore()
 
   return (

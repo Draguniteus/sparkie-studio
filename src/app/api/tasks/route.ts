@@ -127,6 +127,7 @@ export async function DELETE(req: NextRequest) {
 }
 
 // PATCH /api/tasks — respond to a task (approve/reject) or update status
+// For email draft tasks: also accepts `attachment` field to pass to Gmail send
 export async function PATCH(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
@@ -134,7 +135,12 @@ export async function PATCH(req: NextRequest) {
     if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     await ensureTable()
-    const { id, status } = await req.json() as { id: string; status: string }
+    const body = await req.json() as {
+      id: string
+      status: string
+      attachment?: { name: string; dataUrl: string; mimeType: string }
+    }
+    const { id, status, attachment } = body
     if (!id || !status) return NextResponse.json({ error: 'Missing id or status' }, { status: 400 })
 
     const validStatuses = ['approved', 'rejected', 'completed', 'failed', 'skipped', 'pending', 'cancelled']
@@ -145,6 +151,56 @@ export async function PATCH(req: NextRequest) {
     // Map approved → completed for human tasks
     const resolvedStatus = status === 'approved' ? 'completed' : status === 'rejected' ? 'skipped' : status
     const setResolved = ['completed', 'skipped', 'failed', 'cancelled'].includes(resolvedStatus)
+
+    // For email draft tasks being approved: auto-send via Gmail
+    if (status === 'approved') {
+      const taskRes = await query<{ action: string; payload: Record<string, unknown> }>(
+        `SELECT action, payload FROM sparkie_tasks WHERE id = $1 AND user_id = $2`,
+        [id, userId]
+      )
+      const task = taskRes.rows[0]
+
+      if (task && (task.action === 'create_email_draft' || task.action === 'send_email')) {
+        const payload = task.payload as { to?: string; subject?: string; body?: string }
+        const composioKey = process.env.COMPOSIO_API_KEY
+        const entityId = `sparkie_user_${userId}`
+
+        if (composioKey && payload.to) {
+          try {
+            // Build body — if attachment provided, append note about it
+            let emailBody = payload.body ?? ''
+            if (attachment) {
+              emailBody += `\n\n[Attachment: ${attachment.name} — see attached file]`
+            }
+
+            // Call Composio GMAIL_SEND_EMAIL
+            const composioRes = await fetch('https://backend.composio.dev/api/v2/actions/GMAIL_SEND_EMAIL/execute', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': composioKey,
+              },
+              body: JSON.stringify({
+                connectedAccountId: entityId,
+                input: {
+                  to: payload.to,
+                  subject: payload.subject ?? '(no subject)',
+                  body: emailBody,
+                },
+              }),
+            })
+
+            if (!composioRes.ok) {
+              const errText = await composioRes.text()
+              console.error('Gmail send failed:', composioRes.status, errText)
+            }
+          } catch (e) {
+            console.error('Gmail send error:', e)
+            // Don't block task update — still mark as completed
+          }
+        }
+      }
+    }
 
     await query(
       `UPDATE sparkie_tasks SET status = $1 ${setResolved ? ', resolved_at = NOW()' : ''}
