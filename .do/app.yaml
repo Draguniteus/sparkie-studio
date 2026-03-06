@@ -7,6 +7,7 @@ services:
       deploy_on_push: true
     source_dir: /
     environment_slug: node-js
+    build_command: NODE_OPTIONS="--max-old-space-size=896" npm run build
     run_command: npm start
     http_port: 3000
     instance_size_slug: apps-s-1vcpu-1gb
