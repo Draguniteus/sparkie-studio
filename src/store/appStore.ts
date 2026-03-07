@@ -15,6 +15,7 @@ export interface PendingTask {
   label: string
   payload: Record<string, unknown>
   status: 'pending' | 'approved' | 'rejected'
+  emailDraft?: { subject?: string; to?: string; body?: string }
 }
 
 export interface Message {
