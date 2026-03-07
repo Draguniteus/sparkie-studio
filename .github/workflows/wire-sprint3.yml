@@ -1,0 +1,32 @@
+name: Wire Sprint 3 Tools
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type YES to confirm
+        required: true
+        default: YES
+
+jobs:
+  wire:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Apply Sprint 3 wiring patch
+        run: python3 .github/scripts/wire_sprint3.py
+      
+      - name: Commit wired route.ts
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/app/api/chat/route.ts
+          git diff --cached --stat
+          git commit -m "feat(tools): wire Sprint 3 tools into route.ts"
+          git push origin master
