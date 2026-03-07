@@ -4150,7 +4150,8 @@ function checkRateLimit(key: string): boolean {
 
 export async function POST(req: NextRequest) {
   try {
-    const { messages, model: _clientModel, userProfile, voiceMode } = await req.json()
+    const body = await req.json()
+    const { messages, model: _clientModel, userProfile, voiceMode } = body
     // Server-side model routing — ignore client model selector, Sparkie picks automatically
     const modelSelection = selectModel(messages ?? [])
     const model = modelSelection.primary
@@ -4307,7 +4308,7 @@ Make it feel like walking into your friend's creative space and being genuinely 
     let finalSystemContent = systemContent
 
     // Option A: If frontend injected live connectedApps list, use it (overrides tool-derived list)
-    const liveConnectedApps = (body as Record<string, unknown>).connectedApps as string[] | undefined
+    const liveConnectedApps = (body.connectedApps) as string[] | undefined
     if (liveConnectedApps && liveConnectedApps.length > 0) {
       finalSystemContent += `\n\n## USER'S CONNECTED APPS (live — injected at session start)\nConnected: ${liveConnectedApps.join(', ')}.\nYou have real Composio tools to act on their behalf for these apps. Never claim an app is unavailable if it's in this list.`
     } else if (connectorTools.length > 0) {
