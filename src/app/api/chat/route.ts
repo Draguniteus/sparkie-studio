@@ -12,6 +12,8 @@ import { readSessionSnapshot, writeSessionSnapshot } from '@/lib/threadStore'
 import { writeWorklog, writeMsgBatch } from '@/lib/worklog'
 import { SPARKIE_TOOLS_S2 } from '@/lib/sprint2-tools'
 import { executeSprint2Tool } from '@/lib/sprint2-cases'
+import { SPARKIE_TOOLS_S3 } from '@/lib/sprint3-tools'
+import { executeSprint3Tool } from '@/lib/sprint3-cases'
 import { ingestRepo, getProjectContext, addKnownIssue, resolveKnownIssue, formatProjectContextBlock } from '@/lib/repoIngestion'
 
 export const runtime = 'nodejs'
@@ -2214,6 +2216,7 @@ const SPARKIE_TOOLS = [
     },
   },
   ...SPARKIE_TOOLS_S2,
+  ...SPARKIE_TOOLS_S3,
 ]
 
 // ── Memory helpers ─────────────────────────────────────────────────────────────
@@ -3782,6 +3785,8 @@ async function executeTool(
       default: {
         const s2result = await executeSprint2Tool(name, args, userId)
         if (s2result !== null) return s2result
+        const s3result = await executeSprint3Tool(name, args, userId, baseUrl)
+        if (s3result !== null) return s3result
         if (userId) {
           return await executeConnectorTool(name, args, userId)
         }
@@ -4808,6 +4813,13 @@ Make it feel like walking into your friend's creative space and being genuinely 
         create_calendar_event: "Calendar Bee Queued",
         transcribe_audio: "Transcription Bee Online",
         text_to_speech: "Voice Synthesis Active",
+        // Sprint 3
+        execute_script: "Script Engine Online",
+        npm_run: "npm Runner Active",
+        git_ops: "Git Ops Active",
+        delete_memory: "Memory Pruner Active",
+        run_tests: "Test Runner Active",
+        check_lint: "Lint Checker Active",
       }
       const pickHive = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)]
       hiveLog.push(pickHive(HIVE_INIT))
@@ -4968,6 +4980,9 @@ Rules:
             get_schema: 'Reading DB schema...', get_deployment_history: 'Pulling deploy history...',
             search_github: 'Searching codebase...', create_calendar_event: 'Drafting calendar event...',
             transcribe_audio: 'Transcribing audio...', text_to_speech: 'Synthesizing speech...',
+            execute_script: 'Running script...', npm_run: 'Running npm...',
+            git_ops: 'Running git ops...', delete_memory: 'Pruning memory...',
+            run_tests: 'Running tests...', check_lint: 'Checking lint...',
           }
           // Human-readable worklog step labels (shown in worklog trace, richer than chip labels)
           const WORKLOG_STEP_LABELS: Record<string, string> = {
@@ -5012,6 +5027,12 @@ Rules:
             create_calendar_event: 'Drafting calendar event for approval',
             transcribe_audio: 'Transcribing audio',
             text_to_speech: 'Running the tool — text to speech',
+            execute_script: 'Running script',
+            npm_run: 'Running npm command',
+            git_ops: 'Running git operation',
+            delete_memory: 'Deleting memory entry',
+            run_tests: 'Running test suite',
+            check_lint: 'Running lint check',
           }
           const chipLabel = toolCalls.length > 1
             ? `Running ${toolCalls.length} tools...`
@@ -5034,6 +5055,8 @@ Rules:
             send_email: 'zap',
             get_schema: 'database', get_deployment_history: 'rocket', search_github: 'search',
             create_calendar_event: 'calendarToday', transcribe_audio: 'mic', text_to_speech: 'mic',
+            execute_script: 'code', npm_run: 'terminal', git_ops: 'git',
+            delete_memory: 'trash', run_tests: 'checkCircle', check_lint: 'alertCircle',
           }
           const stepTraceIcon = stepIcon[chipToolName] ?? 'zap'
           // Use WORKLOG_STEP_LABELS for the running trace label (human-readable)
