@@ -2289,7 +2289,7 @@ async function getAwareness(userId: string): Promise<{ daysSince: number; sessio
       // Brief if returning after 6+ hours away (not just a page refresh)
       const hoursSince = (now.getTime() - new Date(last).getTime()) / (1000 * 60 * 60)
       shouldBrief = hoursSince >= 6
-      await query('UPDATE user_sessions SET last_seen_at = NOW(), session_count = session_count + 1 WHERE user_id = $1', [userId])
+      void query('UPDATE user_sessions SET last_seen_at = NOW(), session_count = session_count + 1 WHERE user_id = $1', [userId]).catch(() => {})
     } else {
       shouldBrief = true // First ever session
       await query('INSERT INTO user_sessions (user_id, last_seen_at, session_count, first_seen_at) VALUES ($1, NOW(), 1, NOW()) ON CONFLICT (user_id) DO NOTHING', [userId])
@@ -4100,6 +4100,8 @@ async function getUserConnectorTools(userId: string): Promise<Array<{
   type: string
   function: { name: string; description: string; parameters: Record<string, unknown> }
 }>> {
+  const cached = _ctCache.get(userId)
+  if (cached && cached.expiresAt > Date.now()) return cached.tools
   try {
     const apiKey = process.env.COMPOSIO_API_KEY
     if (!apiKey) return []
@@ -4132,6 +4134,7 @@ async function getUserConnectorTools(userId: string): Promise<Array<{
         }
       }
     }
+    _ctCache.set(userId, { tools, expiresAt: Date.now() + 2 * 60 * 1000 })
     return tools
   } catch { return [] }
 }
@@ -4421,6 +4424,10 @@ function setCachedSearch(query: string, result: string): void {
   _searchCache.set(query, { result, expiresAt: Date.now() + 60_000 })
 }
 
+// ── Connector-tools TTL cache — avoids live Composio API call on every request ──
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const _ctCache = new Map<string, { tools: any[]; expiresAt: number }>()
+
 const _rlMap = new Map<string, { count: number; resetAt: number }>()
 
 // ── Session-level abort: kill previous in-flight request when same user sends new one ──
@@ -4538,7 +4545,8 @@ export async function POST(req: NextRequest) {
       }
 
       // Inject project context (Phase 3 residual) — if repo was ingested, add structural awareness
-      const projectCtx = await getProjectContext(userId, 'Draguniteus/sparkie-studio')
+      // Skipped: getProjectContext not used in system prompt — saves one extra fetch per request
+      const projectCtx: string | null = null
       if (projectCtx) {
         // Auto-refresh if stale (> 2 hours)
         const ageMs = Date.now() - new Date(projectCtx.lastIngestedAt).getTime()
@@ -4896,7 +4904,7 @@ Rules:
               method: 'POST',
               headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
               body: JSON.stringify({
-                model: 'openai-gpt-4.1',
+                model: MODELS.CAPABLE, // was openai-gpt-4.1 (tier-blocked) — Flame handles planning
                 stream: false,
                 temperature: 0.3,
                 max_tokens: 600,
