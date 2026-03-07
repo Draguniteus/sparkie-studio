@@ -2101,7 +2101,117 @@ const SPARKIE_TOOLS = [
         required: ['path', 'message'],
       },
     },
-  }]
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'write_database',
+      description: 'Run an INSERT, UPDATE, or DELETE SQL statement on the Sparkie database. Use to manage tasks, worklog entries, memories, feed posts, or any other Sparkie data. Always query_database first to confirm the record exists before updating/deleting.',
+      parameters: {
+        type: 'object',
+        properties: {
+          sql: { type: 'string', description: 'SQL statement: INSERT, UPDATE, or DELETE. Never use SELECT here — use query_database instead.' },
+          params: { type: 'array', items: {}, description: 'Optional parameter values for parameterized query ($1, $2, ...)' },
+        },
+        required: ['sql'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'update_task',
+      description: 'Update the status or result of a task in sparkie_tasks. Use to mark tasks as approved, running, completed, or failed after acting on them. Call read_pending_tasks first to get the task ID.',
+      parameters: {
+        type: 'object',
+        properties: {
+          task_id: { type: 'string', description: 'Task ID to update (from read_pending_tasks)' },
+          status: { type: 'string', enum: ['pending', 'approved', 'running', 'completed', 'failed', 'skipped'], description: 'New status' },
+          result: { type: 'string', description: 'Optional: outcome or result message to store on the task' },
+        },
+        required: ['task_id', 'status'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'delete_task',
+      description: 'Permanently delete a task from sparkie_tasks. Use to clean up orphaned, duplicate, or obsolete tasks. Always confirm the task ID with read_pending_tasks first.',
+      parameters: {
+        type: 'object',
+        properties: {
+          task_id: { type: 'string', description: 'Task ID to delete' },
+        },
+        required: ['task_id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'update_worklog',
+      description: 'Write an entry to sparkie_worklog. Log your actions, decisions, and outcomes. Include reasoning, tools called, commit SHAs, and confidence. Call after every meaningful action — code pushes, deploys, task completions, failed attempts.',
+      parameters: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', description: 'Entry type: "code_push", "task_executed", "memory_learned", "tool_call", "ai_response", "decision"' },
+          message: { type: 'string', description: 'Human-readable summary of what happened' },
+          metadata: { type: 'object', additionalProperties: true, description: 'Optional structured metadata: commit, files_read, tools_called, reasoning, confidence, outcome' },
+        },
+        required: ['type', 'message'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_memory',
+      description: 'Fetch memories on demand mid-session. Use when you need to recall something specific about the user or yourself that may not be in the current context window. Searches user_memories and sparkie_self_memory tables.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Keyword or phrase to search in memory content (case-insensitive)' },
+          category: { type: 'string', description: 'Optional: filter by category (identity, preference, emotion, project, relationship, habit, self, user, creative, world)' },
+          limit: { type: 'number', description: 'Max results to return (default 10)' },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'delete_file',
+      description: 'Delete a file from the Sparkie Studio GitHub repository (master branch). Use to clean up stale scripts, configs, or files no longer needed. Always confirm the file exists with get_github first. Irreversible.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'File path in repo to delete, e.g. "src/old-script.ts"' },
+          message: { type: 'string', description: 'Git commit message explaining why the file is being deleted' },
+        },
+        required: ['path', 'message'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'send_email',
+      description: "Send an email directly from Michael's Gmail account. For sensitive sends, prefer create_task with action:'send_email' to get HITL approval first. This sends immediately — use with care.",
+      parameters: {
+        type: 'object',
+        properties: {
+          to: { type: 'string', description: 'Recipient email address' },
+          subject: { type: 'string', description: 'Email subject line' },
+          body: { type: 'string', description: 'Email body — plain text or HTML' },
+          cc: { type: 'string', description: 'Optional CC email address' },
+        },
+        required: ['to', 'subject', 'body'],
+      },
+    },
+  },
+]
 
 // ── Memory helpers ─────────────────────────────────────────────────────────────
 async function loadMemories(userId: string, queryText?: string): Promise<string> {
@@ -3466,6 +3576,171 @@ async function executeTool(
         }
       }
 
+      case 'write_database': {
+        if (!userId) return 'Not authenticated'
+        const { sql: writeSql, params: writeParams } = args as { sql: string; params?: unknown[] }
+        if (!writeSql) return 'write_database: sql is required'
+        const upperSql = writeSql.trim().toUpperCase()
+        if (upperSql.startsWith('SELECT')) return 'write_database: use query_database for SELECT queries'
+        try {
+          const writeResult = await query(writeSql, writeParams ?? [])
+          const rowCount = writeResult.rowCount ?? 0
+          return `✅ write_database: ${rowCount} row(s) affected`
+        } catch (e) {
+          return `write_database error: ${String(e)}`
+        }
+      }
+
+      case 'update_task': {
+        if (!userId) return 'Not authenticated'
+        const { task_id: updateTaskId, status: newStatus, result: taskResult } = args as {
+          task_id: string; status: string; result?: string
+        }
+        if (!updateTaskId || !newStatus) return 'update_task: task_id and status are required'
+        try {
+          const existing = await query('SELECT id FROM sparkie_tasks WHERE id = $1 AND user_id = $2', [updateTaskId, userId])
+          if (existing.rows.length === 0) return `update_task: task ${updateTaskId} not found`
+          await query(
+            `UPDATE sparkie_tasks SET status = $1, resolved_at = CASE WHEN $1 IN ('completed','failed','skipped') THEN NOW() ELSE resolved_at END WHERE id = $2 AND user_id = $3`,
+            [newStatus, updateTaskId, userId]
+          )
+          if (taskResult) {
+            await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS result TEXT`).catch(() => {})
+            await query(`UPDATE sparkie_tasks SET result = $1 WHERE id = $2`, [taskResult, updateTaskId]).catch(() => {})
+          }
+          return `✅ update_task: ${updateTaskId} → ${newStatus}${taskResult ? ' | ' + taskResult : ''}`
+        } catch (e) {
+          return `update_task error: ${String(e)}`
+        }
+      }
+
+      case 'delete_task': {
+        if (!userId) return 'Not authenticated'
+        const { task_id: delTaskId } = args as { task_id: string }
+        if (!delTaskId) return 'delete_task: task_id is required'
+        try {
+          const existing = await query('SELECT id, label FROM sparkie_tasks WHERE id = $1 AND user_id = $2', [delTaskId, userId])
+          if (existing.rows.length === 0) return `delete_task: task ${delTaskId} not found`
+          const taskLabel = (existing.rows[0] as { label: string }).label
+          await query('DELETE FROM sparkie_tasks WHERE id = $1 AND user_id = $2', [delTaskId, userId])
+          return `✅ delete_task: deleted "${taskLabel}" (${delTaskId})`
+        } catch (e) {
+          return `delete_task error: ${String(e)}`
+        }
+      }
+
+      case 'update_worklog': {
+        if (!userId) return 'Not authenticated'
+        const { type: wlType, message: wlMessage, metadata: wlMeta } = args as {
+          type: string; message: string; metadata?: Record<string, unknown>
+        }
+        if (!wlType || !wlMessage) return 'update_worklog: type and message are required'
+        try {
+          await writeWorklog(userId, wlType, wlMessage, wlMeta ?? {})
+          return `✅ Worklog entry saved: [${wlType}] ${wlMessage.slice(0, 80)}${wlMessage.length > 80 ? '...' : ''}`
+        } catch (e) {
+          return `update_worklog error: ${String(e)}`
+        }
+      }
+
+      case 'read_memory': {
+        if (!userId) return 'Not authenticated'
+        const { query: memQuery, category: memCategory, limit: memLimit = 10 } = args as {
+          query?: string; category?: string; limit?: number
+        }
+        try {
+          let userMemSql: string
+          let userParams: unknown[]
+          if (memQuery && memCategory) {
+            userMemSql = `SELECT 'user' AS source, category, content, created_at FROM user_memories WHERE user_id = $1 AND content ILIKE $2 AND category = $3 ORDER BY created_at DESC LIMIT $4`
+            userParams = [userId, `%${memQuery}%`, memCategory, memLimit]
+          } else if (memQuery) {
+            userMemSql = `SELECT 'user' AS source, category, content, created_at FROM user_memories WHERE user_id = $1 AND content ILIKE $2 ORDER BY created_at DESC LIMIT $3`
+            userParams = [userId, `%${memQuery}%`, memLimit]
+          } else if (memCategory) {
+            userMemSql = `SELECT 'user' AS source, category, content, created_at FROM user_memories WHERE user_id = $1 AND category = $2 ORDER BY created_at DESC LIMIT $3`
+            userParams = [userId, memCategory, memLimit]
+          } else {
+            userMemSql = `SELECT 'user' AS source, category, content, created_at FROM user_memories WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2`
+            userParams = [userId, memLimit]
+          }
+          const userMems = await query(userMemSql, userParams)
+          await query(`CREATE TABLE IF NOT EXISTS sparkie_self_memory (
+            id SERIAL PRIMARY KEY, user_id TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'self',
+            content TEXT NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW()
+          )`).catch(() => {})
+          let selfMemSql: string
+          let selfParams: unknown[]
+          if (memQuery) {
+            selfMemSql = `SELECT 'self' AS source, category, content, created_at FROM sparkie_self_memory WHERE user_id = $1 AND content ILIKE $2 ORDER BY created_at DESC LIMIT $3`
+            selfParams = [userId, `%${memQuery}%`, memLimit]
+          } else {
+            selfMemSql = `SELECT 'self' AS source, category, content, created_at FROM sparkie_self_memory WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2`
+            selfParams = [userId, memLimit]
+          }
+          const selfMems = await query(selfMemSql, selfParams)
+          const allRows = [...userMems.rows, ...selfMems.rows] as Array<{ source: string; category: string; content: string }>
+          if (allRows.length === 0) return `read_memory: no memories found${memQuery ? ' matching "' + memQuery + '"' : ''}`
+          return allRows.map(r => `[${r.source}:${r.category}] ${r.content}`).join('\n')
+        } catch (e) {
+          return `read_memory error: ${String(e)}`
+        }
+      }
+
+      case 'delete_file': {
+        if (!userId) return 'Not authenticated'
+        const { path: delPath, message: delMsg } = args as { path: string; message: string }
+        if (!delPath || !delMsg) return 'delete_file: path and message are required'
+        try {
+          const GITHUB_TOKEN = process.env.GITHUB_TOKEN ?? process.env.GITHUB_PAT ?? ''
+          if (!GITHUB_TOKEN) return 'GITHUB_TOKEN not configured'
+          const owner = 'Draguniteus'
+          const repo = 'sparkie-studio'
+          const fetchRes = await fetch(
+            `https://api.github.com/repos/${owner}/${repo}/contents/${delPath}`,
+            { headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: 'application/vnd.github.v3+json' }, signal: AbortSignal.timeout(8000) }
+          )
+          if (!fetchRes.ok) return `delete_file: could not find ${delPath} (${fetchRes.status})`
+          const fetchData = await fetchRes.json() as { sha: string }
+          const deleteRes = await fetch(
+            `https://api.github.com/repos/${owner}/${repo}/contents/${delPath}`,
+            {
+              method: 'DELETE',
+              headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: 'application/vnd.github.v3+json', 'Content-Type': 'application/json' },
+              body: JSON.stringify({ message: delMsg, sha: fetchData.sha }),
+              signal: AbortSignal.timeout(10000),
+            }
+          )
+          if (!deleteRes.ok) {
+            const errText = await deleteRes.text()
+            return `delete_file failed (${deleteRes.status}): ${errText.slice(0, 200)}`
+          }
+          const deleteData = await deleteRes.json() as { commit?: { sha?: string } }
+          const commitSha = deleteData.commit?.sha?.slice(0, 12) ?? '?'
+          writeWorklog(userId ?? 'system', 'code_push', `delete_file: ${delPath} — ${delMsg}`, { commit: commitSha, path: delPath }).catch(() => {})
+          return `✅ Deleted: ${delPath}\nCommit: ${commitSha}\nMessage: ${delMsg}`
+        } catch (e) {
+          return `delete_file error: ${String(e)}`
+        }
+      }
+
+      case 'send_email': {
+        if (!userId) return 'Not authenticated'
+        const { to: emailTo, subject: emailSubject, body: emailBody, cc: emailCc } = args as {
+          to: string; subject: string; body: string; cc?: string
+        }
+        if (!emailTo || !emailSubject || !emailBody) return 'send_email: to, subject, and body are required'
+        try {
+          const sendArgs: Record<string, string> = { to: emailTo, subject: emailSubject, body: emailBody }
+          if (emailCc) sendArgs.cc = emailCc
+          const sendResult = await executeConnectorTool('GMAIL_SEND_EMAIL', sendArgs, userId)
+          writeWorklog(userId, 'task_executed', `📧 Sent email to ${emailTo}: "${emailSubject}"`, { decision_type: 'action', signal_priority: 'P2' }).catch(() => {})
+          return sendResult
+        } catch (e) {
+          return `send_email error: ${String(e)}`
+        }
+      }
+
       case 'post_to_social': {
         if (!userId) return 'Not authenticated'
         const { platform, text, media_url, subreddit, title } = args as {
@@ -4673,6 +4948,11 @@ Rules:
             // Skills & Context
             install_skill: 'Installing skill...', update_context: 'Updating context...',
             update_actions: 'Updating action plan...',
+            // Sprint 1 — P0 self-management
+            write_database: 'Writing to database...', update_task: 'Updating task...',
+            delete_task: 'Deleting task...', update_worklog: 'Logging to worklog...',
+            read_memory: 'Memory recalled', delete_file: 'Deleting file...',
+            send_email: 'Sending email...',
           }
           // Human-readable worklog step labels (shown in worklog trace, richer than chip labels)
           const WORKLOG_STEP_LABELS: Record<string, string> = {
@@ -4704,6 +4984,13 @@ Rules:
             install_skill: 'Running the tool — installing skill',
             update_context: 'Running the tool — updating context',
             update_actions: 'Running the tool — updating action plan',
+            write_database: 'Writing to database',
+            update_task: 'Running the tool — updating task',
+            delete_task: 'Running the tool — deleting task',
+            update_worklog: 'Writing to worklog',
+            read_memory: 'Reading from memory',
+            delete_file: 'Running the tool — deleting file',
+            send_email: 'Running the tool — sending email',
           }
           const chipLabel = toolCalls.length > 1
             ? `Running ${toolCalls.length} tools...`
@@ -4721,6 +5008,9 @@ Rules:
             generate_image: 'image', generate_music: 'music',
             generate_video: 'video', generate_speech: 'mic',
             post_to_social: 'zap', send_discord: 'zap', post_to_feed: 'zap',
+            write_database: 'database', update_task: 'scroll', delete_task: 'scroll',
+            update_worklog: 'scroll', read_memory: 'brain', delete_file: 'edit',
+            send_email: 'zap',
           }
           const stepTraceIcon = stepIcon[chipToolName] ?? 'zap'
           // Use WORKLOG_STEP_LABELS for the running trace label (human-readable)
