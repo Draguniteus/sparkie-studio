@@ -1,0 +1,32 @@
+name: Fix TS2339 projectCtx block
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type YES to confirm
+        required: true
+        default: YES
+
+jobs:
+  ts-fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Remove dead projectCtx block
+        run: python3 .github/scripts/ts_fix.py
+
+      - name: Commit fixed route.ts
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/app/api/chat/route.ts
+          git diff --cached --stat
+          git commit -m "fix(route): remove dead projectCtx block — resolves TS2339 never error"
+          git push origin master
