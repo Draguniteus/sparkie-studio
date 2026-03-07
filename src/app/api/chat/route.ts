@@ -4544,16 +4544,7 @@ export async function POST(req: NextRequest) {
         systemContent += formatUserModelBlock(userModel)
       }
 
-      // Inject project context (Phase 3 residual) — if repo was ingested, add structural awareness
-      // Skipped: getProjectContext not used in system prompt — saves one extra fetch per request
-      const projectCtx: string | null = null
-      if (projectCtx) {
-        // Auto-refresh if stale (> 2 hours)
-        const ageMs = Date.now() - new Date(projectCtx.lastIngestedAt).getTime()
-        if (ageMs < 2 * 60 * 60 * 1000) {
-          systemContent += '\n\n' + formatProjectContextBlock(projectCtx)
-        }
-      }
+      // getProjectContext skipped — not used in system prompt (perf fix)
 
       // Inject session snapshot for continuity (if recent session exists and this looks like continuation)
       if (sessionSnapshot && messages.length <= 3) {
