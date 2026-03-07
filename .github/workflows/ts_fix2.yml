@@ -1,0 +1,27 @@
+name: Fix TS2345 IdentityFiles fast-path
+on:
+  workflow_dispatch:
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Apply type fix
+        run: python3 .github/scripts/ts_fix2.py
+      - name: Verify TypeScript
+        run: |
+          npm ci --prefer-offline 2>/dev/null || npm install
+          npx tsc --noEmit --skipLibCheck 2>&1 | tail -20
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/app/api/chat/route.ts
+          git diff --cached --stat
+          git commit -m "fix(route): TS2345 — cast CONVERSATIONAL fast-path returns to correct types"
+          git push origin master
