@@ -27,7 +27,7 @@ export async function executeSprint2Tool(
                ORDER BY ordinal_position`,
               [tbl]
             )
-            rows.push(...res.rows.map((r: Record<string, string>) => ({ table_name: tbl, ...r })))
+            rows.push(...res.rows.map((r: any) => ({ table_name: tbl, ...r } as Record<string, string | null>)))
           }
           if (!rows.length) return `No columns found for table(s): ${tables}. Check table names.`
           const grouped: Record<string, string[]> = {}
@@ -41,7 +41,7 @@ export async function executeSprint2Tool(
             `SELECT table_name FROM information_schema.tables
              WHERE table_schema = 'public' ORDER BY table_name`
           )
-          return 'Tables: ' + res.rows.map((r: { table_name: string }) => r.table_name).join(', ')
+          return 'Tables: ' + res.rows.map((r: any) => String(r.table_name)).join(', ')
         }
       } catch (e) {
         return `get_schema error: ${String(e)}`
