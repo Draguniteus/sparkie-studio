@@ -15,13 +15,13 @@ NEW_IMPORT = (
 )
 assert OLD_IMPORT in content, "PATCH1 anchor not found"
 content = content.replace(OLD_IMPORT, NEW_IMPORT, 1)
-print("PATCH1: imports added")
+print("PATCH 1 OK")
 
 idx = content.rfind("name: 'send_email'")
 close_idx = content.find("  },\n]\n", idx)
 assert close_idx > 0, "PATCH2 array close not found"
 content = content[:close_idx] + "  },\n  ...SPARKIE_TOOLS_S2,\n]\n" + content[close_idx + len("  },\n]\n"):]
-print("PATCH2: SPARKIE_TOOLS_S2 spread added")
+print("PATCH 2 OK")
 
 OLD_DEFAULT = (
     "      default:\n"
@@ -43,7 +43,7 @@ NEW_DEFAULT = (
 )
 assert OLD_DEFAULT in content, "PATCH3 default case not found"
 content = content.replace(OLD_DEFAULT, NEW_DEFAULT, 1)
-print("PATIH3: executeSprint2Tool dispatch added")
+print("PATCH 3 OK")
 
 gct_idx = content.find('get_current_time: "')
 assert gct_idx > 0, "PATCH4 hive anchor not found"
@@ -60,7 +60,7 @@ sprint2_hive = (
     '        text_to_speech: "Voice Synthesis Active",\n'
 )
 content = content[:insert_at] + sprint2_hive + content[insert_at:]
-print("PATCH4O+\")
+print("PATCH 4 OK")
 
 OLD_CHIP = "            send_email: 'Sending email...',\n          }"
 NEW_CHIP = (
@@ -72,7 +72,7 @@ NEW_CHIP = (
 )
 assert OLD_CHIP in content, "PATCH5 chip not found"
 content = content.replace(OLD_CHIP, NEW_CHIP, 1)
-print("PATCH5: CHIPLABELS: added")
+print("PATCH 5 OK")
 
 OLD_WLOG = "            send_email: 'Running the tool \u2014 sending email',\n          }"
 NEW_WLOG = (
@@ -87,7 +87,7 @@ NEW_WLOG = (
 )
 assert OLD_WLOG in content, "PATCH6 worklog not found"
 content = content.replace(OLD_WLOG, NEW_WLOG, 1)
-print("PATCH6: WORKLOG_STEP_LABELS added")
+print("PATCH 6 OK")
 
 OLD_ICON = "            send_email: 'zap',\n          }"
 NEW_ICON = (
@@ -98,7 +98,7 @@ NEW_ICON = (
 )
 assert OLD_ICON in content, "PATCH7 icon not found"
 content = content.replace(OLD_ICON, NEW_ICON, 1)
-print("PATCH0º stepIcon added")
+print("PATCH 7 OK")
 
 checks = [
     "import { SPARKIE_TOOLS_S2 }",
