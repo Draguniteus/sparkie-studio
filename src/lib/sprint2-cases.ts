@@ -18,7 +18,7 @@ export async function executeSprint2Tool(
       try {
         if (tables && tables.trim()) {
           const tableList = tables.split(',').map((t: string) => t.trim()).filter(Boolean)
-          const rows: Array<{ table_name: string; column_name: string; data_type: string; is_nullable: string; column_default: string | null }> = []
+          const rows: Array<Record<string, string | null>> = []
           for (const tbl of tableList) {
             const res = await query(
               `SELECT column_name, data_type, is_nullable, column_default
@@ -32,8 +32,8 @@ export async function executeSprint2Tool(
           if (!rows.length) return `No columns found for table(s): ${tables}. Check table names.`
           const grouped: Record<string, string[]> = {}
           for (const r of rows) {
-            if (!grouped[r.table_name]) grouped[r.table_name] = []
-            grouped[r.table_name].push(`  ${r.column_name} ${r.data_type.toUpperCase()}${r.is_nullable === 'NO' ? ' NOT NULL' : ''}${r.column_default ? ' DEFAULT ' + r.column_default : ''}`)
+            if (!grouped[r.table_name!]) grouped[r.table_name!] = []
+            grouped[r.table_name!].push(`  ${r.column_name} ${String(r.data_type).toUpperCase()}${r.is_nullable === 'NO' ? ' NOT NULL' : ''}${r.column_default ? ' DEFAULT ' + r.column_default : ''}`)
           }
           return Object.entries(grouped).map(([t, cols]) => `TABLE ${t}:\n${cols.join('\n')}`).join('\n\n')
         } else {
