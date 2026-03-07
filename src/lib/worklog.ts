@@ -18,7 +18,6 @@ export type WorklogType =
   | 'tool_call'
   | 'proactive_signal'
   | 'decision'
-  | 'decision'
   | 'hold'
   | 'self_assessment'
 
@@ -78,7 +77,7 @@ async function ensureTable() {
 
 export async function writeWorklog(
   userId: string,
-  type: WorklogType,
+  type: WorklogType | string,
   content: string,
   metadata: WorklogMeta = {}
 ): Promise<void> {
