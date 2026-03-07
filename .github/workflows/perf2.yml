@@ -1,0 +1,27 @@
+name: Perf Pass 2
+on:
+  workflow_dispatch:
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Apply all perf patches
+        run: python3 .github/scripts/perf2_apply.py
+      - name: Verify TypeScript
+        run: |
+          npm ci --prefer-offline 2>/dev/null || npm install
+          npx tsc --noEmit --skipLibCheck 2>&1 | tail -20
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/app/api/chat/route.ts src/store/appStore.ts src/components/chat/ChatView.tsx src/components/chat/ChatInput.tsx
+          git diff --cached --stat
+          git commit -m "perf(pass2): DDL guard, mem cache, flamePlan timeout, CONVERSATIONAL fast-path, shallow store, rAF throttle"
+          git push origin master
