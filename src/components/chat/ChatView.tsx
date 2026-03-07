@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '@/store/appStore'
+import { shallow } from 'zustand/shallow'
 import { ChatInput } from './ChatInput'
 import { MessageBubble } from './MessageBubble'
 import { Code, Share, MoreHorizontal, Brain, ChevronRight, CheckCircle, AlertCircle, Loader2 } from 'lucide-react'
@@ -14,7 +15,17 @@ const STEP_ICON_MAP: Record<string, string> = {
 }
 
 export function ChatView() {
-  const { chats, currentChatId, ideOpen, toggleIDE, userAvatarUrl, longTaskLabel } = useAppStore()
+  const { chats, currentChatId, ideOpen, toggleIDE, userAvatarUrl, longTaskLabel } = useAppStore(
+    (s) => ({
+      chats: s.chats,
+      currentChatId: s.currentChatId,
+      ideOpen: s.ideOpen,
+      toggleIDE: s.toggleIDE,
+      userAvatarUrl: s.userAvatarUrl,
+      longTaskLabel: s.longTaskLabel,
+    }),
+    shallow
+  )
   const chat = chats.find(c => c.id === currentChatId)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [traceOpen, setTraceOpen] = useState(false)

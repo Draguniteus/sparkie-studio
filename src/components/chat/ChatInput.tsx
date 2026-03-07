@@ -153,6 +153,7 @@ export function ChatInput() {
   const agentAbortRef = useRef<AbortController | null>(null)
   const chatAbortRef = useRef<AbortController | null>(null)
   const [isRecording, setIsRecording] = useState(false)
+  const streamFlushRef = useRef<number>(0)
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [isVoiceChatOpen, setIsVoiceChatOpen] = useState(false)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -920,7 +921,10 @@ export function ChatInput() {
                 addWorklogEntry({ type: 'result', content: 'Analyzed', status: 'done' })
               }
               fullContent += delta.content
-              updateMessage(chatId, assistantMsgId, { content: fullContent })
+              clearTimeout(streamFlushRef.current)
+              streamFlushRef.current = setTimeout(() => {
+                updateMessage(chatId, assistantMsgId, { content: fullContent })
+              }, 16) as unknown as number
             }
           } catch { /* skip */ }
         }

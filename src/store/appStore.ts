@@ -233,18 +233,29 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
     return id
   },
 
-  appendToMessage: (id, content) =>
-    set((s) => ({
-      messages: s.messages.map((m) => m.id === id ? { ...m, content: m.content + content } : m),
-      chats: s.chats.map((c) => ({
-        ...c,
-        messages: c.messages.map((m) => m.id === id ? { ...m, content: m.content + content } : m),
-      })),
-    })),
+  appendToMessage: (id, content) => {
+    const s = get()
+    const chatIdx = s.chats.findIndex(c => c.messages.some(m => m.id === id))
+    if (chatIdx < 0) return
+    set((st) => {
+      const newChats = [...st.chats]
+      const chat = newChats[chatIdx]
+      newChats[chatIdx] = { ...chat, messages: chat.messages.map((m) => m.id === id ? { ...m, content: m.content + content } : m) }
+      return { chats: newChats, messages: st.messages.map((m) => m.id === id ? { ...m, content: m.content + content } : m) }
+    })
+  },
 
   updateMessage: (chatIdOrId, idOrPatch, patch) => {
     if (patch !== undefined) {
       const msgId = idOrPatch as string
+      // Guard: skip if nothing changed
+      const s0 = get()
+      const chat0 = s0.chats.find(c => c.id === chatIdOrId)
+      const msg0 = chat0?.messages.find(m => m.id === msgId)
+      if (msg0) {
+        const keys = Object.keys(patch) as Array<keyof typeof patch>
+        if (keys.every(k => (msg0 as Record<string, unknown>)[k] === (patch as Record<string, unknown>)[k])) return
+      }
       set((s) => ({
         messages: s.messages.map((m) => m.id === msgId ? { ...m, ...patch } : m),
         chats: s.chats.map((c) =>

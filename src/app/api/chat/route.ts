@@ -2222,6 +2222,25 @@ const SPARKIE_TOOLS = [
   ...SPARKIE_TOOLS_S4,
 ]
 
+// ── One-time DDL init guard ───────────────────────────────────────────────────────
+let _dbInitialized = false
+async function ensureDbInit(): Promise<void> {
+  if (_dbInitialized) return
+  _dbInitialized = true
+  try {
+    await query(`CREATE TABLE IF NOT EXISTS user_memories (
+      id SERIAL PRIMARY KEY, user_id TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'general',
+      content TEXT NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`)
+    await query(`CREATE INDEX IF NOT EXISTS idx_user_memories_user_id ON user_memories(user_id)`)
+    await query(`CREATE TABLE IF NOT EXISTS user_sessions (
+      id SERIAL PRIMARY KEY, user_id TEXT NOT NULL UNIQUE,
+      last_seen_at TIMESTAMPTZ DEFAULT NOW(), session_count INTEGER DEFAULT 1,
+      first_seen_at TIMESTAMPTZ DEFAULT NOW()
+    )`)
+  } catch { /* tables may already exist */ }
+}
+
 // ── Memory helpers ─────────────────────────────────────────────────────────────
 async function loadMemories(userId: string, queryText?: string): Promise<string> {
   // ── Supermemory semantic retrieval (if configured) ──────────────────────────
@@ -2232,7 +2251,7 @@ async function loadMemories(userId: string, queryText?: string): Promise<string>
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${smKey}` },
         body: JSON.stringify({ containerTag: userId, q: queryText }),
-        signal: AbortSignal.timeout(4000),
+        signal: AbortSignal.timeout(2000),
       })
       if (smRes.ok) {
         const sm = await smRes.json() as {
@@ -2253,16 +2272,7 @@ async function loadMemories(userId: string, queryText?: string): Promise<string>
 
   // ── SQL fallback ─────────────────────────────────────────────────────────────
   try {
-    await query(`CREATE TABLE IF NOT EXISTS user_memories (
-      id SERIAL PRIMARY KEY, user_id TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'general',
-      content TEXT NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW()
-    )`)
-    await query(`CREATE INDEX IF NOT EXISTS idx_user_memories_user_id ON user_memories(user_id)`)
-    await query(`CREATE TABLE IF NOT EXISTS user_sessions (
-      id SERIAL PRIMARY KEY, user_id TEXT NOT NULL UNIQUE,
-      last_seen_at TIMESTAMPTZ DEFAULT NOW(), session_count INTEGER DEFAULT 1,
-      first_seen_at TIMESTAMPTZ DEFAULT NOW()
-    )`)
+    await ensureDbInit()
     const res = await query<{ category: string; content: string }>(
       'SELECT category, content FROM user_memories WHERE user_id = $1 ORDER BY created_at ASC',
       [userId]
@@ -4427,6 +4437,7 @@ function setCachedSearch(query: string, result: string): void {
 // ── Connector-tools TTL cache — avoids live Composio API call on every request ──
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const _ctCache = new Map<string, { tools: any[]; expiresAt: number }>()
+const _memCache = new Map<string, { text: string; expiresAt: number }>()
 
 const _rlMap = new Map<string, { count: number; resetAt: number }>()
 
@@ -4514,13 +4525,20 @@ export async function POST(req: NextRequest) {
       recordUserActivity(userId).catch(() => {})
 
       const [memoriesText, awareness, identityFiles, envCtx, sessionSnapshot, readyIntents, userModel] = await Promise.all([
-        loadMemories(userId, messages.filter((m: { role: string; content: string }) => m.role === 'user').at(-1)?.content?.slice(0, 200)),
+        (() => {
+          const _mce = _memCache.get(userId)
+          if (_mce && _mce.expiresAt > Date.now()) return Promise.resolve(_mce.text)
+          return loadMemories(userId, messages.filter((m: { role: string; content: string }) => m.role === 'user').at(-1)?.content?.slice(0, 200)).then(t => {
+            _memCache.set(userId, { text: t, expiresAt: Date.now() + 30_000 })
+            return t
+          })
+        })(),
         getAwareness(userId),
-        loadIdentityFiles(userId),
-        buildEnvironmentalContext(userId),
-        readSessionSnapshot(userId),
-        loadReadyDeferredIntents(userId),
-        getUserModel(userId),
+        modelSelection.tier === 'conversational' ? Promise.resolve([]) : loadIdentityFiles(userId),
+        modelSelection.tier === 'conversational' ? Promise.resolve('') : buildEnvironmentalContext(userId),
+        modelSelection.tier === 'conversational' ? Promise.resolve(null) : readSessionSnapshot(userId),
+        modelSelection.tier === 'conversational' ? Promise.resolve([]) : loadReadyDeferredIntents(userId),
+        modelSelection.tier === 'conversational' ? Promise.resolve(null) : getUserModel(userId),
       ])
       shouldBrief = awareness.shouldBrief && messages.length <= 2 // Only brief on session open
 
@@ -4889,20 +4907,26 @@ Rules:
             ...loopMessages.slice(-4),
           ]
 
-          const flamePlanRes = await fetch(
-            `${OPENCODE_BASE}/chat/completions`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-              body: JSON.stringify({
-                model: MODELS.CAPABLE, // was openai-gpt-4.1 (tier-blocked) — Flame handles planning
-                stream: false,
-                temperature: 0.3,
-                max_tokens: 600,
-                messages: planMessages,
-              }),
-            }
+          const _planTimeout = new Promise<Response>((_, rej) =>
+            setTimeout(() => rej(new Error('plan_timeout')), 1500)
           )
+          const flamePlanRes = await Promise.race([
+            fetch(
+              `${OPENCODE_BASE}/chat/completions`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+                body: JSON.stringify({
+                  model: MODELS.CAPABLE,
+                  stream: false,
+                  temperature: 0.3,
+                  max_tokens: 600,
+                  messages: planMessages,
+                }),
+              }
+            ),
+            _planTimeout,
+          ])
 
           if (flamePlanRes.ok) {
             const planData = await flamePlanRes.json()
