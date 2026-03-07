@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 import { getServerSession } from 'next-auth/next'
 import { authOptions } from '@/lib/auth'
 import { query } from '@/lib/db'
-import { loadIdentityFiles, buildIdentityBlock, updateSessionFile, updateContextFile, updateActionsFile } from '@/lib/identity'
+import { loadIdentityFiles, buildIdentityBlock, updateSessionFile, updateContextFile, updateActionsFile, type IdentityFiles } from '@/lib/identity'
 import { buildEnvironmentalContext, formatEnvContextBlock, recordUserActivity } from '@/lib/environmentalContext'
 import { extractDeferredIntent, saveDeferredIntent, loadReadyDeferredIntents, markDeferredIntentSurfaced } from '@/lib/timeModel'
 import { startTrace, addTraceEntry, detectTraceLoop, endTrace, persistTrace } from '@/lib/executionTrace'
@@ -4534,10 +4534,10 @@ export async function POST(req: NextRequest) {
           })
         })(),
         getAwareness(userId),
-        modelSelection.tier === 'conversational' ? Promise.resolve([]) : loadIdentityFiles(userId),
+        modelSelection.tier === 'conversational' ? Promise.resolve({ user: '', memory: '', session: '', heartbeat: '', context: '', actions: '', snapshot: '' } as IdentityFiles) : loadIdentityFiles(userId),
         modelSelection.tier === 'conversational' ? Promise.resolve('') : buildEnvironmentalContext(userId),
         modelSelection.tier === 'conversational' ? Promise.resolve(null) : readSessionSnapshot(userId),
-        modelSelection.tier === 'conversational' ? Promise.resolve([]) : loadReadyDeferredIntents(userId),
+        modelSelection.tier === 'conversational' ? Promise.resolve([] as Awaited<ReturnType<typeof loadReadyDeferredIntents>>) : loadReadyDeferredIntents(userId),
         modelSelection.tier === 'conversational' ? Promise.resolve(null) : getUserModel(userId),
       ])
       shouldBrief = awareness.shouldBrief && messages.length <= 2 // Only brief on session open
