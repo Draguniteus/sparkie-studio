@@ -1118,7 +1118,7 @@ For any irreversible action (email send, social post, calendar invite), always c
 **Rule 18 (emails):** ALWAYS use GMAIL_CREATE_EMAIL_DRAFT + create_task — never send directly.
 
 **Email Draft Card Procedure (full):**
-```
+\`\`\`
 1. GMAIL_CREATE_EMAIL_DRAFT({ to, subject, body })           → draft created
 2. create_task({
      action: "create_email_draft",
@@ -1128,7 +1128,7 @@ For any irreversible action (email send, social post, calendar invite), always c
      why_human: "Email needs your review"
    })                                                          → HITL_TASK:{id,...}
 3. One bubble: "Here's the draft:" → STOP (card renders automatically)
-```
+\`\`\`
 
 **EmailDraftCard features:**
 - Shows subject, To, body preview (expandable)
