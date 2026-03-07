@@ -10,6 +10,8 @@ import { getAttempts, formatAttemptBlock } from '@/lib/attemptHistory'
 import { getUserModel, formatUserModelBlock, ingestSessionSignal } from '@/lib/userModel'
 import { readSessionSnapshot, writeSessionSnapshot } from '@/lib/threadStore'
 import { writeWorklog, writeMsgBatch } from '@/lib/worklog'
+import { SPARKIE_TOOLS_S2 } from '@/lib/sprint2-tools'
+import { executeSprint2Tool } from '@/lib/sprint2-cases'
 import { ingestRepo, getProjectContext, addKnownIssue, resolveKnownIssue, formatProjectContextBlock } from '@/lib/repoIngestion'
 
 export const runtime = 'nodejs'
@@ -2211,6 +2213,7 @@ const SPARKIE_TOOLS = [
       },
     },
   },
+  ...SPARKIE_TOOLS_S2,
 ]
 
 // ── Memory helpers ─────────────────────────────────────────────────────────────
@@ -3776,12 +3779,14 @@ async function executeTool(
         })}`
       }
 
-      default:
-        // Try as a connector action (user's connected apps)
+      default: {
+        const s2result = await executeSprint2Tool(name, args, userId)
+        if (s2result !== null) return s2result
         if (userId) {
           return await executeConnectorTool(name, args, userId)
         }
         return 'Tool not available: ' + name
+      }
     }
   } catch (e) {
     return `Tool error: ${String(e)}`
@@ -4796,6 +4801,13 @@ Make it feel like walking into your friend's creative space and being genuinely 
         install_skill: "⚡ Skill Bee Installing — New Capability Loading Into Hive...",
         // Time
         get_current_time: "⏱️ Chronos Bee Checking — Hive Clock Synchronized...",
+        // Sprint 2
+        get_schema: "Schema Bee Active",
+        get_deployment_history: "Deployment Archives Accessed",
+        search_github: "Code Scout Deployed",
+        create_calendar_event: "Calendar Bee Queued",
+        transcribe_audio: "Transcription Bee Online",
+        text_to_speech: "Voice Synthesis Active",
       }
       const pickHive = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)]
       hiveLog.push(pickHive(HIVE_INIT))
@@ -4953,6 +4965,9 @@ Rules:
             delete_task: 'Deleting task...', update_worklog: 'Logging to worklog...',
             read_memory: 'Memory recalled', delete_file: 'Deleting file...',
             send_email: 'Sending email...',
+            get_schema: 'Reading DB schema...', get_deployment_history: 'Pulling deploy history...',
+            search_github: 'Searching codebase...', create_calendar_event: 'Drafting calendar event...',
+            transcribe_audio: 'Transcribing audio...', text_to_speech: 'Synthesizing speech...',
           }
           // Human-readable worklog step labels (shown in worklog trace, richer than chip labels)
           const WORKLOG_STEP_LABELS: Record<string, string> = {
@@ -4991,6 +5006,12 @@ Rules:
             read_memory: 'Reading from memory',
             delete_file: 'Running the tool — deleting file',
             send_email: 'Running the tool — sending email',
+            get_schema: 'Reading database schema',
+            get_deployment_history: 'Pulling deployment history',
+            search_github: 'Searching the repository',
+            create_calendar_event: 'Drafting calendar event for approval',
+            transcribe_audio: 'Transcribing audio',
+            text_to_speech: 'Running the tool — text to speech',
           }
           const chipLabel = toolCalls.length > 1
             ? `Running ${toolCalls.length} tools...`
@@ -5011,6 +5032,8 @@ Rules:
             write_database: 'database', update_task: 'scroll', delete_task: 'scroll',
             update_worklog: 'scroll', read_memory: 'brain', delete_file: 'edit',
             send_email: 'zap',
+            get_schema: 'database', get_deployment_history: 'rocket', search_github: 'search',
+            create_calendar_event: 'calendarToday', transcribe_audio: 'mic', text_to_speech: 'mic',
           }
           const stepTraceIcon = stepIcon[chipToolName] ?? 'zap'
           // Use WORKLOG_STEP_LABELS for the running trace label (human-readable)
