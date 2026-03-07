@@ -14,6 +14,8 @@ import { SPARKIE_TOOLS_S2 } from '@/lib/sprint2-tools'
 import { executeSprint2Tool } from '@/lib/sprint2-cases'
 import { SPARKIE_TOOLS_S3 } from '@/lib/sprint3-tools'
 import { executeSprint3Tool } from '@/lib/sprint3-cases'
+import { SPARKIE_TOOLS_S4 } from '@/lib/sprint4-tools'
+import { executeSprint4Tool } from '@/lib/sprint4-cases'
 import { ingestRepo, getProjectContext, addKnownIssue, resolveKnownIssue, formatProjectContextBlock } from '@/lib/repoIngestion'
 
 export const runtime = 'nodejs'
@@ -2217,6 +2219,7 @@ const SPARKIE_TOOLS = [
   },
   ...SPARKIE_TOOLS_S2,
   ...SPARKIE_TOOLS_S3,
+  ...SPARKIE_TOOLS_S4,
 ]
 
 // ── Memory helpers ─────────────────────────────────────────────────────────────
@@ -3787,6 +3790,8 @@ async function executeTool(
         if (s2result !== null) return s2result
         const s3result = await executeSprint3Tool(name, args, userId, baseUrl)
         if (s3result !== null) return s3result
+        const s4result = await executeSprint4Tool(name, args, userId, baseUrl, executeConnectorTool)
+        if (s4result !== null) return s4result
         if (userId) {
           return await executeConnectorTool(name, args, userId)
         }
@@ -4820,6 +4825,14 @@ Make it feel like walking into your friend's creative space and being genuinely 
         delete_memory: "Memory Pruner Active",
         run_tests: "Test Runner Active",
         check_lint: "Lint Checker Active",
+        // Sprint 4
+        read_email_thread: "Mail Reader Active",
+        manage_email: "Mail Manager Active",
+        rsvp_event: "Calendar RSVP Active",
+        manage_calendar_event: "Calendar Manager Active",
+        analyze_file: "File Analyst Active",
+        fetch_url: "Web Reader Active",
+        research: "Research Engine Active",
       }
       const pickHive = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)]
       hiveLog.push(pickHive(HIVE_INIT))
@@ -4983,6 +4996,9 @@ Rules:
             execute_script: 'Running script...', npm_run: 'Running npm...',
             git_ops: 'Running git ops...', delete_memory: 'Pruning memory...',
             run_tests: 'Running tests...', check_lint: 'Checking lint...',
+            read_email_thread: 'Reading thread...', manage_email: 'Managing email...',
+            rsvp_event: 'Sending RSVP...', manage_calendar_event: 'Updating calendar...',
+            analyze_file: 'Analyzing file...', fetch_url: 'Fetching URL...', research: 'Researching...',
           }
           // Human-readable worklog step labels (shown in worklog trace, richer than chip labels)
           const WORKLOG_STEP_LABELS: Record<string, string> = {
@@ -5033,6 +5049,13 @@ Rules:
             delete_memory: 'Deleting memory entry',
             run_tests: 'Running test suite',
             check_lint: 'Running lint check',
+            read_email_thread: 'Reading email thread',
+            manage_email: 'Managing email',
+            rsvp_event: 'RSVPing to event',
+            manage_calendar_event: 'Managing calendar event',
+            analyze_file: 'Analyzing file',
+            fetch_url: 'Fetching URL',
+            research: 'Researching topic',
           }
           const chipLabel = toolCalls.length > 1
             ? `Running ${toolCalls.length} tools...`
@@ -5057,6 +5080,8 @@ Rules:
             create_calendar_event: 'calendarToday', transcribe_audio: 'mic', text_to_speech: 'mic',
             execute_script: 'code', npm_run: 'terminal', git_ops: 'git',
             delete_memory: 'trash', run_tests: 'checkCircle', check_lint: 'alertCircle',
+            read_email_thread: 'mail', manage_email: 'mail', rsvp_event: 'calendar',
+            manage_calendar_event: 'calendar', analyze_file: 'file', fetch_url: 'globe', research: 'search',
           }
           const stepTraceIcon = stepIcon[chipToolName] ?? 'zap'
           // Use WORKLOG_STEP_LABELS for the running trace label (human-readable)
