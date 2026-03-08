@@ -42,10 +42,11 @@ function EmailDraftCard({ task, onResolve }: Props) {
   const [attachment, setAttachment] = useState<{ name: string; dataUrl: string; mimeType: string } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const draft = task.emailDraft!
-  const subject = draft.subject ?? task.payload?.subject as string ?? "(no subject)"
-  const to = draft.to ?? task.payload?.to as string ?? ""
-  const body = draft.body ?? task.payload?.body as string ?? ""
+  const draft = task.emailDraft
+  if (!draft) return null  // guard: emailDraft not yet loaded
+  const subject = draft.subject ?? (task.payload?.subject as string) ?? "(no subject)"
+  const to = draft.to ?? (task.payload?.to as string) ?? ""
+  const body = draft.body ?? (task.payload?.body as string) ?? ""
   // Truncate body for preview
   const bodyPreview = body.length > 280 ? body.slice(0, 280) + "…" : body
   const [expanded, setExpanded] = useState(false)
@@ -204,7 +205,7 @@ function EmailDraftCard({ task, onResolve }: Props) {
 // ── Generic HITL Task Approval Card ──────────────────────────────────────────
 export function TaskApprovalCard({ task, onResolve }: Props) {
   // Route to email draft card if this is an email draft task
-  const isEmailDraft = task.action === "create_email_draft" || task.action === "send_email" || !!task.emailDraft
+  const isEmailDraft = (task.action === "create_email_draft" || task.action === "send_email" || !!task.emailDraft) && !!task.emailDraft
   if (isEmailDraft) {
     return <EmailDraftCard task={task} onResolve={onResolve} />
   }
