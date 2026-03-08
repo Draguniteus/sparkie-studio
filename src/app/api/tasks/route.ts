@@ -36,16 +36,17 @@ export async function POST(req: NextRequest) {
     if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     await ensureTable()
-    const { id, action, label, payload } = await req.json() as {
+    const { id, action, label, payload, executor, why_human } = await req.json() as {
       id: string; action: string; label: string; payload: Record<string, unknown>
+      executor?: string; why_human?: string
     }
     if (!id || !action || !label) return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
 
     await query(
-      `INSERT INTO sparkie_tasks (id, user_id, action, label, payload, status)
-       VALUES ($1, $2, $3, $4, $5, 'pending')
+      `INSERT INTO sparkie_tasks (id, user_id, action, label, payload, status, executor, why_human)
+       VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7)
        ON CONFLICT (id) DO NOTHING`,
-      [id, userId, action, label, JSON.stringify(payload)]
+      [id, userId, action, label, JSON.stringify(payload), executor ?? 'human', why_human ?? null]
     )
     return NextResponse.json({ ok: true })
   } catch (e) {
