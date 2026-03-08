@@ -154,7 +154,7 @@ export function ChatInput() {
   const agentAbortRef = useRef<AbortController | null>(null)
   const chatAbortRef = useRef<AbortController | null>(null)
   const [isRecording, setIsRecording] = useState(false)
-  const streamFlushRef = useRef<number>(0)
+  const streamFlushRef = useRef<number>(0) // rAF handle for 60fps-throttled updateMessage during streaming
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [isVoiceChatOpen, setIsVoiceChatOpen] = useState(false)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -951,10 +951,11 @@ export function ChatInput() {
                 addWorklogEntry({ type: 'result', content: 'Analyzed', status: 'done' })
               }
               fullContent += delta.content
-              clearTimeout(streamFlushRef.current)
-              streamFlushRef.current = setTimeout(() => {
+              // rAF throttle: cap React re-renders at 60fps instead of per-token
+              cancelAnimationFrame(streamFlushRef.current)
+              streamFlushRef.current = requestAnimationFrame(() => {
                 updateMessage(chatId, assistantMsgId, { content: fullContent })
-              }, 16) as unknown as number
+              })
             }
           } catch { /* skip */ }
         }
