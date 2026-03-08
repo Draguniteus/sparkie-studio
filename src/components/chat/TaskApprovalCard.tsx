@@ -60,12 +60,50 @@ function EmailDraftCard({ task, onResolve }: Props) {
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    const reader = new FileReader()
-    reader.onload = () => {
-      setAttachment({ name: file.name, dataUrl: reader.result as string, mimeType: file.type })
-    }
-    reader.readAsDataURL(file)
     e.target.value = ""
+
+    const MAX_BASE64_BYTES = 480_000 // ~360KB raw → ~480KB base64 → safe under DO 1MB body limit
+
+    const storeAsIs = (f: File) => {
+      const reader = new FileReader()
+      reader.onload = () => {
+        setAttachment({ name: f.name, dataUrl: reader.result as string, mimeType: f.type })
+      }
+      reader.readAsDataURL(f)
+    }
+
+    // For images: compress via canvas if needed
+    if (file.type.startsWith("image/")) {
+      const img = new Image()
+      const objectUrl = URL.createObjectURL(file)
+      img.onload = () => {
+        URL.revokeObjectURL(objectUrl)
+        // Target: keep output base64 under MAX_BASE64_BYTES
+        // Start at quality=0.82 and step down; also scale down if still too large
+        const tryCompress = (quality: number, scale: number) => {
+          const canvas = document.createElement("canvas")
+          canvas.width = Math.round(img.width * scale)
+          canvas.height = Math.round(img.height * scale)
+          const ctx = canvas.getContext("2d")!
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+          const dataUrl = canvas.toDataURL("image/jpeg", quality)
+          const base64Part = dataUrl.split(",")[1] ?? dataUrl
+          if (base64Part.length <= MAX_BASE64_BYTES || quality <= 0.3) {
+            setAttachment({ name: file.name.replace(/\.[^.]+$/, ".jpg"), dataUrl, mimeType: "image/jpeg" })
+          } else if (quality > 0.4) {
+            tryCompress(quality - 0.15, scale)
+          } else {
+            tryCompress(0.3, scale * 0.7)
+          }
+        }
+        tryCompress(0.82, 1.0)
+      }
+      img.onerror = () => { URL.revokeObjectURL(objectUrl); storeAsIs(file) }
+      img.src = objectUrl
+    } else {
+      // Non-image: read as-is (PDFs etc. — user responsible for size)
+      storeAsIs(file)
+    }
   }
 
   const handleDecision = async (decision: "approved" | "rejected") => {
@@ -75,7 +113,7 @@ function EmailDraftCard({ task, onResolve }: Props) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let attachmentRef: Record<string, string> | null = null
 
-      // Upload attachment first if present — Composio GMAIL_SEND_EMAIL needs an s3key, not raw base64
+      // Validate and relay attachment through upload-attachment before including in PATCH
       if (decision === "approved" && attachment?.dataUrl) {
         try {
           const uploadRes = await fetch("/api/upload-attachment", {
