@@ -790,8 +790,13 @@ export function ChatInput() {
 
     // Agentic task requests — ALWAYS chat path (Sparkie's /api/chat handles these, NOT the IDE builder)
     // Email, social, search, memory, scheduling, comms — anything that triggers Sparkie's tool loop
-    const AGENTIC_TASK = /\b(send|compose|draft|reply to|respond to|forward|email|tweet|post|message|text|dm|notify|remind|schedule|remind me|set a reminder|search my|look up|find me|fetch|check my|read my|show my|list my|summarize my|check (the|my|for)|what.{0,20}(email|inbox|calendar|reminder|tweet|post|message|schedule)|remember (that|this|my|to)|save (this|that|my|to)|add to|remove from|delete from)\b/i
+    const AGENTIC_TASK = /\b(send|compose|draft|reply to|respond to|forward|email|tweet|post|message|text|dm|notify|remind|schedule|remind me|set a reminder|search my|look up|find me|fetch|check my|read my|read me|read the|show my|show me|list my|list me|summarize my|check (the|my|for)|what.{0,20}(email|inbox|calendar|reminder|tweet|post|message|schedule)|remember (that|this|my|to)|save (this|that|my|to)|add to|remove from|delete from|tell me what (you|i)|what can you|what do you|investigate|analyze|analyse|diagnose|audit|review my|read (my|me|the|latest|recent|new|unread)|open my|play my|start my|stop my)\b/i
     if (AGENTIC_TASK.test(t)) return true  // → streamReply → /api/chat
+
+    // Non-code "create" — create a reminder/event/meeting/note/goal/plan are agentic, not builds
+    // Excludes "task"/"list" — too ambiguous ("task manager app", "todo list app" should be builds)
+    // BUILD_PHRASE "create a" will still correctly catch code builds downstream
+    if (/\bcreate\b.{0,40}\b(reminder|event|meeting|note|goal|plan|alert|notification|record|appointment)\b/i.test(t)) return true
 
     // Ambiguous — escalate to LLM classifier
     return null
