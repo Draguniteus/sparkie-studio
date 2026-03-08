@@ -161,19 +161,43 @@ export async function PATCH(req: NextRequest) {
       const task = taskRes.rows[0]
 
       if (task && (task.action === 'create_email_draft' || task.action === 'send_email')) {
-        const payload = task.payload as { to?: string; subject?: string; body?: string }
+        const payload = task.payload as { to?: string; recipient_email?: string; subject?: string; body?: string }
+        // Support both 'to' and 'recipient_email' payload keys
+        const recipientEmail = payload.to ?? payload.recipient_email
         const composioKey = process.env.COMPOSIO_API_KEY
         const entityId = `sparkie_user_${userId}`
 
-        if (composioKey && payload.to) {
+        console.log('[tasks PATCH] Email send attempt — recipient:', recipientEmail, 'action:', task.action, 'payload keys:', Object.keys(payload))
+
+        if (composioKey && recipientEmail) {
           try {
-            // Build body — if attachment provided, append note about it
-            let emailBody = payload.body ?? ''
-            if (attachment) {
-              emailBody += `\n\n[Attachment: ${attachment.name} — see attached file]`
+            const emailBody = payload.body ?? ''
+
+            // Build attachments array if file was attached
+            // dataUrl format: "data:image/png;base64,iVBORw0KGgo..."
+            const gmailAttachments: Array<{ name: string; content: string; content_type: string }> = []
+            if (attachment?.dataUrl) {
+              const base64Data = attachment.dataUrl.includes(',')
+                ? attachment.dataUrl.split(',')[1]
+                : attachment.dataUrl
+              gmailAttachments.push({
+                name: attachment.name,
+                content: base64Data,
+                content_type: attachment.mimeType || 'application/octet-stream',
+              })
             }
 
-            // Call Composio GMAIL_SEND_EMAIL via v3 (matching chat/route.ts pattern)
+            // Call Composio GMAIL_SEND_EMAIL via v3
+            const gmailArgs: Record<string, unknown> = {
+              recipient_email: recipientEmail,
+              subject: payload.subject ?? '(no subject)',
+              body: emailBody,
+              is_html: false,
+            }
+            if (gmailAttachments.length > 0) {
+              gmailArgs.attachments = gmailAttachments
+            }
+
             const composioRes = await fetch('https://backend.composio.dev/api/v3/tools/execute/GMAIL_SEND_EMAIL', {
               method: 'POST',
               headers: {
@@ -182,23 +206,22 @@ export async function PATCH(req: NextRequest) {
               },
               body: JSON.stringify({
                 entity_id: entityId,
-                arguments: {
-                  recipient_email: payload.to,
-                  subject: payload.subject ?? '(no subject)',
-                  body: emailBody,
-                  is_html: false,
-                },
+                arguments: gmailArgs,
               }),
             })
 
             if (!composioRes.ok) {
               const errText = await composioRes.text()
-              console.error('Gmail send failed:', composioRes.status, errText)
+              console.error('[tasks PATCH] Gmail send failed:', composioRes.status, errText)
+            } else {
+              console.log('[tasks PATCH] Gmail send success for:', recipientEmail)
             }
           } catch (e) {
-            console.error('Gmail send error:', e)
+            console.error('[tasks PATCH] Gmail send error:', e)
             // Don't block task update — still mark as completed
           }
+        } else {
+          console.warn('[tasks PATCH] Gmail send skipped — missing composioKey or recipient. composioKey:', !!composioKey, 'recipient:', recipientEmail)
         }
       }
     }
