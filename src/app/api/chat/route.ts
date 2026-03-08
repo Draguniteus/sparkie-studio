@@ -2516,11 +2516,19 @@ async function loadMemories(userId: string, queryText?: string): Promise<string>
   // ── SQL fallback ─────────────────────────────────────────────────────────────
   try {
     await ensureDbInit()
-    const res = await query<{ category: string; content: string }>(
-      'SELECT category, content FROM user_memories WHERE user_id = $1 ORDER BY created_at ASC',
-      [userId]
-    )
-    return res.rows.map((r) => `[${r.category}] ${r.content}`).join('\n')
+    const [userRes, selfRes] = await Promise.all([
+      query<{ category: string; content: string }>(
+        'SELECT category, content FROM user_memories WHERE user_id = $1 ORDER BY created_at ASC',
+        [userId]
+      ),
+      query<{ category: string; content: string }>(
+        'SELECT category, content FROM sparkie_self_memory ORDER BY created_at DESC LIMIT 80'
+      ).catch(() => ({ rows: [] as Array<{ category: string; content: string }> })),
+    ])
+    const lines: string[] = []
+    for (const r of userRes.rows) lines.push(`[${r.category}] ${r.content}`)
+    for (const r of selfRes.rows) lines.push(`[self:${r.category}] ${r.content}`)
+    return lines.join('\n')
   } catch { return '' }
 }
 async function getAwareness(userId: string): Promise<{ daysSince: number; sessionCount: number; timeLabel: string; shouldBrief: boolean }> {
