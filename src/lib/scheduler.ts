@@ -12,11 +12,118 @@ const COMPOSIO_BASE = 'https://backend.composio.dev/api/v3'
 const COMPOSIO_KEY  = process.env.COMPOSIO_API_KEY ?? ''
 const INTERNAL_BASE = process.env.NEXTAUTH_URL ?? process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3000'
 
+// ── Phase 4: Topic Routing ─────────────────────────────────────────────────
+// Classifies incoming emails and routes them to matching sparkie_topics by fingerprint/aliases.
+// Honors each topic's notification_policy (immediate/defer/auto).
+
+async function routeEmailToTopic(
+  userId: string,
+  emailId: string,
+  subject: string,
+  fromEmail: string,
+  snippet: string
+): Promise<string | null> {
+  try {
+    // Fetch all active topics for this user
+    const topics = await query<{
+      id: string
+      name: string
+      fingerprint: string
+      aliases: string[]
+      notification_policy: string
+    }>(
+      `SELECT id, name, fingerprint, aliases, notification_policy
+       FROM sparkie_topics
+       WHERE user_id = $1 AND status = 'active'
+       ORDER BY updated_at DESC LIMIT 50`,
+      [userId]
+    )
+
+    if (topics.rows.length === 0) return null
+
+    const emailText = `${subject} ${fromEmail} ${snippet}`.toLowerCase()
+
+    // Score each topic by keyword overlap
+    let bestMatch: { id: string; name: string; score: number; policy: string } | null = null
+
+    for (const topic of topics.rows) {
+      let score = 0
+      const fp = (topic.fingerprint ?? '').toLowerCase()
+      const aliases: string[] = Array.isArray(topic.aliases) ? topic.aliases : []
+
+      // Fingerprint match — split on spaces and check each word
+      for (const word of fp.split(/\s+/).filter(w => w.length > 3)) {
+        if (emailText.includes(word)) score += 2
+      }
+
+      // Alias match
+      for (const alias of aliases) {
+        const al = alias.toLowerCase()
+        if (emailText.includes(al)) score += 3
+      }
+
+      // Topic name match
+      for (const word of topic.name.toLowerCase().split(/\s+/).filter(w => w.length > 3)) {
+        if (emailText.includes(word)) score += 1
+      }
+
+      if (score > 0 && (!bestMatch || score > bestMatch.score)) {
+        bestMatch = { id: topic.id, name: topic.name, score, policy: topic.notification_policy ?? 'auto' }
+      }
+    }
+
+    if (!bestMatch || bestMatch.score < 2) return null
+
+    // Check if already linked
+    const existing = await query<{ id: string }>(
+      `SELECT id FROM sparkie_topic_threads
+       WHERE topic_id = $1 AND source_type = 'email' AND source_id = $2 LIMIT 1`,
+      [bestMatch.id, emailId]
+    )
+    if (existing.rows.length > 0) return bestMatch.id
+
+    // Link the email to the topic
+    await query(
+      `INSERT INTO sparkie_topic_threads (topic_id, source_type, source_id, summary, created_at)
+       VALUES ($1, 'email', $2, $3, NOW())
+       ON CONFLICT DO NOTHING`,
+      [bestMatch.id, emailId, `Auto-routed: ${subject.slice(0, 120)}`]
+    )
+
+    // Update topic's updated_at
+    await query(
+      `UPDATE sparkie_topics SET updated_at = NOW() WHERE id = $1`,
+      [bestMatch.id]
+    )
+
+    // Log based on notification policy
+    const logPriority = bestMatch.policy === 'immediate' ? 'P1'
+                       : bestMatch.policy === 'defer'     ? 'P3'
+                       : 'P2'
+
+    await writeWorklog(userId, 'decision', `📎 Email routed to topic "${bestMatch.name}": ${subject.slice(0, 80)}`, {
+      decision_type: 'proactive',
+      reasoning: `Email matched topic fingerprint/aliases with score ${bestMatch.score}. Notification policy: ${bestMatch.policy}.`,
+      signal_priority: logPriority,
+      topic_id: bestMatch.id,
+      email_id: emailId,
+      status: 'done',
+    })
+
+    return bestMatch.id
+  } catch (e) {
+    console.error('[scheduler] routeEmailToTopic error:', e)
+    return null
+  }
+}
+
+
 async function proactiveInboxSweep(userId: string): Promise<void> {
   if (!COMPOSIO_KEY) return
 
   // 1. Fetch last 5 unread emails via Composio Gmail connector
   let emailsJson: string
+  let messages: Array<{ subject: string; from: string; snippet: string; id: string }> = []
   try {
     const entityId = `sparkie_user_${userId}`
     const emailRes = await fetch(`${COMPOSIO_BASE}/actions/execute`, {
@@ -31,7 +138,7 @@ async function proactiveInboxSweep(userId: string): Promise<void> {
     })
     if (!emailRes.ok) return
     const emailData = await emailRes.json() as { data?: { messages?: Array<{ subject: string; from: string; snippet: string; id: string }> } }
-    const messages = emailData?.data?.messages ?? []
+    messages = emailData?.data?.messages ?? []
     emailsJson = JSON.stringify(messages.slice(0, 3))
     // Write a proactive entry even when inbox is empty — the act of checking IS proactive
     if (messages.length === 0) {
@@ -43,6 +150,13 @@ async function proactiveInboxSweep(userId: string): Promise<void> {
       return
     }
   } catch { return }
+
+  // Phase 4: Route each email to matching topic
+  for (const msg of messages.slice(0, 5)) {
+    if (msg.id && msg.subject) {
+      routeEmailToTopic(userId, msg.id, msg.subject, msg.from ?? '', msg.snippet ?? '').catch(() => {})
+    }
+  }
 
   // 2. Check if we already have a pending inbox task for this user (debounce)
   try {
@@ -470,12 +584,6 @@ async function heartbeatTick(baseUrl: string): Promise<void> {
 
       // Prune expired tool cache entries
       pruneToolCache()
-      // Deployment health sweep — once every ~10 ticks (10 min)
-      if (shouldRunAuthCheck) {
-        const sweepUser = dueUsers.rows[0]?.user_id ?? authCheckUsers.rows[0]?.user_id
-        if (sweepUser) deploymentHealthSweep(sweepUser).catch(() => {})
-      }
-
       // Deployment health sweep — once every ~10 ticks (10 min)
       if (shouldRunAuthCheck) {
         const sweepUser = dueUsers.rows[0]?.user_id ?? authCheckUsers.rows[0]?.user_id

@@ -101,6 +101,56 @@ CREATE INDEX IF NOT EXISTS idx_agents_creator_id ON agents(creator_id);
 CREATE INDEX IF NOT EXISTS idx_agents_visibility ON agents(visibility);
 CREATE INDEX IF NOT EXISTS idx_users_verify_token ON users(verify_token);
 
+
+-- ── Phase 4: Topic/Context Cluster Tables ────────────────────────────────────
+CREATE TABLE IF NOT EXISTS sparkie_topics (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id             TEXT NOT NULL,
+  name                TEXT NOT NULL,
+  fingerprint         TEXT NOT NULL DEFAULT '',
+  aliases             JSONB DEFAULT '[]',
+  summary             TEXT DEFAULT '',
+  notification_policy TEXT DEFAULT 'auto',
+  status              TEXT DEFAULT 'active',
+  created_at          TIMESTAMPTZ DEFAULT NOW(),
+  updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_sparkie_topics_user_id ON sparkie_topics(user_id);
+CREATE INDEX IF NOT EXISTS idx_sparkie_topics_status ON sparkie_topics(status);
+
+CREATE TABLE IF NOT EXISTS sparkie_topic_threads (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  topic_id    UUID NOT NULL REFERENCES sparkie_topics(id) ON DELETE CASCADE,
+  source_type TEXT NOT NULL,
+  source_id   TEXT NOT NULL,
+  summary     TEXT DEFAULT '',
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(topic_id, source_type, source_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sparkie_topic_threads_topic_id ON sparkie_topic_threads(topic_id);
+CREATE INDEX IF NOT EXISTS idx_sparkie_topic_threads_source ON sparkie_topic_threads(source_type, source_id);
+
+-- ── Phase 4: Contact Notes Table ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS sparkie_contacts (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id         TEXT NOT NULL,
+  email           TEXT NOT NULL,
+  display_name    TEXT DEFAULT '',
+  notes           TEXT DEFAULT '',
+  cc_preference   TEXT DEFAULT '',
+  response_sla    TEXT DEFAULT '',
+  priority        TEXT DEFAULT 'normal',
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(user_id, email)
+);
+CREATE INDEX IF NOT EXISTS idx_sparkie_contacts_user_id ON sparkie_contacts(user_id);
+CREATE INDEX IF NOT EXISTS idx_sparkie_contacts_email ON sparkie_contacts(email);
+
+-- ── Phase 5: user_memories category column (if not already present) ──────────
+ALTER TABLE user_memories ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'work_rule';
+
+
 INSERT INTO users (email, display_name, email_verified, role)
 VALUES ('draguniteus@gmail.com', 'Michael', true, 'owner')
 ON CONFLICT (email) DO UPDATE SET role = 'owner';
