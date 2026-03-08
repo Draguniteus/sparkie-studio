@@ -6,8 +6,9 @@ export const runtime = 'nodejs'
 
 // POST /api/upload-attachment
 // Body: { filename: string, mimeType: string, base64Data: string }
-// Returns: { s3key: string }
-// Used by TaskApprovalCard before sending email with attachment via GMAIL_SEND_EMAIL
+// Returns: { ok: true, filename, mimeType, base64Data }
+// Validates the file and echoes it back for use in tasks/route.ts MIME assembly
+// No external upload needed — the full MIME message is built at send time
 export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
@@ -24,43 +25,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing filename or base64Data' }, { status: 400 })
     }
 
-    const composioKey = process.env.COMPOSIO_API_KEY
-    if (!composioKey) {
-      return NextResponse.json({ error: 'Composio not configured' }, { status: 500 })
+    // Validate base64 by attempting decode
+    try {
+      const buf = Buffer.from(base64Data, 'base64')
+      if (buf.length === 0) return NextResponse.json({ error: 'Empty file' }, { status: 400 })
+      console.log('[upload-attachment] Validated:', filename, mimeType, buf.length, 'bytes')
+    } catch {
+      return NextResponse.json({ error: 'Invalid base64' }, { status: 400 })
     }
 
-    // Convert base64 to buffer
-    const buffer = Buffer.from(base64Data, 'base64')
-
-    // Upload to Composio file storage via multipart/form-data
-    const formData = new FormData()
-    const blob = new Blob([buffer], { type: mimeType || 'application/octet-stream' })
-    formData.append('file', blob, filename)
-
-    const uploadRes = await fetch('https://backend.composio.dev/api/v1/files/upload', {
-      method: 'POST',
-      headers: {
-        'x-api-key': composioKey,
-      },
-      body: formData,
+    // Return the attachment data so tasks/route.ts can assemble the MIME message
+    return NextResponse.json({
+      ok: true,
+      filename,
+      mimeType: mimeType || 'application/octet-stream',
+      base64Data,
     })
-
-    if (!uploadRes.ok) {
-      const errText = await uploadRes.text()
-      console.error('[upload-attachment] Composio upload failed:', uploadRes.status, errText)
-      return NextResponse.json({ error: 'Upload failed' }, { status: 500 })
-    }
-
-    const result = await uploadRes.json()
-    // Composio returns { s3key: string } or { key: string }
-    const s3key = result.s3key || result.key || result.id
-    if (!s3key) {
-      console.error('[upload-attachment] No s3key in response:', result)
-      return NextResponse.json({ error: 'No s3key returned' }, { status: 500 })
-    }
-
-    console.log('[upload-attachment] Uploaded:', filename, '→ s3key:', s3key)
-    return NextResponse.json({ s3key })
   } catch (e) {
     console.error('[upload-attachment] Error:', e)
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })
