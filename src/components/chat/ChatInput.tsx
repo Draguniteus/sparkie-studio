@@ -798,6 +798,15 @@ export function ChatInput() {
     // BUILD_PHRASE "create a" will still correctly catch code builds downstream
     if (/\bcreate\b.{0,40}\b(reminder|event|meeting|note|goal|plan|alert|notification|record|appointment)\b/i.test(t)) return true
 
+    // Media generation — "make me a song / generate an image / make a video" → ALWAYS chat
+    // These hit BUILD_PHRASE ("make a", "generate a") but must go to streamReply → Sparkie's media tools
+    // Must run BEFORE BUILD_PHRASE check below
+    // Pattern A: "generate/make/create [article/adjective] [media type]"
+    const MEDIA_GENERATE_A = /\b(make me |make |generate |write me |write |create )(?:(?:a |an |some |some )\b)?(?:[a-z]+ )?(?:[a-z]+ )?(image|photo|picture|drawing|illustration|artwork|render|portrait|wallpaper|thumbnail|visual|video|clip|animation|reel|short|movie|film|footage|song|music|track|beat|melody|audio|sound|jingle|composition|playlist)/i
+    // Pattern B: explicit standalone media intent keywords
+    const MEDIA_GENERATE_B = /\b(generate|make me|write me|compose|create).{0,30}\b(music|song|track|beat|melody|audio|image|photo|video)/i
+    if (MEDIA_GENERATE_A.test(t) || MEDIA_GENERATE_B.test(t)) return true  // → streamReply → generate_image / generate_video / generate_ace_music
+
     // Ambiguous — escalate to LLM classifier
     return null
   }, [])
