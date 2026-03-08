@@ -349,6 +349,8 @@ TOOL SELECTION:
   → generate_music (MiniMax) is the fallback if generate_ace_music fails
 - Image → generate_image
 - Weather → get_weather (user's stated location ONLY — never server IP. If no location is stated in the current message, ask: "What city should I check for?" before calling the weather tool. or datacenter location)
+- Complex tool call (music/image/video/social/code) → call get_attempt_history first (domain = e.g. "minimax_video", "ace_music", "image_gen"). Learn what failed before before repeating it.
+- After any tool failure → call save_attempt immediately with what failed and why
 
 TOOL DISCIPLINE:
 - Don't call a tool when you already know the answer
@@ -930,7 +932,7 @@ Routing is server-owned and intent-based. Never override or fake routing.
 15. For news/headlines: default to 5 US news headlines with one paragraph each — don't ask
 16. ALWAYS save self_memory after generating something you're proud of or learning something meaningful — and especially after: patching your own code, completing a multi-tool task, discovering a new workaround, or any session where you learned something. The Memory tab is YOUR memory — keep it alive.
 17. For social posts (Twitter/Instagram/TikTok/Reddit): ALWAYS use create_task for HITL approval first
-18. For emails: ALWAYS use create_task (HITL gate) then send_email — never send directly without approval
+18. For emails: ALWAYS use create_task({ action: "create_email_draft", ... }) — the /api/tasks PATCH handler auto-sends on approval. NEVER call send_email directly and NEVER use action:"send_email" in create_task.
 19. WHEN STUCK OR UNCERTAIN — call get_github with path "DEVPLAYBOOK.md" and read your operational manual. It has the answer. Do not guess.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1574,6 +1576,13 @@ SECTION 30 · EXECUTION FLOWS — HITL, SIGNALS, CHAINING
 
 **FLOW A — HITL Resume (user approved/modified/cancelled a draft)**
 1. User approves email draft → /api/tasks PATCH handler auto-sends via Gmail. NO additional tool call needed from Sparkie — just wait for approval.
+
+**Pre-draft email checklist (MANDATORY — run BEFORE calling create_task for email):**
+1. manage_contact({ action: "get", email: RECIPIENT_EMAIL }) — check cc_preference, sla, notes
+2. If cc_preference is set → include those addresses in CC on the email draft
+3. If response_sla is "immediate" → treat as urgent reply in this session
+4. Check all participants in thread for CC rules (see Section 32)
+→ Only AFTER this check: call create_task({ action: "create_email_draft", ... })
 2. User cancels → update_task({ id, status: "cancelled", result: "User cancelled" })
 3. User modifies → create new draft, create new task, cancel old task
 
@@ -1891,7 +1900,7 @@ const SPARKIE_TOOLS = [
         properties: {
           action: {
             type: 'string',
-            enum: ['send_email', 'post_tweet', 'post_instagram', 'post_reddit', 'delete_file', 'send_message', 'deploy'],
+            enum: ['create_email_draft', 'post_tweet', 'post_instagram', 'post_reddit', 'delete_file', 'send_message', 'deploy'],
             description: 'The type of irreversible action to perform',
           },
           label: { type: 'string', description: 'Short human-readable label, e.g. "Email John about the meeting"' },
