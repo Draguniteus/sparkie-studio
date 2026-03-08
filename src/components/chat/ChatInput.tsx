@@ -788,6 +788,11 @@ export function ChatInput() {
     // Thanks, acknowledgements
     if (/^(thanks?|thank you|ty|thx|cheers|appreciate|got it|sounds good|makes sense|understood|noted|ok|okay|sure|perfect|copy that|roger|on it|let.?s go|yes|no|nope|yep|yup|nah|lol|haha|lmao|omg|wow|nice|cool|awesome|dope|sick|sweet)/.test(t)) return true
 
+    // Agentic task requests — ALWAYS chat path (Sparkie's /api/chat handles these, NOT the IDE builder)
+    // Email, social, search, memory, scheduling, comms — anything that triggers Sparkie's tool loop
+    const AGENTIC_TASK = /\b(send|compose|draft|reply to|respond to|forward|email|tweet|post|message|text|dm|notify|remind|schedule|remind me|set a reminder|search my|look up|find me|fetch|check my|read my|show my|list my|summarize my|check (the|my|for)|what.{0,20}(email|inbox|calendar|reminder|tweet|post|message|schedule)|remember (that|this|my|to)|save (this|that|my|to)|add to|remove from|delete from)\b/i
+    if (AGENTIC_TASK.test(t)) return true  // → streamReply → /api/chat
+
     // Ambiguous — escalate to LLM classifier
     return null
   }, [])
