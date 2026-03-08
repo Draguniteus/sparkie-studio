@@ -369,10 +369,13 @@ export function ChatInput() {
         } catch { /* non-fatal */ }
       }
 
+      chatAbortRef.current?.abort()
+      chatAbortRef.current = new AbortController()
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: apiMessages, model: selectedModel, userProfile, ...(connectedApps ? { connectedApps } : {}) }),
+        signal: chatAbortRef.current.signal,
       })
 
       if (!response.ok) {
@@ -872,10 +875,13 @@ export function ChatInput() {
     addWorklogEntry({ type: 'action', content: 'Query received — routing...', status: 'running' })
     try {
       const userProfile = useAppStore.getState().userProfile
+      chatAbortRef.current?.abort()
+      chatAbortRef.current = new AbortController()
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: apiMessages, model: selectedModel, userProfile }),
+        signal: chatAbortRef.current.signal,
       })
       if (!response.ok) {
         const err = await response.json().catch(() => ({ error: `HTTP ${response.status}` }))
@@ -976,8 +982,19 @@ export function ChatInput() {
             // HITL task approval event
             if (parsed.sparkie_task) {
               const task = parsed.sparkie_task
+              // Stamp tool traces before early return so InMemoryPill renders above the HITL card
+              const chipLabelAtHITL = useAppStore.getState().longTaskLabel
+              if (chipLabelAtHITL && assistantMsgId) {
+                useAppStore.getState().updateMessage(chatId, assistantMsgId, {
+                  chipLabel: chipLabelAtHITL,
+                  toolTraces: _stepTracesRef.current.length > 0 ? [..._stepTracesRef.current] : undefined,
+                })
+              }
+              _setStepTraces([])
+              _stepTracesRef.current = []
+              useAppStore.getState().setLongTaskLabel(null)
               updateMessage(chatId, assistantMsgId, {
-                content: fullContent || parsed.text || "I need your approval before I do this:",
+                content: fullContent || parsed.text || "I've queued that for your approval — check the card below.",
                 isStreaming: false,
                 pendingTask: { ...task, status: "pending" },
               })
@@ -1343,6 +1360,16 @@ export function ChatInput() {
     return () => {
       agentAbortRef.current?.abort()
     }
+  }, [])
+
+  // ── sparkie_stop_stream — dispatched by live InMemoryPill stop button ─────
+  useEffect(() => {
+    const handler = () => {
+      chatAbortRef.current?.abort()
+      agentAbortRef.current?.abort()
+    }
+    window.addEventListener('sparkie_stop_stream', handler)
+    return () => window.removeEventListener('sparkie_stop_stream', handler)
   }, [])
 
   // ── Voice recording ───────────────────────────────────────────────────────
