@@ -43,10 +43,16 @@ function EmailDraftCard({ task, onResolve }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const draft = task.emailDraft
-  if (!draft) return null  // guard: emailDraft not yet loaded
-  const subject = draft.subject ?? (task.payload?.subject as string) ?? "(no subject)"
-  const to = draft.to ?? (task.payload?.to as string) ?? ""
-  const body = draft.body ?? (task.payload?.body as string) ?? ""
+  // Payload fallback: payload may arrive as a JSON string (route.ts stores it via JSON.stringify)
+  const payloadFallback: Record<string, string> = (() => {
+    if (!task.payload) return {}
+    if (typeof task.payload === 'string') { try { return JSON.parse(task.payload) } catch { return {} } }
+    return task.payload as Record<string, string>
+  })()
+  if (!draft && !payloadFallback.to && !payloadFallback.subject) return null  // nothing to render
+  const subject = (draft?.subject ?? payloadFallback.subject ?? '(no subject)') as string
+  const to = (draft?.to ?? payloadFallback.to ?? '') as string
+  const body = (draft?.body ?? payloadFallback.body ?? '') as string
   // Truncate body for preview
   const bodyPreview = body.length > 280 ? body.slice(0, 280) + "…" : body
   const [expanded, setExpanded] = useState(false)
@@ -205,7 +211,7 @@ function EmailDraftCard({ task, onResolve }: Props) {
 // ── Generic HITL Task Approval Card ──────────────────────────────────────────
 export function TaskApprovalCard({ task, onResolve }: Props) {
   // Route to email draft card if this is an email draft task
-  const isEmailDraft = (task.action === "create_email_draft" || task.action === "send_email" || !!task.emailDraft) && !!task.emailDraft
+  const isEmailDraft = task.action === "create_email_draft" || task.action === "send_email" || !!task.emailDraft
   if (isEmailDraft) {
     return <EmailDraftCard task={task} onResolve={onResolve} />
   }
@@ -270,16 +276,27 @@ export function TaskApprovalCard({ task, onResolve }: Props) {
       </div>
 
       {/* Payload preview */}
-      {task.payload && Object.keys(task.payload).length > 0 && (
-        <div className="px-4 py-2.5 space-y-1.5">
-          {Object.entries(task.payload).map(([k, v]) => (
-            <div key={k} className="flex gap-2 text-xs">
-              <span className="text-text-muted capitalize min-w-[60px]">{k.replace(/_/g, " ")}:</span>
-              <span className="text-text-secondary truncate">{String(v)}</span>
-            </div>
-          ))}
-        </div>
-      )}
+      {task.payload && (() => {
+        // payload may arrive as a JSON string — parse it to an object before rendering
+        let payloadObj: Record<string, unknown>
+        if (typeof task.payload === 'string') {
+          try { payloadObj = JSON.parse(task.payload) } catch { payloadObj = {} }
+        } else {
+          payloadObj = task.payload as Record<string, unknown>
+        }
+        const entries = Object.entries(payloadObj).filter(([, v]) => v !== undefined && v !== '')
+        if (entries.length === 0) return null
+        return (
+          <div className="px-4 py-2.5 space-y-1.5">
+            {entries.map(([k, v]) => (
+              <div key={k} className="flex gap-2 text-xs">
+                <span className="text-text-muted capitalize min-w-[60px]">{k.replace(/_/g, ' ')}:</span>
+                <span className="text-text-secondary truncate max-w-[260px] whitespace-pre-wrap break-words">{String(v)}</span>
+              </div>
+            ))}
+          </div>
+        )
+      })()}
 
       {/* Warning */}
       <div className="flex items-start gap-2 px-4 py-2 bg-amber-500/5 border-t border-amber-500/10">
