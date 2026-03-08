@@ -955,10 +955,9 @@ export function ChatInput() {
               useAppStore.getState().setLongTaskLabel(null)
               continue
             }
-            // Hive status update — animated pill + persist in worklog as thinking step
+            // Hive status update — animated pill only (not written to worklog; step_trace handles real entries)
             if (parsed.hive_status) {
               setHiveStatus(parsed.hive_status)
-              addWorklogEntry({ type: 'thinking', content: parsed.hive_status as string, status: 'done' })
               continue
             }
             // Timer fired notification — show as a special message chip
@@ -1013,7 +1012,7 @@ export function ChatInput() {
       updateMessage(chatId, assistantMsgId, { content: finalContent, isStreaming: false })
       saveMessage('assistant', finalContent)
       // ── Worklog framing: log response sent ──
-      addWorklogEntry({ type: 'ai_response', content: `Responded`, status: 'done' })
+      addWorklogEntry({ type: 'ai_response', content: `You just sent me a message:\n${userContent.slice(0, 120)}${userContent.length > 120 ? '\u2026' : ''}`, status: 'done' })
     } catch {
       updateMessage(chatId, assistantMsgId, { content: "Connection error.", isStreaming: false })
       addWorklogEntry({ type: 'error', content: 'Connection error', status: 'error' })
