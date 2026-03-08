@@ -123,14 +123,14 @@ type GenMode = "chat" | "image" | "video" | "music" | "lyrics" | "speech"
 
 export function ChatInput() {
   // ── Persist a message to DB (fire-and-forget, never blocks UI) ──────────
-  const saveMessage = (role: 'user' | 'assistant', content: string) => {
+  const saveMessage = useCallback((role: 'user' | 'assistant', content: string) => {
     if (!content?.trim()) return
     fetch('/api/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ role, content }),
     }).catch(() => { /* silent — history is best-effort */ })
-  }
+  }, [])  // stable — no deps, fetch is global
   // ─────────────────────────────────────────────────────────────────────────
 
   const [input, setInput] = useState("")
@@ -1616,7 +1616,7 @@ export function ChatInput() {
     speech: "Enter the text you want to convert to speech...",
   }
 
-  const messages_count = useAppStore((s) => s.messages.length)
+  const messages_count = useAppStore(useCallback((s) => s.messages.length, []))
   const showTemplates = messages_count === 0 && input === "" && genMode === "chat"
 
   return (
