@@ -5459,8 +5459,56 @@ Rules:
           loopMessages = [...loopMessages, choice.message, ...toolResults]
 
         } else if (finishReason === 'stop' && choice?.message?.content) {
-          // Check for XML-format tool calls (some models like MiniMax emit these instead of tool_calls)
+          // Check for text-format tool calls (some models output JSON/XML instead of tool_calls)
           const rawContent: string = choice.message.content
+
+          // ── JSON-format tool call: {"type":"function","name":"...","parameters":{...}} ──
+          // Emitted by minimax-m2.5-free (Atlas tier) when it doesn't use proper tool_calls
+          const jsonFnPattern = /\{\s*"type"\s*:\s*"function"\s*,\s*"name"\s*:\s*"([^"]+)"\s*,\s*"parameters"\s*:\s*(\{[\s\S]*?\})\s*\}/g
+          const hasJsonFnCall = /"type"\s*:\s*"function"\s*,\s*"name"\s*:/.test(rawContent)
+
+          if (hasJsonFnCall && round < MAX_TOOL_ROUNDS) {
+            const jsonFnResults: Array<{ role: 'tool'; tool_call_id: string; content: string }> = []
+            const jsonFnCalls: Array<{ id: string; type: string; function: { name: string; arguments: string } }> = []
+            let jsonMatch
+            const jsonFnPatternLocal = /\{\s*"type"\s*:\s*"function"\s*,\s*"name"\s*:\s*"([^"]+)"\s*,\s*"parameters"\s*:\s*(\{[\s\S]*?\})\s*\}/g
+            while ((jsonMatch = jsonFnPatternLocal.exec(rawContent)) !== null) {
+              const toolName = jsonMatch[1]
+              let toolArgs: Record<string, unknown> = {}
+              try { toolArgs = JSON.parse(jsonMatch[2]) } catch { /* ignore parse err */ }
+              const fakeId = `json_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+              jsonFnCalls.push({ id: fakeId, type: 'function', function: { name: toolName, arguments: JSON.stringify(toolArgs) } })
+              const result = await executeTool(toolName, toolArgs, toolContext)
+              jsonFnResults.push({ role: 'tool' as const, tool_call_id: fakeId, content: result })
+            }
+            if (jsonFnResults.length > 0) {
+              // Check for HITL task — emit card and halt
+              for (const tr of jsonFnResults) {
+                if (tr.content.startsWith('HITL_TASK:')) {
+                  const taskJson = tr.content.slice('HITL_TASK:'.length)
+                  const task = JSON.parse(taskJson)
+                  const enc2 = new TextEncoder()
+                  const hitlStream2 = new ReadableStream({
+                    start(ctrl) {
+                      const text = "I've queued that for your approval — check the card below."
+                      ctrl.enqueue(enc2.encode(`data: ${JSON.stringify({ sparkie_task: task, text })}\n\n`))
+                      ctrl.enqueue(enc2.encode('data: [DONE]\n\n'))
+                      ctrl.close()
+                    },
+                  })
+                  return new Response(hitlStream2, {
+                    headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
+                  })
+                }
+              }
+              const fakeAssistantMsg = { role: 'assistant' as const, content: null, tool_calls: jsonFnCalls }
+              loopMessages = [...loopMessages, fakeAssistantMsg, ...jsonFnResults]
+              usedTools = true
+              continue
+            }
+          }
+
+          // ── XML-format tool calls: <invoke name="..."> (MiniMax alternate format) ──
           const xmlToolPattern = /<invoke\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)<\/invoke>|<parameter\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)<\/parameter>/g
           const hasXmlToolCall = /minimax:tool_call|<invoke\s+name=|<\/invoke>/.test(rawContent)
 
