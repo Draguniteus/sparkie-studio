@@ -286,35 +286,33 @@ export async function executeSprint5Tool(
       const COMPOSIO_API_KEY = process.env.COMPOSIO_API_KEY ?? ''
       const ENTITY_ID = `sparkie_user_${userId}`
 
-      const helperPreamble = `
-import json, urllib.request, urllib.error
-
-COMPOSIO_API_KEY = "${COMPOSIO_API_KEY}"
-ENTITY_ID = "${ENTITY_ID}"
-COMPOSIO_BASE = "https://backend.composio.dev/api/v3"
-
-def run_composio_tool(tool_slug: str, arguments: dict) -> dict:
-    'Execute a Composio tool. Returns response dict.'
-    url = f"{COMPOSIO_BASE}/tools/execute/{tool_slug}"
-    body = json.dumps({"entity_id": ENTITY_ID, "arguments": arguments}).encode()
-    req = urllib.request.Request(url, data=body, method="POST",
-        headers={"x-api-key": COMPOSIO_API_KEY, "Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return json.loads(r.read())
-    except urllib.error.HTTPError as e:
-        return {"error": f"HTTP {e.code}: {e.read().decode()[:300]}"}
-
-def invoke_llm(query: str) -> str:
-    'Quick LLM call for inline analysis.'
-    # Uses DO inference via env — for now returns placeholder, Sparkie handles LLM natively
-    return f"[LLM: {query[:200]}]"
-
-def upload_file(path: str) -> str:
-    'Placeholder upload — returns path for now.'
-    return path
-
-`
+      // Build preamble as string concat to avoid TS template literal conflicts
+      const helperPreamble = [
+        'import json, urllib.request, urllib.error',
+        '',
+        'COMPOSIO_API_KEY = "' + COMPOSIO_API_KEY + '"',
+        'ENTITY_ID = "' + ENTITY_ID + '"',
+        'COMPOSIO_BASE = "https://backend.composio.dev/api/v3"',
+        '',
+        'def run_composio_tool(tool_slug, arguments):',
+        '    url = COMPOSIO_BASE + "/tools/execute/" + tool_slug',
+        '    body = json.dumps({"entity_id": ENTITY_ID, "arguments": arguments}).encode()',
+        '    import urllib.request as _ur',
+        '    req = _ur.Request(url, data=body, method="POST",',
+        '        headers={"x-api-key": COMPOSIO_API_KEY, "Content-Type": "application/json"})',
+        '    try:',
+        '        with _ur.urlopen(req, timeout=30) as r:',
+        '            return json.loads(r.read())',
+        '    except Exception as e:',
+        '        return {"error": str(e)}',
+        '',
+        'def invoke_llm(q):',
+        '    return "[LLM: " + str(q)[:200] + "]"',
+        '',
+        'def upload_file(path):',
+        '    return path',
+        '',
+      ].join('\n')
       const fullCode = helperPreamble + '\n' + code
 
       // POST to /api/execute (E2B sandbox)
