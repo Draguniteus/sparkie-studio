@@ -912,8 +912,8 @@ export function ChatInput() {
             if (parsed.task_chip_clear) {
               // Stamp the chip label + step traces onto the completed message
               const chipLabelNow = useAppStore.getState().longTaskLabel
-              if (chipLabelNow && assistantMsgId.current) {
-                useAppStore.getState().updateMessage(currentChatIdRef.current ?? '', assistantMsgId.current, {
+              if (chipLabelNow && assistantMsgId) {
+                useAppStore.getState().updateMessage(chatId, assistantMsgId, {
                   chipLabel: chipLabelNow,
                   toolTraces: _stepTraces.length > 0 ? [..._stepTraces] : undefined,
                 })
