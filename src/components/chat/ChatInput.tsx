@@ -767,6 +767,10 @@ export function ChatInput() {
   const EMOTIONAL_OVERRIDE = /\b(i('m| am| was| feel)|you('re| are| were)|we('re| are)|she('s| is)|he('s| is)|broken you|proud of|upset|sorry|happy|excited|love|miss|wow|amazing|incredible|beautiful|great job|well done|thank|glad|grateful)\b/i
   const hasBuildSignal = BUILD_KEYWORDS.test(t) || BUILD_PHRASE.test(t) || EDIT_PHRASE.test(t)
   if (hasBuildSignal) {
+    // Comms override — email/social/comms tasks win even if "write/create/make" prefix present
+    // e.g. "write an email", "create a tweet", "make me a message" → always chat
+    const COMMS_OVERRIDE = /\b(email|tweet|post to|message|dm|text|reply to|forward|discord|slack|instagram|twitter|facebook|reddit|tiktok)\b/i
+    if (AGENTIC_TASK.test(t) && COMMS_OVERRIDE.test(t)) return true  // → streamReply → /api/chat
     // If message has emotional/relational override AND no explicit code target, escalate to LLM
     const hasCodeTarget = /\b(app|page|button|color|navbar|footer|header|component|style|css|html|code|script|file|function|api|endpoint|route|database|model|feature|modal|form|input|layout|theme|icon|image|logo|animation|widget|card|sidebar|menu|dropdown|table|chart|graph|dashboard)\b/i.test(t)
     if (EMOTIONAL_OVERRIDE.test(t) && !hasCodeTarget) return null // → LLM classifier
