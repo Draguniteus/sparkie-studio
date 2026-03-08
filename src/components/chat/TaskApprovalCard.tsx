@@ -72,10 +72,35 @@ function EmailDraftCard({ task, onResolve }: Props) {
     if (resolved || loading) return
     setLoading(decision)
     try {
+      let attachmentRef: { name: string; s3key: string; mimeType: string } | null = null
+
+      // Upload attachment first if present — Composio GMAIL_SEND_EMAIL needs an s3key, not raw base64
+      if (decision === "approved" && attachment?.dataUrl) {
+        try {
+          const uploadRes = await fetch("/api/upload-attachment", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              filename: attachment.name,
+              mimeType: attachment.mimeType,
+              base64Data: attachment.dataUrl.includes(",") ? attachment.dataUrl.split(",")[1] : attachment.dataUrl,
+            }),
+          })
+          if (uploadRes.ok) {
+            const { s3key } = await uploadRes.json()
+            attachmentRef = { name: attachment.name, s3key, mimeType: attachment.mimeType }
+          } else {
+            console.warn("Attachment upload failed — sending email without attachment")
+          }
+        } catch (err) {
+          console.warn("Attachment upload error:", err, "— sending without attachment")
+        }
+      }
+
       const payload: Record<string, unknown> = {
         id: task.id,
         status: decision,
-        ...(decision === "approved" && attachment ? { attachment } : {}),
+        ...(attachmentRef ? { attachment: attachmentRef } : {}),
       }
       const res = await fetch("/api/tasks", {
         method: "PATCH",
