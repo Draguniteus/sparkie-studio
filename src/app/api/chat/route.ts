@@ -5155,10 +5155,11 @@ Rules:
               const richStepLabel = pathShort ? `${baseStepLabel}${pathShort}` : baseStepLabel
               liveEnqueue({ step_trace: { icon: stepIcon[tc.function.name] ?? 'zap', label: richStepLabel, status: isStepError ? 'error' : 'done', duration: stepDuration } })
 
-              // Worklog card SSE — emit for notable tool completions
+              // Worklog card SSE — emit LIVE via liveEnqueue so worklog updates as each tool completes
+              // (was: pushed to hiveLog and flushed at end → entire worklog dumped all at once)
               if (['save_memory', 'save_self_memory', 'log_worklog', 'patch_file', 'write_file', 'trigger_deploy', 'create_task', 'schedule_task'].includes(tc.function.name) && !isStepError) {
                 const wlSummary = result.slice(0, 200)
-                hiveLog.push(`__worklog_card__${JSON.stringify({ tool: tc.function.name, summary: wlSummary, ts: new Date().toISOString() })}`)
+                liveEnqueue({ worklog_card: { tool: tc.function.name, summary: wlSummary, ts: new Date().toISOString() } })
               }
 
               return { role: 'tool' as const, tool_call_id: tc.id, content: result }
