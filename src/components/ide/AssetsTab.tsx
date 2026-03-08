@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react"
 import { useAppStore, AssetType, AssetSource } from "@/store/appStore"
+import { useShallow } from "zustand/react/shallow"
 import { Download, Search, X, ExternalLink, MessageSquare, FileCode, Globe, FileText, Music, Video, Table, Presentation, File, ChevronDown, Trash2 } from "lucide-react"
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -178,7 +179,9 @@ interface PreviewModal {
 }
 
 export function AssetsTab() {
-  const { assets, setCurrentChat, setActiveTab, removeAsset } = useAppStore()
+  const { assets, setCurrentChat, setActiveTab, removeAsset } = useAppStore(
+    useShallow((s) => ({ assets: s.assets, setCurrentChat: s.setCurrentChat, setActiveTab: s.setActiveTab, removeAsset: s.removeAsset }))
+  )
   const [filterTab, setFilterTab] = useState<FilterTab>("all")
   const [sourceFilter, setSourceFilter] = useState<AssetSource | "all">("all")
   const [search, setSearch] = useState("")

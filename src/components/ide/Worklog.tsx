@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { useAppStore, WorklogEntry } from "@/store/appStore"
+import { useShallow } from "zustand/react/shallow"
 import { Brain, Loader2, Mail, MessageSquare, Send, Activity, Eye } from "lucide-react"
 
 function formatTime(ts: Date | number | string | undefined) {
@@ -232,7 +233,9 @@ interface WorklogProps {
 }
 
 export function Worklog({ compact = false }: WorklogProps) {
-  const { worklog, isExecuting, addWorklogEntry } = useAppStore()
+  const { worklog, isExecuting, addWorklogEntry } = useAppStore(
+    useShallow((s) => ({ worklog: s.worklog, isExecuting: s.isExecuting, addWorklogEntry: s.addWorklogEntry }))
+  )
   const [dbLoaded, setDbLoaded] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
