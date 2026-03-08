@@ -4,6 +4,7 @@ import React, { useState } from "react"
 import { Message, PendingTask } from "@/store/appStore"
 import { TaskApprovalCard } from "@/components/chat/TaskApprovalCard"
 import { useAppStore } from "@/store/appStore"
+import { useShallow } from "zustand/react/shallow"
 import { Sparkles, User, Copy, RefreshCw, ThumbsUp, ThumbsDown, Download, Check, ExternalLink, FileCode, Layers, Eye, Clock } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
@@ -129,7 +130,7 @@ function MessageBubbleInner({ message, userAvatarUrl }: Props) {
     )
   }
   const { updateMessage, currentChatId } = useAppStore(
-    (s) => ({ updateMessage: s.updateMessage, currentChatId: s.currentChatId })
+    useShallow((s) => ({ updateMessage: s.updateMessage, currentChatId: s.currentChatId }))
   )
 
   return (
