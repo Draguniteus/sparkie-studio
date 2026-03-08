@@ -4525,18 +4525,17 @@ export async function POST(req: NextRequest) {
       recordUserActivity(userId).catch(() => {})
 
       const [memoriesText, awareness, identityFiles, envCtx, sessionSnapshot, readyIntents, userModel] = await Promise.all([
-        // CONVERSATIONAL: skip Supermemory fetch — saves 200-600ms on every simple message
-        modelSelection.tier === 'conversational' ? Promise.resolve('') : (() => {
+        (() => {
           const _mce = _memCache.get(userId)
           if (_mce && _mce.expiresAt > Date.now()) return Promise.resolve(_mce.text)
           return loadMemories(userId, messages.filter((m: { role: string; content: string }) => m.role === 'user').at(-1)?.content?.slice(0, 200)).then(t => {
-            _memCache.set(userId, { text: t, expiresAt: Date.now() + 300_000 }) // 5min TTL (was 30s)
+            _memCache.set(userId, { text: t, expiresAt: Date.now() + 30_000 })
             return t
           })
         })(),
         getAwareness(userId),
         modelSelection.tier === 'conversational' ? Promise.resolve({ user: '', memory: '', session: '', heartbeat: '', context: '', actions: '', snapshot: '' } as IdentityFiles) : loadIdentityFiles(userId),
-        modelSelection.tier === 'conversational' ? Promise.resolve('') : buildEnvironmentalContext(userId),
+        modelSelection.tier === 'conversational' ? Promise.resolve(null) : buildEnvironmentalContext(userId),
         modelSelection.tier === 'conversational' ? Promise.resolve(null) : readSessionSnapshot(userId),
         modelSelection.tier === 'conversational' ? Promise.resolve([] as Awaited<ReturnType<typeof loadReadyDeferredIntents>>) : loadReadyDeferredIntents(userId),
         modelSelection.tier === 'conversational' ? Promise.resolve(null) : getUserModel(userId),
@@ -4555,8 +4554,8 @@ export async function POST(req: NextRequest) {
 
       systemContent += `\n\n## RIGHT NOW\n- Time of day: ${awareness.timeLabel}\n- Sessions together: ${awareness.sessionCount}\n- Days since last visit: ${awareness.daysSince === 0 ? 'same day' : `${awareness.daysSince} day${awareness.daysSince === 1 ? '' : 's'} ago`}`
 
-      // Inject environmental context
-      systemContent += '\n\n' + formatEnvContextBlock(envCtx)
+      // Inject environmental context (skipped on CONVERSATIONAL tier)
+      if (envCtx) { systemContent += '\n\n' + formatEnvContextBlock(envCtx) }
 
       // Inject behavioral user model (Phase 3)
       if (userModel && userModel.sessionCount >= 5) {
