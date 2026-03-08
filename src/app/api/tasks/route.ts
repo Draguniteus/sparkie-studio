@@ -174,41 +174,92 @@ export async function PATCH(req: NextRequest) {
           try {
             const emailBody = payload.body ?? ''
 
-            // Call Composio GMAIL_SEND_EMAIL via v3
-            const gmailArgs: Record<string, unknown> = {
-              recipient_email: recipientEmail,
-              subject: payload.subject ?? '(no subject)',
-              body: emailBody,
-              is_html: false,
-            }
-            // Attachment: expects { name, mimetype, s3key } from Composio file storage
-            // s3key is obtained by uploading file first via /api/upload-attachment
-            if (attachment && (attachment as Record<string, string>).s3key) {
-              const att = attachment as Record<string, string>
-              gmailArgs.attachment = {
-                name: att.name,
-                mimetype: att.mimeType || att.mimetype || 'application/octet-stream',
-                s3key: att.s3key,
+            // Build attachment type from PATCH body
+            // attachment may have: { name, base64Data, mimeType } (from upload-attachment echo)
+            // OR: { name, s3key, mimeType } (legacy Composio path - kept for compat)
+            const attData = attachment as Record<string, string> | null | undefined
+            const hasAttachment = !!attData?.base64Data && !!attData?.filename
+
+            if (!hasAttachment) {
+              // No attachment — use simple Composio GMAIL_SEND_EMAIL call
+              const composioRes = await fetch('https://backend.composio.dev/api/v3/tools/execute/GMAIL_SEND_EMAIL', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-api-key': composioKey },
+                body: JSON.stringify({
+                  entity_id: entityId,
+                  arguments: {
+                    recipient_email: recipientEmail,
+                    subject: payload.subject ?? '(no subject)',
+                    body: emailBody,
+                    is_html: false,
+                  },
+                }),
+              })
+              if (!composioRes.ok) {
+                const errText = await composioRes.text()
+                console.error('[tasks PATCH] Gmail send failed:', composioRes.status, errText)
+              } else {
+                console.log('[tasks PATCH] Gmail send success for:', recipientEmail)
               }
-            }
-
-            const composioRes = await fetch('https://backend.composio.dev/api/v3/tools/execute/GMAIL_SEND_EMAIL', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': composioKey,
-              },
-              body: JSON.stringify({
-                entity_id: entityId,
-                arguments: gmailArgs,
-              }),
-            })
-
-            if (!composioRes.ok) {
-              const errText = await composioRes.text()
-              console.error('[tasks PATCH] Gmail send failed:', composioRes.status, errText)
             } else {
-              console.log('[tasks PATCH] Gmail send success for:', recipientEmail)
+              // Has attachment — build raw RFC 2822 MIME message and send via Gmail API directly
+              const boundary = `sparkie_${Date.now()}_boundary`
+              const subject = payload.subject ?? '(no subject)'
+              const mimeType = attData.mimeType || attData.mimetype || 'application/octet-stream'
+              const filename = attData.filename || attData.name || 'attachment'
+              const fileBase64 = attData.base64Data
+
+              // Build RFC 2822 MIME multipart message
+              const mimeLines = [
+                `From: me`,
+                `To: ${recipientEmail}`,
+                `Subject: ${subject}`,
+                `MIME-Version: 1.0`,
+                `Content-Type: multipart/mixed; boundary="${boundary}"`,
+                ``,
+                `--${boundary}`,
+                `Content-Type: text/plain; charset="UTF-8"`,
+                `Content-Transfer-Encoding: 7bit`,
+                ``,
+                emailBody,
+                ``,
+                `--${boundary}`,
+                `Content-Type: ${mimeType}; name="${filename}"`,
+                `Content-Disposition: attachment; filename="${filename}"`,
+                `Content-Transfer-Encoding: base64`,
+                ``,
+                // Split base64 into 76-char lines (RFC 2822)
+                fileBase64.match(/.{1,76}/g)?.join('\r\n') ?? fileBase64,
+                ``,
+                `--${boundary}--`,
+              ]
+
+              const rawMessage = mimeLines.join('\r\n')
+              // Base64url encode (URL-safe, no padding)
+              const rawBase64url = Buffer.from(rawMessage).toString('base64')
+                .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+
+              // Send via Composio GMAIL_SEND_EMAIL using 'raw' field
+              const composioRes = await fetch('https://backend.composio.dev/api/v3/tools/execute/GMAIL_SEND_EMAIL', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-api-key': composioKey },
+                body: JSON.stringify({
+                  entity_id: entityId,
+                  arguments: {
+                    recipient_email: recipientEmail,
+                    subject,
+                    body: emailBody,
+                    is_html: false,
+                    raw: rawBase64url,
+                  },
+                }),
+              })
+              if (!composioRes.ok) {
+                const errText = await composioRes.text()
+                console.error('[tasks PATCH] Gmail send (with attachment) failed:', composioRes.status, errText)
+              } else {
+                console.log('[tasks PATCH] Gmail send with attachment success for:', recipientEmail, 'file:', filename)
+              }
             }
           } catch (e) {
             console.error('[tasks PATCH] Gmail send error:', e)
