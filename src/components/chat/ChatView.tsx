@@ -31,9 +31,13 @@ export function ChatView() {
   const [streamTraces, setStreamTraces] = useState<StepTrace[]>([])
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-    }
+    // rAF: batch scroll to the paint cycle — prevents forced layout on every SSE token
+    const raf = requestAnimationFrame(() => {
+      if (scrollRef.current) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+      }
+    })
+    return () => cancelAnimationFrame(raf)
   }, [chat?.messages, longTaskLabel])
 
   useEffect(() => {

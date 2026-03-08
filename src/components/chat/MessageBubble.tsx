@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import React, { useState } from "react"
 import { Message, PendingTask } from "@/store/appStore"
 import { TaskApprovalCard } from "@/components/chat/TaskApprovalCard"
 import { useAppStore } from "@/store/appStore"
@@ -91,7 +91,7 @@ function BuildCard({ card }: { card: NonNullable<Message["buildCard"]> }) {
   )
 }
 
-export function MessageBubble({ message, userAvatarUrl }: Props) {
+function MessageBubbleInner({ message, userAvatarUrl }: Props) {
   const isUser = message.role === "user"
   const [copied, setCopied] = useState(false)
 
@@ -128,7 +128,9 @@ export function MessageBubble({ message, userAvatarUrl }: Props) {
       </div>
     )
   }
-  const { updateMessage, currentChatId } = useAppStore()
+  const { updateMessage, currentChatId } = useAppStore(
+    (s) => ({ updateMessage: s.updateMessage, currentChatId: s.currentChatId })
+  )
 
   return (
     <div className={`flex gap-3 animate-fade-in ${isUser ? "justify-end" : ""}`}>
@@ -342,3 +344,5 @@ export function MessageBubble({ message, userAvatarUrl }: Props) {
     </div>
   )
 }
+
+export const MessageBubble = React.memo(MessageBubbleInner)

@@ -54,7 +54,7 @@ function AnimatedText({
   )
 }
 
-// ── Media renderers ───────────────────────────────────────────────────────────
+// ── Media renderers ──────────────────────────────────────────────────────────
 
 function SparkieImage({ src, alt }: { src: string; alt?: string }) {
   return (
@@ -87,7 +87,7 @@ function SparkieAudio({ src, label }: { src: string; label?: string }) {
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
-        <span style={{ fontSize: "18px" }}>🎵</span>
+        <span style={{ fontSize: "18px" }}>&#x1F3B5;</span>
         <span style={{ color: "#FFC30B", fontWeight: 600, fontSize: "14px" }}>{title}</span>
       </div>
       <audio
@@ -138,15 +138,34 @@ export function AnimatedMarkdown({ content, isStreaming, messageId }: Props) {
 
   const isDone = animationDoneSet.has(messageId)
 
+  // KEY PERF: During active streaming, skip ReactMarkdown entirely.
+  // ReactMarkdown re-parses the full AST on every token — O(n^2) for long responses.
+  // Plain pre-wrap render is negligible. Markdown is only parsed once streaming ends.
+  if (isStreaming && !isDone) {
+    return (
+      <p style={{ wordBreak: "break-word", overflowWrap: "anywhere", whiteSpace: "pre-wrap", margin: 0 }}>
+        {content || " "}
+      </p>
+    )
+  }
+
   // Reset per-render offset at top of each render
   renderCharOffset = 0
 
-  const makeComponents = (done: boolean): Components => ({
+  return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={makeComponents(isDone)}>
+      {content || " "}
+    </ReactMarkdown>
+  )
+}
+
+function makeComponents(done: boolean): Components {
+  return {
     p({ children }) {
-      return <p style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}><AnimatedNodes isDone={done}>{children}</AnimatedNodes></p>
+      return <p style={{ wordBreak: "break-word", overflowWrap: "anywhere" }}><AnimatedNodes isDone={done}>{children}</AnimatedNodes></p>
     },
     a({ children, href }) {
-      return <a href={href} target="_blank" rel="noopener noreferrer" style={{ wordBreak: 'break-all' }}><AnimatedNodes isDone={done}>{children}</AnimatedNodes></a>
+      return <a href={href} target="_blank" rel="noopener noreferrer" style={{ wordBreak: "break-all" }}><AnimatedNodes isDone={done}>{children}</AnimatedNodes></a>
     },
     h1({ children }) {
       return <h1><AnimatedNodes isDone={done}>{children}</AnimatedNodes></h1>
@@ -169,34 +188,21 @@ export function AnimatedMarkdown({ content, isStreaming, messageId }: Props) {
     li({ children }) {
       return <li><AnimatedNodes isDone={done}>{children}</AnimatedNodes></li>
     },
-    // Code blocks — intercept media fences, pass through real code
     code(props) {
       const { children, className } = props
       const lang = className?.replace("language-", "") ?? ""
       const raw = String(children).trim()
 
-      if (lang === "image") {
-        return <SparkieImage src={raw} />
-      }
-      if (lang === "audio") {
-        return <SparkieAudio src={raw} />
-      }
-      if (lang === "video") {
-        return <SparkieVideo src={raw} />
-      }
+      if (lang === "image") return <SparkieImage src={raw} />
+      if (lang === "audio") return <SparkieAudio src={raw} />
+      if (lang === "video") return <SparkieVideo src={raw} />
 
       return <code className={className}>{children}</code>
     },
     pre({ children }) {
       return <pre>{children}</pre>
     },
-  })
-
-  return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={makeComponents(isDone)}>
-      {content || " "}
-    </ReactMarkdown>
-  )
+  }
 }
 
 function AnimatedNodes({
