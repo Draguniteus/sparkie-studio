@@ -51,7 +51,12 @@ export interface PendingTask {
   emailDraft?: { subject?: string; to?: string; body?: string }
 }
 
-export interface StepTrace { icon: string; label: string; status: 'running' | 'done' | 'error'; duration?: number }
+export interface StepTrace {
+  icon: string
+  label: string
+  status: 'running' | 'done' | 'error'
+  duration?: number
+}
 
 export interface Message {
   id: string
@@ -64,7 +69,8 @@ export interface Message {
   isStreaming?: boolean
   buildCard?: BuildCardData  // only present when type === 'build_card'
   pendingTask?: PendingTask  // only present for HITL approval messages
-  toolTraces?: StepTrace[]   // step traces frozen onto this message after response completes
+  chipLabel?: string           // 'In memory:...' label stamped when task_chip_clear fires
+  toolTraces?: StepTrace[]     // step traces collected during this response
 }
 
 export interface Chat {

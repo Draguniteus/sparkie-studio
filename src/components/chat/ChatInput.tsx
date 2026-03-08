@@ -1,11 +1,10 @@
 "use client"
 
 import { useState, useRef, useCallback, useEffect } from "react"
-import { useAppStore } from "@/store/appStore"
+import { useAppStore, StepTrace } from "@/store/appStore"
 import { useShallow } from "zustand/react/shallow"
 
 // ── Step trace + worklog card types ──────────────────────────────────────
-interface StepTrace { icon: string; label: string; status: 'running' | 'done' | 'error'; duration?: number }
 interface WorklogCard { tool: string; summary: string; ts: string }
 
 // STEP_ICON_MAP moved to ChatView
@@ -909,18 +908,18 @@ export function ChatInput() {
               useAppStore.getState().setLongTaskLabel(parsed.task_chip as string)
               continue
             }
-            // Phase 5: task_chip_clear — stamp traces onto message then hide chip
+            // Phase 5: task_chip_clear — hide chip when response arrives
             if (parsed.task_chip_clear) {
-              useAppStore.getState().setLongTaskLabel(null)
-              // Freeze current step traces onto this assistant message so they persist permanently
-              const frozenTraces = _stepTraces.filter(t => t.status !== 'running')
-              if (frozenTraces.length > 0 && assistantMsgId) {
-                const chatIdForTrace = useAppStore.getState().currentChatId
-                if (chatIdForTrace) {
-                  useAppStore.getState().updateMessage(chatIdForTrace, assistantMsgId, { toolTraces: frozenTraces })
-                }
+              // Stamp the chip label + step traces onto the completed message
+              const chipLabelNow = useAppStore.getState().longTaskLabel
+              if (chipLabelNow && assistantMsgId.current) {
+                useAppStore.getState().updateMessage(currentChatIdRef.current ?? '', assistantMsgId.current, {
+                  chipLabel: chipLabelNow,
+                  toolTraces: _stepTraces.length > 0 ? [..._stepTraces] : undefined,
+                })
               }
               _setStepTraces([])
+              useAppStore.getState().setLongTaskLabel(null)
               continue
             }
             // Hive status update — animated pill + persist in worklog as thinking step
@@ -989,7 +988,6 @@ export function ChatInput() {
       setHiveStatus(null)
       setStreaming(false)
       useAppStore.getState().setLongTaskLabel(null)  // always clear chip on completion/error
-      _setStepTraces([])  // clear step traces (already stamped onto message via task_chip_clear)
     }
   }, [selectedModel, addMessage, updateMessage, setStreaming, setHiveStatus, saveMessage, clearWorklog, openIDE, ideOpen, setIDETab, addWorklogEntry])
   // eslint-disable-next-line react-hooks/exhaustive-deps -- streamAgent is stable at runtime (defined after, useCallback ref)
