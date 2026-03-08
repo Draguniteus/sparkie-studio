@@ -15,13 +15,14 @@ const STEP_ICON_MAP: Record<string, string> = {
 }
 
 export function ChatView() {
-  const { chats, currentChatId, ideOpen, toggleIDE, userAvatarUrl } = useAppStore(
+  const { chats, currentChatId, ideOpen, toggleIDE, userAvatarUrl, longTaskLabel } = useAppStore(
     useShallow((s) => ({
       chats: s.chats,
       currentChatId: s.currentChatId,
       ideOpen: s.ideOpen,
       toggleIDE: s.toggleIDE,
       userAvatarUrl: s.userAvatarUrl,
+      longTaskLabel: s.longTaskLabel,
     }))
   )
   const chat = chats.find(c => c.id === currentChatId)
@@ -37,7 +38,7 @@ export function ChatView() {
       }
     })
     return () => cancelAnimationFrame(raf)
-  }, [chat?.messages, hasActivity])
+  }, [chat?.messages, streamTraces.length, longTaskLabel])
 
   useEffect(() => {
     const handler = (e: Event) => {
