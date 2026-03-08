@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
 import { CheckCircle, XCircle, Clock, AlertTriangle, Paperclip, Send, X, Mail } from "lucide-react"
 import { PendingTask } from "@/store/appStore"
 
@@ -41,18 +41,79 @@ function EmailDraftCard({ task, onResolve }: Props) {
   )
   const [attachment, setAttachment] = useState<{ name: string; dataUrl: string; mimeType: string } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // Async-fetched draft state — populated when task.emailDraft is null on mount
+  const [fetchedDraft, setFetchedDraft] = useState<{ subject?: string; to?: string; body?: string } | null>(null)
 
-  const draft = task.emailDraft
   // Payload fallback: payload may arrive as a JSON string (route.ts stores it via JSON.stringify)
   const payloadFallback: Record<string, string> = (() => {
     if (!task.payload) return {}
     if (typeof task.payload === 'string') { try { return JSON.parse(task.payload) } catch { return {} } }
     return task.payload as Record<string, string>
   })()
-  if (!draft && !payloadFallback.to && !payloadFallback.subject) return null  // nothing to render
-  const subject = (draft?.subject ?? payloadFallback.subject ?? '(no subject)') as string
-  const to = (draft?.to ?? payloadFallback.to ?? '') as string
+
+  // Fetch draft from DB when emailDraft is null (async load race — task arrives before DB write)
+  useEffect(() => {
+    if (task.emailDraft || fetchedDraft) return
+    if (!task.id) return
+    const fetchDraft = async () => {
+      try {
+        const res = await fetch(`/api/tasks?id=${encodeURIComponent(task.id)}`)
+        if (!res.ok) return
+        const data = await res.json()
+        const t = data.task ?? data
+        if (t?.payload) {
+          const p = typeof t.payload === 'string' ? JSON.parse(t.payload) : t.payload
+          // Support both 'to' and 'recipient_email' keys
+          if (p?.subject || p?.to || p?.recipient_email || p?.body) {
+            setFetchedDraft({
+              subject: p.subject,
+              to: p.to ?? p.recipient_email,
+              body: p.body,
+            })
+          }
+        }
+        if (t?.emailDraft) {
+          setFetchedDraft(t.emailDraft)
+        }
+      } catch { /* silently fail — card still renders with payload data */ }
+    }
+    // Small delay to let DB write complete before fetching
+    const timer = setTimeout(fetchDraft, 600)
+    return () => clearTimeout(timer)
+  }, [task.id, task.emailDraft, fetchedDraft])
+
+  const draft = task.emailDraft ?? fetchedDraft
+
+  // Support both 'to' and 'recipient_email' in payload fallback (DB stores as recipient_email)
+  const payloadTo = payloadFallback.to ?? payloadFallback.recipient_email
+  const payloadSubject = payloadFallback.subject
+
+  // Resolve field values
+  const subject = (draft?.subject ?? payloadSubject ?? '') as string
+  const to = (draft?.to ?? payloadTo ?? '') as string
   const body = (draft?.body ?? payloadFallback.body ?? '') as string
+
+  // Show a skeleton loader while waiting for data (instead of return null)
+  if (!subject && !to && !body) {
+    return (
+      <div className="mt-2 rounded-xl border border-purple-500/25 bg-purple-500/5 overflow-hidden">
+        <div className="flex items-center gap-2.5 px-4 py-3">
+          <div className="w-7 h-7 rounded-lg bg-purple-500/15 flex items-center justify-center shrink-0">
+            <Mail size={14} className="text-purple-400" />
+          </div>
+          <div className="flex-1 space-y-1.5">
+            <div className="h-2.5 w-16 bg-purple-500/20 rounded animate-pulse" />
+            <div className="h-3 w-40 bg-hive-elevated rounded animate-pulse" />
+          </div>
+        </div>
+        <div className="px-4 py-2 text-xs text-text-muted flex items-center gap-2">
+          <Clock size={11} className="animate-spin text-purple-400" />
+          Loading draft…
+        </div>
+      </div>
+    )
+  }
+
   // Truncate body for preview
   const bodyPreview = body.length > 280 ? body.slice(0, 280) + "…" : body
   const [expanded, setExpanded] = useState(false)
@@ -78,8 +139,6 @@ function EmailDraftCard({ task, onResolve }: Props) {
       const objectUrl = URL.createObjectURL(file)
       img.onload = () => {
         URL.revokeObjectURL(objectUrl)
-        // Target: keep output base64 under MAX_BASE64_BYTES
-        // Start at quality=0.82 and step down; also scale down if still too large
         const tryCompress = (quality: number, scale: number) => {
           const canvas = document.createElement("canvas")
           canvas.width = Math.round(img.width * scale)
@@ -101,7 +160,6 @@ function EmailDraftCard({ task, onResolve }: Props) {
       img.onerror = () => { URL.revokeObjectURL(objectUrl); storeAsIs(file) }
       img.src = objectUrl
     } else {
-      // Non-image: read as-is (PDFs etc. — user responsible for size)
       storeAsIs(file)
     }
   }
@@ -110,10 +168,8 @@ function EmailDraftCard({ task, onResolve }: Props) {
     if (resolved || loading) return
     setLoading(decision)
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let attachmentRef: Record<string, string> | null = null
 
-      // Validate and relay attachment through upload-attachment before including in PATCH
       if (decision === "approved" && attachment?.dataUrl) {
         try {
           const uploadRes = await fetch("/api/upload-attachment", {
@@ -128,7 +184,6 @@ function EmailDraftCard({ task, onResolve }: Props) {
           if (uploadRes.ok) {
             const uploadData = await uploadRes.json()
             if (uploadData.ok && uploadData.base64Data) {
-              // Pass the validated file data through for MIME assembly at send time
               attachmentRef = {
                 name: uploadData.filename || attachment.name,
                 filename: uploadData.filename || attachment.name,
@@ -137,7 +192,6 @@ function EmailDraftCard({ task, onResolve }: Props) {
               } as { name: string; filename: string; mimeType: string; base64Data: string; s3key?: string }
             } else {
               console.warn("Attachment validation failed:", uploadData)
-              // Still try to send without attachment rather than blocking
             }
           } else {
             const errText = await uploadRes.text()
@@ -169,9 +223,8 @@ function EmailDraftCard({ task, onResolve }: Props) {
 
   return (
     <div className="mt-2 rounded-xl border border-purple-500/25 bg-purple-500/5 overflow-hidden">
-      {/* Header — Email pill + subject + chevron + Sent badge */}
+      {/* Header — Email pill + subject + Sent badge */}
       <div className="flex items-center gap-2.5 px-4 py-3 border-b border-purple-500/15">
-        {/* Gmail M logo */}
         <div className="w-7 h-7 rounded-lg bg-purple-500/15 flex items-center justify-center shrink-0">
           <Mail size={14} className="text-purple-400" />
         </div>
@@ -195,8 +248,7 @@ function EmailDraftCard({ task, onResolve }: Props) {
               </span>
             )}
           </div>
-          {/* Subject line */}
-          <p className="text-sm font-semibold text-text-primary mt-0.5 truncate">{subject}</p>
+          <p className="text-sm font-semibold text-text-primary mt-0.5 truncate">{subject || "(no subject)"}</p>
         </div>
       </div>
 
@@ -353,7 +405,6 @@ export function TaskApprovalCard({ task, onResolve }: Props) {
 
       {/* Payload preview */}
       {task.payload && (() => {
-        // payload may arrive as a JSON string — parse it to an object before rendering
         let payloadObj: Record<string, unknown>
         if (typeof task.payload === 'string') {
           try { payloadObj = JSON.parse(task.payload) } catch { payloadObj = {} }
