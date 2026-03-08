@@ -12,6 +12,7 @@ import { Download, ChevronLeft, ChevronRight, Brain } from "lucide-react"
 import { TaskQueuePanel } from "@/components/ide/TaskQueuePanel"
 import { MemoryTab } from "@/components/ide/MemoryTab"
 import { RealScorePanel } from "@/components/ide/RealScorePanel"
+import { ProcessTab } from "@/components/ide/ProcessTab"
 
 
 function WorklogPanel() {
@@ -232,7 +233,7 @@ export function IDEPanelInner() {
         )}
         {ideTab === 'process' && (
           <div className="h-full">
-            {isExecuting ? <LiveCodeView /> : <Preview />}
+            {isExecuting ? <LiveCodeView /> : <ProcessTab />}
           </div>
         )}
 
