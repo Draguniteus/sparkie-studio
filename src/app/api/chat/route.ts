@@ -5681,13 +5681,16 @@ SYNTHESIS RULES:
       }
     }
 
-    // Helper: strip XML tool call artifacts from model output
+    // Helper: strip XML and OpenAI-format tool call artifacts from model output
     function sanitizeContent(text: string): string {
       return text
+        // MiniMax XML-format tool calls
         .replace(/minimax:tool_call\s*<invoke[\s\S]*?<\/invoke>\s*<\/minimax:tool_call>/g, '')
         .replace(/<invoke\s+name=["'][^"']+["'][^>]*>[\s\S]*?<\/invoke>/g, '')
         .replace(/<\/minimax:tool_call>/g, '')
         .replace(/<minimax:tool_call>/g, '')
+        // OpenAI-format function call JSON blobs printed verbatim by some models
+        .replace(/\{\s*"type"\s*:\s*"function"\s*,\s*"name"\s*:[^}]+,"parameters"\s*:\s*\{[\s\S]*?\}\s*\}/g, '')
         .trim()
     }
 
