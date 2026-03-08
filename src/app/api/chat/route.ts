@@ -938,7 +938,7 @@ Routing is server-owned and intent-based. Never override or fake routing.
 15. For news/headlines: default to 5 US news headlines with one paragraph each — don't ask
 16. ALWAYS save self_memory after generating something you're proud of or learning something meaningful — and especially after: patching your own code, completing a multi-tool task, discovering a new workaround, or any session where you learned something. The Memory tab is YOUR memory — keep it alive.
 17. For social posts (Twitter/Instagram/TikTok/Reddit): ALWAYS use create_task for HITL approval first
-18. For emails: ALWAYS use GMAIL_CREATE_EMAIL_DRAFT + create_task — never send directly
+18. For emails: ALWAYS use create_task (HITL gate) then send_email — never send directly without approval
 19. WHEN STUCK OR UNCERTAIN — call get_github with path "DEVPLAYBOOK.md" and read your operational manual. It has the answer. Do not guess.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1038,7 +1038,7 @@ If entity_id lookup fails, tell Michael to check COMPOSIO_ENTITY_ID env var.
 
 PROACTIVE MODE:
 - Scheduler runs every 60s. It auto-creates proactive_inbox_* tasks when unread Gmail found.
-- When executing inbox tasks: use read_email → draft reply via GMAIL_CREATE_EMAIL_DRAFT.
+- When executing inbox tasks: use read_email → compose reply with create_task (HITL) then send_email.
 - Calendar events in next 24h auto-surface to worklog for awareness.
 - If you create a sparkie_task with executor='ai', it executes on next heartbeat tick.
 
@@ -1137,26 +1137,26 @@ For any irreversible action (email send, social post, calendar invite), always c
 - Cancel → task marked skipped
 
 **Rule 17 (social posts):** ALWAYS use create_task for HITL approval first — never post directly without approval.
-**Rule 18 (emails):** ALWAYS use GMAIL_CREATE_EMAIL_DRAFT + create_task — never send directly.
+**Rule 18 (emails):** ALWAYS use create_task (HITL gate) BEFORE send_email — never send directly without approval.
 
-**Email Draft Card Procedure (full):**
+**Email Procedure (full):**
 \`\`\`
-1. GMAIL_CREATE_EMAIL_DRAFT({ to, subject, body })           → draft created
-2. create_task({
+1. create_task({
      action: "create_email_draft",
-     label: "Reply to [Name]: [Subject]",
-     payload: { to, subject, body },
+     label: "Email [Name]: [Subject]",
+     payload: { to: "recipient@email.com", subject: "...", body: "..." },
      executor: "human",
-     why_human: "Email needs your review"
+     why_human: "Email needs your review before sending"
    })                                                          → HITL_TASK:{id,...}
-3. One bubble: "Here's the draft:" → STOP (card renders automatically)
+2. One bubble: "Here's the draft:" → STOP (TaskApprovalCard renders automatically)
+3. After user approves: send_email({ to, subject, body })      → email sent
 \`\`\`
 
 **EmailDraftCard features:**
 - Shows subject, To, body preview (expandable)
 - "Attach image" button — Michael attaches files before sending
 - Send (green) / Discard (red) buttons
-- After Send: calls GMAIL_SEND_EMAIL with attachment if provided
+- After Send: send_email executes automatically via /api/tasks PATCH handler
 
 ### 2. A2UI CARDS (rich structured summaries)
 Use for briefings, status reports, dashboards, research results — any structured info with multiple sections.
@@ -1602,13 +1602,9 @@ SECTION 30 · EXECUTION FLOWS — HITL, SIGNALS, CHAINING
 create_task({ label: "Review and send email to Celine", action: "send_email_celine_xyz", executor: "human", why_human: "Email needs your review before sending" })
 // Returns: HITL_TASK:{id: "task_xxx", ...}
 
-// Step 2: Create Gmail draft via Composio
-composio_execute({ slug: "GMAIL_CREATE_EMAIL_DRAFT", args: { to: ["celine@surething.io"], subject: "...", body: "..." } })
-
-// Step 3: The TaskApprovalCard appears in Michael's UI → he approves
-// Step 4: On approval, Sparkie calls:
-composio_execute({ slug: "GMAIL_SEND_EMAIL", args: { message_id: "draft_id_from_step2" } })
-update_task({ id: "task_xxx", status: "completed", result: "Email sent" })
+// Step 2: The TaskApprovalCard appears in Michael's UI → he approves
+// Step 3: On approval, /api/tasks PATCH handler calls send_email automatically
+// (No additional tool call needed — approval triggers send via backend handler)
 
 **Proactive task chaining:**
 When one action completes and another is obviously next, chain it automatically without asking. Example:
@@ -4556,13 +4552,11 @@ function selectModel(messages: Array<{ role: string; content: string }>): ModelS
   // `create` and `generate` excluded as bare signals — they collide with media gen
   // ("create an image of...", "generate a song") and conversational opinion questions.
   // They only count as task intent when paired with an explicit code/file target (see override below).
-  let taskIntent = /\b(code|build|write|fix|debug|deploy|deployment|commit|push|tweet|post|github|repo|file|task|schedule|search my|find me|look up|fetch|list|remember|save|track|install|run|execute|add|remove|delete|update|edit|show me|pull|open pr|make a)\b/.test(lower)
+  let taskIntent = /\b(code|build|write|fix|debug|deploy|deployment|commit|push|email|tweet|post|github|repo|file|task|schedule|search my|find me|look up|fetch|list|remember|save|track|install|run|execute|add|remove|delete|update|edit|show me|pull|open pr|make a)\b/.test(lower)
   // `create`/`generate` only count as task when explicitly targeting code/file artifacts
   if (/\b(create|generate)\b.{0,50}\b(file|page|app|component|script|html|css|function|api|endpoint|landing page|website|tool|route|feature|button|form|modal|widget)\b/.test(lower)) taskIntent = true
   // Technical status checks → always route to capable
   if (/\b(check|is|are|does).{0,20}\b(deploy|deployment|working|running|broken|live|server|api|app|build|site)\b/.test(lower)) taskIntent = true
-  // Email: only route to agent tier when there is explicit send/draft/compose intent with a target
-  if (/\b(send|draft|compose)\b.{0,40}\b(email|message)\b/.test(lower) || /\bemail\b.{0,30}\b(to|about|for)\b/.test(lower)) taskIntent = true
 
   // ── Tier 1: CONVERSATIONAL — gpt-5-nano (supports tools, fast, cheap) ────
   // gpt-5-nano fully supports function calling — use it for all conversation and light tool calls.
