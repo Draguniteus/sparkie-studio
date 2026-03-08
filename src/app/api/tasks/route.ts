@@ -173,19 +173,20 @@ export async function PATCH(req: NextRequest) {
               emailBody += `\n\n[Attachment: ${attachment.name} — see attached file]`
             }
 
-            // Call Composio GMAIL_SEND_EMAIL
-            const composioRes = await fetch('https://backend.composio.dev/api/v2/actions/GMAIL_SEND_EMAIL/execute', {
+            // Call Composio GMAIL_SEND_EMAIL via v3 (matching chat/route.ts pattern)
+            const composioRes = await fetch('https://backend.composio.dev/api/v3/tools/execute/GMAIL_SEND_EMAIL', {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
                 'x-api-key': composioKey,
               },
               body: JSON.stringify({
-                connectedAccountId: entityId,
-                input: {
-                  to: payload.to,
+                entity_id: entityId,
+                arguments: {
+                  recipient_email: payload.to,
                   subject: payload.subject ?? '(no subject)',
                   body: emailBody,
+                  is_html: false,
                 },
               }),
             })
