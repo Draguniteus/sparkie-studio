@@ -154,7 +154,7 @@ export function ChatInput() {
   const agentAbortRef = useRef<AbortController | null>(null)
   const chatAbortRef = useRef<AbortController | null>(null)
   const [isRecording, setIsRecording] = useState(false)
-  const streamFlushRef = useRef<number>(0) // rAF handle for 60fps-throttled updateMessage during streaming
+  const streamFlushRef = useRef<number>(0)
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [isVoiceChatOpen, setIsVoiceChatOpen] = useState(false)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -951,11 +951,10 @@ export function ChatInput() {
                 addWorklogEntry({ type: 'result', content: 'Analyzed', status: 'done' })
               }
               fullContent += delta.content
-              // rAF throttle: cap React re-renders at 60fps instead of per-token
-              cancelAnimationFrame(streamFlushRef.current)
-              streamFlushRef.current = requestAnimationFrame(() => {
+              clearTimeout(streamFlushRef.current)
+              streamFlushRef.current = setTimeout(() => {
                 updateMessage(chatId, assistantMsgId, { content: fullContent })
-              })
+              }, 16) as unknown as number
             }
           } catch { /* skip */ }
         }
@@ -1645,30 +1644,6 @@ export function ChatInput() {
         <div className="mb-2 flex items-center gap-2 px-3 py-1.5 rounded-xl bg-honey-500/10 border border-honey-500/25 text-xs text-honey-400 animate-pulse w-fit max-w-full overflow-hidden">
           <span className="shrink-0">⚡</span>
           <span className="truncate font-medium">{hiveStatus}</span>
-        </div>
-      )}
-      {/* ── Attached file chip ──────────────────────────────────────── */}
-      {attachedFile && (
-        <div className="flex items-center gap-2 px-3 pt-2 pb-0">
-          <div className="flex items-center gap-1.5 bg-hive-hover text-text-secondary text-xs px-2.5 py-1 rounded-full max-w-[240px]">
-            <Paperclip size={11} className="shrink-0 text-honey-500" />
-            <span className="truncate">{attachedFile.name}</span>
-            <button onClick={() => setAttachedFile(null)} className="ml-0.5 hover:text-text-primary shrink-0">
-              <X size={11} />
-            </button>
-          </div>
-        </div>
-      )}
-      {/* ── Attached file chip ──────────────────────────────────────── */}
-      {attachedFile && (
-        <div className="flex items-center gap-2 px-3 pt-2 pb-0">
-          <div className="flex items-center gap-1.5 bg-hive-hover text-text-secondary text-xs px-2.5 py-1 rounded-full max-w-[240px]">
-            <Paperclip size={11} className="shrink-0 text-honey-500" />
-            <span className="truncate">{attachedFile.name}</span>
-            <button onClick={() => setAttachedFile(null)} className="ml-0.5 hover:text-text-primary shrink-0">
-              <X size={11} />
-            </button>
-          </div>
         </div>
       )}
       {/* ── Attached file chip ──────────────────────────────────────── */}
