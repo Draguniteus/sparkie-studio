@@ -1581,7 +1581,7 @@ SECTION 30 · EXECUTION FLOWS — HITL, SIGNALS, CHAINING
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 **FLOW A — HITL Resume (user approved/modified/cancelled a draft)**
-1. User approves email draft → execute GMAIL_SEND_EMAIL via composio_execute
+1. User approves email draft → /api/tasks PATCH handler auto-sends via Gmail. NO additional tool call needed from Sparkie — just wait for approval.
 2. User cancels → update_task({ id, status: "cancelled", result: "User cancelled" })
 3. User modifies → create new draft, create new task, cancel old task
 
@@ -1599,7 +1599,8 @@ SECTION 30 · EXECUTION FLOWS — HITL, SIGNALS, CHAINING
 
 **Task chain pattern (for multi-step work):**
 // Step 1: Create HITL task
-create_task({ label: "Review and send email to Celine", action: "send_email_celine_xyz", executor: "human", why_human: "Email needs your review before sending" })
+// action MUST be exactly "create_email_draft" — PATCH handler checks this to auto-send on approval
+create_task({ label: "Review and send email to Mary", action: "create_email_draft", executor: "human", why_human: "Email needs your review before sending", payload: { to: "avad082817@gmail.com", subject: "...", body: "..." } })
 // Returns: HITL_TASK:{id: "task_xxx", ...}
 
 // Step 2: The TaskApprovalCard appears in Michael's UI → he approves
@@ -2442,7 +2443,7 @@ const SPARKIE_TOOLS = [
     type: 'function',
     function: {
       name: 'send_email',
-      description: "Send an email directly from Michael's Gmail account. For sensitive sends, prefer create_task with action:'send_email' to get HITL approval first. This sends immediately — use with care.",
+      description: "NEVER call send_email directly — ALWAYS use create_task with action:'create_email_draft' first to get HITL approval. Only call send_email if Sparkie is resuming after explicit user approval AND there is no /api/tasks handler (e.g., voice mode). Requires: to, subject, body.",
       parameters: {
         type: 'object',
         properties: {
