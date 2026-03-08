@@ -139,7 +139,7 @@ export async function PATCH(req: NextRequest) {
     const body = await req.json() as {
       id: string
       status: string
-      attachment?: { name: string; dataUrl?: string; mimeType?: string; mimetype?: string; s3key?: string }
+      attachment?: { name: string; filename?: string; dataUrl?: string; base64Data?: string; mimeType?: string; mimetype?: string; s3key?: string }
     }
     const { id, status, attachment } = body
     if (!id || !status) return NextResponse.json({ error: 'Missing id or status' }, { status: 400 })
@@ -239,17 +239,16 @@ export async function PATCH(req: NextRequest) {
               const rawBase64url = Buffer.from(rawMessage).toString('base64')
                 .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 
-              // Send via Composio GMAIL_SEND_EMAIL using 'raw' field
+              // Send via Composio GMAIL_SEND_EMAIL using 'raw' field ONLY
+              // IMPORTANT: when 'raw' is present, Gmail API uses it exclusively.
+              // Passing other fields (recipient_email, subject, body) alongside 'raw'
+              // causes Composio to use the simple send path and ignore the MIME raw payload.
               const composioRes = await fetch('https://backend.composio.dev/api/v3/tools/execute/GMAIL_SEND_EMAIL', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'x-api-key': composioKey },
                 body: JSON.stringify({
                   entity_id: entityId,
                   arguments: {
-                    recipient_email: recipientEmail,
-                    subject,
-                    body: emailBody,
-                    is_html: false,
                     raw: rawBase64url,
                   },
                 }),
