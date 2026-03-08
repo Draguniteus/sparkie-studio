@@ -136,6 +136,7 @@ export function ChatInput() {
   const [showModels, setShowModels] = useState(false)
   const [hiveStatus, setHiveStatus] = useState<string | null>(null)
   const [_stepTraces, _setStepTraces] = useState<StepTrace[]>([])
+  const _stepTracesRef = useRef<StepTrace[]>([])  // Ref mirror — avoids stale closure in async callback
   const [_inlineFeedCards, _setInlineFeedCards] = useState<WorklogCard[]>([])
   const [genMode, setGenMode] = useState<GenMode>("chat")
   const [slashSuggestions, setSlashSuggestions] = useState<Array<{ cmd: string; desc: string }>>([])
@@ -906,11 +907,16 @@ export function ChatInput() {
               if (!ideOpen) openIDE()
               _setStepTraces(prev => {
                 const existing = prev.findIndex(t => t.label === trace.label && t.status === 'running')
+                let next: StepTrace[]
                 if (existing >= 0 && (trace.status === 'done' || trace.status === 'error')) {
-                  return prev.map((t, i) => i === existing ? trace : t)
+                  next = prev.map((t, i) => i === existing ? trace : t)
+                } else if (trace.status === 'running') {
+                  next = [...prev, trace]
+                } else {
+                  next = [...prev, trace]
                 }
-                if (trace.status === 'running') return [...prev, trace]
-                return [...prev, trace]
+                _stepTracesRef.current = next  // keep ref in sync
+                return next
               })
               // Log real step to worklog so Live Activity shows what Sparkie is actually doing
               if (trace.status === 'running') {
@@ -941,10 +947,11 @@ export function ChatInput() {
               if (chipLabelNow && assistantMsgId) {
                 useAppStore.getState().updateMessage(chatId, assistantMsgId, {
                   chipLabel: chipLabelNow,
-                  toolTraces: _stepTraces.length > 0 ? [..._stepTraces] : undefined,
+                  toolTraces: _stepTracesRef.current.length > 0 ? [..._stepTracesRef.current] : undefined,
                 })
               }
               _setStepTraces([])
+              _stepTracesRef.current = []
               useAppStore.getState().setLongTaskLabel(null)
               continue
             }

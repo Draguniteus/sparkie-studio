@@ -137,6 +137,20 @@ function InMemoryPill({ traces }: { traces: StepTrace[] }) {
   )
 }
 
+// Sanitize raw model function-call JSON blobs that occasionally leak into message content
+// (happens when model emits tool calls as text instead of structured tool_calls)
+function sanitizeContent(content: string): string {
+  if (!content) return content
+  // Strip bare JSON objects that look like function call output
+  // e.g. {"type":"function","name":"create_task",...} or raw tool_call JSON
+  const stripped = content
+    .replace(/^\s*\{[\s\S]*?"type"\s*:\s*"function"[\s\S]*?\}\s*$/m, '')
+    .replace(/^\s*\{[\s\S]*?"name"\s*:\s*"create_task"[\s\S]*?\}\s*$/m, '')
+    .replace(/^\s*\{[\s\S]*?"name"\s*:\s*"(send_email|create_task|schedule_task|search_web)"[\s\S]*?\}\s*$/m, '')
+    .trim()
+  return stripped || content
+}
+
 function MessageBubbleInner({ message, userAvatarUrl }: Props) {
   const isUser = message.role === "user"
   const [copied, setCopied] = useState(false)
@@ -316,7 +330,7 @@ function MessageBubbleInner({ message, userAvatarUrl }: Props) {
                 <div className="whitespace-pre-wrap break-words">{message.content}</div>
               ) : (
                 <AnimatedMarkdown
-                  content={message.content || " "}
+                  content={sanitizeContent(message.content) || " "}
                   isStreaming={message.isStreaming ?? false}
                   messageId={message.id}
                 />
