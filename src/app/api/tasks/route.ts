@@ -138,7 +138,7 @@ export async function PATCH(req: NextRequest) {
     const body = await req.json() as {
       id: string
       status: string
-      attachment?: { name: string; dataUrl: string; mimeType: string }
+      attachment?: { name: string; dataUrl?: string; mimeType?: string; mimetype?: string; s3key?: string }
     }
     const { id, status, attachment } = body
     if (!id || !status) return NextResponse.json({ error: 'Missing id or status' }, { status: 400 })
@@ -173,20 +173,6 @@ export async function PATCH(req: NextRequest) {
           try {
             const emailBody = payload.body ?? ''
 
-            // Build attachments array if file was attached
-            // dataUrl format: "data:image/png;base64,iVBORw0KGgo..."
-            const gmailAttachments: Array<{ name: string; content: string; content_type: string }> = []
-            if (attachment?.dataUrl) {
-              const base64Data = attachment.dataUrl.includes(',')
-                ? attachment.dataUrl.split(',')[1]
-                : attachment.dataUrl
-              gmailAttachments.push({
-                name: attachment.name,
-                content: base64Data,
-                content_type: attachment.mimeType || 'application/octet-stream',
-              })
-            }
-
             // Call Composio GMAIL_SEND_EMAIL via v3
             const gmailArgs: Record<string, unknown> = {
               recipient_email: recipientEmail,
@@ -194,8 +180,15 @@ export async function PATCH(req: NextRequest) {
               body: emailBody,
               is_html: false,
             }
-            if (gmailAttachments.length > 0) {
-              gmailArgs.attachments = gmailAttachments
+            // Attachment: expects { name, mimetype, s3key } from Composio file storage
+            // s3key is obtained by uploading file first via /api/upload-attachment
+            if (attachment && (attachment as Record<string, string>).s3key) {
+              const att = attachment as Record<string, string>
+              gmailArgs.attachment = {
+                name: att.name,
+                mimetype: att.mimeType || att.mimetype || 'application/octet-stream',
+                s3key: att.s3key,
+              }
             }
 
             const composioRes = await fetch('https://backend.composio.dev/api/v3/tools/execute/GMAIL_SEND_EMAIL', {
