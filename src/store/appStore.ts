@@ -287,7 +287,7 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
       const msg0 = chat0?.messages.find(m => m.id === msgId)
       if (msg0) {
         const keys = Object.keys(patch) as Array<keyof typeof patch>
-        if (keys.every(k => (msg0 as Record<string, unknown>)[k] === (patch as Record<string, unknown>)[k])) return
+        if (keys.every(k => (msg0 as unknown as Record<string, unknown>)[k] === (patch as unknown as Record<string, unknown>)[k])) return
       }
       set((s) => ({
         messages: s.messages.map((m) => m.id === msgId ? { ...m, ...patch } : m),
