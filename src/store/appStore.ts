@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 
 // Debounced localStorage: batches writes so streaming tokens don't hammer storage
-function createDebouncedStorage(delay = 1000) {
+function createDebouncedStorageBackend(delay = 1000) {
   let timer: ReturnType<typeof setTimeout> | null = null
   let pendingKey: string | null = null
   let pendingValue: string | null = null
@@ -533,7 +533,7 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
 }),
   {
     name: 'sparkie-chat-v1',
-    storage: createDebouncedStorage(800), // Debounced: max 1 write/800ms — prevents per-token localStorage blocking
+    storage: createJSONStorage(() => createDebouncedStorageBackend(800)), // Debounced: max 1 write/800ms — prevents per-token localStorage blocking
     // Only persist the chat history — not UI state, IDE state, worklog, etc.
     partialize: (s) => ({
       chats: s.chats.map(c => ({
