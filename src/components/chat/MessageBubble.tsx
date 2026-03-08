@@ -303,21 +303,32 @@ function MessageBubbleInner({ message, userAvatarUrl }: Props) {
               <ThumbsDown size={12} />
             </button>
             {message.model && (() => {
-              // Map internal model IDs to Sparkie team codenames — never expose provider names
+              // Map live model IDs → Sparkie team codenames (never expose provider names)
               const TEAM_NAMES: Record<string, string> = {
-                "minimax-m2.5-free": "Sparkie",
-                "minimax-m2.5": "Sparkie",
-                "kimi-k2.5-free": "Flame",
-                "kimi-k2.5": "Flame",
-                "gpt-5-nano": "Atlas",
-                "glm-5-free": "Ember",
-                "glm-5": "Ember",
+                // CONVERSATIONAL tier
+                "anthropic-claude-4.5-haiku": "Sparkie",
+                "claude-4.5-haiku": "Sparkie",
+                // CAPABLE tier (Flame)
+                "llama3.3-70b-instruct": "Flame",
+                "llama-3.3-70b-instruct": "Flame",
+                // CAPABLE+ tier (Ember)
+                "big-pickle": "Ember",
+                // DEEP tier (Atlas)
+                "minimax-m2.5-free": "Atlas",
+                "minimax-m2.5": "Atlas",
+                // FRONTIER tier (Trinity)
+                "trinity-large-preview-free": "Trinity",
+                "trinity-large-preview": "Trinity",
+                // Agent / task loop
+                "Agent Loop": "Sparkie",
               }
               const modelSlug = message.model.split("/").pop() || message.model
-              const teamName = TEAM_NAMES[modelSlug] || TEAM_NAMES[message.model] || "Sparkie"
+              const teamName = TEAM_NAMES[modelSlug] || TEAM_NAMES[message.model]
+              // Skip pill for timer/trigger badges (e.g. "One-time", "Recurring")
+              if (!teamName) return null
               return (
-                <span className="text-[10px] text-text-muted ml-2 flex items-center gap-0.5">
-                  <span style={{ color: "rgba(245,197,66,0.5)" }}>✦</span>
+                <span className="ml-2 flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-purple-500/10 border border-purple-500/20 text-[10px] text-purple-300/80 font-medium">
+                  <span style={{ color: "rgba(245,197,66,0.6)" }}>✦</span>
                   <span>{teamName}</span>
                 </span>
               )
