@@ -4556,11 +4556,13 @@ function selectModel(messages: Array<{ role: string; content: string }>): ModelS
   // `create` and `generate` excluded as bare signals — they collide with media gen
   // ("create an image of...", "generate a song") and conversational opinion questions.
   // They only count as task intent when paired with an explicit code/file target (see override below).
-  let taskIntent = /\b(code|build|write|fix|debug|deploy|deployment|commit|push|email|tweet|post|github|repo|file|task|schedule|search my|find me|look up|fetch|list|remember|save|track|install|run|execute|add|remove|delete|update|edit|show me|pull|open pr|make a)\b/.test(lower)
+  let taskIntent = /\b(code|build|write|fix|debug|deploy|deployment|commit|push|tweet|post|github|repo|file|task|schedule|search my|find me|look up|fetch|list|remember|save|track|install|run|execute|add|remove|delete|update|edit|show me|pull|open pr|make a)\b/.test(lower)
   // `create`/`generate` only count as task when explicitly targeting code/file artifacts
   if (/\b(create|generate)\b.{0,50}\b(file|page|app|component|script|html|css|function|api|endpoint|landing page|website|tool|route|feature|button|form|modal|widget)\b/.test(lower)) taskIntent = true
   // Technical status checks → always route to capable
   if (/\b(check|is|are|does).{0,20}\b(deploy|deployment|working|running|broken|live|server|api|app|build|site)\b/.test(lower)) taskIntent = true
+  // Email: only route to agent tier when there is explicit send/draft/compose intent with a target
+  if (/\b(send|draft|compose)\b.{0,40}\b(email|message)\b/.test(lower) || /\bemail\b.{0,30}\b(to|about|for)\b/.test(lower)) taskIntent = true
 
   // ── Tier 1: CONVERSATIONAL — gpt-5-nano (supports tools, fast, cheap) ────
   // gpt-5-nano fully supports function calling — use it for all conversation and light tool calls.
