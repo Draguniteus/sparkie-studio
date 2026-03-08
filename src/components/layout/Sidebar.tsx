@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useAppStore } from '@/store/appStore'
+import { useShallow } from 'zustand/react/shallow'
 import {
   Search, FolderOpen, Image, MessageSquare,
   Settings, ChevronLeft, Sparkles, Radio, Plug, Zap, Lock, Rss, BookOpen, Brain
@@ -26,7 +27,19 @@ export function Sidebar() {
     setActiveTab, activeTab, openSettings,
     userAvatarUrl, getOrCreateSingleChat, setCurrentChat,
     worklog,
-  } = useAppStore()
+  } = useAppStore(
+    useShallow((s) => ({
+      sidebarOpen: s.sidebarOpen,
+      toggleSidebar: s.toggleSidebar,
+      setActiveTab: s.setActiveTab,
+      activeTab: s.activeTab,
+      openSettings: s.openSettings,
+      userAvatarUrl: s.userAvatarUrl,
+      getOrCreateSingleChat: s.getOrCreateSingleChat,
+      setCurrentChat: s.setCurrentChat,
+      worklog: s.worklog,
+    }))
+  )
   const { user, signOut } = useAuth()
 
   const displayName = user?.name ?? user?.email?.split('@')[0] ?? 'User'

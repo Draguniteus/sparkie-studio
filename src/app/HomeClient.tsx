@@ -102,12 +102,7 @@ export default function HomeClient() {
       {isDragging && (
         <div className="fixed inset-0 z-[9999] cursor-col-resize" />
       )}
-      <div className="hidden md:flex md:shrink-0">
-        <Sidebar />
-      </div>
-      <div className="md:hidden">
-        <Sidebar />
-      </div>
+      <Sidebar />
       <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
         <div className="flex-1 min-h-0 overflow-hidden md:pb-0 pb-[60px]">
           <MainPanel />
