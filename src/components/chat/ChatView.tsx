@@ -111,8 +111,24 @@ export function ChatView() {
         </div>
       </div>
 
-      {/* "In memory" pill now lives in MessageBubble — rendered per-response from message.toolTraces */}
-      {/* Live activity indicator during streaming (thin pulse line) */}
+      {/* Live InMemoryPill — shows during active streaming */}
+      {longTaskLabel && (
+        <div className="px-3 md:px-4 pt-1.5 flex items-center">
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gradient-to-r from-purple-600/12 via-blue-600/8 to-purple-500/8 border border-purple-500/25 w-fit max-w-full">
+            <span className="text-[10px] animate-pulse">🧠</span>
+            <span className="text-[10px] text-purple-300/85 font-medium truncate max-w-[280px]">{longTaskLabel}</span>
+            {/* Stop button inline in the pill — click to abort */}
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent('sparkie_stop_stream'))}
+              className="ml-1 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-red-500/15 text-red-400 hover:bg-red-500/25 border border-red-500/20 text-[9px] font-medium transition-all shrink-0"
+              title="Stop generating"
+            >
+              ■ Stop
+            </button>
+          </div>
+        </div>
+      )}
+      {/* Thin pulse line for activity */}
       {hasActivity && (
         <div className="h-px bg-gradient-to-r from-transparent via-purple-500/30 to-transparent animate-pulse" />
       )}
