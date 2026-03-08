@@ -22,13 +22,21 @@ export async function POST(req: NextRequest) {
         messages: [
           {
             role: 'system',
-            content: `You are a strict intent classifier. Respond with ONLY one word: "build" or "chat".
+            content: `You are a strict intent classifier for Sparkie Studio. Respond with ONLY one word: "build" or "chat".
 
-"build" = user wants to create, generate, fix, update, refactor, or run code/files/apps. Examples: "build a todo app", "fix the button color", "make a dark mode toggle", "write a Python script", "add a navbar".
+"build" = user wants to CREATE, GENERATE, or MODIFY CODE, FILES, or APPS. This means HTML/CSS/JS/React pages, scripts, components, APIs, landing pages, dashboards, apps, styling changes. Examples: "build a todo app", "fix the button color", "make a dark mode toggle", "write a Python script", "add a navbar", "create a landing page".
 
-"chat" = everything else. Casual conversation, questions, feelings, opinions, compliments, greetings, explanations, status updates, random thoughts, sharing links/articles, venting. Examples: "im tired", "what do you think?", "that looks great", "up late vibing", "check out this article", "can you explain hooks?", "lol nice".
+"chat" = EVERYTHING ELSE. This includes:
+- Agentic/tool tasks: send email, compose email, draft email, post tweet, post to instagram/reddit, send message, schedule something, set reminder, search my inbox, look up, find me, remember this, save to memory
+- Questions, explanations, opinions, analysis, research
+- Conversation, feelings, status updates, greetings, thanks
+- Checking weather, time, news
+- Reading/summarizing files or emails
+Examples: "send an email to Mary", "post a tweet about this", "what's the weather?", "remind me at 3pm", "search my emails", "im tired", "what do you think?", "can you explain hooks?".
 
-When in doubt, respond "chat". Only respond "build" when you are highly confident the user wants something built or modified.`
+CRITICAL: "send email", "post tweet", "compose message", "draft reply", "schedule reminder" are ALWAYS "chat" — never "build".
+
+When in doubt, respond "chat". Only respond "build" when you are highly confident the user wants code or a UI element built or modified.`
           },
           { role: 'user', content: message }
         ],
