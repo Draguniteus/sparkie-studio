@@ -1934,31 +1934,17 @@ export function ChatInput() {
               </span>
             </button>
 
-            {/* Send / Stop button */}
-            {isStreaming ? (
-              <button
-                onClick={() => {
-                  chatAbortRef.current?.abort()
-                  agentAbortRef.current?.abort()
-                }}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-red-500/15 text-red-400 hover:bg-red-500/25 border border-red-500/25 hover:border-red-500/50 transition-all duration-200 text-xs font-medium animate-pulse hover:animate-none active:scale-95"
-                title="Stop generating"
-              >
-                <Square size={13} className="fill-current" />
-                <span>Stop</span>
-              </button>
-            ) : (
-              <button
-                onClick={handleSubmit} disabled={!input.trim() && !attachedFile}
-                className={`p-2 rounded-xl transition-all duration-200 active:scale-95 ${
-                  input.trim() || attachedFile
-                    ? "bg-honey-500 text-hive-900 hover:bg-honey-400 shadow-lg shadow-honey-500/25 hover:shadow-honey-500/40 hover:scale-105"
-                    : "bg-hive-hover text-text-muted cursor-not-allowed opacity-50"
-                }`}
-              >
-                <ArrowUp size={16} />
-              </button>
-            )}
+            {/* Send button — Stop is in the InMemoryPill above chat only */}
+            <button
+              onClick={handleSubmit} disabled={!input.trim() && !attachedFile}
+              className={`p-2 rounded-xl transition-all duration-200 active:scale-95 ${
+                input.trim() || attachedFile
+                  ? "bg-honey-500 text-hive-900 hover:bg-honey-400 shadow-lg shadow-honey-500/25 hover:shadow-honey-500/40 hover:scale-105"
+                  : "bg-hive-hover text-text-muted cursor-not-allowed opacity-50"
+              }`}
+            >
+              <ArrowUp size={16} />
+            </button>
           </div>
         </div>
       </div>
