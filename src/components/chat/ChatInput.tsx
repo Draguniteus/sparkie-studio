@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react"
 import { useAppStore } from "@/store/appStore"
+import { useShallow } from "zustand/react/shallow"
 
 // ── Step trace + worklog card types ──────────────────────────────────────
 interface StepTrace { icon: string; label: string; status: 'running' | 'done' | 'error'; duration?: number }
@@ -166,7 +167,36 @@ export function ChatInput() {
     addWorklogEntry, updateWorklogEntry, clearWorklog,
     setContainerStatus, setPreviewUrl, saveChatFiles, addAsset, updateAsset,
     setLastMode,
-  } = useAppStore()
+  } = useAppStore(
+    useShallow((s) => ({
+      selectedModel: s.selectedModel,
+      setSelectedModel: s.setSelectedModel,
+      createChat: s.createChat,
+      getOrCreateSingleChat: s.getOrCreateSingleChat,
+      addMessage: s.addMessage,
+      updateMessage: s.updateMessage,
+      currentChatId: s.currentChatId,
+      isStreaming: s.isStreaming,
+      setStreaming: s.setStreaming,
+      openIDE: s.openIDE,
+      setExecuting: s.setExecuting,
+      setActiveFile: s.setActiveFile,
+      setIDETab: s.setIDETab,
+      ideOpen: s.ideOpen,
+      clearLiveCode: s.clearLiveCode,
+      appendLiveCode: s.appendLiveCode,
+      addLiveCodeFile: s.addLiveCodeFile,
+      addWorklogEntry: s.addWorklogEntry,
+      updateWorklogEntry: s.updateWorklogEntry,
+      clearWorklog: s.clearWorklog,
+      setContainerStatus: s.setContainerStatus,
+      setPreviewUrl: s.setPreviewUrl,
+      saveChatFiles: s.saveChatFiles,
+      addAsset: s.addAsset,
+      updateAsset: s.updateAsset,
+      setLastMode: s.setLastMode,
+    }))
+  )
 
   // Upsert a file with a potentially nested path (e.g. "public/index.html")
   // into the Zustand files tree, creating intermediate folder nodes as needed.
@@ -1586,7 +1616,7 @@ export function ChatInput() {
     speech: "Enter the text you want to convert to speech...",
   }
 
-  const messages_count = useAppStore(s => s.messages).length
+  const messages_count = useAppStore((s) => s.messages.length)
   const showTemplates = messages_count === 0 && input === "" && genMode === "chat"
 
   return (

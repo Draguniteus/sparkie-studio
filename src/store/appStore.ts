@@ -1,6 +1,39 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 
+// Debounced localStorage: batches writes so streaming tokens don't hammer storage
+function createDebouncedStorage(delay = 1000) {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  let pendingKey: string | null = null
+  let pendingValue: string | null = null
+
+  return {
+    getItem: (name: string) => {
+      if (typeof window === 'undefined') return null
+      return localStorage.getItem(name)
+    },
+    setItem: (name: string, value: string) => {
+      if (typeof window === 'undefined') return
+      pendingKey = name
+      pendingValue = value
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => {
+        if (pendingKey !== null && pendingValue !== null) {
+          try { localStorage.setItem(pendingKey, pendingValue) } catch {}
+          pendingKey = null
+          pendingValue = null
+        }
+        timer = null
+      }, delay)
+    },
+    removeItem: (name: string) => {
+      if (typeof window === 'undefined') return
+      if (timer) clearTimeout(timer)
+      try { localStorage.removeItem(name) } catch {}
+    },
+  }
+}
+
 export interface BuildCardData {
   title: string           // derived project name (e.g. "ai-tools-directory")
   files: string[]         // list of created file names
@@ -500,7 +533,7 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
 }),
   {
     name: 'sparkie-chat-v1',
-    storage: createJSONStorage(() => typeof window !== 'undefined' ? localStorage : undefined as never),
+    storage: createDebouncedStorage(800), // Debounced: max 1 write/800ms — prevents per-token localStorage blocking
     // Only persist the chat history — not UI state, IDE state, worklog, etc.
     partialize: (s) => ({
       chats: s.chats.map(c => ({

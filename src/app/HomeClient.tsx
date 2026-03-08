@@ -6,6 +6,7 @@ import { IDEPanel } from '@/components/layout/IDEPanel'
 import { MainPanel } from '@/components/layout/MainPanel'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { useAppStore } from '@/store/appStore'
+import { useShallow } from 'zustand/react/shallow'
 import { OnboardingModal } from '@/components/OnboardingModal'
 import { SettingsModal } from '@/components/layout/SettingsModal'
 import { applyTheme, loadTheme } from '@/utils/themeUtils'
@@ -17,7 +18,13 @@ const DEFAULT_IDE_WIDTH = 520
 
 export default function HomeClient() {
   const { status } = useSession()
-  const { ideOpen, onboardingDone, hydrateFromStorage } = useAppStore()
+  const { ideOpen, onboardingDone, hydrateFromStorage } = useAppStore(
+    useShallow((s) => ({
+      ideOpen: s.ideOpen,
+      onboardingDone: s.onboardingDone,
+      hydrateFromStorage: s.hydrateFromStorage,
+    }))
+  )
   const [mounted, setMounted] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
 

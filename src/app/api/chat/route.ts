@@ -4525,11 +4525,12 @@ export async function POST(req: NextRequest) {
       recordUserActivity(userId).catch(() => {})
 
       const [memoriesText, awareness, identityFiles, envCtx, sessionSnapshot, readyIntents, userModel] = await Promise.all([
-        (() => {
+        // CONVERSATIONAL: skip Supermemory fetch — saves 200-600ms on every simple message
+        modelSelection.tier === 'conversational' ? Promise.resolve('') : (() => {
           const _mce = _memCache.get(userId)
           if (_mce && _mce.expiresAt > Date.now()) return Promise.resolve(_mce.text)
           return loadMemories(userId, messages.filter((m: { role: string; content: string }) => m.role === 'user').at(-1)?.content?.slice(0, 200)).then(t => {
-            _memCache.set(userId, { text: t, expiresAt: Date.now() + 30_000 })
+            _memCache.set(userId, { text: t, expiresAt: Date.now() + 300_000 }) // 5min TTL (was 30s)
             return t
           })
         })(),
