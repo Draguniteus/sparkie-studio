@@ -72,7 +72,8 @@ function EmailDraftCard({ task, onResolve }: Props) {
     if (resolved || loading) return
     setLoading(decision)
     try {
-      let attachmentRef: { name: string; s3key: string; mimeType: string } | null = null
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let attachmentRef: Record<string, string> | null = null
 
       // Upload attachment first if present — Composio GMAIL_SEND_EMAIL needs an s3key, not raw base64
       if (decision === "approved" && attachment?.dataUrl) {
@@ -87,10 +88,22 @@ function EmailDraftCard({ task, onResolve }: Props) {
             }),
           })
           if (uploadRes.ok) {
-            const { s3key } = await uploadRes.json()
-            attachmentRef = { name: attachment.name, s3key, mimeType: attachment.mimeType }
+            const uploadData = await uploadRes.json()
+            if (uploadData.ok && uploadData.base64Data) {
+              // Pass the validated file data through for MIME assembly at send time
+              attachmentRef = {
+                name: uploadData.filename || attachment.name,
+                filename: uploadData.filename || attachment.name,
+                mimeType: uploadData.mimeType || attachment.mimeType,
+                base64Data: uploadData.base64Data,
+              } as { name: string; filename: string; mimeType: string; base64Data: string; s3key?: string }
+            } else {
+              console.warn("Attachment validation failed:", uploadData)
+              // Still try to send without attachment rather than blocking
+            }
           } else {
-            console.warn("Attachment upload failed — sending email without attachment")
+            const errText = await uploadRes.text()
+            console.warn("Attachment upload failed:", uploadRes.status, errText, "— sending email without attachment")
           }
         } catch (err) {
           console.warn("Attachment upload error:", err, "— sending without attachment")
