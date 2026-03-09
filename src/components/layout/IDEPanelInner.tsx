@@ -70,7 +70,7 @@ export function IDEPanelInner() {
   const {
     ideOpen, ideTab, isExecuting, liveCode, files,
     setIdeTab, containerStatus, clearTerminalOutput, appendTerminalOutput, setContainerStatus,
-    worklog,
+    worklog, previewUrl,
   } = useAppStore()
   const { runProject } = useWebContainer()
   const [showExplorer, setShowExplorer] = useState(true)
@@ -157,6 +157,14 @@ export function IDEPanelInner() {
     window.addEventListener('sparkie:open-preview', handler)
     return () => window.removeEventListener('sparkie:open-preview', handler)
   }, [setIdeTab])
+
+  // When WC server becomes ready, auto-switch to Preview tab
+  // This is the MiniMax model: build runs in Process/Terminal, preview appears when server is live
+  useEffect(() => {
+    if (containerStatus === 'ready' && previewUrl) {
+      setIdeTab('preview')
+    }
+  }, [containerStatus, previewUrl, setIdeTab])
 
   const downloadAll = () => {
     files.forEach(f => {
