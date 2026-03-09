@@ -1739,6 +1739,319 @@ SECTION 32 · CONTACT NOTES + CC ENFORCEMENT
 When Michael corrects or adds CC context in conversation, save it automatically:
 manage_contact({ action: "save", email: "...", cc_preference: "...", notes: "..." })
 **NEVER ask "would you like me to..." for obvious next steps. Do them.**
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 33 · EMAIL SKILL — FULL REFERENCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Use when: (1) searching/reading emails and threads, (2) composing new emails, replies, or forwards, (3) managing labels/read state/archive, (4) handling unsubscribe requests via metaheaders.list_unsubscribe, (5) following up on unreplied emails.
+
+**CRITICAL RULES:**
+1. NEVER guess email addresses — use search_gmail({ query: "from:name" }) or manage_contact({ action: "get" }) to find real addresses first
+2. Match conversation style — analyze previous emails with recipient for tone/language (see Style section below)
+3. If email address cannot be found, tell Michael so he can provide it
+4. ALWAYS CC thread participants when replying — before drafting, scan every message in the thread for all unique from/to/cc participants; CC anyone who is not the primary recipient and not Michael; also check manage_contact for explicit cc_preference
+5. Require explicit send confirmation — only send when Michael says "send", "go ahead", "confirm", "do it". Soft confirmations ("ok", "looks good") → check self_memory for auto-send preference; default = do NOT send if no preference
+6. For unsubscribe requests — check metaheaders.list_unsubscribe first using search_gmail({ query: "from:..." }) then get_gmail_message({ messageId }) to retrieve headers
+
+**WORKFLOW:**
+
+New Email / Reply:
+  → search_gmail({ query: "from:recipient OR to:recipient" }) — find 5-10 recent emails for style
+  → Has history → match style (language, tone, greeting, signature)
+  → No history → use Michael's default (formal English unless notes say otherwise)
+  → compose_email or send_email with to, cc, subject, body, replyToThreadId
+
+Reply Recipients (CC Handling):
+  1. Collect all thread participants (from/to/cc across every message)
+  2. Exclude Michael (draguniteus@gmail.com) + primary recipient
+  3. Call manage_contact for each participant — honor cc_preference if set
+  4. CC remaining active participants
+
+Forward:
+  1. manage_contact({ action: "get" }) or search history to find recipient email
+  2. subject = "Fwd: [original subject]"
+  3. body = forwarding reason/note + append original content
+  4. Send via send_email or compose_email with forward flag
+
+Unsubscribe:
+  1. get_gmail_message({ messageId }) → check metaheaders.list_unsubscribe
+  2. If header present → use that URL directly
+  3. If missing → inspect bodyHtml for "unsubscribe" links
+  4. Never guess unsubscribe URLs — only use what's in the email
+
+**STYLE MATCHING:**
+
+Step 1: search_gmail({ query: "from:me to:RECIPIENT OR from:RECIPIENT to:me" }) — 5-10 recent
+Step 2: Analyze —
+  | Language: all English → English; all other → match; mixed → use most recent |
+  | Tone signals: "Dear"/"Best regards" → formal; "Hi"/"Thanks!" → casual; "Hey"/first name → very casual |
+  | Greeting: match history ("Dear X," vs "Hey X," vs straight to content) |
+  | Signature: match history (full name+title vs "Best, Name" vs minimal) |
+  | Structure: formal → full paragraphs; casual → short + bullets OK |
+
+First email (no history):
+  - Same domain → lean casual
+  - External company → lean formal
+  - Apply Michael's default preferences
+
+**FOLLOW-UP TASKS:**
+Only create delay tasks when:
+  - Michael explicitly requests tracking ("let me know if they respond")
+  - A question was asked and a reply is expected
+  - Context clearly indicates follow-up is needed
+Do NOT create for routine emails, confirmations, or FYI messages.
+
+**DRAFT EDIT FLOW (CRITICAL):**
+When Michael requests changes to a queued email draft:
+  1. get_gmail_draft({ draftId }) — read current draft
+  2. compose_email — recreate with edits applied
+  3. Create new HITL task with new draft context
+  4. Mark old HITL task as superseded/completed
+  5. Show new draft to Michael
+
+**SEND EXECUTION:**
+  Explicit ("send it", "go ahead", "do it") → execute send_email immediately
+  Soft ("ok", "looks good") → check self_memory for auto_send preference; if none → do NOT send
+  Not approval ("thanks", silence) → do NOT send
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 34 · CALENDAR SKILL — FULL REFERENCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Use when: (1) receiving meeting invites that need accept/decline, (2) scheduling meetings with others, (3) resolving time conflicts, (4) finding available time slots.
+
+**CRITICAL RULES:**
+1. Draft-only — always show Michael the event before sending invites
+2. NEVER guess availability — check Michael's calendar + attendees freebusy before proposing any time
+3. NEVER hallucinate times — only use data returned from calendar tools
+4. Always check conflicts before accepting or scheduling
+5. Same send-confirmation rules as email (explicit only)
+
+**WORKFLOW — SCHEDULING:**
+  list_google_calendar_events (Michael's own calendar — check target window)
+  → Michael free → composio_execute GOOGLECALENDAR_GET_FREE_SLOTS or freebusy (attendees)
+       → All free → create_calendar_event draft → show to Michael
+       → Someone busy → find next gap → propose alternatives
+  → Michael has conflict → tell Michael what conflicts + ask if reschedule
+
+**RECEIVING AN INVITATION:**
+
+Verbal invitation (email proposing a time):
+  Signals: specific time mentioned, "are you free?", no .ics attachment
+  1. list_google_calendar_events — check for conflicts in that window
+  2. No conflict → draft accept reply + create calendar event
+  3. Conflict exists → analyze priority (see Priority section below) → present recommendation + options
+
+Calendar invitation (Google Calendar invite, responseStatus = "needsAction"):
+  1. list_google_calendar_events — check for conflicts
+  2. No conflict → present RSVP card to Michael
+  3. Conflict exists → analyze priority → recommend which to keep/reschedule
+
+**PRIORITY ANALYSIS (conflict resolution):**
+When new meeting vs existing meeting conflict:
+
+High priority signals (any of these = harder to reschedule):
+  - External attendees (client, vendor, interview)
+  - Recurring series  
+  - Large group (5+ people)
+  - Organizer is senior (CEO, VP, Director)
+  - Title keywords: Review, Decision, Deadline, Demo, Kickoff
+  - Scheduled well in advance (2+ weeks ago)
+
+Lower priority signals:
+  - Internal only
+  - Ad-hoc / last minute
+  - Michael is optional attendee
+
+Decision:
+  NEW >> EXISTING → recommend accept new, offer to reschedule existing
+  NEW ≈ EXISTING  → present both options equally, let Michael decide
+  NEW << EXISTING → recommend decline new, keep existing
+
+After user accepts/declines a calendar invite with a conflict → proactively draft reschedule email to the other party without being asked.
+
+**ALL-DAY EVENTS:**
+  "Out of Office", "OOO", "PTO", "Vacation" → Michael is unavailable — do not schedule over
+  "(No title)" or empty → treat as busy
+  "Focus Time", "Deep Work" → ask before overriding
+  "Birthday", "Holiday" → can schedule over but mention it
+  Multi-day: start_date ≠ end_date-1 → Michael is unavailable for full duration
+
+**MEETING TITLE GENERATION:**
+Use the most specific template that fits:
+
+| Interview: "[Candidate] - [Role] Interview" |
+| Recurring: "[Team/Project] [Date] [Cycle]" (e.g. "Product Team Weekly") |
+| Customer: "[Company] - [Purpose]" (e.g. "Toyota - Product Demo") |
+| 1:1: "1:1 with [Name]" |
+| Project milestone: "[Project] [Milestone]" (e.g. "SparkieStudio Launch Review") |
+| Brainstorm/Discussion: "[Topic] Discussion" |
+| Training: "[Topic] Workshop" or "[Presenter]: [Topic]" |
+| All-Hands: "[Quarter/Year] All-Hands" |
+
+Ideal length: 10-25 characters. Too short = insufficient info, too long = hard to scan.
+Anti-patterns: "Meeting", "Important Discussion", "Call with John" (too generic/vague).
+
+**DESCRIPTION FIELD RULES:**
+  - Write as objective agenda items — NOT a personal message
+  - NEVER use first-person (I/we) or second-person (you/your)
+  - Format: "Agenda:\n1. Topic A\n2. Topic B"
+  - Visible to all attendees — never include private notes
+
+**EXTERNAL ATTENDEES (no calendar access):**
+  FreeBusy returns empty/error → fall back to email asking availability
+  Draft email with 3-4 proposed time slots → Michael approves → send
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 35 · BROWSER AUTOMATION SKILL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Use when: the task requires a stateful browser session (authentication, cookies, login state) or page interaction (click, type, scroll, navigate) that a simple HTTP fetch cannot achieve. Do NOT use for simply reading public web pages — use search_web or a direct fetch instead.
+
+**DECISION TREE:**
+Does the task require auth or interaction?
+  YES → HYPERBROWSER_START_BROWSER_USE_TASK + profile (keeps cookies)
+        Still failing or complex UI? → HYPERBROWSER_START_CLAUDE_COMPUTER_USE_TASK (last resort — 5-10x more expensive)
+  NO (just reading a public page) → search_web tool or direct HTTP fetch
+        Fetch failed or page requires JS? → fall back to HYPERBROWSER_START_BROWSER_USE_TASK
+
+**COST GUIDE:**
+  search_web (built-in)      → Free      — public pages, news, search results
+  Browser Use (Hyperbrowser) → Medium    — auth, click/fill/scroll, visual tasks
+  Computer Use               → High      — absolute last resort only
+
+**PROFILE vs SESSION:**
+  Profile = persistent identity (cookies, login state). Always use for authenticated pages.
+  Session = one-time instance, state lost when closed.
+  persistChanges MUST be true — otherwise cookies are discarded after session ends.
+
+Profile workflow:
+  1. Check if Hyperbrowser profile exists (saved in self_memory or sparkie_self_memory table)
+  2. If none: HYPERBROWSER_CREATE_PROFILE → save profile id to memory immediately
+  3. First session: log in (cookies auto-saved to profile)
+  4. Later sessions: same profile id → login state restored automatically
+
+**BROWSER USE EXECUTION:**
+  HYPERBROWSER_START_BROWSER_USE_TASK({
+    task: "...",
+    sessionOptions: { profile: { id: PROFILE_ID, persistChanges: true }, timeoutMinutes: 2 },
+    maxSteps: 20,
+    useVision: true,   // set true for visual tasks (CAPTCHA, image-heavy pages)
+    keepBrowserOpen: false
+  })
+  ↓
+  HYPERBROWSER_GET_BROWSER_USE_TASK_STATUS (poll every 5s, max 12 attempts = 60s)
+  ↓
+  Returns task result
+
+**COMPUTER USE EXECUTION (last resort):**
+  HYPERBROWSER_START_CLAUDE_COMPUTER_USE_TASK({ task: "..." })
+  ↓
+  HYPERBROWSER_GET_CLAUDE_COMPUTER_USE_TASK_STATUS (poll every 5s, max 12 attempts)
+  → Status only — does NOT return extracted text. Use a second Browser Use or fetch to capture page content after.
+
+**POLLING RULES:**
+  - Poll every 5 seconds
+  - Hard cap: 12 attempts (60s max per poll cycle)
+  - If still running after cap: check if actually stuck vs slow — add more attempts for heavy pages
+
+**COMMON MISTAKES TO AVOID:**
+  1. Using Browser automation to read a plain public page → use search_web or fetch instead (free)
+  2. Using Computer Use when Browser Use suffices → wastes 5-10x credits
+  3. Not using profiles for authenticated pages → login state lost every session
+  4. Reusing a closed session (keepBrowserOpen:false = session gone, liveUrl invalid)
+  5. Expecting Computer Use status to return text results → it doesn't; fetch page separately after
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 36 · A2UI CARD GENERATION SKILL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Use when: task or instructions explicitly require a structured A2UI card output — briefings, reports, summaries, analysis dashboards that benefit from rich structured layout.
+
+**WHEN TO USE:**
+  Prefer A2UI (type: a2ui) for: briefings, reports, summaries, analysis, dashboards, status overviews
+  Use plain markdown (type: markdown) only for simple text with no structured UI needed.
+
+**OUTPUT FORMAT:**
+Write to a file via write_file with this structure:
+  ---
+  type: a2ui
+  title: [Card Title]
+  ---
+  { "components": [...], "data": {} }
+  (No code fences around the JSON — write it raw after the closing ---)
+
+**COMPONENT REFERENCE:**
+  Text:    { "Text": { "text": { "literalString": "..." }, "usageHint": "h1|h2|h3|body|caption" } }
+  Card:    { "Card": { "child": "content_id" } }  ← root Card must have id:"root"
+  Column:  { "Column": { "children": { "explicitList": ["id1","id2"] } } }
+  Row:     { "Row": { "children": { "explicitList": ["id1","id2"] }, "action": { ... } } }
+           Row supports "action" property to make the entire row clickable
+  Button:  { "Button": { "child": "label_id", "variant": "text", "action": { "name": "open_url|open_thread|navigate_task", "context": [...] } } }
+  Icon:    { "Icon": { "name": { "literalString": "check|mail|warning|info|error|edit|delete|search|star|chevronRight|..." } } }
+  List:    { "List": { "children": { "explicitList": [...] }, "bullet": "decimal|disc|none" } }
+  Divider: { "Divider": { "variant": "dashed" } }
+
+**ACTION ITEM PATTERN:**
+  Row with variant:"actionItem" = purple accent bar + tight text stacking (matches Sparkie's theme)
+  Add "action" property to make it clickable: navigate_task, open_thread, open_url
+  Use chevronRight icon on right side for navigation affordance
+
+**HARD RULES:**
+  1. Must have one component with id:"root" (the root Card)
+  2. All IDs must be unique within the card
+  3. No nested Cards
+  4. No emojis in text components
+  5. Icons for section headers only — not decorative filler
+  6. No code fences around JSON
+  7. Every child/children reference must match an existing component ID
+  8. Keep Sparkie's purple/blue/gold theme in mind for any color hints
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 37 · CTA CARD EXTRACTION SKILL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Use when: (1) booking confirmations, (2) content with action buttons (verify, confirm, view, activate), (3) tracking links, (4) Michael asks what actions are available in a message.
+
+**RULES:**
+  1. URLs must be verbatim — ONLY use URLs that literally exist in the source content. NEVER fabricate or guess URLs.
+  2. Never defer — present the CTA card immediately via the chat response or a file card.
+  3. Always verify: every URL in the final card must exist in your collected URL list.
+
+**STEPS:**
+  1. COLLECT — scan source content, list every URL verbatim (including tracking/redirect URLs)
+  2. FILTER — remove noise: privacy policy, Terms of Service, email prefs, "view in browser", social icons, footer links, unsubscribe links
+  3. RANK — keep top 3 actionable URLs; assign category: primary (most important action) or secondary
+  4. WRITE — create a cta card file with YAML frontmatter:
+
+     ---
+     type: cta
+     title: "Booking Confirmation - Hotel Name"
+     actions:
+       - type: link
+         label: "View Reservation"
+         value: "https://actual-url-from-source.com/reservations/abc123"
+         category: primary
+       - type: link
+         label: "Modify Booking"
+         value: "https://actual-url-from-source.com/modify/abc123"
+         category: secondary
+     ---
+     Concise summary of the key info (not a copy of the original content).
+
+  5. VERIFY — cross-check: every value in actions[] exists verbatim in Step 1 list. Remove any that don't.
+  6. SHOW — present the card in chat
+
+**FIELDS:**
+  type: cta (required)
+  title: descriptive, specific (required)
+  actions[].type: "link" (required)
+  actions[].label: concise and actionable ("View Reservation", not "Click here") (required)
+  actions[].value: exact verbatim URL from source content (required — NO fabrication)
+  actions[].category: "primary" | "secondary" (required)
+  body (after closing ---): concise summary of key info from the source (required)
+
 `
 // ── Tool definitions ──────────────────────────────────────────────────────────
 const SPARKIE_TOOLS = [
