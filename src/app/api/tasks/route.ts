@@ -43,11 +43,20 @@ export async function POST(req: NextRequest) {
     }
     if (!id || !action || !label) return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
 
+    // Ensure payload is stored as a proper JSON object (not double-stringified)
+    // If the AI sends payload as a JSON string, parse it first so Postgres JSONB gets an object
+    let payloadObj: Record<string, unknown>
+    if (typeof payload === 'string') {
+      try { payloadObj = JSON.parse(payload) } catch { payloadObj = { raw: payload } }
+    } else {
+      payloadObj = payload ?? {}
+    }
+
     await query(
       `INSERT INTO sparkie_tasks (id, user_id, action, label, payload, status, executor, why_human)
-       VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7)
+       VALUES ($1, $2, $3, $4, $5::jsonb, 'pending', $6, $7)
        ON CONFLICT (id) DO NOTHING`,
-      [id, userId, action, label, JSON.stringify(payload), executor ?? 'human', why_human ?? null]
+      [id, userId, action, label, JSON.stringify(payloadObj), executor ?? 'human', why_human ?? null]
     )
     return NextResponse.json({ ok: true })
   } catch (e) {
@@ -173,19 +182,15 @@ async function getGmailConnectedAccountId(entityId: string, composioKey: string)
   return null
 }
 
-// Extract recipient email from payload — handles any key name the AI might use
-function extractRecipientEmail(payload: Record<string, unknown>): string | undefined {
-  // Try every key name the AI model might generate
-  const keys = ['to', 'recipient_email', 'email', 'recipient', 'to_email', 'toEmail', 'recipientEmail', 'address', 'emailAddress']
-  for (const key of keys) {
-    const val = payload[key]
-    if (typeof val === 'string' && val.includes('@')) return val
+// Normalize payload — handles Postgres returning JSONB as either object or string
+function normalizePayload(raw: unknown): Record<string, unknown> {
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw) as Record<string, unknown> } catch { return {} }
   }
-  // Deep search: scan all string values that look like email addresses
-  for (const val of Object.values(payload)) {
-    if (typeof val === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) return val
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    return raw as Record<string, unknown>
   }
-  return undefined
+  return {}
 }
 
 // PATCH /api/tasks — approve/reject task; auto-sends email for create_email_draft tasks
@@ -213,21 +218,22 @@ export async function PATCH(req: NextRequest) {
     const setResolved = ['completed', 'skipped', 'failed', 'cancelled'].includes(resolvedStatus)
 
     if (status === 'approved') {
-      const taskRes = await query<{ action: string; payload: Record<string, unknown> }>(
+      const taskRes = await query<{ action: string; payload: unknown }>(
         `SELECT action, payload FROM sparkie_tasks WHERE id = $1 AND user_id = $2`,
         [id, userId]
       )
       const task = taskRes.rows[0]
 
       if (task && (task.action === 'create_email_draft' || task.action === 'send_email')) {
-        const payload = task.payload as Record<string, unknown>
+        // Normalize payload — Postgres JSONB may come back as object or string depending on pg driver
+        const payload = normalizePayload(task.payload)
         const composioKey = process.env.COMPOSIO_API_KEY
         const entityId = `sparkie_user_${userId}`
 
-        // Log full payload keys for diagnosis
+        // Log full payload for diagnosis
         console.log('[tasks PATCH] Email task payload keys:', Object.keys(payload), 'values:', JSON.stringify(payload).slice(0, 300))
 
-        const recipientEmail = extractRecipientEmail(payload)
+        const recipientEmail = (payload.to ?? payload.recipient_email ?? payload.email ?? payload.recipient) as string | undefined
         console.log('[tasks PATCH] Email send attempt — recipient:', recipientEmail, 'action:', task.action, 'hasAttachment:', !!attachment)
 
         if (composioKey && recipientEmail) {
@@ -294,11 +300,9 @@ export async function PATCH(req: NextRequest) {
 
               console.log('[tasks PATCH] MIME assembled, rawBase64url length:', rawBase64url.length)
 
-              // Look up Gmail connectedAccountId
               const connectedAccountId = await getGmailConnectedAccountId(entityId, composioKey)
 
               if (!connectedAccountId) {
-                // No Gmail connected — fall back to plain send with note
                 console.warn('[tasks PATCH] No Gmail connectedAccountId — falling back to plain send')
                 const fallbackRes = await fetch(`${V3}/tools/execute/GMAIL_SEND_EMAIL`, {
                   method: 'POST',
@@ -316,7 +320,6 @@ export async function PATCH(req: NextRequest) {
                 const fallbackText = await fallbackRes.text()
                 console.log('[tasks PATCH] Fallback plain send:', fallbackRes.status, fallbackText.slice(0, 200))
               } else {
-                // Use Composio proxy to call Gmail API directly with raw MIME
                 try {
                   const proxyRes = await fetch('https://backend.composio.dev/api/v2/actions/proxy', {
                     method: 'POST',
@@ -331,7 +334,6 @@ export async function PATCH(req: NextRequest) {
                   const proxyText = await proxyRes.text()
                   if (!proxyRes.ok) {
                     console.error('[tasks PATCH] Gmail proxy send failed:', proxyRes.status, proxyText.slice(0, 400))
-                    // Proxy failed — fall back to plain send
                     const fallbackRes = await fetch(`${V3}/tools/execute/GMAIL_SEND_EMAIL`, {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json', 'x-api-key': composioKey },
