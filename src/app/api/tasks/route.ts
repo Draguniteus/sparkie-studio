@@ -125,9 +125,6 @@ export async function DELETE(req: NextRequest) {
 }
 
 // Look up the Composio Gmail connectedAccountId for a user entity.
-// Mirrors the same strategy used in /api/connectors/route.ts:
-// 1) entity-scoped connections (user_id param, not entityId)
-// 2) fall back to global connections list
 async function getGmailConnectedAccountId(entityId: string, composioKey: string): Promise<string | null> {
   const headers = { 'x-api-key': composioKey }
   // 1) Entity-scoped: use user_id param (NOT entityId)
@@ -176,6 +173,21 @@ async function getGmailConnectedAccountId(entityId: string, composioKey: string)
   return null
 }
 
+// Extract recipient email from payload — handles any key name the AI might use
+function extractRecipientEmail(payload: Record<string, unknown>): string | undefined {
+  // Try every key name the AI model might generate
+  const keys = ['to', 'recipient_email', 'email', 'recipient', 'to_email', 'toEmail', 'recipientEmail', 'address', 'emailAddress']
+  for (const key of keys) {
+    const val = payload[key]
+    if (typeof val === 'string' && val.includes('@')) return val
+  }
+  // Deep search: scan all string values that look like email addresses
+  for (const val of Object.values(payload)) {
+    if (typeof val === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) return val
+  }
+  return undefined
+}
+
 // PATCH /api/tasks — approve/reject task; auto-sends email for create_email_draft tasks
 export async function PATCH(req: NextRequest) {
   try {
@@ -208,16 +220,20 @@ export async function PATCH(req: NextRequest) {
       const task = taskRes.rows[0]
 
       if (task && (task.action === 'create_email_draft' || task.action === 'send_email')) {
-        const payload = task.payload as { to?: string; recipient_email?: string; subject?: string; body?: string }
-        const recipientEmail = payload.to ?? payload.recipient_email
+        const payload = task.payload as Record<string, unknown>
         const composioKey = process.env.COMPOSIO_API_KEY
         const entityId = `sparkie_user_${userId}`
 
+        // Log full payload keys for diagnosis
+        console.log('[tasks PATCH] Email task payload keys:', Object.keys(payload), 'values:', JSON.stringify(payload).slice(0, 300))
+
+        const recipientEmail = extractRecipientEmail(payload)
         console.log('[tasks PATCH] Email send attempt — recipient:', recipientEmail, 'action:', task.action, 'hasAttachment:', !!attachment)
 
         if (composioKey && recipientEmail) {
           try {
-            const emailBody = payload.body ?? ''
+            const emailBody = (payload.body ?? payload.message ?? payload.content ?? '') as string
+            const emailSubject = (payload.subject ?? payload.title ?? '(no subject)') as string
             const attData = attachment as Record<string, string> | null | undefined
             const hasAttachment = !!attData?.base64Data && !!(attData?.filename || attData?.name)
 
@@ -230,7 +246,7 @@ export async function PATCH(req: NextRequest) {
                   entity_id: entityId,
                   arguments: {
                     recipient_email: recipientEmail,
-                    subject: payload.subject ?? '(no subject)',
+                    subject: emailSubject,
                     body: emailBody,
                     is_html: false,
                   },
@@ -245,7 +261,6 @@ export async function PATCH(req: NextRequest) {
             } else {
               // Attachment send — build raw RFC 2822 MIME + send via Composio proxy
               const boundary = `sparkie_${Date.now()}_boundary`
-              const subject = payload.subject ?? '(no subject)'
               const mimeType = attData.mimeType || attData.mimetype || 'application/octet-stream'
               const filename = attData.filename || attData.name || 'attachment'
               const fileBase64 = attData.base64Data
@@ -253,7 +268,7 @@ export async function PATCH(req: NextRequest) {
               const mimeLines = [
                 `From: me`,
                 `To: ${recipientEmail}`,
-                `Subject: ${subject}`,
+                `Subject: ${emailSubject}`,
                 `MIME-Version: 1.0`,
                 `Content-Type: multipart/mixed; boundary="${boundary}"`,
                 ``,
@@ -292,7 +307,7 @@ export async function PATCH(req: NextRequest) {
                     entity_id: entityId,
                     arguments: {
                       recipient_email: recipientEmail,
-                      subject: payload.subject ?? '(no subject)',
+                      subject: emailSubject,
                       body: `${emailBody}\n\n[Attachment could not be delivered — image omitted]`,
                       is_html: false,
                     },
@@ -324,7 +339,7 @@ export async function PATCH(req: NextRequest) {
                         entity_id: entityId,
                         arguments: {
                           recipient_email: recipientEmail,
-                          subject: payload.subject ?? '(no subject)',
+                          subject: emailSubject,
                           body: `${emailBody}\n\n[Attachment could not be delivered]`,
                           is_html: false,
                         },
