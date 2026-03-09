@@ -381,7 +381,7 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
       previewUrl: null,
     })
   },
-  deleteChat: (id) => set((s) => ({ chats: s.chats.filter(c) => c.id !== id), currentChatId: null, messages: [] })),
+  deleteChat: (id) => set((s) => ({ chats: s.chats.filter((c) => c.id !== id), currentChatId: null, messages: [] })),
 
   sidebarOpen: true,
   activeTab: 'chat',
