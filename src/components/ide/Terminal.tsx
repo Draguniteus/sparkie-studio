@@ -7,7 +7,7 @@ import { Terminal as TermIcon, Play, Square, Trash2, ExternalLink } from 'lucide
 declare global {
   interface Window {
     Terminal: new (options?: Record<string, unknown>) => XTermInstance
-    FitAddon: new () => { fit(): void; proposeDimensions(): { cols: number; rows: number } | undefined }
+    FitAddon: { FitAddon: new () => { fit(): void; proposeDimensions(): { cols: number; rows: number } | undefined } }
     _xtermLoaded?: boolean
   }
 }
@@ -99,7 +99,7 @@ export function Terminal() {
         scrollback: 3000,
       })
 
-      const fitAddon = new window.FitAddon()
+      const fitAddon = new window.FitAddon.FitAddon()
       term.loadAddon(fitAddon)
       term.open(termRef.current)
       fitAddon.fit()
