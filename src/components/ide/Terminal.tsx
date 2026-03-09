@@ -7,7 +7,7 @@ import { Terminal as TermIcon, Play, Square, Trash2, ExternalLink } from 'lucide
 declare global {
   interface Window {
     Terminal: new (options?: Record<string, unknown>) => XTermInstance
-    FitAddon: { FitAddon: new () => { fit(): void; proposeDimensions(): { cols: number; rows: number } | undefined } }
+    FitAddon: new () => { fit(): void; proposeDimensions(): { cols: number; rows: number } | undefined }
     _xtermLoaded?: boolean
   }
 }
@@ -60,7 +60,7 @@ export function Terminal() {
   const prevOutputRef = useRef('')
   const serverUrlDetectedRef = useRef(false)
 
-  // ── Load xterm + init terminal ────────────────────────────────────
+  // ── Load xterm + init terminal ────────────────────────────────
   useEffect(() => {
     if (!termRef.current) return
 
@@ -99,7 +99,7 @@ export function Terminal() {
         scrollback: 3000,
       })
 
-      const fitAddon = new window.FitAddon.FitAddon()
+      const fitAddon = new window.FitAddon()
       term.loadAddon(fitAddon)
       term.open(termRef.current)
       fitAddon.fit()
@@ -158,7 +158,7 @@ export function Terminal() {
   // Instead we intercept via xterm.write with a post-write URL scan on raw data.
   // Implemented in connectE2B — see ws.onmessage extension below.
 
-  // ── ResizeObserver ───────────────────────────────────────────────────────
+  // ── ResizeObserver ─────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!termRef.current || !fitRef.current) return
     const ro = new ResizeObserver(() => fitRef.current?.fit())
@@ -166,7 +166,7 @@ export function Terminal() {
     return () => ro.disconnect()
   }, [])
 
-  // ── E2B PTY connection ───────────────────────────────────────────────────
+  // ── E2B PTY connection ────────────────────────────────────────────────────
   const connectE2B = useCallback(async (term: XTermInstance) => {
     try {
       // Create a new E2B terminal session
@@ -193,6 +193,21 @@ export function Terminal() {
         // Send terminal size
         const dims = fitRef.current?.fit()
         void dims
+        // ── Race fix: fire any pending command that was already set before we connected ──
+        // The useEffect can't re-run synchronously after setConnected(true), so we also
+        // consume pendingRunCommand here to eliminate the connected=false race window.
+        const pending = useAppStore.getState().pendingRunCommand
+        if (pending) {
+          useAppStore.getState().setPendingRunCommand(null)
+          serverUrlDetectedRef.current = false
+          setContainerStatus('installing')
+          setTimeout(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: 'input', data: pending + '\r' }))
+              term.write('\r\n\x1b[33m  [Sparkie]\x1b[0m Running: ' + pending + '\r\n')
+            }
+          }, 300)
+        }
       }
       ws.onmessage = (e) => {
         const raw = e.data as string
@@ -219,7 +234,7 @@ export function Terminal() {
             }
           }
         }
-        // ── Detect build/install errors ────────────────────────────────────────
+        // ── Detect build/install errors ─────────────────────────────────────────
         if (raw.includes('npm ERR!') || raw.includes('error Command failed') || raw.includes('ENOENT') || raw.includes('Cannot find module')) {
           setContainerStatus('error')
           term.write('\r\n\x1b[31m  [Sparkie]\x1b[0m Build error detected — check above ↑\r\n')
