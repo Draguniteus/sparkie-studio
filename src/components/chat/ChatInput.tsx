@@ -1377,12 +1377,18 @@ export function ChatInput() {
         // automatically fire the dev server in the terminal. Sparkie never declares
         // "preview ready" for Node projects without actually starting the server.
         const allBuiltFiles = Array.from(createdFileNames)
-        const hasPackageJson = allBuiltFiles.some(f => f.endsWith('package.json') || f === 'package.json')
+        const hasPackageJson = allBuiltFiles.some(f => f === 'package.json' || f.endsWith('/package.json'))
         if (hasPackageJson) {
-          // Find the package.json content from the store to check for scripts.dev
-          const pkgFile = useAppStore.getState().files.find(f =>
-            f.name === 'package.json' || f.name?.endsWith('/package.json')
-          )
+          // Recursively search the file tree — handles nested paths like sparkie/package.json
+          // upsertFile builds a folder tree, so flat .find() misses children
+          type FNode = import('@/store/appStore').FileNode
+          function findFileInTree(nodes: FNode[], name: string): FNode | undefined {
+            for (const n of nodes) {
+              if (n.type === 'file' && n.name === name) return n
+              if (n.children) { const found = findFileInTree(n.children as FNode[], name); if (found) return found }
+            }
+          }
+          const pkgFile = findFileInTree(useAppStore.getState().files, 'package.json')
           let hasDevScript = false
           let startCmd = 'npm install && npm run dev'
           try {
@@ -1394,6 +1400,9 @@ export function ChatInput() {
               if (hasStartSh) startCmd = 'sh start.sh'
               else if (pkg.scripts?.dev) startCmd = 'npm install && npm run dev'
               else if (pkg.scripts?.start) startCmd = 'npm install && npm start'
+            } else {
+              // package.json in allBuiltFiles but not yet in store tree (race) — default to dev
+              hasDevScript = true
             }
           } catch { hasDevScript = true /* assume dev project if package.json parse fails */ }
 
