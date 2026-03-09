@@ -227,3 +227,133 @@ All 16 skills available via read_skill({ name: "..." }):
 ---
 
 *DEVPLAYBOOK last updated: March 9, 2026 — Parts 21–22 added: skill auto-trigger table, full skills library index (16 skills).*
+
+
+---
+
+## PART 23: WHY SPARKIE LACKS AUTONOMOUS EXPERTISE — AND HOW TO FIX IT
+
+*Written March 9, 2026 — after structural comparison with SureThing AI.*
+
+---
+
+### The Core Problem
+
+Sparkie can execute. She has the tools, the task queue, the skills DB. But when she runs autonomously — triggered by inbox check, morning brief, or a scheduled task — she underperforms. Here's why:
+
+---
+
+### Gap 1: Autonomous Tasks Execute as Chat, Not as Agent
+
+When a scheduled AI task fires in `/api/agent/route.ts`, the execution is:
+```
+fetch('/api/chat', { messages: [{ role: 'user', content: taskPrompt }], model: 'openai-gpt-5-mini' })
+```
+
+This means:
+- The task prompt is treated as a plain user message
+- The chat route has no special knowledge that this is an autonomous execution
+- It runs with whatever system prompt the chat route has — no skill loading, no context about the task type
+- The model used is `openai-gpt-5-mini` (hardcoded) — CAPABLE tier is `llama3.3-70b-instruct`
+- No `read_skill` is called before execution — Sparkie doesn't know to
+
+**Fix: The autonomous task action field must specify which skill to load first.**
+
+Every AI task action should begin with:
+```
+"First: read_skill({ name: '...' }). Then: [actual instructions]"
+```
+
+Example — email follow-up task:
+```
+action: "read_skill({ name: 'email' }). Then: Search Gmail for replies to thread_123 from John. If replied, draft response. If not, note it."
+```
+
+---
+
+### Gap 2: No Persistent Working Memory Across Restarts
+
+SureThing uses `/cells/{id}/workspace/` — a persistent filesystem. Sparkie has no equivalent. If a multi-step autonomous task needs to write intermediate state (e.g., "scraped 40/100 URLs, cursor at page 4"), that state is lost on restart.
+
+**Fix: Add `/api/workspace` endpoint — key-value file store backed by DB.**
+- `POST /api/workspace` `{ key: "task_xyz_state", value: "..." }` → upsert
+- `GET /api/workspace?key=task_xyz_state` → read
+- Sparkie writes task state here mid-execution; reads on resume
+
+Until this exists: use `sparkie_self_memory` table as a makeshift workspace for small strings.
+Pattern: `save_self_memory({ key: "task_resume_cursor", value: JSON.stringify(state) })`
+
+---
+
+### Gap 3: Skills Load Lazily (Only When Sparkie Knows to Ask)
+
+SureThing's skills are flat files — the orchestrator injects them based on task type automatically. Sparkie's skills are in the DB — but Sparkie only loads them when she recognizes she should.
+
+In autonomous execution (triggered from `/api/agent`), the model is started fresh with just the task prompt. It has no trigger to load skills unless the `action` field explicitly says to.
+
+**Fix: Add a skill-trigger header to every autonomous task action.**
+See PART 21 for the full trigger table. Use it when creating every AI task.
+
+---
+
+### Gap 4: No Multi-Agent Sub-Loops
+
+SureThing uses parallel execution across multiple tools in a single orchestrator turn. Sparkie runs one tool at a time, sequentially, in the chat loop.
+
+This means:
+- Can't fan out: "check inbox AND check calendar AND check tasks simultaneously"
+- Can't do `Promise.allSettled` pattern at the agent level
+- Long tasks risk hitting the 3–10 round loop cap
+
+**Fix (future): Multi-agent parallel sub-loop architecture** — one orchestrator, N parallel sub-agents each running their own tool chain.
+Until then: batch related checks into one prompt and use Composio tools efficiently.
+
+---
+
+### Gap 5: Autonomous Execution Has No Skill Routing
+
+When `/api/agent` fires `executeDueTasks`, it calls `/api/chat` with a raw task prompt. The chat route doesn't know:
+- What type of task this is
+- Which skill to load
+- What HITL rules apply
+- What the expected output format is
+
+SureThing injects execution flow rules (HITL, reply CC, send confirmation) at the system prompt level — always present.
+
+**Fix: Move core execution rules out of DEVPLAYBOOK (Sparkie reads occasionally) and into the system prompt (always present).**
+Key rules that must be system-prompt-level (not skill-level):
+1. HITL: require confirmation before sending emails/calendar invites
+2. Reply CC: always CC thread participants
+3. Send confirmation: only send on explicit "send it" / "go ahead"
+4. Read before write: never patch files without reading current content first
+5. Skill auto-trigger: always call read_skill before skill-related tasks
+
+---
+
+### Summary: What to Fix
+
+| Gap | Fix | Effort |
+|-----|-----|--------|
+| Autonomous tasks don't load skills | Include `read_skill(...)` at start of every `action` field | Low — change task creation patterns |
+| No persistent working memory | Add `/api/workspace` DB-backed key-value store | Medium |
+| Skills only load when recognized | Add skill-trigger line to all AI task actions | Low |
+| No parallel execution | Future: multi-agent sub-loops | High |
+| Core rules not always present | Move critical HITL/CC/send rules to system prompt | Low |
+
+---
+
+### The Deepest Issue
+
+SureThing is an orchestrator that treats every task as a workflow with defined stages (plan → draft → HITL → execute → follow-up). Sparkie treats every task as a chat message. Chat is reactive. Orchestration is proactive.
+
+The fix isn't one patch — it's a mindset change in how tasks are structured:
+- Every task action = a mini runbook, not a chat message
+- Skills are prerequisites, not optional references
+- HITL is a required stage, not a fallback
+- Persistent state is a first-class concept, not an afterthought
+
+*This is what separates autonomous expertise from reactive helpfulness.*
+
+---
+
+*DEVPLAYBOOK last updated: March 9, 2026 — Part 23 added: autonomous execution gaps and fixes.*
