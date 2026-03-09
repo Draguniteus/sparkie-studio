@@ -237,6 +237,8 @@ interface AppState {
   setPreviewUrl: (url: string | null) => void
   appendTerminalOutput: (text: string) => void
   clearTerminalOutput: () => void
+  pendingRunCommand: string | null        // set by build pipeline → consumed by Terminal
+  setPendingRunCommand: (cmd: string | null) => void
 
   // User memory profile
   userProfile: UserProfile | null
@@ -480,6 +482,8 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
     return { terminalOutput: trimmed }
   }),
   clearTerminalOutput: () => set({ terminalOutput: '' }),
+  pendingRunCommand: null,
+  setPendingRunCommand: (cmd) => set({ pendingRunCommand: cmd }),
 
   // User memory profile — read localStorage at store creation for instant hydration (no flash)
   userProfile: ((): UserProfile | null => {
