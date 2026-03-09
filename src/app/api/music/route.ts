@@ -92,6 +92,27 @@ function extractUserId(req: NextRequest): string {
 }
 
 async function tryPersistAudio(url: string, userId: string): Promise<string> {
+  // Handle base64 data URLs from ACE Step (data:audio/wav;base64,...)
+  if (url.startsWith('data:')) {
+    try {
+      const commaIdx = url.indexOf(',')
+      if (commaIdx === -1) return url
+      const base64Data = url.slice(commaIdx + 1)
+      // Convert to data URL blob path for GitHub push
+      const audioBuffer = Buffer.from(base64Data, 'base64')
+      if (audioBuffer.length === 0) return url
+      const tempDataUrl = 'data:audio/wav;base64,' + base64Data
+      // Push to GitHub as binary — use the buffer approach via a temp file pattern
+      // Since pushMediaToGitHub expects URL, convert to object URL approach:
+      // Fall through to direct data URL (client can play data: URLs natively)
+      console.log('[/api/music] ACE audio data URL, size:', audioBuffer.length, 'bytes — passing through')
+      return url  // data: URLs work directly in <audio src>
+    } catch (e) {
+      console.error('[/api/music] ACE data URL handling failed:', e)
+      return url
+    }
+  }
+  // HTTP URLs: push to GitHub for persistence
   try {
     const result = await pushMediaToGitHub('audio', url, userId, 'mp3')
     return result.url
@@ -208,20 +229,30 @@ async function handleAceMusic(
     let lyrics = ''
 
     if (contentAccum) {
-      const titleMatch = contentAccum.match(/(?:^|\n)(?:title|song)[:\s]+([^\n]+)/i)
-      const styleMatch = contentAccum.match(/(?:^|\n)(?:style|genre|tags)[:\s]+([^\n]+)/i)
-      if (titleMatch) title = titleMatch[1].trim().replace(/["'*]/g, '')
-      if (styleMatch) style = styleMatch[1].trim()
-      const lyricsMatch = contentAccum.match(/\[(Verse|Chorus|Bridge|Intro|Outro|Pre Chorus|Post Chorus|Hook|Interlude)[\s\S]*/i)
+      // ACE Step sample_mode streams: title line, style/tags line, then full lyrics
+      const titleMatch = contentAccum.match(/(?:^|\n)(?:title|song\s*name|name)[:\s]+([^\n]+)/i)
+      const styleMatch = contentAccum.match(/(?:^|\n)(?:style|genre|tags|mood|sound)[:\s]+([^\n]+)/i)
+      if (titleMatch) title = titleMatch[1].trim().replace(/["'*#]/g, '').trim()
+      if (styleMatch) style = styleMatch[1].trim().replace(/["'*#]/g, '').trim()
+
+      // Lyrics: try section-tagged block first, then fall back to all content after metadata lines
+      const lyricsMatch = contentAccum.match(/\[(Verse|Chorus|Bridge|Intro|Outro|Pre[\s-]?Chorus|Post[\s-]?Chorus|Hook|Interlude|Inst|Solo)[\s\S]*/i)
       if (lyricsMatch) {
         lyrics = normalizeLyricsTags(lyricsMatch[0].trim())
-      } else if (!titleMatch && !styleMatch) {
-        lyrics = contentAccum.trim()
+      } else {
+        // Remove any title/style header lines and use the rest as lyrics
+        const cleaned = contentAccum
+          .replace(/^(?:title|song\s*name|name|style|genre|tags|mood|sound)[:\s][^\n]+\n?/gim, '')
+          .trim()
+        if (cleaned.length > 20) {
+          lyrics = normalizeLyricsTags(cleaned)
+        }
       }
     }
 
     if (!title) title = prompt.slice(0, 50).replace(/\b\w/g, c => c.toUpperCase()).trim() || 'Sparkie Mix'
-    if (!style) style = prompt.slice(0, 120)
+    // Style: prefer extracted style, fallback to full prompt (shows what was requested)
+    if (!style) style = prompt.slice(0, 200)
 
     if (audioUrls.length === 0) {
       console.error('[/api/music] ACE returned no audio. contentAccum length:', contentAccum.length)
