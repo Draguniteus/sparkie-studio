@@ -2864,9 +2864,9 @@ function pushConversationToSupermemory(userId: string, conversation: string): vo
 async function executeTool(
   name: string,
   args: Record<string, unknown>,
-  ctx: { userId: string | null; tavilyKey: string | undefined; apiKey: string; doKey: string; baseUrl: string }
+  ctx: { userId: string | null; tavilyKey: string | undefined; apiKey: string; doKey: string; baseUrl: string; cookieHeader: string }
 ): Promise<string> {
-  const { userId, tavilyKey, apiKey, doKey, baseUrl } = ctx
+  const { userId, tavilyKey, apiKey, doKey, baseUrl, cookieHeader } = ctx
   try {
     switch (name) {
       case 'get_weather': {
@@ -3663,8 +3663,6 @@ async function executeTool(
           return `read_skill error: ${String(e)}`
         }
       }
-
-      const cookieHeader = req.headers.get('cookie') ?? ''
 
       case 'workspace_read': {
         if (!userId) return 'Not authenticated'
@@ -5192,7 +5190,7 @@ Make it feel like walking into your friend's creative space and being genuinely 
     if (userId) startTrace(requestId, userId)
 
     const useTools = !voiceMode && modelSelection.needsTools  // skip tool loop for conversational/chitchat tier
-    const toolContext = { userId, tavilyKey, apiKey, doKey, baseUrl }
+    const toolContext = { userId, tavilyKey, apiKey, doKey, baseUrl, cookieHeader: req.headers.get('cookie') ?? '' }
     const toolMediaResults: Array<{ name: string; result: string }> = []
 
     let finalMessages = [...recentMessages]
