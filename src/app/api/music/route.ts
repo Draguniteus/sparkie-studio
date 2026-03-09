@@ -377,7 +377,8 @@ async function handleMiniMax(
   const requestBody: Record<string, unknown> = {
     model: minimaxModel,
     prompt: stylePrompt.trim() || rawPrompt.slice(0, 500),
-    output_format: 'url',
+    stream: true,
+    output_format: 'hex',
     audio_setting: { sample_rate: 44100, bitrate: 256000, format: 'mp3' },
   }
 
@@ -399,12 +400,11 @@ async function handleMiniMax(
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
       body: JSON.stringify(requestBody),
-      signal: AbortSignal.timeout(120000),
+      signal: AbortSignal.timeout(180000),
     })
 
-    clearInterval(keepalive)
-
     if (!res.ok) {
+      clearInterval(keepalive)
       const errRaw = await res.json().catch(() => ({ error: 'HTTP ' + res.status }))
       const errObj = errRaw as Record<string, unknown>
       const baseResp = errObj?.base_resp as Record<string, unknown> | undefined
@@ -414,55 +414,67 @@ async function handleMiniMax(
       return
     }
 
-    const data = await res.json()
-    console.log('[/api/music] base_resp:', JSON.stringify(data?.base_resp))
+    // Stream hex chunks — keeps connection alive during generation (avoids DO 60s HTTP timeout)
+    const reader = res.body!.getReader()
+    const decoder = new TextDecoder()
+    let hexAccum = ''
+    let buffer = ''
 
-    if (data?.base_resp?.status_code !== 0) {
-      const errMsg = data?.base_resp?.status_msg || 'MiniMax API error (code ' + data?.base_resp?.status_code + ')'
-      console.error('[/api/music] API error:', errMsg)
-      send('data: ' + JSON.stringify({ error: errMsg }) + '\n\n')
-      return
-    }
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
 
-    const dataPayload = Array.isArray(data?.data) ? data.data[0] : data?.data
-    const audioFieldValue =
-      dataPayload?.audio_file ||
-      dataPayload?.audioURL ||
-      dataPayload?.audio_url ||
-      dataPayload?.url ||
-      dataPayload?.download_url
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue
+          const json = line.slice(5).trim()
+          if (!json || json === '[DONE]') continue
+          let chunk: Record<string, unknown>
+          try { chunk = JSON.parse(json) } catch { continue }
 
-    if (audioFieldValue && String(audioFieldValue).startsWith('http')) {
-      const persistentUrl = await tryPersistAudio(String(audioFieldValue), userId)
-      send('data: ' + JSON.stringify({ url: persistentUrl, model: minimaxModel }) + '\n\n')
-      return
-    }
+          // Check for errors mid-stream
+          const baseResp = chunk?.base_resp as Record<string, unknown> | undefined
+          if (baseResp && baseResp.status_code !== 0) {
+            console.error('[/api/music] stream error:', JSON.stringify(baseResp))
+            send('data: ' + JSON.stringify({ error: baseResp.status_msg || 'MiniMax stream error' }) + '\n\n')
+            clearInterval(keepalive)
+            return
+          }
 
-    const audioRaw = dataPayload?.audio
-    if (audioRaw && typeof audioRaw === 'string' && audioRaw.length > 0) {
-      if (audioRaw.startsWith('http')) {
-        const persistentUrl = await tryPersistAudio(audioRaw, userId)
-        send('data: ' + JSON.stringify({ url: persistentUrl, model: minimaxModel }) + '\n\n')
-        return
-      } else {
-        try {
-          const audioBuf = Buffer.from(audioRaw, 'hex')
-          if (audioBuf.length === 0) throw new Error('Hex decode produced empty buffer')
-          const dataUrl = 'data:audio/mp3;base64,' + audioBuf.toString('base64')
-          const persistentUrl = await tryPersistAudio(dataUrl, userId)
-          send('data: ' + JSON.stringify({ url: persistentUrl, model: minimaxModel }) + '\n\n')
-          return
-        } catch (hexErr) {
-          console.error('[/api/music] Hex decode failed:', hexErr)
+          // Accumulate hex audio data
+          const data = chunk?.data as Record<string, unknown> | undefined
+          const audioChunk = data?.audio as string | undefined
+          if (audioChunk && typeof audioChunk === 'string' && audioChunk.length > 0) {
+            hexAccum += audioChunk
+          }
         }
       }
+    } finally {
+      reader.cancel().catch(() => {})
     }
 
-    const dataKeys = Object.keys(dataPayload || {})
-    console.error('[/api/music] No audio. Keys:', dataKeys)
-    send('data: ' + JSON.stringify({
-      error: 'MiniMax returned success but no audio. Keys: [' + dataKeys.join(', ') + ']. Check credits/quota.'
-    }) + '\n\n')
+    clearInterval(keepalive)
+
+    if (!hexAccum || hexAccum.length === 0) {
+      send('data: ' + JSON.stringify({ error: 'MiniMax returned empty audio stream. Check credits/quota.' }) + '\n\n')
+      return
+    }
+
+    console.log('[/api/music] MiniMax stream complete, hex length:', hexAccum.length)
+
+    try {
+      const audioBuf = Buffer.from(hexAccum, 'hex')
+      if (audioBuf.length === 0) throw new Error('Hex decode produced empty buffer')
+      const dataUrl = 'data:audio/mp3;base64,' + audioBuf.toString('base64')
+      const persistentUrl = await tryPersistAudio(dataUrl, userId)
+      send('data: ' + JSON.stringify({ url: persistentUrl, model: minimaxModel }) + '\n\n')
+    } catch (hexErr) {
+      console.error('[/api/music] Hex decode failed:', hexErr)
+      send('data: ' + JSON.stringify({ error: 'Audio decode failed: ' + (hexErr instanceof Error ? hexErr.message : String(hexErr)) }) + '\n\n')
+    }
 
   } catch (err) {
     clearInterval(keepalive)
