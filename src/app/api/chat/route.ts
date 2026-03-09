@@ -389,6 +389,40 @@ SOCIAL MEDIA — MODE A vs MODE B:
 - If Mode B fails: fall back to Mode A immediately, show draft as HITL task.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 8B · CORE AUTONOMOUS EXECUTION RULES (ALWAYS ON)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+These rules apply in EVERY context — chat, scheduled task, autonomous trigger:
+
+**RULE 1: SKILL AUTO-TRIGGER**
+Before ANY skill-related task, call read_skill FIRST. See skill trigger table in Section 31.
+NEVER guess how a skill works — always load it fresh from the DB.
+
+**RULE 2: HITL FOR IRREVERSIBLE ACTIONS**
+Email sends, calendar invites, social posts, deletes → always create_task FIRST, show card.
+NEVER send without Michael's explicit approval ("send it", "go ahead", "do it").
+Soft confirmations ("ok", "looks good") → check self_memory for auto_send preference; default = do NOT send.
+
+**RULE 3: REPLY CC ENFORCEMENT**
+When replying to any email thread:
+  1. Scan ALL from/to/cc across every thread message
+  2. Exclude draguniteus@gmail.com + primary recipient
+  3. Check manage_contact cc_preference for each participant
+  4. CC all remaining active participants
+NEVER skip this step.
+
+**RULE 4: READ BEFORE WRITE (CODE/FILES)**
+NEVER patch, overwrite, or commit a file without reading its current content first.
+Visible iterative guessing is unacceptable.
+Pattern: GET_RAW_REPOSITORY_CONTENT → apply surgical patch → commit.
+
+**RULE 5: WORKSPACE FOR TASK STATE**
+For multi-step autonomous tasks, checkpoint state with workspace_write({ key, value }).
+Resume with workspace_read({ key }).
+This ensures tasks survive restarts. Never lose progress.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 SECTION 9 · EMOTIONAL INTELLIGENCE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1706,7 +1740,11 @@ Sparkie has a Skills Library stored in sparkie_skills DB. When a task matches a 
 | Browser automation, login, page interaction | read_skill({ name: "browser-use" }) → full rules in Section 35 |
 | A2UI card generation | read_skill({ name: "a2ui-card-gen" }) → full rules in Section 36 |
 | CTA / action button extraction | read_skill({ name: "cta-card-gen" }) → full rules in Section 37 |
-| Social post, tweet, TikTok, Reddit | search_user_memory({ query: "social posting rules" }) |
+| Social post, tweet, TikTok, Reddit, Discord | read_skill({ name: "social" }) |
+| Music generation (ACE, MiniMax) | read_skill({ name: "music" }) |
+| Video generation | read_skill({ name: "video" }) |
+| Self-repair, code patch, deploy, rollback | read_skill({ name: "self-repair" }) |
+| Michael asks what Sparkie can do, capability question | read_skill({ name: "about-sparkie" }) |
 | Any Composio app action | composio_discover({ query: "..." }) before composio_execute |
 
 **Rule: Before drafting any email reply:**
@@ -2235,6 +2273,29 @@ const SPARKIE_TOOLS = [
           name: { type: 'string', description: 'Skill name, e.g. "email", "calendar", "browser-use", "a2ui-card-gen", "cta-card-gen"' },
         },
         required: ['name'],
+      },
+      {
+        name: 'workspace_read',
+        description: 'Read a value from Sparkie\'s persistent workspace (survives restarts/deploys). Use for task checkpoints, intermediate state, config. GET /api/workspace?key=KEY',
+        input_schema: {
+          type: 'object',
+          properties: {
+            key: { type: 'string', description: 'Workspace key to read' },
+          },
+          required: ['key'],
+        },
+      },
+      {
+        name: 'workspace_write',
+        description: 'Write a value to Sparkie\'s persistent workspace. Use for task checkpoints, intermediate state, config. POST /api/workspace { key, value }',
+        input_schema: {
+          type: 'object',
+          properties: {
+            key: { type: 'string', description: 'Workspace key' },
+            value: { type: 'string', description: 'Value to store (JSON-serialize complex objects)' },
+          },
+          required: ['key', 'value'],
+        },
       },
     },
   },
@@ -3578,6 +3639,7 @@ async function executeTool(
       }
 
       case 'read_skill': {
+      'workspace_read': 'workspace_read', 'workspace_write': 'workspace_write',
         try {
           const { name: skillName } = args as { name: string }
           if (!skillName) return 'read_skill: name is required'
@@ -3596,6 +3658,43 @@ async function executeTool(
           return `read_skill error: ${String(e)}`
         }
       }
+
+      case 'workspace_read': {
+        if (!userId) return 'Not authenticated'
+        const { key } = args as { key: string }
+        if (!key) return 'key required'
+        try {
+          const res = await fetch(`${baseUrl}/api/workspace?key=${encodeURIComponent(key)}`, {
+            headers: { Cookie: cookieHeader },
+          })
+          if (res.status === 404) return `workspace: key "${key}" not found`
+          const data = await res.json() as { value?: string; error?: string }
+          if (data.error) return `workspace_read error: ${data.error}`
+          return data.value ?? ''
+        } catch (e) {
+          return `workspace_read error: ${String(e)}`
+        }
+      }
+
+      case 'workspace_write': {
+        if (!userId) return 'Not authenticated'
+        const { key, value } = args as { key: string; value: string }
+        if (!key) return 'key required'
+        if (value === undefined || value === null) return 'value required'
+        try {
+          const res = await fetch(`${baseUrl}/api/workspace`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
+            body: JSON.stringify({ key, value: String(value) }),
+          })
+          const data = await res.json() as { ok?: boolean; error?: string }
+          if (data.error) return `workspace_write error: ${data.error}`
+          return `✓ saved to workspace["${key}"]`
+        } catch (e) {
+          return `workspace_write error: ${String(e)}`
+        }
+      }
+
 
       case 'post_to_feed': {
         if (!userId) return 'Not authenticated'
