@@ -3664,6 +3664,8 @@ async function executeTool(
         }
       }
 
+      const cookieHeader = req.headers.get('cookie') ?? ''
+
       case 'workspace_read': {
         if (!userId) return 'Not authenticated'
         const { key } = args as { key: string }
