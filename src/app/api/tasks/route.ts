@@ -5,6 +5,8 @@ import { query } from '@/lib/db'
 
 export const runtime = 'nodejs'
 
+const V3 = 'https://backend.composio.dev/api/v3'
+
 async function ensureTable() {
   await query(`CREATE TABLE IF NOT EXISTS sparkie_tasks (
     id TEXT PRIMARY KEY,
@@ -22,7 +24,6 @@ async function ensureTable() {
     resolved_at TIMESTAMPTZ
   )`)
   await query(`CREATE INDEX IF NOT EXISTS idx_sparkie_tasks_user ON sparkie_tasks(user_id, status)`)
-  // Add missing columns to existing tables gracefully
   await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS executor TEXT NOT NULL DEFAULT 'human'`).catch(() => {})
   await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS trigger_type TEXT DEFAULT 'manual'`).catch(() => {})
   await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMPTZ`).catch(() => {})
@@ -56,7 +57,6 @@ export async function POST(req: NextRequest) {
 }
 
 // GET /api/tasks?id=xxx — get single task
-// GET /api/tasks?status=all|pending&limit=N — list tasks for TaskQueuePanel
 export async function GET(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
@@ -68,7 +68,6 @@ export async function GET(req: NextRequest) {
     const statusFilter = req.nextUrl.searchParams.get('status')
     const limit = Math.min(parseInt(req.nextUrl.searchParams.get('limit') ?? '30'), 100)
 
-    // Single task lookup
     if (id) {
       const res = await query<{ id: string; status: string; action: string; label: string; payload: unknown }>(
         `SELECT id, status, action, label, payload FROM sparkie_tasks WHERE id = $1 AND user_id = $2`,
@@ -78,7 +77,6 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(res.rows[0])
     }
 
-    // List tasks for queue panel
     let whereClause = 'user_id = $1'
     const params: unknown[] = [userId]
 
@@ -86,7 +84,6 @@ export async function GET(req: NextRequest) {
       whereClause += ' AND status = $2'
       params.push(statusFilter)
     } else {
-      // Default: show recent tasks (all statuses, last 7 days)
       whereClause += ` AND created_at > NOW() - INTERVAL '7 days'`
     }
 
@@ -107,7 +104,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// DELETE /api/tasks?id=xxx — cancel/stop a task immediately
+// DELETE /api/tasks?id=xxx
 export async function DELETE(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
@@ -127,8 +124,59 @@ export async function DELETE(req: NextRequest) {
   }
 }
 
-// PATCH /api/tasks — respond to a task (approve/reject) or update status
-// For email draft tasks: also accepts `attachment` field to pass to Gmail send
+// Look up the Composio Gmail connectedAccountId for a user entity.
+// Mirrors the same strategy used in /api/connectors/route.ts:
+// 1) entity-scoped connections (user_id param, not entityId)
+// 2) fall back to global connections list
+async function getGmailConnectedAccountId(entityId: string, composioKey: string): Promise<string | null> {
+  const headers = { 'x-api-key': composioKey }
+  // 1) Entity-scoped: use user_id param (NOT entityId)
+  try {
+    const res = await fetch(
+      `${V3}/connected_accounts?user_id=${encodeURIComponent(entityId)}&status=ACTIVE&limit=50`,
+      { headers }
+    )
+    if (res.ok) {
+      const d = await res.json() as { items?: Array<{ id: string; toolkit?: { slug: string } }> }
+      const gmailConn = d.items?.find(c => c.toolkit?.slug?.toLowerCase() === 'gmail')
+      if (gmailConn?.id) {
+        console.log('[tasks PATCH] Found Gmail connectedAccountId (entity-scoped):', gmailConn.id)
+        return gmailConn.id
+      }
+    } else {
+      const t = await res.text()
+      console.log('[tasks PATCH] entity-scoped connectedAccounts:', res.status, t.slice(0, 200))
+    }
+  } catch (e) {
+    console.error('[tasks PATCH] entity-scoped connectedAccounts error:', e)
+  }
+
+  // 2) Global fallback (covers admin/dashboard-created connections)
+  try {
+    const res = await fetch(
+      `${V3}/connected_accounts?status=ACTIVE&limit=50`,
+      { headers }
+    )
+    if (res.ok) {
+      const d = await res.json() as { items?: Array<{ id: string; toolkit?: { slug: string } }> }
+      const gmailConn = d.items?.find(c => c.toolkit?.slug?.toLowerCase() === 'gmail')
+      if (gmailConn?.id) {
+        console.log('[tasks PATCH] Found Gmail connectedAccountId (global fallback):', gmailConn.id)
+        return gmailConn.id
+      }
+      console.log('[tasks PATCH] Global connections list:', d.items?.map(c => c.toolkit?.slug))
+    } else {
+      const t = await res.text()
+      console.log('[tasks PATCH] global connectedAccounts:', res.status, t.slice(0, 200))
+    }
+  } catch (e) {
+    console.error('[tasks PATCH] global connectedAccounts error:', e)
+  }
+
+  return null
+}
+
+// PATCH /api/tasks — approve/reject task; auto-sends email for create_email_draft tasks
 export async function PATCH(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
@@ -149,11 +197,9 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid status' }, { status: 400 })
     }
 
-    // Map approved → completed for human tasks
     const resolvedStatus = status === 'approved' ? 'completed' : status === 'rejected' ? 'skipped' : status
     const setResolved = ['completed', 'skipped', 'failed', 'cancelled'].includes(resolvedStatus)
 
-    // For email draft tasks being approved: auto-send via Gmail
     if (status === 'approved') {
       const taskRes = await query<{ action: string; payload: Record<string, unknown> }>(
         `SELECT action, payload FROM sparkie_tasks WHERE id = $1 AND user_id = $2`,
@@ -163,23 +209,21 @@ export async function PATCH(req: NextRequest) {
 
       if (task && (task.action === 'create_email_draft' || task.action === 'send_email')) {
         const payload = task.payload as { to?: string; recipient_email?: string; subject?: string; body?: string }
-        // Support both 'to' and 'recipient_email' payload keys
         const recipientEmail = payload.to ?? payload.recipient_email
         const composioKey = process.env.COMPOSIO_API_KEY
         const entityId = `sparkie_user_${userId}`
 
-        console.log('[tasks PATCH] Email send attempt — recipient:', recipientEmail, 'action:', task.action, 'payload keys:', Object.keys(payload))
+        console.log('[tasks PATCH] Email send attempt — recipient:', recipientEmail, 'action:', task.action, 'hasAttachment:', !!attachment)
 
         if (composioKey && recipientEmail) {
           try {
             const emailBody = payload.body ?? ''
-
             const attData = attachment as Record<string, string> | null | undefined
             const hasAttachment = !!attData?.base64Data && !!(attData?.filename || attData?.name)
 
             if (!hasAttachment) {
-              // No attachment — use Composio GMAIL_SEND_EMAIL tool
-              const composioRes = await fetch('https://backend.composio.dev/api/v3/tools/execute/GMAIL_SEND_EMAIL', {
+              // Plain send — use Composio GMAIL_SEND_EMAIL tool directly
+              const composioRes = await fetch(`${V3}/tools/execute/GMAIL_SEND_EMAIL`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'x-api-key': composioKey },
                 body: JSON.stringify({
@@ -192,22 +236,20 @@ export async function PATCH(req: NextRequest) {
                   },
                 }),
               })
+              const composioText = await composioRes.text()
               if (!composioRes.ok) {
-                const errText = await composioRes.text()
-                console.error('[tasks PATCH] Gmail send failed:', composioRes.status, errText)
+                console.error('[tasks PATCH] Gmail plain send failed:', composioRes.status, composioText)
               } else {
-                console.log('[tasks PATCH] Gmail send success for:', recipientEmail)
+                console.log('[tasks PATCH] Gmail plain send success:', composioRes.status, composioText.slice(0, 200))
               }
             } else {
-              // Has attachment — build raw RFC 2822 MIME message and send via Gmail API directly
-              // GMAIL_SEND_EMAIL tool does not support 'raw' field — must use Gmail REST API proxy
+              // Attachment send — build raw RFC 2822 MIME + send via Composio proxy
               const boundary = `sparkie_${Date.now()}_boundary`
               const subject = payload.subject ?? '(no subject)'
               const mimeType = attData.mimeType || attData.mimetype || 'application/octet-stream'
               const filename = attData.filename || attData.name || 'attachment'
               const fileBase64 = attData.base64Data
 
-              // Build RFC 2822 MIME multipart message
               const mimeLines = [
                 `From: me`,
                 `To: ${recipientEmail}`,
@@ -226,40 +268,24 @@ export async function PATCH(req: NextRequest) {
                 `Content-Disposition: attachment; filename="${filename}"`,
                 `Content-Transfer-Encoding: base64`,
                 ``,
-                // Split base64 into 76-char lines (RFC 2822)
                 fileBase64.match(/.{1,76}/g)?.join('\r\n') ?? fileBase64,
                 ``,
                 `--${boundary}--`,
               ]
 
               const rawMessage = mimeLines.join('\r\n')
-              // Base64url encode (URL-safe, no padding)
               const rawBase64url = Buffer.from(rawMessage).toString('base64')
                 .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 
-              // Step 1: Get the user's Gmail connectedAccountId from Composio
-              let connectedAccountId: string | null = null
-              try {
-                const connRes = await fetch(
-                  `https://backend.composio.dev/api/v3/connectedAccounts?entityId=${encodeURIComponent(entityId)}&appName=gmail&status=ACTIVE&limit=1`,
-                  { headers: { 'x-api-key': composioKey } }
-                )
-                if (connRes.ok) {
-                  const connData = await connRes.json() as { items?: Array<{ id: string }> }
-                  connectedAccountId = connData.items?.[0]?.id ?? null
-                  console.log('[tasks PATCH] Gmail connectedAccountId:', connectedAccountId)
-                } else {
-                  const errText = await connRes.text()
-                  console.error('[tasks PATCH] Failed to fetch connectedAccount:', connRes.status, errText)
-                }
-              } catch (e) {
-                console.error('[tasks PATCH] connectedAccount fetch error:', e)
-              }
+              console.log('[tasks PATCH] MIME assembled, rawBase64url length:', rawBase64url.length)
+
+              // Look up Gmail connectedAccountId
+              const connectedAccountId = await getGmailConnectedAccountId(entityId, composioKey)
 
               if (!connectedAccountId) {
-                console.error('[tasks PATCH] No Gmail connectedAccountId found for entity:', entityId)
-                // Fallback: try plain send without attachment so at least the email gets through
-                const fallbackRes = await fetch('https://backend.composio.dev/api/v3/tools/execute/GMAIL_SEND_EMAIL', {
+                // No Gmail connected — fall back to plain send with note
+                console.warn('[tasks PATCH] No Gmail connectedAccountId — falling back to plain send')
+                const fallbackRes = await fetch(`${V3}/tools/execute/GMAIL_SEND_EMAIL`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', 'x-api-key': composioKey },
                   body: JSON.stringify({
@@ -267,16 +293,15 @@ export async function PATCH(req: NextRequest) {
                     arguments: {
                       recipient_email: recipientEmail,
                       subject: payload.subject ?? '(no subject)',
-                      body: `${emailBody}\n\n[Attachment could not be delivered — please see original message]`,
+                      body: `${emailBody}\n\n[Attachment could not be delivered — image omitted]`,
                       is_html: false,
                     },
                   }),
                 })
-                console.log('[tasks PATCH] Fallback plain send status:', fallbackRes.status)
+                const fallbackText = await fallbackRes.text()
+                console.log('[tasks PATCH] Fallback plain send:', fallbackRes.status, fallbackText.slice(0, 200))
               } else {
-                // Step 2: Use Composio proxy to call Gmail API directly with raw MIME
-                // POST https://gmail.googleapis.com/gmail/v1/users/me/messages/send
-                // Composio proxy injects the OAuth token for connectedAccountId
+                // Use Composio proxy to call Gmail API directly with raw MIME
                 try {
                   const proxyRes = await fetch('https://backend.composio.dev/api/v2/actions/proxy', {
                     method: 'POST',
@@ -288,12 +313,28 @@ export async function PATCH(req: NextRequest) {
                       body: { raw: rawBase64url },
                     }),
                   })
+                  const proxyText = await proxyRes.text()
                   if (!proxyRes.ok) {
-                    const errText = await proxyRes.text()
-                    console.error('[tasks PATCH] Gmail proxy send (with attachment) failed:', proxyRes.status, errText)
+                    console.error('[tasks PATCH] Gmail proxy send failed:', proxyRes.status, proxyText.slice(0, 400))
+                    // Proxy failed — fall back to plain send
+                    const fallbackRes = await fetch(`${V3}/tools/execute/GMAIL_SEND_EMAIL`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', 'x-api-key': composioKey },
+                      body: JSON.stringify({
+                        entity_id: entityId,
+                        arguments: {
+                          recipient_email: recipientEmail,
+                          subject: payload.subject ?? '(no subject)',
+                          body: `${emailBody}\n\n[Attachment could not be delivered]`,
+                          is_html: false,
+                        },
+                      }),
+                    })
+                    console.log('[tasks PATCH] Proxy-failed fallback plain send:', fallbackRes.status)
                   } else {
-                    const proxyData = await proxyRes.json()
-                    console.log('[tasks PATCH] Gmail proxy send (with attachment) success for:', recipientEmail, 'file:', filename, 'messageId:', proxyData?.id)
+                    let proxyData: { id?: string } = {}
+                    try { proxyData = JSON.parse(proxyText) } catch { /* ignore */ }
+                    console.log('[tasks PATCH] Gmail proxy send success! messageId:', proxyData?.id, 'recipient:', recipientEmail, 'attachment:', filename)
                   }
                 } catch (e) {
                   console.error('[tasks PATCH] Gmail proxy send error:', e)
@@ -302,10 +343,9 @@ export async function PATCH(req: NextRequest) {
             }
           } catch (e) {
             console.error('[tasks PATCH] Gmail send error:', e)
-            // Don't block task update — still mark as completed
           }
         } else {
-          console.warn('[tasks PATCH] Gmail send skipped — missing composioKey or recipient. composioKey:', !!composioKey, 'recipient:', recipientEmail)
+          console.warn('[tasks PATCH] Gmail send skipped — composioKey:', !!composioKey, 'recipient:', recipientEmail)
         }
       }
     }
