@@ -476,8 +476,6 @@ export function ChatInput() {
         const description = finalParse.text || `✨ Created ${filesCreated} file(s). Check the preview →`
         updateMessage(chatId, assistantMsgId, { content: description, isStreaming: false })
         saveMessage('assistant', description)
-        // Auto-switch to Preview tab so user sees the result immediately
-        setIDETab('preview')
       } else {
         // AI responded with text only (no file blocks) — restore the most recent archive back
         // to the active workspace so the preview doesn't go blank
@@ -1345,8 +1343,6 @@ export function ChatInput() {
           'or extend something, assume they mean the files above unless specified otherwise.',
         ]
         upsertFile('BRAIN.md', brainLines.join('\n'), 'markdown')
-        // Auto-switch to Preview tab so user sees the build immediately
-        setIDETab('preview')
       } else {
         // No files — restore archive and show text response
         const currentState = useAppStore.getState()
