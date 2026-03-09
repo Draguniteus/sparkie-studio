@@ -190,8 +190,6 @@ async function handleAceMusic(
       }
     }
 
-    } // end else if (minimaxKey)
-
     // Fallback: if MiniMax unavailable/failed and no user lyrics, build minimal structure
     if (!finalLyrics) {
       console.log('[/api/music] ACE Step 1 fallback: building minimal lyrics from prompt')
