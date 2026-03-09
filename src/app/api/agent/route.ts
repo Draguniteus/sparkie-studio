@@ -108,21 +108,91 @@ async function executeDueTasks(userId: string, host: string, proto: string, cook
 
       let result = 'Task executed'
       if (apiKey) {
-        const taskPrompt = '[AUTONOMOUS TASK EXECUTION]\nTask: ' + task.label + '\nRunbook: ' + task.action + '\n\nExecute this task now. Be thorough. Report what you did.'
-        const chatRes = await fetch(proto + '://' + host + '/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Cookie': cookieHeader },
-          body: JSON.stringify({ messages: [{ role: 'user', content: taskPrompt }], model: 'openai-gpt-5-mini' }),
-          signal: AbortSignal.timeout(45000),
-        })
-        if (chatRes.ok) {
-          const text = await chatRes.text()
-          const lines = text.split('\n').filter((l: string) => l.startsWith('data: ') && l !== 'data: [DONE]')
-          const chunks = lines.map((l: string) => {
-            try { return JSON.parse(l.slice(6)).choices?.[0]?.delta?.content ?? '' } catch { return '' }
+        // ── Orchestrator loop ──────────────────────────────────────────────
+        // Instead of one-shot /api/chat, we run up to MAX_PASSES sequential
+        // passes, feeding each pass's full output back as conversation context.
+        // This lets the model execute 40+ tool calls across a long task
+        // (e.g. scrape 100 pages, process each, aggregate) instead of capping
+        // at ~10 rounds per single chat session.
+        const MAX_PASSES = 4
+        const PASS_TIMEOUT_MS = 50_000
+        const internalSecret = process.env.SPARKIE_INTERNAL_SECRET ?? ''
+
+        const taskPrompt = '[AUTONOMOUS TASK EXECUTION]\nTask: ' + task.label + '\nRunbook: ' + task.action + '\n\nExecute this task now. Be thorough. Use all tools available. When fully done, output a concise summary of what was accomplished.'
+
+        // Conversation history accumulates across passes
+        const conversation: Array<{ role: string; content: string }> = [
+          { role: 'user', content: taskPrompt }
+        ]
+
+        let finalOutput = ''
+        let passCount = 0
+
+        while (passCount < MAX_PASSES) {
+          passCount++
+          let passOutput = ''
+          let hitToolLimit = false
+
+          try {
+            const chatRes = await fetch(proto + '://' + host + '/api/chat', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-internal-user-id': userId,
+                'x-internal-secret': internalSecret,
+              },
+              body: JSON.stringify({
+                messages: conversation,
+                model: 'openai-gpt-4o',
+              }),
+              signal: AbortSignal.timeout(PASS_TIMEOUT_MS),
+            })
+
+            if (!chatRes.ok) {
+              console.error('[orchestrator] pass', passCount, 'HTTP', chatRes.status)
+              break
+            }
+
+            // Parse SSE stream — collect content chunks and detect tool-limit signal
+            const text = await chatRes.text()
+            const sseLines = text.split('\n')
+            for (const line of sseLines) {
+              if (!line.startsWith('data: ') || line === 'data: [DONE]') continue
+              try {
+                const evt = JSON.parse(line.slice(6))
+                const delta = evt.choices?.[0]?.delta
+                if (delta?.content) passOutput += delta.content
+                // Detect if the model hit its round cap (it emits a marker in content)
+                if (delta?.content && (
+                  delta.content.includes('Maximum Effort') ||
+                  delta.content.includes('MAX_TOOL_ROUNDS') ||
+                  delta.content.includes('round limit')
+                )) {
+                  hitToolLimit = true
+                }
+              } catch { /* skip malformed chunks */ }
+            }
+          } catch (fetchErr) {
+            console.error('[orchestrator] pass', passCount, 'error:', fetchErr)
+            break
+          }
+
+          if (!passOutput) break
+
+          finalOutput = passOutput // last non-empty pass wins
+          conversation.push({ role: 'assistant', content: passOutput })
+
+          // Stop if model didn't hit its tool cap — it completed naturally
+          if (!hitToolLimit) break
+
+          // Otherwise continue: prime the next pass to pick up where we left off
+          conversation.push({
+            role: 'user',
+            content: 'You hit your tool execution limit. Continue from where you left off and complete the remaining work.'
           })
-          result = chunks.join('').slice(0, 500)
         }
+
+        result = finalOutput.slice(0, 1000) || 'Task executed (no output)'
       }
 
       // Cron tasks re-queue, delay/manual tasks complete
