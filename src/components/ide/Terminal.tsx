@@ -45,7 +45,11 @@ function loadXterm(): Promise<void> {
 }
 
 export function Terminal() {
-  const { containerStatus, previewUrl, terminalOutput } = useAppStore()
+  const {
+    containerStatus, previewUrl, terminalOutput,
+    pendingRunCommand, setPendingRunCommand,
+    setPreviewUrl, setContainerStatus, setIDETab,
+  } = useAppStore()
   const termRef    = useRef<HTMLDivElement>(null)
   const xtermRef   = useRef<XTermInstance | null>(null)
   const fitRef     = useRef<{ fit(): void } | null>(null)
@@ -54,8 +58,9 @@ export function Terminal() {
   const [connected, setConnected] = useState(false)
   const [e2bMode, setE2bMode]    = useState(false)
   const prevOutputRef = useRef('')
+  const serverUrlDetectedRef = useRef(false)
 
-  // ── Load xterm + init terminal ───────────────────────────────────────────
+  // ── Load xterm + init terminal ────────────────────────────────────
   useEffect(() => {
     if (!termRef.current) return
 
@@ -101,7 +106,7 @@ export function Terminal() {
       xtermRef.current = term
       fitRef.current = fitAddon
 
-      term.write('\r\n\x1b[33m  ✦ Sparkie Terminal\x1b[0m\r\n')
+      term.write('\r\n\x1b[33m  ❖ Sparkie Terminal\x1b[0m\r\n')
       term.write('\x1b[2m  Connected to E2B cloud sandbox\x1b[0m\r\n')
       term.write('\x1b[2m  Type commands below — press Enter to run\x1b[0m\r\n\r\n')
 
@@ -129,7 +134,31 @@ export function Terminal() {
     }
   }, [terminalOutput, e2bMode])
 
-  // ── ResizeObserver ─────────────────────────────────────────────────────────
+  // ── Auto-run: execute pendingRunCommand when E2B shell is ready ──────────
+  // Set by build pipeline after detecting package.json with scripts.dev.
+  // Clears itself after sending so it doesn't re-fire on reconnect.
+  useEffect(() => {
+    if (!pendingRunCommand) return
+    if (!connected || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
+    const cmd = pendingRunCommand
+    setPendingRunCommand(null)
+    serverUrlDetectedRef.current = false
+    setContainerStatus('installing')
+    // Slight delay so the shell is fully settled
+    setTimeout(() => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'input', data: cmd + '\r' }))
+        xtermRef.current?.write('\r\n\x1b[33m  [Sparkie]\x1b[0m Running: ' + cmd + '\r\n')
+      }
+    }, 300)
+  }, [pendingRunCommand, connected, setPendingRunCommand, setContainerStatus])
+
+  // ── Server URL detection: watch WS output for localhost:PORT → set preview ─
+  // Patches the ws.onmessage handler at connection time is fragile (closure).
+  // Instead we intercept via xterm.write with a post-write URL scan on raw data.
+  // Implemented in connectE2B — see ws.onmessage extension below.
+
+  // ── ResizeObserver ───────────────────────────────────────────────────────
   useEffect(() => {
     if (!termRef.current || !fitRef.current) return
     const ro = new ResizeObserver(() => fitRef.current?.fit())
@@ -137,7 +166,7 @@ export function Terminal() {
     return () => ro.disconnect()
   }, [])
 
-  // ── E2B PTY connection ─────────────────────────────────────────────────────
+  // ── E2B PTY connection ───────────────────────────────────────────────────
   const connectE2B = useCallback(async (term: XTermInstance) => {
     try {
       // Create a new E2B terminal session
@@ -166,7 +195,35 @@ export function Terminal() {
         void dims
       }
       ws.onmessage = (e) => {
-        term.write(e.data as string)
+        const raw = e.data as string
+        term.write(raw)
+        // ── Server URL detection ────────────────────────────────────────────
+        // Detect Vite/Next/Express/Parcel/CRA server URLs in terminal output.
+        // Patterns: "localhost:5173", "http://localhost:PORT", "Local: http://..."
+        if (!serverUrlDetectedRef.current) {
+          const urlMatch = raw.match(/https?:\/\/(localhost|127\.0\.0\.1):(\d{2,5})/)
+            || raw.match(/Local:\s+(https?:\/\/[^\s]+)/)
+            || raw.match(/\blistening.*?https?:\/\/(localhost|127\.0\.0\.1):(\d{2,5})/i)
+            || raw.match(/started server.*?https?:\/\/(localhost|127\.0\.0\.1):(\d+)/i)
+          if (urlMatch) {
+            // Extract full URL or build from host:port
+            const fullUrl = urlMatch[0].match(/https?:\/\//) ? urlMatch[0].match(/(https?:\/\/[^\s,]+)/)?.[1] : `http://${urlMatch[1]}:${urlMatch[2]}`
+            const devUrl = fullUrl?.replace(/\/$/, '') || null
+            if (devUrl) {
+              serverUrlDetectedRef.current = true
+              setPreviewUrl(devUrl)
+              setContainerStatus('ready')
+              // Switch IDE to Preview tab
+              setTimeout(() => setIDETab('preview'), 400)
+              term.write('\r\n\x1b[32m  [Sparkie]\x1b[0m Preview ready → ' + devUrl + '\r\n')
+            }
+          }
+        }
+        // ── Detect build/install errors ────────────────────────────────────────
+        if (raw.includes('npm ERR!') || raw.includes('error Command failed') || raw.includes('ENOENT') || raw.includes('Cannot find module')) {
+          setContainerStatus('error')
+          term.write('\r\n\x1b[31m  [Sparkie]\x1b[0m Build error detected — check above ↑\r\n')
+        }
       }
       ws.onclose = () => {
         setConnected(false)
