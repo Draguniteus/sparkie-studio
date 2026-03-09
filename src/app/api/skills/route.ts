@@ -1,7 +1,9 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth/next'
 import { authOptions } from '@/lib/auth'
 import { query } from '@/lib/db'
+
+export const runtime = 'nodejs'
 
 async function ensureSkillsTable() {
   await query(`CREATE TABLE IF NOT EXISTS sparkie_skills (
@@ -17,9 +19,27 @@ async function ensureSkillsTable() {
   )`).catch(() => {})
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   await ensureSkillsTable()
+  const { searchParams } = new URL(req.url)
+  const name = searchParams.get('name')
+
   try {
+    if (name) {
+      const result = await query(
+        `SELECT name, description, category, content, installed_at
+         FROM sparkie_skills WHERE name = $1 LIMIT 1`,
+        [name]
+      )
+      if (!result.rows[0]) {
+        return NextResponse.json(
+          { error: `Skill '${name}' not found. Available: email, email-style-matching, email-examples, calendar, calendar-receiving-invitation, calendar-sending-invitation, calendar-conflict-handling, calendar-meeting-title, calendar-examples, browser-use, a2ui-card-gen, cta-card-gen` },
+          { status: 404 }
+        )
+      }
+      return NextResponse.json({ skill: result.rows[0] })
+    }
+
     const result = await query(
       `SELECT id, name, description, source_url, category, installed_at
        FROM sparkie_skills ORDER BY installed_at DESC LIMIT 100`
@@ -30,7 +50,7 @@ export async function GET() {
   }
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   await ensureSkillsTable()
   const session = await getServerSession(authOptions)
   const user = session?.user as { id?: string } | undefined
@@ -40,7 +60,6 @@ export async function POST(req: Request) {
     const { url, name, description = '' } = await req.json() as { url: string; name: string; description?: string }
     if (!url || !name) return NextResponse.json({ ok: false, error: 'url and name required' }, { status: 400 })
 
-    // Fetch the skill content
     const fetchRes = await fetch(url, {
       headers: { 'User-Agent': 'Sparkie-Studio/1.0' },
       signal: AbortSignal.timeout(15000),
@@ -50,7 +69,6 @@ export async function POST(req: Request) {
     const rawContent = await fetchRes.text()
     const skillContent = rawContent.slice(0, 10000)
 
-    // Detect category from URL/content
     const categoryMap: Record<string, string> = {
       music: 'Music', payment: 'Payments', email: 'Email', sms: 'Messaging',
       voice: 'Voice', vector: 'Database', openai: 'AI', github: 'DevOps',
@@ -61,7 +79,6 @@ export async function POST(req: Request) {
       if (url.toLowerCase().includes(kw) || name.toLowerCase().includes(kw)) { category = cat; break }
     }
 
-    // Save to sparkie_skills table
     await query(
       `INSERT INTO sparkie_skills (user_id, name, description, source_url, category, content)
        VALUES ($1, $2, $3, $4, $5, $6)
@@ -69,12 +86,11 @@ export async function POST(req: Request) {
       [userId ?? 'global', name, description, url, category, skillContent]
     )
 
-    // Also save to user_memories as procedure so Sparkie knows about it in conversations
     if (userId) {
       await query(
         `INSERT INTO user_memories (user_id, category, content, created_at)
          VALUES ($1, 'procedure', $2, NOW())`,
-        [userId, `[SKILL: ${name}]\nPurpose: ${description}\nSource: ${url}\nDocumentation (first 10000 chars):\n${skillContent}`]
+        [userId, '[SKILL: ' + name + ']\nPurpose: ' + description + '\nSource: ' + url + '\nDocumentation (first 10000 chars):\n' + skillContent]
       ).catch(() => {})
     }
 

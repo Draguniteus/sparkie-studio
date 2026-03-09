@@ -3582,7 +3582,7 @@ async function executeTool(
           const { name: skillName } = args as { name: string }
           if (!skillName) return 'read_skill: name is required'
           const result = await fetch(
-            `${process.env.NEXTAUTH_URL ?? 'http://localhost:3000'}/api/skills/${encodeURIComponent(skillName)}`,
+            (process.env.NEXTAUTH_URL ?? 'http://localhost:3000') + '/api/skills?name=' + encodeURIComponent(skillName),
             { headers: { 'x-internal': 'read-skill' }, signal: AbortSignal.timeout(5000) }
           )
           if (!result.ok) {
