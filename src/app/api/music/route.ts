@@ -4,7 +4,7 @@ import { pushMediaToGitHub } from '@/lib/github-media'
 export const runtime = 'nodejs'
 export const maxDuration = 300
 
-const MINIMAX_BASE = 'https://api.minimaxi.com/v1'
+const MINIMAX_BASE = 'https://api.minimax.io/v1'
 const ACE_MUSIC_BASE = 'https://api.acemusic.ai'
 
 const MINIMAX_MODEL_MAP: Record<string, string> = {
