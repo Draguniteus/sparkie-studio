@@ -4,7 +4,8 @@ import { pushMediaToGitHub } from '@/lib/github-media'
 export const runtime = 'nodejs'
 export const maxDuration = 300
 
-const MINIMAX_BASE = 'https://api.minimax.io/v1'
+const MINIMAX_BASE = 'https://api.minimaxi.com/v1'
+const ACE_MUSIC_BASE = 'https://api.acemusic.ai'
 
 const MINIMAX_MODEL_MAP: Record<string, string> = {
   'music-2.5':     'music-2.5',
@@ -65,7 +66,6 @@ function parseMusicPrompt(raw: string): { stylePrompt: string; lyrics: string } 
       lyricParagraphs.length = 0
       lyricParagraphs.push(text.slice(tagMatch.index))
     } else {
-      // No section tags — plain style prompt, no explicit lyrics
       stylePrompt = text.slice(0, 500)
       lyricParagraphs.length = 0
     }
@@ -93,6 +93,16 @@ function extractUserId(req: NextRequest): string {
 }
 
 async function tryPersistAudio(url: string, userId: string): Promise<string> {
+  // Skip if already a data: URI (we'll push the raw base64 below)
+  if (url.startsWith('data:')) {
+    try {
+      const result = await pushMediaToGitHub('audio', url, userId, 'mp3')
+      return result.url
+    } catch (e) {
+      console.error('[/api/music] GitHub media push failed (data URI):', e)
+      return url
+    }
+  }
   try {
     const result = await pushMediaToGitHub('audio', url, userId, 'mp3')
     return result.url
@@ -102,58 +112,202 @@ async function tryPersistAudio(url: string, userId: string): Promise<string> {
   }
 }
 
-export async function POST(req: NextRequest) {
-  let rawPrompt: string
-  let model: string
-  let explicitLyrics: string | undefined
-  let bodyUserId: string | undefined
+// ─── ACE Music Handler ────────────────────────────────────────────────────────
+// Calls api.acemusic.ai OpenRouter-compatible endpoint.
+// sample_mode:true → LM auto-generates title, style, and lyrics from the prompt.
+// batch_size:2 → always returns 2 versions (v1 + v2).
+async function handleAceMusic(
+  prompt: string,
+  userId: string,
+  outerController: ReadableStreamDefaultController<Uint8Array>
+): Promise<void> {
+  const enc = new TextEncoder()
+  const send = (data: string) => { try { outerController.enqueue(enc.encode(data)) } catch { /* stream closed */ } }
+
+  const apiKey = process.env.ACE_MUSIC_API_KEY
+  if (!apiKey) {
+    send('data: ' + JSON.stringify({ error: 'ACE_MUSIC_API_KEY not configured' }) + '\n\n')
+    return
+  }
+
+  const keepalive = setInterval(() => {
+    try { send(': keepalive\n\n') } catch { /* ignore */ }
+  }, 15000)
 
   try {
-    const body = await req.json()
-    rawPrompt = body.prompt
-    model = body.model || 'music-2.5'
-    explicitLyrics = body.lyrics
-    bodyUserId = body.userId
-    if (!rawPrompt) throw new Error('Missing prompt')
-  } catch {
-    return new Response(JSON.stringify({ error: 'Invalid request body' }), {
-      status: 400, headers: { 'Content-Type': 'application/json' },
+    const res = await fetch(ACE_MUSIC_BASE + '/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + apiKey,
+      },
+      body: JSON.stringify({
+        messages: [{ role: 'user', content: prompt }],
+        sample_mode: true,
+        stream: true,
+        batch_size: 2,
+      }),
+      signal: AbortSignal.timeout(240000), // 4 min
     })
-  }
 
-  const userId = bodyUserId || extractUserId(req)
+    clearInterval(keepalive)
 
-  // ACE Music is no longer available — provider shut down
-  if (model === 'ace-step-free') {
-    return new Response(JSON.stringify({
-      error: 'ACE Music (ace-step-free) is no longer available. Please select Music-2.5 or Music-2.0 instead.'
-    }), {
-      status: 503, headers: { 'Content-Type': 'application/json' },
-    })
+    if (!res.ok) {
+      const errText = await res.text().catch(() => 'HTTP ' + res.status)
+      let errMsg = 'ACE Music error ' + res.status
+      try {
+        const errJson = JSON.parse(errText)
+        errMsg = errJson?.error?.message || errJson?.message || errMsg
+      } catch { /* use status code */ }
+      console.error('[/api/music] ACE HTTP error', res.status, errMsg)
+      send('data: ' + JSON.stringify({ error: errMsg }) + '\n\n')
+      return
+    }
+
+    // Parse ACE SSE stream
+    // Each chunk: data: {"choices":[{"delta":{"content":"..."},"index":0}]}
+    // Audio chunks: delta.audio[N].audio_url.url = "data:audio/mpeg;base64,..."
+    // Content chunks arrive first, then audio chunks
+    const reader = res.body!.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    let contentAccum = ''
+    const audioUrls: string[] = [] // collect up to 2 audio URLs
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue
+          const json = line.slice(5).trim()
+          if (!json || json === '[DONE]') continue
+
+          let chunk: Record<string, unknown>
+          try { chunk = JSON.parse(json) } catch { continue }
+
+          const choices = chunk.choices as Array<Record<string, unknown>> | undefined
+          if (!choices) continue
+
+          for (const choice of choices) {
+            const delta = choice.delta as Record<string, unknown> | undefined
+            if (!delta) continue
+
+            // Text content (title, style prompt, lyrics)
+            if (typeof delta.content === 'string' && delta.content) {
+              contentAccum += delta.content
+            }
+
+            // Audio chunks
+            const audioArr = delta.audio as Array<Record<string, unknown>> | undefined
+            if (audioArr) {
+              for (const audioItem of audioArr) {
+                const audioUrl = (audioItem.audio_url as Record<string, unknown> | undefined)?.url as string | undefined
+                if (audioUrl && typeof audioUrl === 'string' && audioUrls.length < 2) {
+                  audioUrls.push(audioUrl)
+                }
+              }
+            }
+          }
+        }
+      }
+    } finally {
+      reader.cancel().catch(() => {})
+    }
+
+    // Parse content: ACE returns structured text like:
+    // Title: Some Title\nStyle: genre, bpm, key\n\n[Verse]\nlyrics...\n[Chorus]\n...
+    let title = ''
+    let style = ''
+    let lyrics = ''
+
+    if (contentAccum) {
+      const titleMatch = contentAccum.match(/(?:^|\n)(?:title|song)[:\s]+([^\n]+)/i)
+      const styleMatch = contentAccum.match(/(?:^|\n)(?:style|genre|tags)[:\s]+([^\n]+)/i)
+      if (titleMatch) title = titleMatch[1].trim().replace(/["'*]/g, '')
+      if (styleMatch) style = styleMatch[1].trim()
+
+      // Lyrics: everything with section tags
+      const lyricsMatch = contentAccum.match(/\[(Verse|Chorus|Bridge|Intro|Outro|Pre Chorus|Post Chorus|Hook|Interlude)[\s\S]*/i)
+      if (lyricsMatch) {
+        lyrics = normalizeLyricsTags(lyricsMatch[0].trim())
+      } else if (!titleMatch && !styleMatch) {
+        // If no structured fields, treat whole content as lyrics
+        lyrics = contentAccum.trim()
+      }
+    }
+
+    if (!title) {
+      // Derive a title from the prompt
+      title = prompt.slice(0, 50).replace(/\b\w/g, c => c.toUpperCase()).trim() || 'Sparkie Mix'
+    }
+    if (!style) style = prompt.slice(0, 120)
+
+    if (audioUrls.length === 0) {
+      console.error('[/api/music] ACE returned no audio URLs. contentAccum length:', contentAccum.length)
+      send('data: ' + JSON.stringify({
+        error: 'ACE Music generation completed but returned no audio. Check your API key credits at api.acemusic.ai.'
+      }) + '\n\n')
+      return
+    }
+
+    console.log('[/api/music] ACE got', audioUrls.length, 'audio URL(s), title:', title)
+
+    // Push both audio URLs to GitHub in parallel
+    const [url1, url2] = await Promise.all([
+      tryPersistAudio(audioUrls[0], userId),
+      audioUrls[1] ? tryPersistAudio(audioUrls[1], userId) : Promise.resolve(undefined),
+    ])
+
+    send('data: ' + JSON.stringify({
+      type: 'ace_music',
+      url: url1,
+      url2: url2 || undefined,
+      title,
+      style,
+      lyrics,
+    }) + '\n\n')
+
+  } catch (err) {
+    clearInterval(keepalive)
+    const msg = err instanceof Error ? err.message : 'ACE Music generation failed'
+    console.error('[/api/music] ACE exception:', msg)
+    send('data: ' + JSON.stringify({ error: msg }) + '\n\n')
   }
+}
+
+// ─── MiniMax Handler ──────────────────────────────────────────────────────────
+async function handleMiniMax(
+  rawPrompt: string,
+  model: string,
+  userId: string,
+  outerController: ReadableStreamDefaultController<Uint8Array>
+): Promise<void> {
+  const enc = new TextEncoder()
+  const send = (data: string) => { try { outerController.enqueue(enc.encode(data)) } catch { /* ignore */ } }
 
   const apiKey = process.env.MINIMAX_API_KEY
   if (!apiKey) {
-    return new Response(JSON.stringify({ error: 'MINIMAX_API_KEY not configured' }), {
-      status: 500, headers: { 'Content-Type': 'application/json' },
-    })
+    send('data: ' + JSON.stringify({ error: 'MINIMAX_API_KEY not configured' }) + '\n\n')
+    return
   }
 
   const minimaxModel = MINIMAX_MODEL_MAP[model] || 'music-2.5'
   const { stylePrompt, lyrics } = parseMusicPrompt(rawPrompt)
-  let finalLyrics = (explicitLyrics || lyrics).trim()
+  let finalLyrics = lyrics.trim()
 
   const supportsLyricsOptimizer = LYRICS_OPTIMIZER_MODELS.has(minimaxModel)
 
-  // For music-2.0: call /lyrics_generation first if no lyrics provided
   if (!finalLyrics && !supportsLyricsOptimizer) {
     try {
       const lyricsRes = await fetch(MINIMAX_BASE + '/lyrics_generation', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + apiKey,
-        },
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
         body: JSON.stringify({ mode: 'write_full_song', prompt: rawPrompt }),
         signal: AbortSignal.timeout(30000),
       })
@@ -172,8 +326,6 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Build MiniMax request body
-  // output_format:'url' is a valid field — MiniMax returns a CDN URL in data.audio instead of hex
   const requestBody: Record<string, unknown> = {
     model: minimaxModel,
     prompt: stylePrompt.trim() || rawPrompt.slice(0, 500),
@@ -182,129 +334,127 @@ export async function POST(req: NextRequest) {
   }
 
   if (finalLyrics) {
-    // Explicit lyrics — send directly
     requestBody.lyrics = finalLyrics
   } else if (supportsLyricsOptimizer) {
-    // lyrics_optimizer:true + empty lyrics → MiniMax auto-generates lyrics from prompt
-    // This is the correct field name per official docs (not 'auto_lyrics')
     requestBody.lyrics = ''
     requestBody.lyrics_optimizer = true
   } else {
-    // music-2.0 fallback — lyrics_generation already attempted above
-    // If it failed, send empty lyrics (may produce instrumental)
     requestBody.lyrics = finalLyrics || ''
   }
 
-  const stream = new ReadableStream({
+  const keepalive = setInterval(() => {
+    try { send(': keepalive\n\n') } catch { /* ignore */ }
+  }, 15000)
+
+  try {
+    const res = await fetch(MINIMAX_BASE + '/music_generation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+      body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(120000),
+    })
+
+    clearInterval(keepalive)
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'HTTP ' + res.status }))
+      const errMsg = (err as Record<string, unknown>)?.base_resp?.status_msg || (err as Record<string, unknown>)?.message || (err as Record<string, unknown>)?.error || ('MiniMax error ' + res.status)
+      console.error('[/api/music] HTTP error', res.status, errMsg)
+      send('data: ' + JSON.stringify({ error: errMsg }) + '\n\n')
+      return
+    }
+
+    const data = await res.json()
+    console.log('[/api/music] response base_resp:', JSON.stringify(data?.base_resp), '| data keys:', Object.keys(data?.data || {}))
+
+    if (data?.base_resp?.status_code !== 0) {
+      const errMsg = data?.base_resp?.status_msg || 'MiniMax API error (code ' + data?.base_resp?.status_code + ')'
+      console.error('[/api/music] API error:', errMsg)
+      send('data: ' + JSON.stringify({ error: errMsg }) + '\n\n')
+      return
+    }
+
+    const dataPayload = Array.isArray(data?.data) ? data.data[0] : data?.data
+    const audioFieldValue =
+      dataPayload?.audio_file ||
+      dataPayload?.audioURL ||
+      dataPayload?.audio_url ||
+      dataPayload?.url ||
+      dataPayload?.download_url
+
+    if (audioFieldValue && String(audioFieldValue).startsWith('http')) {
+      const persistentUrl = await tryPersistAudio(String(audioFieldValue), userId)
+      send('data: ' + JSON.stringify({ url: persistentUrl, model: minimaxModel, persistent: persistentUrl !== String(audioFieldValue) }) + '\n\n')
+      return
+    }
+
+    const audioRaw = dataPayload?.audio
+    if (audioRaw && typeof audioRaw === 'string' && audioRaw.length > 0) {
+      if (audioRaw.startsWith('http')) {
+        const persistentUrl = await tryPersistAudio(audioRaw, userId)
+        send('data: ' + JSON.stringify({ url: persistentUrl, model: minimaxModel, persistent: persistentUrl !== audioRaw }) + '\n\n')
+        return
+      } else {
+        try {
+          const audioBuf = Buffer.from(audioRaw, 'hex')
+          if (audioBuf.length === 0) throw new Error('Hex decode produced empty buffer')
+          const audioBase64 = audioBuf.toString('base64')
+          const dataUrl = 'data:audio/mp3;base64,' + audioBase64
+          const persistentUrl = await tryPersistAudio(dataUrl, userId)
+          send('data: ' + JSON.stringify({ url: persistentUrl, model: minimaxModel, persistent: persistentUrl !== dataUrl }) + '\n\n')
+          return
+        } catch (hexErr) {
+          console.error('[/api/music] Hex decode failed:', hexErr)
+        }
+      }
+    }
+
+    const dataKeys = Object.keys(dataPayload || {})
+    const statusMsg = data?.base_resp?.status_msg || ''
+    console.error('[/api/music] No audio. dataPayload keys:', dataKeys)
+    send('data: ' + JSON.stringify({
+      error: 'MiniMax returned success but no audio. Keys: [' + dataKeys.join(', ') + '].' +
+        (statusMsg ? ' ' + statusMsg + '.' : '') +
+        ' Check MiniMax dashboard for credits/quota.'
+    }) + '\n\n')
+  } catch (err) {
+    clearInterval(keepalive)
+    const msg = err instanceof Error ? err.message : 'MiniMax generation failed'
+    console.error('[/api/music] exception:', msg)
+    send('data: ' + JSON.stringify({ error: msg }) + '\n\n')
+  }
+}
+
+// ─── Main Route Handler ────────────────────────────────────────────────────────
+export async function POST(req: NextRequest) {
+  let rawPrompt: string
+  let model: string
+  let bodyUserId: string | undefined
+
+  try {
+    const body = await req.json()
+    rawPrompt = body.prompt
+    model = body.model || 'music-2.5'
+    bodyUserId = body.userId
+    if (!rawPrompt) throw new Error('Missing prompt')
+  } catch {
+    return new Response(JSON.stringify({ error: 'Invalid request body' }), {
+      status: 400, headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
+  const userId = bodyUserId || extractUserId(req)
+
+  const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      const enc = new TextEncoder()
-      const send = (data: string) => controller.enqueue(enc.encode(data))
-
-      const keepaliveInterval = setInterval(() => {
-        try { send(': keepalive\n\n') } catch { /* stream closed */ }
-      }, 15000)
-
       try {
-        const res = await fetch(MINIMAX_BASE + '/music_generation', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + apiKey,
-          },
-          body: JSON.stringify(requestBody),
-          signal: AbortSignal.timeout(120000),
-        })
-
-        clearInterval(keepaliveInterval)
-
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({ error: 'HTTP ' + res.status }))
-          const errMsg = err?.base_resp?.status_msg || err?.message || err?.error || ('MiniMax error ' + res.status)
-          console.error('[/api/music] HTTP error', res.status, errMsg)
-          send('data: ' + JSON.stringify({ error: errMsg }) + '\n\n')
-          controller.close()
-          return
+        if (model === 'ace-step-free') {
+          await handleAceMusic(rawPrompt, userId, controller)
+        } else {
+          await handleMiniMax(rawPrompt, model, userId, controller)
         }
-
-        const data = await res.json()
-        console.log('[/api/music] response base_resp:', JSON.stringify(data?.base_resp), '| data keys:', Object.keys(data?.data || {}))
-
-        if (data?.base_resp?.status_code !== 0) {
-          const errMsg = data?.base_resp?.status_msg || 'MiniMax API error (code ' + data?.base_resp?.status_code + ')'
-          console.error('[/api/music] API error:', errMsg)
-          send('data: ' + JSON.stringify({ error: errMsg }) + '\n\n')
-          controller.close()
-          return
-        }
-
-        // Response shape with output_format:'url':
-        //   data.audio = "https://..." (CDN URL, valid for 24h)
-        //   data.status = 2
-        // Response shape without output_format (or output_format:'hex'):
-        //   data.audio = "<hex string>"
-        //   data.status = 2
-        const dataPayload = Array.isArray(data?.data) ? data.data[0] : data?.data
-
-        // Try URL fields first (output_format:'url' puts the URL in data.audio)
-        const audioFieldValue =
-          dataPayload?.audio_file ||
-          dataPayload?.audioURL ||
-          dataPayload?.audio_url ||
-          dataPayload?.url ||
-          dataPayload?.download_url
-
-        if (audioFieldValue && String(audioFieldValue).startsWith('http')) {
-          const persistentUrl = await tryPersistAudio(String(audioFieldValue), userId)
-          send('data: ' + JSON.stringify({ url: persistentUrl, model: minimaxModel, persistent: persistentUrl !== String(audioFieldValue) }) + '\n\n')
-          controller.close()
-          return
-        }
-
-        // data.audio: could be URL (output_format:url) or hex string
-        const audioRaw = dataPayload?.audio
-        if (audioRaw && typeof audioRaw === 'string' && audioRaw.length > 0) {
-          if (audioRaw.startsWith('http')) {
-            // URL returned in data.audio (output_format:'url' response shape)
-            const persistentUrl = await tryPersistAudio(audioRaw, userId)
-            send('data: ' + JSON.stringify({ url: persistentUrl, model: minimaxModel, persistent: persistentUrl !== audioRaw }) + '\n\n')
-            controller.close()
-            return
-          } else {
-            // Hex-encoded audio (output_format:'hex' or default)
-            try {
-              const audioBuf = Buffer.from(audioRaw, 'hex')
-              if (audioBuf.length === 0) throw new Error('Hex decode produced empty buffer — likely empty lyrics with no lyrics_optimizer')
-              const audioBase64 = audioBuf.toString('base64')
-              const dataUrl = 'data:audio/mp3;base64,' + audioBase64
-              const persistentUrl = await tryPersistAudio(dataUrl, userId)
-              send('data: ' + JSON.stringify({ url: persistentUrl, model: minimaxModel, persistent: persistentUrl !== dataUrl }) + '\n\n')
-              controller.close()
-              return
-            } catch (hexErr) {
-              console.error('[/api/music] Hex decode failed:', hexErr)
-              // Fall through to diagnostics
-            }
-          }
-        }
-
-        // No audio found — surface diagnostics
-        const dataKeys = Object.keys(dataPayload || {})
-        const statusCode = data?.base_resp?.status_code
-        const statusMsg = data?.base_resp?.status_msg || ''
-        console.error('[/api/music] No audio. dataPayload keys:', dataKeys, '| data.audio type:', typeof dataPayload?.audio, '| data.audio length:', String(dataPayload?.audio || '').length)
-        send('data: ' + JSON.stringify({
-          error: 'MiniMax returned success but no audio. Keys: [' + dataKeys.join(', ') + '].' +
-            (statusMsg ? ' ' + statusMsg + '.' : '') +
-            ' Check MiniMax dashboard for credits/quota.'
-        }) + '\n\n')
-        controller.close()
-
-      } catch (err) {
-        clearInterval(keepaliveInterval)
-        const msg = err instanceof Error ? err.message : 'MiniMax generation failed'
-        console.error('[/api/music] exception:', msg)
-        try { send('data: ' + JSON.stringify({ error: msg }) + '\n\n') } catch { /* ignore */ }
-        controller.close()
+      } finally {
+        try { controller.close() } catch { /* already closed */ }
       }
     }
   })
