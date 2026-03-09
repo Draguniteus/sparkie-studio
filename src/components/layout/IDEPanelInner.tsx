@@ -20,7 +20,7 @@ function WorklogPanel() {
   const entries = [...worklog].reverse()
 
   const typeConfig: Record<string, { icon: string; color: string; bg: string }> = {
-    thinking: { icon: '◌', color: 'text-text-muted', bg: 'bg-hive-elevated/40' },
+    thinking: { icon: '🧠', color: 'text-text-muted', bg: 'bg-hive-elevated/40' },
     action:   { icon: '⚡', color: 'text-blue-400',   bg: 'bg-blue-500/5'       },
     result:   { icon: '✓',  color: 'text-green-400',  bg: 'bg-green-500/5'      },
     error:    { icon: '✕',  color: 'text-red-400',    bg: 'bg-red-500/5'        },
@@ -82,8 +82,8 @@ export function IDEPanelInner() {
     const contents = fileList.map(f => f.content ?? '').join('\n')
     const hasHtml   = names.some(n => n === 'index.html' || n.endsWith('/index.html'))
     const hasPkg    = names.some(n => n === 'package.json')
-    const hasFrontend = /["'](react|vue|svelte|next|vite|@remix-run|astro)["',]/.test(contents)
-    const hasBackend  = /["'](express|fastify|koa|hapi|@nestjs|http\.createServer)["',]/.test(contents)
+    const hasFrontend = /['"](react|vue|svelte|next|vite|@remix-run|astro)["',]/.test(contents)
+    const hasBackend  = /['"](express|fastify|koa|hapi|@nestjs|http\.createServer)["',]/.test(contents)
     return hasPkg && !hasHtml && !hasFrontend && hasBackend
   }, [])
 
@@ -149,11 +149,10 @@ export function IDEPanelInner() {
   }, [files, isExecuting, containerStatus, runProject, setIdeTab, isBackendProject,
       clearTerminalOutput, appendTerminalOutput, setContainerStatus])
 
-  // Listen for BuildCard "Open Preview" button → switch to process tab
+  // Listen for BuildCard "Open Preview" button → switch to preview tab
   useEffect(() => {
     const handler = () => {
-      setIdeTab('process')
-      // If IDE is closed this won't fire (ideOpen check), but setIdeTab is harmless
+      setIdeTab('preview')
     }
     window.addEventListener('sparkie:open-preview', handler)
     return () => window.removeEventListener('sparkie:open-preview', handler)
@@ -174,6 +173,7 @@ export function IDEPanelInner() {
 
   const tabs = [
     { id: 'process',  label: 'Process'  },
+    { id: 'preview',  label: 'Preview'  },
     { id: 'worklog',  label: 'Worklog'  },
     { id: 'memory',   label: 'Memory'   },
     { id: 'real',     label: 'REAL'     },
@@ -231,6 +231,12 @@ export function IDEPanelInner() {
         {ideTab === 'tasks' && (
           <TaskQueuePanel />
         )}
+        {ideTab === 'preview' && (
+          <div className="h-full">
+            <Preview />
+          </div>
+        )}
+
         {ideTab === 'process' && (
           <div className="h-full">
             {isExecuting ? <LiveCodeView /> : <ProcessTab />}
