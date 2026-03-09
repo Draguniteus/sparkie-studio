@@ -168,3 +168,62 @@ POST /api/execute
 ---
 
 *DEVPLAYBOOK last updated: March 7, 2026 — Parts 19–20 added: large-file git commits (blob/tree/commit/ref), raw file fetch, E2B sandbox full procedure.*
+
+
+---
+
+## PART 21: SKILL AUTO-TRIGGER — WHEN TO CALL read_skill
+
+*Sparkie's Skills Library (sparkie_skills DB) has 16 skills. Load on demand — don't guess.*
+
+**Before any of these tasks, call the matching skill FIRST:**
+
+| Task | Skill to call |
+|------|--------------|
+| Drafting, replying, forwarding email | read_skill({ name: "email" }) |
+| Email style matching | read_skill({ name: "email-style-matching" }) |
+| Email examples / edge cases | read_skill({ name: "email-examples" }) |
+| Scheduling, RSVP, calendar conflict | read_skill({ name: "calendar" }) |
+| Receiving a verbal/calendar invite | read_skill({ name: "calendar-receiving-invitation" }) |
+| Sending a meeting invite | read_skill({ name: "calendar-sending-invitation" }) |
+| Calendar conflict analysis | read_skill({ name: "calendar-conflict-handling" }) |
+| Meeting title generation | read_skill({ name: "calendar-meeting-title" }) |
+| Calendar examples | read_skill({ name: "calendar-examples" }) |
+| Browser automation, login, interaction | read_skill({ name: "browser-use" }) |
+| A2UI card generation | read_skill({ name: "a2ui-card-gen" }) |
+| CTA / action button extraction | read_skill({ name: "cta-card-gen" }) |
+| Social media posting (Twitter/Instagram/Reddit/TikTok/Discord) | read_skill({ name: "social" }) |
+| Music generation (ACE or MiniMax) | read_skill({ name: "music" }) |
+| Video generation (seedance/ltx-2/veo/wan/grok) | read_skill({ name: "video" }) |
+| Self-repair, code patch, deploy, rollback | read_skill({ name: "self-repair" }) |
+
+**Rule:** Skill content is in the DB — not in your context window. Always load it fresh. It has the most up-to-date procedures, quirks, and known fixes.
+
+---
+
+## PART 22: SKILLS LIBRARY — INDEX
+
+All 16 skills available via read_skill({ name: "..." }):
+
+| Name | Category | Description |
+|------|----------|-------------|
+| email | Email | Full email workflow: compose, reply, forward, CC enforcement, style matching, unsubscribe |
+| email-style-matching | Email | Tone/language matching guide for email replies |
+| email-examples | Email | Edge case examples: CC threads, forwarding, bounces |
+| calendar | Calendar | Scheduling, RSVP, conflict detection, freebusy |
+| calendar-receiving-invitation | Calendar | Verbal vs calendar invite handling |
+| calendar-sending-invitation | Calendar | FreeBusy workflow, draft → send |
+| calendar-conflict-handling | Calendar | Priority matrix, hard/soft/tentative conflicts |
+| calendar-meeting-title | Calendar | Title templates by meeting type |
+| calendar-examples | Calendar | Multi-person scheduling, rescheduling scenarios |
+| browser-use | Browser | Hyperbrowser automation, profile/session, escalation ladder |
+| a2ui-card-gen | UI | Structured card generation with Sparkie's purple/gold theme |
+| cta-card-gen | UI | CTA button extraction from confirmations/receipts |
+| social | Social | Twitter/Instagram/Reddit/TikTok/Discord — Mode A/B, per-platform rules |
+| music | Creative | ACE Step + MiniMax — lyrics writing, tags format, pipeline quirks |
+| video | Creative | 6 models: seedance/seedance-pro/wan/ltx-2/veo/grok-video |
+| self-repair | System | Code patch, deploy, rollback, SWC error patterns |
+
+---
+
+*DEVPLAYBOOK last updated: March 9, 2026 — Parts 21–22 added: skill auto-trigger table, full skills library index (16 skills).*
