@@ -1400,7 +1400,7 @@ export function ChatInput() {
           if (hasDevScript) {
             // Update the build message so user knows terminal is running
             if (buildMsgId) updateMessage(chatId, buildMsgId, {
-              content: \`✨ Built \${fileNames} — starting dev server...\`,
+              content: `✨ Built ${fileNames} — starting dev server...`,
               isStreaming: false,
             })
             // Switch to terminal tab so user sees npm install progress
@@ -1409,9 +1409,9 @@ export function ChatInput() {
             setPendingRunCommand(startCmd)
             // Update wrap message
             const nodeWrapPhrases = [
-              \`Installing dependencies and starting the dev server — preview will load automatically once it's up!\`,
-              \`On it — running `\${startCmd}` now. Preview will appear as soon as the server starts ✨\`,
-              \`Firing up the dev server! Give it a moment — preview loads automatically when it's ready 🔥\`,
+              `Installing dependencies and starting the dev server — preview will load automatically once it's up!`,
+              `On it — running \`${startCmd}\` now. Preview will appear as soon as the server starts ✨`,
+              `Firing up the dev server! Give it a moment — preview loads automatically when it's ready 🔥`,
             ]
             updateMessage(chatId, ackMsgId, {
               content: nodeWrapPhrases[Math.floor(Math.random() * nodeWrapPhrases.length)],
