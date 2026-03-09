@@ -131,7 +131,9 @@ async function handleAceMusic(
   prompt: string,
   userId: string,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ctrl: any
+  ctrl: any,
+  userStyle?: string,
+  userLyrics?: string
 ): Promise<void> {
   const enc = new TextEncoder()
   const send = (data: string) => { try { ctrl.enqueue(enc.encode(data)) } catch { /* closed */ } }
@@ -148,12 +150,20 @@ async function handleAceMusic(
   }, 15000)
 
   try {
-    // ── Step 1: Generate lyrics via MiniMax ─────────────────────────────────
+    // ── Step 1: Use user-provided lyrics/style OR generate via MiniMax ─────────
     let finalLyrics = ''
     let songTitle = ''
     let styleTags = ''
 
-    if (minimaxKey) {
+    // If user explicitly provided style + lyrics (power-user mode), skip MiniMax entirely
+    if (userLyrics) {
+      finalLyrics = userLyrics
+      styleTags = userStyle || ''
+      // Extract title from first non-tag, non-empty line of lyrics or prompt
+      const firstLine = userLyrics.split('\n').find(l => l.trim() && !l.trim().startsWith('['))
+      songTitle = firstLine?.trim().slice(0, 50) || prompt.slice(0, 50).replace(/\b\w/g, c => c.toUpperCase()).trim()
+      console.log('[/api/music] ACE Step 1: using user-provided lyrics (', finalLyrics.length, 'chars) + style (', styleTags.slice(0, 60), ')')
+    } else if (minimaxKey) {
       try {
         console.log('[/api/music] ACE Step 1: generating lyrics via MiniMax for prompt:', prompt.slice(0, 80))
         const lyricsRes = await fetch(MINIMAX_BASE + '/lyrics_generation', {
@@ -180,8 +190,9 @@ async function handleAceMusic(
       }
     }
 
-    // Fallback: if MiniMax unavailable/failed, build minimal lyrics from prompt
-    // so ACE at least gets structure to work with (won't be instrumental)
+    } // end else if (minimaxKey)
+
+    // Fallback: if MiniMax unavailable/failed and no user lyrics, build minimal structure
     if (!finalLyrics) {
       console.log('[/api/music] ACE Step 1 fallback: building minimal lyrics from prompt')
       const subject = prompt.replace(/^(make|write|create|generate|compose)\s+(me\s+)?(a\s+)?/i, '').trim()
@@ -192,7 +203,7 @@ async function handleAceMusic(
 
     // ── Step 2: Generate audio via ACE with real lyrics ──────────────────────
     // Build tagged content: <prompt>STYLE</prompt>\n<lyrics>LYRICS</lyrics>
-    const stylePrompt = styleTags || prompt.slice(0, 200)
+    const stylePrompt = userStyle || styleTags || prompt.slice(0, 200)
     const taggedContent = `<prompt>${stylePrompt}</prompt>\n<lyrics>${finalLyrics}</lyrics>`
 
     console.log('[/api/music] ACE Step 2: calling ACE with lyrics, duration=150, batch_size=2')
@@ -477,11 +488,16 @@ export async function POST(req: NextRequest) {
   let model: string
   let bodyUserId: string | undefined
 
+  let userStyle: string | undefined
+  let userLyrics: string | undefined
+
   try {
     const body = await req.json()
     rawPrompt = body.prompt
     model = body.model || 'music-2.5'
     bodyUserId = body.userId
+    userStyle = typeof body.userStyle === 'string' && body.userStyle ? body.userStyle : undefined
+    userLyrics = typeof body.userLyrics === 'string' && body.userLyrics ? body.userLyrics : undefined
     if (!rawPrompt) throw new Error('Missing prompt')
   } catch {
     return new Response(JSON.stringify({ error: 'Invalid request body' }), {
@@ -496,7 +512,7 @@ export async function POST(req: NextRequest) {
     async start(controller: any) {
       try {
         if (model === 'ace-step-free') {
-          await handleAceMusic(rawPrompt, userId, controller)
+          await handleAceMusic(rawPrompt, userId, controller, userStyle, userLyrics)
         } else {
           await handleMiniMax(rawPrompt, model, userId, controller)
         }
