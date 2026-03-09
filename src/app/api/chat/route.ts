@@ -2274,28 +2274,34 @@ const SPARKIE_TOOLS = [
         },
         required: ['name'],
       },
-      {
-        name: 'workspace_read',
-        description: 'Read a value from Sparkie\'s persistent workspace (survives restarts/deploys). Use for task checkpoints, intermediate state, config. GET /api/workspace?key=KEY',
-        input_schema: {
-          type: 'object',
-          properties: {
-            key: { type: 'string', description: 'Workspace key to read' },
-          },
-          required: ['key'],
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'workspace_read',
+      description: 'Read a value from Sparkie\'s persistent workspace (survives restarts/deploys). Use for task checkpoints, intermediate state, config. GET /api/workspace?key=KEY',
+      parameters: {
+        type: 'object',
+        properties: {
+          key: { type: 'string', description: 'Workspace key to read' },
         },
+        required: ['key'],
       },
-      {
-        name: 'workspace_write',
-        description: 'Write a value to Sparkie\'s persistent workspace. Use for task checkpoints, intermediate state, config. POST /api/workspace { key, value }',
-        input_schema: {
-          type: 'object',
-          properties: {
-            key: { type: 'string', description: 'Workspace key' },
-            value: { type: 'string', description: 'Value to store (JSON-serialize complex objects)' },
-          },
-          required: ['key', 'value'],
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'workspace_write',
+      description: 'Write a value to Sparkie\'s persistent workspace. Use for task checkpoints, intermediate state, config. POST /api/workspace { key, value }',
+      parameters: {
+        type: 'object',
+        properties: {
+          key: { type: 'string', description: 'Workspace key' },
+          value: { type: 'string', description: 'Value to store (JSON-stringify complex objects)' },
         },
+        required: ['key', 'value'],
       },
     },
   },
@@ -3639,7 +3645,6 @@ async function executeTool(
       }
 
       case 'read_skill': {
-      'workspace_read': 'workspace_read', 'workspace_write': 'workspace_write',
         try {
           const { name: skillName } = args as { name: string }
           if (!skillName) return 'read_skill: name is required'
