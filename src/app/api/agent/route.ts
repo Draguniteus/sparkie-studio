@@ -143,7 +143,7 @@ async function executeDueTasks(userId: string, host: string, proto: string, cook
               },
               body: JSON.stringify({
                 messages: conversation,
-                model: 'openai-gpt-4o',
+                model: 'llama3.3-70b-instruct',
               }),
               signal: AbortSignal.timeout(PASS_TIMEOUT_MS),
             })
