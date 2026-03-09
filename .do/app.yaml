@@ -12,6 +12,11 @@ services:
     http_port: 3000
     instance_size_slug: apps-s-1vcpu-1gb
     instance_count: 2
+    envs:
+      - key: ACE_MUSIC_API_KEY
+        value: d33f8bc6767445a98b608dbf56710d26
+        type: SECRET
+        scope: RUN_AND_BUILD_TIME
 databases:
   - name: sparkie-db
     engine: PG
