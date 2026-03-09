@@ -1410,7 +1410,7 @@ export function ChatInput() {
             // Update wrap message
             const nodeWrapPhrases = [
               \`Installing dependencies and starting the dev server — preview will load automatically once it's up!\`,
-              \`On it — running \\`\${startCmd}\\` now. Preview will appear as soon as the server starts ✨\`,
+              \`On it — running `\${startCmd}` now. Preview will appear as soon as the server starts ✨\`,
               \`Firing up the dev server! Give it a moment — preview loads automatically when it's ready 🔥\`,
             ]
             updateMessage(chatId, ackMsgId, {
