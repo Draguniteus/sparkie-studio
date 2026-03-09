@@ -184,7 +184,7 @@ function AceMusicPlayer({ message }: { message: Message }) {
   return (
     <div className="w-full max-w-md rounded-2xl overflow-hidden border border-purple-500/30 bg-gradient-to-b from-[#1a0533] to-[#0d0118] shadow-xl shadow-purple-900/30">
       <div className="px-4 pt-4 pb-2">
-        <p className="text-[10px] font-semibold tracking-widest text-honey-400/70 uppercase mb-0.5">ACE STEP 1.5</p>
+        <p className="text-[10px] font-semibold tracking-widest text-honey-400/70 uppercase mb-0.5">Sparkie's Music Studio</p>
         <h3 className="text-lg font-bold text-white leading-tight truncate">{meta.title}</h3>
       </div>
 
