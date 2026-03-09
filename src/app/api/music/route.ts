@@ -122,10 +122,11 @@ async function tryPersistAudio(url: string, userId: string): Promise<string> {
   }
 }
 
-// ─── ACE Music Handler ──────────────────────────────────────────────────────
-// Uses api.acemusic.ai OpenRouter-compatible endpoint.
-// sample_mode:true → LM auto-generates everything from natural language.
-// batch_size:2 → always returns 2 versions.
+// ─── ACE Music Handler ────────────────────────────────────────────────────────
+// Two-step pipeline:
+//   Step 1: MiniMax lyrics_generation → structured lyrics + style tags + title
+//   Step 2: ACE /v1/chat/completions with real lyrics, batch_size:2, duration:150
+//           → returns 2 audio versions via SSE stream
 async function handleAceMusic(
   prompt: string,
   userId: string,
@@ -135,8 +136,9 @@ async function handleAceMusic(
   const enc = new TextEncoder()
   const send = (data: string) => { try { ctrl.enqueue(enc.encode(data)) } catch { /* closed */ } }
 
-  const apiKey = process.env.ACE_MUSIC_API_KEY
-  if (!apiKey) {
+  const aceKey = process.env.ACE_MUSIC_API_KEY
+  const minimaxKey = process.env.MINIMAX_API_KEY
+  if (!aceKey) {
     send('data: ' + JSON.stringify({ error: 'ACE_MUSIC_API_KEY not configured' }) + '\n\n')
     return
   }
@@ -146,17 +148,71 @@ async function handleAceMusic(
   }, 15000)
 
   try {
+    // ── Step 1: Generate lyrics via MiniMax ─────────────────────────────────
+    let finalLyrics = ''
+    let songTitle = ''
+    let styleTags = ''
+
+    if (minimaxKey) {
+      try {
+        console.log('[/api/music] ACE Step 1: generating lyrics via MiniMax for prompt:', prompt.slice(0, 80))
+        const lyricsRes = await fetch(MINIMAX_BASE + '/lyrics_generation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + minimaxKey },
+          body: JSON.stringify({ mode: 'write_full_song', prompt }),
+          signal: AbortSignal.timeout(30000),
+        })
+        if (lyricsRes.ok) {
+          const lyricsData = await lyricsRes.json()
+          if (lyricsData?.base_resp?.status_code === 0 && lyricsData?.lyrics) {
+            finalLyrics = lyricsData.lyrics
+            songTitle = lyricsData.song_title || ''
+            styleTags = lyricsData.style_tags || ''
+            console.log('[/api/music] ACE Step 1 done: title=', songTitle, 'style=', styleTags.slice(0, 60), 'lyrics len=', finalLyrics.length)
+          } else {
+            console.error('[/api/music] MiniMax lyrics error:', JSON.stringify(lyricsData?.base_resp))
+          }
+        } else {
+          console.error('[/api/music] MiniMax lyrics HTTP error:', lyricsRes.status)
+        }
+      } catch (e) {
+        console.error('[/api/music] MiniMax lyrics exception:', e)
+      }
+    }
+
+    // Fallback: if MiniMax unavailable/failed, build minimal lyrics from prompt
+    // so ACE at least gets structure to work with (won't be instrumental)
+    if (!finalLyrics) {
+      console.log('[/api/music] ACE Step 1 fallback: building minimal lyrics from prompt')
+      const subject = prompt.replace(/^(make|write|create|generate|compose)\s+(me\s+)?(a\s+)?/i, '').trim()
+      finalLyrics = `[Verse]\n${subject}\nA story told in song\nWords that carry on\nThrough melody and rhyme\n\n[Chorus]\n${subject}\nForever in our hearts\nA song that never parts\nEchoes through all time\n\n[Verse]\nThe journey carries forth\nWith meaning and with worth\nEach note a stepping stone\nTowards a place called home\n\n[Chorus]\n${subject}\nForever in our hearts\nA song that never parts\nEchoes through all time\n\n[Outro]\nThe music fades away\nBut memories will stay`
+      songTitle = subject.slice(0, 50).replace(/\b\w/g, c => c.toUpperCase())
+      styleTags = 'heartfelt, melodic, emotional'
+    }
+
+    // ── Step 2: Generate audio via ACE with real lyrics ──────────────────────
+    // Build tagged content: <prompt>STYLE</prompt>\n<lyrics>LYRICS</lyrics>
+    const stylePrompt = styleTags || prompt.slice(0, 200)
+    const taggedContent = `<prompt>${stylePrompt}</prompt>\n<lyrics>${finalLyrics}</lyrics>`
+
+    console.log('[/api/music] ACE Step 2: calling ACE with lyrics, duration=150, batch_size=2')
+
     const res = await fetch(ACE_MUSIC_BASE + '/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + apiKey,
+        'Authorization': 'Bearer ' + aceKey,
       },
       body: JSON.stringify({
-        messages: [{ role: 'user', content: prompt }],
-        sample_mode: true,
+        messages: [{ role: 'user', content: taggedContent }],
+        sample_mode: false,
         stream: true,
         batch_size: 2,
+        audio_config: {
+          duration: 150,
+          vocal_language: 'en',
+          format: 'mp3',
+        },
       }),
       signal: AbortSignal.timeout(240000),
     })
@@ -224,34 +280,20 @@ async function handleAceMusic(
       reader.cancel().catch(() => {})
     }
 
-    let title = ''
-    let style = ''
-    let lyrics = ''
+    // ── Build final metadata ─────────────────────────────────────────────────
+    // Extract title/style from ACE content if richer than what MiniMax gave us
+    let title = songTitle
+    let style = styleTags
+    let lyrics = finalLyrics  // use MiniMax lyrics — they're real structured lyrics
 
     if (contentAccum) {
-      // ACE Step sample_mode streams: title line, style/tags line, then full lyrics
       const titleMatch = contentAccum.match(/(?:^|\n)(?:title|song\s*name|name)[:\s]+([^\n]+)/i)
       const styleMatch = contentAccum.match(/(?:^|\n)(?:style|genre|tags|mood|sound)[:\s]+([^\n]+)/i)
-      if (titleMatch) title = titleMatch[1].trim().replace(/["'*#]/g, '').trim()
-      if (styleMatch) style = styleMatch[1].trim().replace(/["'*#]/g, '').trim()
-
-      // Lyrics: try section-tagged block first, then fall back to all content after metadata lines
-      const lyricsMatch = contentAccum.match(/\[(Verse|Chorus|Bridge|Intro|Outro|Pre[\s-]?Chorus|Post[\s-]?Chorus|Hook|Interlude|Inst|Solo)[\s\S]*/i)
-      if (lyricsMatch) {
-        lyrics = normalizeLyricsTags(lyricsMatch[0].trim())
-      } else {
-        // Remove any title/style header lines and use the rest as lyrics
-        const cleaned = contentAccum
-          .replace(/^(?:title|song\s*name|name|style|genre|tags|mood|sound)[:\s][^\n]+\n?/gim, '')
-          .trim()
-        if (cleaned.length > 20) {
-          lyrics = normalizeLyricsTags(cleaned)
-        }
-      }
+      if (titleMatch && !title) title = titleMatch[1].trim().replace(/["'*#]/g, '').trim()
+      if (styleMatch && !style) style = styleMatch[1].trim().replace(/["'*#]/g, '').trim()
     }
 
     if (!title) title = prompt.slice(0, 50).replace(/\b\w/g, c => c.toUpperCase()).trim() || 'Sparkie Mix'
-    // Style: prefer extracted style, fallback to full prompt (shows what was requested)
     if (!style) style = prompt.slice(0, 200)
 
     if (audioUrls.length === 0) {
