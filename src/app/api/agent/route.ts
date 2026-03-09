@@ -118,7 +118,33 @@ async function executeDueTasks(userId: string, host: string, proto: string, cook
         const PASS_TIMEOUT_MS = 50_000
         const internalSecret = process.env.SPARKIE_INTERNAL_SECRET ?? ''
 
-        const taskPrompt = '[AUTONOMOUS TASK EXECUTION]\nTask: ' + task.label + '\nRunbook: ' + task.action + '\n\nExecute this task now. Be thorough. Use all tools available. When fully done, output a concise summary of what was accomplished.'
+        // ── read_skill prefix resolution ──────────────────────────────────
+        // If task.action begins with read_skill({name:"..."}), load that skill's
+        // content from the DB and inject it into the prompt as expert context.
+        // The prefix is stripped from the action before passing to the model.
+        let skillContext = ''
+        let actionRunbook = task.action
+        const skillMatch = task.action.match(/^\s*read_skill\(\{\s*name:\s*["']([^"']+)["']\s*\}\)\s*;?\s*\n?/)
+        if (skillMatch) {
+          const skillName = skillMatch[1]
+          actionRunbook = task.action.slice(skillMatch[0].length).trimStart()
+          try {
+            const skillRow = await query<{ content: string }>(
+              `SELECT content FROM sparkie_skills WHERE name = $1 LIMIT 1`,
+              [skillName]
+            )
+            if (skillRow.rows[0]?.content) {
+              skillContext = '\n\n--- SKILL CONTEXT: ' + skillName + ' ---\n' + skillRow.rows[0].content + '\n--- END SKILL CONTEXT ---'
+              console.log('[orchestrator] Loaded skill:', skillName, '(' + skillRow.rows[0].content.length + ' chars)')
+            } else {
+              console.warn('[orchestrator] Skill not found:', skillName)
+            }
+          } catch (skillErr) {
+            console.error('[orchestrator] Skill load error:', skillErr)
+          }
+        }
+
+        const taskPrompt = '[AUTONOMOUS TASK EXECUTION]\nTask: ' + task.label + skillContext + '\n\nRunbook: ' + actionRunbook + '\n\nExecute this task now. Be thorough. Use all tools available. When fully done, output a concise summary of what was accomplished.'
 
         // Conversation history accumulates across passes
         const conversation: Array<{ role: string; content: string }> = [
