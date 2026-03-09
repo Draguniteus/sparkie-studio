@@ -58,19 +58,27 @@ export interface StepTrace {
   duration?: number
 }
 
+export interface AceMusicMetadata {
+  title: string
+  style: string
+  lyrics: string
+  url2?: string    // second version URL (batch_size:2)
+}
+
 export interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
-  type?: 'text' | 'image' | 'video' | 'build_card' | 'music' | 'speech'
+  type?: 'text' | 'image' | 'video' | 'build_card' | 'music' | 'speech' | 'ace_music'
   imageUrl?: string
   imagePrompt?: string
   model?: string
   isStreaming?: boolean
   buildCard?: BuildCardData  // only present when type === 'build_card'
   pendingTask?: PendingTask  // only present for HITL approval messages
-  chipLabel?: string           // 'In memory:...' label stamped when task_chip_clear fires
+  chipLabel?: string            // 'In memory:...' label stamped when task_chip_clear fires
   toolTraces?: StepTrace[]     // step traces collected during this response
+  aceMetadata?: AceMusicMetadata  // only present when type === 'ace_music'
 }
 
 export interface Chat {
@@ -113,8 +121,8 @@ export function flattenFileTree(nodes: FileNode[]): FileNode[] {
 export interface UserProfile {
   name: string            // what to call the user
   role: string            // e.g. "indie developer", "designer", "student"
-  goals: string           // what they're building / main use case
-  style: string           // coding style preference: "commented", "minimal", "production"
+  goals: string          // what they're building / main use case
+  style: string          // coding style preference: "commented", "minimal", "production"
   experience: string      // "beginner" | "intermediate" | "expert"
   completedAt: string     // ISO timestamp of when onboarding was completed
 }
@@ -373,7 +381,7 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
       previewUrl: null,
     })
   },
-  deleteChat: (id) => set((s) => ({ chats: s.chats.filter((c) => c.id !== id), currentChatId: null, messages: [] })),
+  deleteChat: (id) => set((s) => ({ chats: s.chats.filter(c) => c.id !== id), currentChatId: null, messages: [] })),
 
   sidebarOpen: true,
   activeTab: 'chat',
