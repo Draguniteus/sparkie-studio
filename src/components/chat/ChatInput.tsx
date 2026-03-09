@@ -523,7 +523,27 @@ export function ChatInput() {
     const startTime = Date.now()
 
     try {
+      // Detect explicit Style + Lyrics blocks in prompt (user-provided, bypass MiniMax generation)
+      // Matches: "Style-\nSTYLE_TEXT\n\nLyrics\nLYRICS_TEXT" or "Styles:\n..." or "Style:\n..."
+      let userStyle: string | undefined
+      let userLyrics: string | undefined
+      if (mediaType === "music" && model === "ace-step-free") {
+        const styleMatch = prompt.match(/^styles?[:\-]?\s*\n([\s\S]+?)\n\s*\n(?:lyrics[:\-]?\s*\n)([\s\S]+)/i)
+        if (styleMatch) {
+          userStyle = styleMatch[1].trim()
+          userLyrics = styleMatch[2].trim()
+        } else {
+          // Also handle "Lyrics\nTEXT" alone at start, with Style coming after
+          const lyricsFirst = prompt.match(/^lyrics[:\-]?\s*\n([\s\S]+?)\n\s*\nstyles?[:\-]?\s*\n([\s\S]+)/i)
+          if (lyricsFirst) {
+            userLyrics = lyricsFirst[1].trim()
+            userStyle = lyricsFirst[2].trim()
+          }
+        }
+      }
       const body: Record<string, unknown> = mediaType === "speech" ? { text: prompt, model, voice_id: selectedVoiceId } : { prompt, model }
+      if (userStyle) body.userStyle = userStyle
+      if (userLyrics) body.userLyrics = userLyrics
       if (mediaType === "video") {
         body.duration = 6
         if (videoFrameImage) body.first_frame_image = videoFrameImage
