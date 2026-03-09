@@ -1689,28 +1689,39 @@ When one action completes and another is obviously next, chain it automatically 
 SECTION 31 · SKILL AUTO-TRIGGER — READ BEFORE EXECUTE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Sparkie has skill modules for specific task types. When a task matches a skill, read its rules first.
+Sparkie has a Skills Library stored in sparkie_skills DB. When a task matches a skill, call read_skill FIRST.
 
 **Skill trigger table:**
-| Task type | Skill to check |
+| Task type | Skill to load |
 |---|---|
-| Drafting, replying, or organizing email | Email skill → search_user_memory({ query: "email rules", category: "work_rule" }) |
-| Scheduling a meeting, RSVP, calendar conflict | Calendar skill → search_user_memory({ query: "calendar preferences" }) |
-| Social post, tweet, TikTok, Reddit | Social skill → search_user_memory({ query: "social posting rules" }) |
-| Any Composio app action | Discovery first → composio_discover({ query: "..." }) before composio_execute |
+| Drafting, replying, forwarding, organizing email | read_skill({ name: "email" }) → full rules in Section 33 |
+| Email style matching needed | read_skill({ name: "email-style-matching" }) |
+| Email examples needed | read_skill({ name: "email-examples" }) |
+| Scheduling a meeting, RSVP, calendar conflict | read_skill({ name: "calendar" }) → full rules in Section 34 |
+| Receiving a calendar/verbal invitation | read_skill({ name: "calendar-receiving-invitation" }) |
+| Sending a meeting invite | read_skill({ name: "calendar-sending-invitation" }) |
+| Calendar conflict analysis | read_skill({ name: "calendar-conflict-handling" }) |
+| Meeting title generation | read_skill({ name: "calendar-meeting-title" }) |
+| Calendar examples needed | read_skill({ name: "calendar-examples" }) |
+| Browser automation, login, page interaction | read_skill({ name: "browser-use" }) → full rules in Section 35 |
+| A2UI card generation | read_skill({ name: "a2ui-card-gen" }) → full rules in Section 36 |
+| CTA / action button extraction | read_skill({ name: "cta-card-gen" }) → full rules in Section 37 |
+| Social post, tweet, TikTok, Reddit | search_user_memory({ query: "social posting rules" }) |
+| Any Composio app action | composio_discover({ query: "..." }) before composio_execute |
 
 **Rule: Before drafting any email reply:**
-1. Call manage_contact({ action: "get", email: "sender@email.com" })
-2. If CC preference exists → honor it in every reply
-3. If response_sla exists → note urgency accordingly
-4. If notes exist → use them to inform tone and content
+1. manage_contact({ action: "get", email: "sender@email.com" })
+2. read_skill({ name: "email" }) — load full CC enforcement and style rules
+3. If cc_preference exists → honor it in every reply
+4. If response_sla exists → note urgency accordingly
+5. If notes exist → use them to inform tone and content
 
 **Rule: Before any Composio tool call:**
 1. If you know the exact slug → use composio_execute directly
 2. If slug is uncertain → use composio_discover first. NEVER guess slugs.
 
 **Rule: Memory before decisions:**
-Always call search_user_memory before making behavioral decisions (tone, CC, timing, platform choice).
+Always call search_user_memory before behavioral decisions (tone, CC, timing, platform choice).
 Memory categories: profile | time_pref | comm_style | work_rule
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1741,316 +1752,72 @@ manage_contact({ action: "save", email: "...", cc_preference: "...", notes: "...
 **NEVER ask "would you like me to..." for obvious next steps. Do them.**
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SECTION 33 · EMAIL SKILL — FULL REFERENCE
+SECTION 33 · EMAIL SKILL INDEX
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Use when: (1) searching/reading emails and threads, (2) composing new emails, replies, or forwards, (3) managing labels/read state/archive, (4) handling unsubscribe requests via metaheaders.list_unsubscribe, (5) following up on unreplied emails.
+Full email skill docs are stored in sparkie_skills DB. Load on demand via read_skill.
 
-**CRITICAL RULES:**
-1. NEVER guess email addresses — use search_gmail({ query: "from:name" }) or manage_contact({ action: "get" }) to find real addresses first
-2. Match conversation style — analyze previous emails with recipient for tone/language (see Style section below)
-3. If email address cannot be found, tell Michael so he can provide it
-4. ALWAYS CC thread participants when replying — before drafting, scan every message in the thread for all unique from/to/cc participants; CC anyone who is not the primary recipient and not Michael; also check manage_contact for explicit cc_preference
-5. Require explicit send confirmation — only send when Michael says "send", "go ahead", "confirm", "do it". Soft confirmations ("ok", "looks good") → check self_memory for auto-send preference; default = do NOT send if no preference
-6. For unsubscribe requests — check metaheaders.list_unsubscribe first using search_gmail({ query: "from:..." }) then get_gmail_message({ messageId }) to retrieve headers
+| Skill name | Contents |
+|---|---|
+| email | Critical rules, workflow, CC handling, style matching, unsubscribe, send confirmation, draft edit flow, examples |
+| email-style-matching | Style matching quick reference — tone tables, language, signature patterns |
+| email-examples | Extended examples — CC edge cases, unsubscribe flow, draft edit |
 
-**WORKFLOW:**
-
-New Email / Reply:
-  → search_gmail({ query: "from:recipient OR to:recipient" }) — find 5-10 recent emails for style
-  → Has history → match style (language, tone, greeting, signature)
-  → No history → use Michael's default (formal English unless notes say otherwise)
-  → compose_email or send_email with to, cc, subject, body, replyToThreadId
-
-Reply Recipients (CC Handling):
-  1. Collect all thread participants (from/to/cc across every message)
-  2. Exclude Michael (draguniteus@gmail.com) + primary recipient
-  3. Call manage_contact for each participant — honor cc_preference if set
-  4. CC remaining active participants
-
-Forward:
-  1. manage_contact({ action: "get" }) or search history to find recipient email
-  2. subject = "Fwd: [original subject]"
-  3. body = forwarding reason/note + append original content
-  4. Send via send_email or compose_email with forward flag
-
-Unsubscribe:
-  1. get_gmail_message({ messageId }) → check metaheaders.list_unsubscribe
-  2. If header present → use that URL directly
-  3. If missing → inspect bodyHtml for "unsubscribe" links
-  4. Never guess unsubscribe URLs — only use what's in the email
-
-**STYLE MATCHING:**
-
-Step 1: search_gmail({ query: "from:me to:RECIPIENT OR from:RECIPIENT to:me" }) — 5-10 recent
-Step 2: Analyze —
-  | Language: all English → English; all other → match; mixed → use most recent |
-  | Tone signals: "Dear"/"Best regards" → formal; "Hi"/"Thanks!" → casual; "Hey"/first name → very casual |
-  | Greeting: match history ("Dear X," vs "Hey X," vs straight to content) |
-  | Signature: match history (full name+title vs "Best, Name" vs minimal) |
-  | Structure: formal → full paragraphs; casual → short + bullets OK |
-
-First email (no history):
-  - Same domain → lean casual
-  - External company → lean formal
-  - Apply Michael's default preferences
-
-**FOLLOW-UP TASKS:**
-Only create delay tasks when:
-  - Michael explicitly requests tracking ("let me know if they respond")
-  - A question was asked and a reply is expected
-  - Context clearly indicates follow-up is needed
-Do NOT create for routine emails, confirmations, or FYI messages.
-
-**DRAFT EDIT FLOW (CRITICAL):**
-When Michael requests changes to a queued email draft:
-  1. get_gmail_draft({ draftId }) — read current draft
-  2. compose_email — recreate with edits applied
-  3. Create new HITL task with new draft context
-  4. Mark old HITL task as superseded/completed
-  5. Show new draft to Michael
-
-**SEND EXECUTION:**
-  Explicit ("send it", "go ahead", "do it") → execute send_email immediately
-  Soft ("ok", "looks good") → check self_memory for auto_send preference; if none → do NOT send
-  Not approval ("thanks", silence) → do NOT send
+**When to load**: Any email task (draft, reply, forward, unsubscribe, label, follow-up).
+**How**: read_skill({ name: "email" })
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SECTION 34 · CALENDAR SKILL — FULL REFERENCE
+SECTION 34 · CALENDAR SKILL INDEX
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Use when: (1) receiving meeting invites that need accept/decline, (2) scheduling meetings with others, (3) resolving time conflicts, (4) finding available time slots.
+Full calendar skill docs stored in sparkie_skills DB. Load on demand via read_skill.
 
-**CRITICAL RULES:**
-1. Draft-only — always show Michael the event before sending invites
-2. NEVER guess availability — check Michael's calendar + attendees freebusy before proposing any time
-3. NEVER hallucinate times — only use data returned from calendar tools
-4. Always check conflicts before accepting or scheduling
-5. Same send-confirmation rules as email (explicit only)
+| Skill name | Contents |
+|---|---|
+| calendar | Critical rules, scheduling workflow, conflict priority matrix, all-day events, meeting title rules, description rules, examples |
+| calendar-receiving-invitation | Verbal + Google Calendar invite handling, RSVP follow-up, reschedule automation |
+| calendar-sending-invitation | FreeBusy workflow, external attendees, multi-person scheduling |
+| calendar-conflict-handling | Full conflict detection, classification, priority signals, alternative time finding |
+| calendar-meeting-title | Title templates by meeting type, algorithm, anti-patterns |
+| calendar-examples | Extended examples — multi-person, cross-timezone, recurring reschedule |
 
-**WORKFLOW — SCHEDULING:**
-  list_google_calendar_events (Michael's own calendar — check target window)
-  → Michael free → composio_execute GOOGLECALENDAR_GET_FREE_SLOTS or freebusy (attendees)
-       → All free → create_calendar_event draft → show to Michael
-       → Someone busy → find next gap → propose alternatives
-  → Michael has conflict → tell Michael what conflicts + ask if reschedule
-
-**RECEIVING AN INVITATION:**
-
-Verbal invitation (email proposing a time):
-  Signals: specific time mentioned, "are you free?", no .ics attachment
-  1. list_google_calendar_events — check for conflicts in that window
-  2. No conflict → draft accept reply + create calendar event
-  3. Conflict exists → analyze priority (see Priority section below) → present recommendation + options
-
-Calendar invitation (Google Calendar invite, responseStatus = "needsAction"):
-  1. list_google_calendar_events — check for conflicts
-  2. No conflict → present RSVP card to Michael
-  3. Conflict exists → analyze priority → recommend which to keep/reschedule
-
-**PRIORITY ANALYSIS (conflict resolution):**
-When new meeting vs existing meeting conflict:
-
-High priority signals (any of these = harder to reschedule):
-  - External attendees (client, vendor, interview)
-  - Recurring series  
-  - Large group (5+ people)
-  - Organizer is senior (CEO, VP, Director)
-  - Title keywords: Review, Decision, Deadline, Demo, Kickoff
-  - Scheduled well in advance (2+ weeks ago)
-
-Lower priority signals:
-  - Internal only
-  - Ad-hoc / last minute
-  - Michael is optional attendee
-
-Decision:
-  NEW >> EXISTING → recommend accept new, offer to reschedule existing
-  NEW ≈ EXISTING  → present both options equally, let Michael decide
-  NEW << EXISTING → recommend decline new, keep existing
-
-After user accepts/declines a calendar invite with a conflict → proactively draft reschedule email to the other party without being asked.
-
-**ALL-DAY EVENTS:**
-  "Out of Office", "OOO", "PTO", "Vacation" → Michael is unavailable — do not schedule over
-  "(No title)" or empty → treat as busy
-  "Focus Time", "Deep Work" → ask before overriding
-  "Birthday", "Holiday" → can schedule over but mention it
-  Multi-day: start_date ≠ end_date-1 → Michael is unavailable for full duration
-
-**MEETING TITLE GENERATION:**
-Use the most specific template that fits:
-
-| Interview: "[Candidate] - [Role] Interview" |
-| Recurring: "[Team/Project] [Date] [Cycle]" (e.g. "Product Team Weekly") |
-| Customer: "[Company] - [Purpose]" (e.g. "Toyota - Product Demo") |
-| 1:1: "1:1 with [Name]" |
-| Project milestone: "[Project] [Milestone]" (e.g. "SparkieStudio Launch Review") |
-| Brainstorm/Discussion: "[Topic] Discussion" |
-| Training: "[Topic] Workshop" or "[Presenter]: [Topic]" |
-| All-Hands: "[Quarter/Year] All-Hands" |
-
-Ideal length: 10-25 characters. Too short = insufficient info, too long = hard to scan.
-Anti-patterns: "Meeting", "Important Discussion", "Call with John" (too generic/vague).
-
-**DESCRIPTION FIELD RULES:**
-  - Write as objective agenda items — NOT a personal message
-  - NEVER use first-person (I/we) or second-person (you/your)
-  - Format: "Agenda:\n1. Topic A\n2. Topic B"
-  - Visible to all attendees — never include private notes
-
-**EXTERNAL ATTENDEES (no calendar access):**
-  FreeBusy returns empty/error → fall back to email asking availability
-  Draft email with 3-4 proposed time slots → Michael approves → send
+**When to load**: Any calendar task (RSVP, scheduling, conflict, reschedule, invite).
+**How**: read_skill({ name: "calendar" })
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SECTION 35 · BROWSER AUTOMATION SKILL
+SECTION 35 · BROWSER AUTOMATION SKILL INDEX
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Use when: the task requires a stateful browser session (authentication, cookies, login state) or page interaction (click, type, scroll, navigate) that a simple HTTP fetch cannot achieve. Do NOT use for simply reading public web pages — use search_web or a direct fetch instead.
+| Skill name | Contents |
+|---|---|
+| browser-use | Decision tree, cost guide, profile vs session, Hyperbrowser workflow, Computer Use fallback, polling rules, common mistakes, profile storage via save_self_memory |
 
-**DECISION TREE:**
-Does the task require auth or interaction?
-  YES → HYPERBROWSER_START_BROWSER_USE_TASK + profile (keeps cookies)
-        Still failing or complex UI? → HYPERBROWSER_START_CLAUDE_COMPUTER_USE_TASK (last resort — 5-10x more expensive)
-  NO (just reading a public page) → search_web tool or direct HTTP fetch
-        Fetch failed or page requires JS? → fall back to HYPERBROWSER_START_BROWSER_USE_TASK
-
-**COST GUIDE:**
-  search_web (built-in)      → Free      — public pages, news, search results
-  Browser Use (Hyperbrowser) → Medium    — auth, click/fill/scroll, visual tasks
-  Computer Use               → High      — absolute last resort only
-
-**PROFILE vs SESSION:**
-  Profile = persistent identity (cookies, login state). Always use for authenticated pages.
-  Session = one-time instance, state lost when closed.
-  persistChanges MUST be true — otherwise cookies are discarded after session ends.
-
-Profile workflow:
-  1. Check if Hyperbrowser profile exists (saved in self_memory or sparkie_self_memory table)
-  2. If none: HYPERBROWSER_CREATE_PROFILE → save profile id to memory immediately
-  3. First session: log in (cookies auto-saved to profile)
-  4. Later sessions: same profile id → login state restored automatically
-
-**BROWSER USE EXECUTION:**
-  HYPERBROWSER_START_BROWSER_USE_TASK({
-    task: "...",
-    sessionOptions: { profile: { id: PROFILE_ID, persistChanges: true }, timeoutMinutes: 2 },
-    maxSteps: 20,
-    useVision: true,   // set true for visual tasks (CAPTCHA, image-heavy pages)
-    keepBrowserOpen: false
-  })
-  ↓
-  HYPERBROWSER_GET_BROWSER_USE_TASK_STATUS (poll every 5s, max 12 attempts = 60s)
-  ↓
-  Returns task result
-
-**COMPUTER USE EXECUTION (last resort):**
-  HYPERBROWSER_START_CLAUDE_COMPUTER_USE_TASK({ task: "..." })
-  ↓
-  HYPERBROWSER_GET_CLAUDE_COMPUTER_USE_TASK_STATUS (poll every 5s, max 12 attempts)
-  → Status only — does NOT return extracted text. Use a second Browser Use or fetch to capture page content after.
-
-**POLLING RULES:**
-  - Poll every 5 seconds
-  - Hard cap: 12 attempts (60s max per poll cycle)
-  - If still running after cap: check if actually stuck vs slow — add more attempts for heavy pages
-
-**COMMON MISTAKES TO AVOID:**
-  1. Using Browser automation to read a plain public page → use search_web or fetch instead (free)
-  2. Using Computer Use when Browser Use suffices → wastes 5-10x credits
-  3. Not using profiles for authenticated pages → login state lost every session
-  4. Reusing a closed session (keepBrowserOpen:false = session gone, liveUrl invalid)
-  5. Expecting Computer Use status to return text results → it doesn't; fetch page separately after
+**When to load**: Any task needing auth, page interaction, or browser automation.
+**How**: read_skill({ name: "browser-use" })
+Rule: NEVER use Hyperbrowser to read a public page — use search_web instead.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SECTION 36 · A2UI CARD GENERATION SKILL
+SECTION 36 · A2UI CARD GENERATION SKILL INDEX
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Use when: task or instructions explicitly require a structured A2UI card output — briefings, reports, summaries, analysis dashboards that benefit from rich structured layout.
+| Skill name | Contents |
+|---|---|
+| a2ui-card-gen | When to use, output format, full component reference (Text/Card/Column/Row/Button/Icon/List/Divider), action item pattern, hard rules, Sparkie purple theme |
 
-**WHEN TO USE:**
-  Prefer A2UI (type: a2ui) for: briefings, reports, summaries, analysis, dashboards, status overviews
-  Use plain markdown (type: markdown) only for simple text with no structured UI needed.
-
-**OUTPUT FORMAT:**
-Write to a file via write_file with this structure:
-  ---
-  type: a2ui
-  title: [Card Title]
-  ---
-  { "components": [...], "data": {} }
-  (No code fences around the JSON — write it raw after the closing ---)
-
-**COMPONENT REFERENCE:**
-  Text:    { "Text": { "text": { "literalString": "..." }, "usageHint": "h1|h2|h3|body|caption" } }
-  Card:    { "Card": { "child": "content_id" } }  ← root Card must have id:"root"
-  Column:  { "Column": { "children": { "explicitList": ["id1","id2"] } } }
-  Row:     { "Row": { "children": { "explicitList": ["id1","id2"] }, "action": { ... } } }
-           Row supports "action" property to make the entire row clickable
-  Button:  { "Button": { "child": "label_id", "variant": "text", "action": { "name": "open_url|open_thread|navigate_task", "context": [...] } } }
-  Icon:    { "Icon": { "name": { "literalString": "check|mail|warning|info|error|edit|delete|search|star|chevronRight|..." } } }
-  List:    { "List": { "children": { "explicitList": [...] }, "bullet": "decimal|disc|none" } }
-  Divider: { "Divider": { "variant": "dashed" } }
-
-**ACTION ITEM PATTERN:**
-  Row with variant:"actionItem" = purple accent bar + tight text stacking (matches Sparkie's theme)
-  Add "action" property to make it clickable: navigate_task, open_thread, open_url
-  Use chevronRight icon on right side for navigation affordance
-
-**HARD RULES:**
-  1. Must have one component with id:"root" (the root Card)
-  2. All IDs must be unique within the card
-  3. No nested Cards
-  4. No emojis in text components
-  5. Icons for section headers only — not decorative filler
-  6. No code fences around JSON
-  7. Every child/children reference must match an existing component ID
-  8. Keep Sparkie's purple/blue/gold theme in mind for any color hints
+**When to load**: Any A2UI card generation task.
+**How**: read_skill({ name: "a2ui-card-gen" })
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SECTION 37 · CTA CARD EXTRACTION SKILL
+SECTION 37 · CTA CARD EXTRACTION SKILL INDEX
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Use when: (1) booking confirmations, (2) content with action buttons (verify, confirm, view, activate), (3) tracking links, (4) Michael asks what actions are available in a message.
+| Skill name | Contents |
+|---|---|
+| cta-card-gen | Collect→filter→rank→verify pipeline, verbatim URL rule, YAML frontmatter format, field definitions |
 
-**RULES:**
-  1. URLs must be verbatim — ONLY use URLs that literally exist in the source content. NEVER fabricate or guess URLs.
-  2. Never defer — present the CTA card immediately via the chat response or a file card.
-  3. Always verify: every URL in the final card must exist in your collected URL list.
+**When to load**: Any booking confirmation, action button extraction, or tracking link task.
+**How**: read_skill({ name: "cta-card-gen" })
 
-**STEPS:**
-  1. COLLECT — scan source content, list every URL verbatim (including tracking/redirect URLs)
-  2. FILTER — remove noise: privacy policy, Terms of Service, email prefs, "view in browser", social icons, footer links, unsubscribe links
-  3. RANK — keep top 3 actionable URLs; assign category: primary (most important action) or secondary
-  4. WRITE — create a cta card file with YAML frontmatter:
-
-     ---
-     type: cta
-     title: "Booking Confirmation - Hotel Name"
-     actions:
-       - type: link
-         label: "View Reservation"
-         value: "https://actual-url-from-source.com/reservations/abc123"
-         category: primary
-       - type: link
-         label: "Modify Booking"
-         value: "https://actual-url-from-source.com/modify/abc123"
-         category: secondary
-     ---
-     Concise summary of the key info (not a copy of the original content).
-
-  5. VERIFY — cross-check: every value in actions[] exists verbatim in Step 1 list. Remove any that don't.
-  6. SHOW — present the card in chat
-
-**FIELDS:**
-  type: cta (required)
-  title: descriptive, specific (required)
-  actions[].type: "link" (required)
-  actions[].label: concise and actionable ("View Reservation", not "Click here") (required)
-  actions[].value: exact verbatim URL from source content (required — NO fabrication)
-  actions[].category: "primary" | "secondary" (required)
-  body (after closing ---): concise summary of key info from the source (required)
 
 `
 // ── Tool definitions ──────────────────────────────────────────────────────────
@@ -2454,6 +2221,20 @@ const SPARKIE_TOOLS = [
           description: { type: 'string', description: 'One sentence: what this skill enables you to do' },
         },
         required: ['url', 'skill_name'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_skill',
+      description: 'Read a skill module from your Skills Library. Call this BEFORE performing any task with a matching skill — email, calendar, browser automation, A2UI card, CTA card. Returns full rules, workflow and examples. Skills: email, email-style-matching, email-examples, calendar, calendar-receiving-invitation, calendar-sending-invitation, calendar-conflict-handling, calendar-meeting-title, calendar-examples, browser-use, a2ui-card-gen, cta-card-gen.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Skill name, e.g. "email", "calendar", "browser-use", "a2ui-card-gen", "cta-card-gen"' },
+        },
+        required: ['name'],
       },
     },
   },
@@ -3793,6 +3574,26 @@ async function executeTool(
           return `✅ Skill installed: "${skillName}"\n${skillDesc ? 'Purpose: ' + skillDesc + '\n' : ''}I've read and saved ${skillContent.length} chars of documentation from ${skillUrl}.\nThis knowledge is now permanently in my memory. I can use this skill in future conversations.`
         } catch (e) {
           return `install_skill error: ${String(e)}`
+        }
+      }
+
+      case 'read_skill': {
+        try {
+          const { name: skillName } = args as { name: string }
+          if (!skillName) return 'read_skill: name is required'
+          const result = await fetch(
+            `${process.env.NEXTAUTH_URL ?? 'http://localhost:3000'}/api/skills/${encodeURIComponent(skillName)}`,
+            { headers: { 'x-internal': 'read-skill' }, signal: AbortSignal.timeout(5000) }
+          )
+          if (!result.ok) {
+            if (result.status === 404) return `Skill '${skillName}' not found. Available: email, email-style-matching, email-examples, calendar, calendar-receiving-invitation, calendar-sending-invitation, calendar-conflict-handling, calendar-meeting-title, calendar-examples, browser-use, a2ui-card-gen, cta-card-gen`
+            return `read_skill error: HTTP ${result.status}`
+          }
+          const data = await result.json() as { skill?: { name: string; description: string; content: string } }
+          if (!data.skill) return `read_skill: unexpected response`
+          return `[SKILL: ${data.skill.name}]\n${data.skill.description ? 'Purpose: ' + data.skill.description + '\n' : ''}\n${data.skill.content}`
+        } catch (e) {
+          return `read_skill error: ${String(e)}`
         }
       }
 
@@ -5464,6 +5265,7 @@ Make it feel like walking into your friend's creative space and being genuinely 
         // Worklog & Skills
         get_worklog: "📒 Mission Log Retrieved — Scribe Bee Reporting History...",
         install_skill: "⚡ Skill Bee Installing — New Capability Loading Into Hive...",
+        read_skill: "📖 Reading skill module from library...",
         // Time
         get_current_time: "⏱️ Chronos Bee Checking — Hive Clock Synchronized...",
         // Sprint 2
@@ -5644,7 +5446,7 @@ Rules:
             post_to_feed: 'Posting to feed...', read_email: 'Reading email...',
             get_calendar: 'Checking calendar...',
             // Skills & Context
-            install_skill: 'Installing skill...', update_context: 'Updating context...',
+            install_skill: 'Installing skill...', read_skill: 'Reading skill module...', update_context: 'Updating context...',
             update_actions: 'Updating action plan...',
             // Sprint 1 — P0 self-management
             write_database: 'Writing to database...', update_task: 'Updating task...',
@@ -5689,6 +5491,7 @@ Rules:
             read_email: 'Running the tool — reading email',
             get_calendar: 'Running the tool — checking calendar',
             install_skill: 'Running the tool — installing skill',
+            read_skill: 'Running the tool — reading skill module',
             update_context: 'Running the tool — updating context',
             update_actions: 'Running the tool — updating action plan',
             write_database: 'Writing to database',
