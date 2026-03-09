@@ -166,7 +166,7 @@ export function ChatInput() {
     openIDE, setExecuting, setActiveFile, setIDETab, ideOpen,
     clearLiveCode, appendLiveCode, addLiveCodeFile,
     addWorklogEntry, updateWorklogEntry, clearWorklog,
-    setContainerStatus, setPreviewUrl, saveChatFiles, addAsset, updateAsset,
+    setContainerStatus, setPreviewUrl, setPendingRunCommand, saveChatFiles, addAsset, updateAsset,
     setLastMode,
   } = useAppStore(
     useShallow((s) => ({
@@ -192,6 +192,7 @@ export function ChatInput() {
       clearWorklog: s.clearWorklog,
       setContainerStatus: s.setContainerStatus,
       setPreviewUrl: s.setPreviewUrl,
+      setPendingRunCommand: s.setPendingRunCommand,
       saveChatFiles: s.saveChatFiles,
       addAsset: s.addAsset,
       updateAsset: s.updateAsset,
@@ -1370,6 +1371,54 @@ export function ChatInput() {
           'or extend something, assume they mean the files above unless specified otherwise.',
         ]
         upsertFile('BRAIN.md', brainLines.join('\n'), 'markdown')
+
+        // ── Auto-run detection ─────────────────────────────────────────────
+        // If build included a package.json with a dev script (Vite, CRA, Next, etc.)
+        // automatically fire the dev server in the terminal. Sparkie never declares
+        // "preview ready" for Node projects without actually starting the server.
+        const allBuiltFiles = Array.from(createdFileNames)
+        const hasPackageJson = allBuiltFiles.some(f => f.endsWith('package.json') || f === 'package.json')
+        if (hasPackageJson) {
+          // Find the package.json content from the store to check for scripts.dev
+          const pkgFile = useAppStore.getState().files.find(f =>
+            f.name === 'package.json' || f.name?.endsWith('/package.json')
+          )
+          let hasDevScript = false
+          let startCmd = 'npm install && npm run dev'
+          try {
+            if (pkgFile?.content) {
+              const pkg = JSON.parse(pkgFile.content) as { scripts?: Record<string, string> }
+              hasDevScript = !!(pkg.scripts?.dev || pkg.scripts?.start)
+              // Prefer start.sh if it was built (already has npm install && npm run dev)
+              const hasStartSh = allBuiltFiles.some(f => f === 'start.sh' || f.endsWith('/start.sh'))
+              if (hasStartSh) startCmd = 'sh start.sh'
+              else if (pkg.scripts?.dev) startCmd = 'npm install && npm run dev'
+              else if (pkg.scripts?.start) startCmd = 'npm install && npm start'
+            }
+          } catch { hasDevScript = true /* assume dev project if package.json parse fails */ }
+
+          if (hasDevScript) {
+            // Update the build message so user knows terminal is running
+            if (buildMsgId) updateMessage(chatId, buildMsgId, {
+              content: \`✨ Built \${fileNames} — starting dev server...\`,
+              isStreaming: false,
+            })
+            // Switch to terminal tab so user sees npm install progress
+            setIDETab('terminal')
+            // Signal Terminal.tsx to run the command when E2B shell is ready
+            setPendingRunCommand(startCmd)
+            // Update wrap message
+            const nodeWrapPhrases = [
+              \`Installing dependencies and starting the dev server — preview will load automatically once it's up!\`,
+              \`On it — running \\`\${startCmd}\\` now. Preview will appear as soon as the server starts ✨\`,
+              \`Firing up the dev server! Give it a moment — preview loads automatically when it's ready 🔥\`,
+            ]
+            updateMessage(chatId, ackMsgId, {
+              content: nodeWrapPhrases[Math.floor(Math.random() * nodeWrapPhrases.length)],
+              isStreaming: false,
+            })
+          }
+        }
       } else {
         // No files — restore archive and show text response
         const currentState = useAppStore.getState()
