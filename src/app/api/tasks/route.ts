@@ -174,14 +174,11 @@ export async function PATCH(req: NextRequest) {
           try {
             const emailBody = payload.body ?? ''
 
-            // Build attachment type from PATCH body
-            // attachment may have: { name, base64Data, mimeType } (from upload-attachment echo)
-            // OR: { name, s3key, mimeType } (legacy Composio path - kept for compat)
             const attData = attachment as Record<string, string> | null | undefined
-            const hasAttachment = !!attData?.base64Data && !!attData?.filename
+            const hasAttachment = !!attData?.base64Data && !!(attData?.filename || attData?.name)
 
             if (!hasAttachment) {
-              // No attachment — use simple Composio GMAIL_SEND_EMAIL call
+              // No attachment — use Composio GMAIL_SEND_EMAIL tool
               const composioRes = await fetch('https://backend.composio.dev/api/v3/tools/execute/GMAIL_SEND_EMAIL', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'x-api-key': composioKey },
@@ -203,6 +200,7 @@ export async function PATCH(req: NextRequest) {
               }
             } else {
               // Has attachment — build raw RFC 2822 MIME message and send via Gmail API directly
+              // GMAIL_SEND_EMAIL tool does not support 'raw' field — must use Gmail REST API proxy
               const boundary = `sparkie_${Date.now()}_boundary`
               const subject = payload.subject ?? '(no subject)'
               const mimeType = attData.mimeType || attData.mimetype || 'application/octet-stream'
@@ -239,25 +237,67 @@ export async function PATCH(req: NextRequest) {
               const rawBase64url = Buffer.from(rawMessage).toString('base64')
                 .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 
-              // Send via Composio GMAIL_SEND_EMAIL using 'raw' field ONLY
-              // IMPORTANT: when 'raw' is present, Gmail API uses it exclusively.
-              // Passing other fields (recipient_email, subject, body) alongside 'raw'
-              // causes Composio to use the simple send path and ignore the MIME raw payload.
-              const composioRes = await fetch('https://backend.composio.dev/api/v3/tools/execute/GMAIL_SEND_EMAIL', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-api-key': composioKey },
-                body: JSON.stringify({
-                  entity_id: entityId,
-                  arguments: {
-                    raw: rawBase64url,
-                  },
-                }),
-              })
-              if (!composioRes.ok) {
-                const errText = await composioRes.text()
-                console.error('[tasks PATCH] Gmail send (with attachment) failed:', composioRes.status, errText)
+              // Step 1: Get the user's Gmail connectedAccountId from Composio
+              let connectedAccountId: string | null = null
+              try {
+                const connRes = await fetch(
+                  `https://backend.composio.dev/api/v3/connectedAccounts?entityId=${encodeURIComponent(entityId)}&appName=gmail&status=ACTIVE&limit=1`,
+                  { headers: { 'x-api-key': composioKey } }
+                )
+                if (connRes.ok) {
+                  const connData = await connRes.json() as { items?: Array<{ id: string }> }
+                  connectedAccountId = connData.items?.[0]?.id ?? null
+                  console.log('[tasks PATCH] Gmail connectedAccountId:', connectedAccountId)
+                } else {
+                  const errText = await connRes.text()
+                  console.error('[tasks PATCH] Failed to fetch connectedAccount:', connRes.status, errText)
+                }
+              } catch (e) {
+                console.error('[tasks PATCH] connectedAccount fetch error:', e)
+              }
+
+              if (!connectedAccountId) {
+                console.error('[tasks PATCH] No Gmail connectedAccountId found for entity:', entityId)
+                // Fallback: try plain send without attachment so at least the email gets through
+                const fallbackRes = await fetch('https://backend.composio.dev/api/v3/tools/execute/GMAIL_SEND_EMAIL', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'x-api-key': composioKey },
+                  body: JSON.stringify({
+                    entity_id: entityId,
+                    arguments: {
+                      recipient_email: recipientEmail,
+                      subject: payload.subject ?? '(no subject)',
+                      body: `${emailBody}\n\n[Attachment could not be delivered — please see original message]`,
+                      is_html: false,
+                    },
+                  }),
+                })
+                console.log('[tasks PATCH] Fallback plain send status:', fallbackRes.status)
               } else {
-                console.log('[tasks PATCH] Gmail send with attachment success for:', recipientEmail, 'file:', filename)
+                // Step 2: Use Composio proxy to call Gmail API directly with raw MIME
+                // POST https://gmail.googleapis.com/gmail/v1/users/me/messages/send
+                // Composio proxy injects the OAuth token for connectedAccountId
+                try {
+                  const proxyRes = await fetch('https://backend.composio.dev/api/v2/actions/proxy', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'x-api-key': composioKey },
+                    body: JSON.stringify({
+                      endpoint: '/gmail/v1/users/me/messages/send',
+                      method: 'POST',
+                      connectedAccountId,
+                      body: { raw: rawBase64url },
+                    }),
+                  })
+                  if (!proxyRes.ok) {
+                    const errText = await proxyRes.text()
+                    console.error('[tasks PATCH] Gmail proxy send (with attachment) failed:', proxyRes.status, errText)
+                  } else {
+                    const proxyData = await proxyRes.json()
+                    console.log('[tasks PATCH] Gmail proxy send (with attachment) success for:', recipientEmail, 'file:', filename, 'messageId:', proxyData?.id)
+                  }
+                } catch (e) {
+                  console.error('[tasks PATCH] Gmail proxy send error:', e)
+                }
               }
             }
           } catch (e) {
