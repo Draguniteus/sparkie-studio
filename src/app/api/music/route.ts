@@ -206,88 +206,80 @@ async function handleAceMusic(
 
     console.log('[/api/music] ACE Step 2: calling ACE with lyrics, duration=150, batch_size=2')
 
-    const res = await fetch(ACE_MUSIC_BASE + '/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + aceKey,
-      },
-      body: JSON.stringify({
-        messages: [{ role: 'user', content: taggedContent }],
-        sample_mode: false,
-        stream: true,
-        batch_size: 2,
-        audio_config: {
-          duration: 150,
-          vocal_language: 'en',
-          format: 'mp3',
-        },
-      }),
-      signal: AbortSignal.timeout(240000),
-    })
-
-    clearInterval(keepalive)
-
-    if (!res.ok) {
-      const errText = await res.text().catch(() => 'HTTP ' + res.status)
-      let errMsg = 'ACE Music error ' + res.status
+    // Run two ACE requests in parallel (batch_size:1 each) to guarantee 2 independent versions
+    const makeAceRequest = async (): Promise<{ audioUrl: string | undefined; content: string }> => {
+      const r = await fetch(ACE_MUSIC_BASE + '/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aceKey },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: taggedContent }],
+          sample_mode: false,
+          stream: true,
+          batch_size: 1,
+          audio_config: { duration: 150, vocal_language: 'en', format: 'mp3' },
+        }),
+        signal: AbortSignal.timeout(240000),
+      })
+      if (!r.ok) {
+        const errText = await r.text().catch(() => 'HTTP ' + r.status)
+        let errMsg = 'ACE Music error ' + r.status
+        try { const j = JSON.parse(errText); errMsg = j?.error?.message || j?.message || errMsg } catch { /* noop */ }
+        throw new Error(errMsg)
+      }
+      const rdr = r.body!.getReader()
+      const dec = new TextDecoder()
+      let buf = '', accum = '', foundUrl: string | undefined
       try {
-        const errJson = JSON.parse(errText)
-        errMsg = errJson?.error?.message || errJson?.message || errMsg
-      } catch { /* use status */ }
-      console.error('[/api/music] ACE HTTP error', res.status, errMsg)
-      send('data: ' + JSON.stringify({ error: errMsg }) + '\n\n')
-      return
-    }
-
-    const reader = res.body!.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-    let contentAccum = ''
-    const audioUrls: string[] = []
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() ?? ''
-
-        for (const line of lines) {
-          if (!line.startsWith('data:')) continue
-          const json = line.slice(5).trim()
-          if (!json || json === '[DONE]') continue
-
-          let chunk: Record<string, unknown>
-          try { chunk = JSON.parse(json) } catch { continue }
-
-          const choices = chunk.choices as Array<Record<string, unknown>> | undefined
-          if (!choices) continue
-
-          for (const choice of choices) {
-            const delta = choice.delta as Record<string, unknown> | undefined
-            if (!delta) continue
-
-            if (typeof delta.content === 'string' && delta.content) {
-              contentAccum += delta.content
-            }
-
-            const audioArr = delta.audio as Array<Record<string, unknown>> | undefined
-            if (audioArr) {
-              for (const item of audioArr) {
-                const audioUrl = (item.audio_url as Record<string, unknown> | undefined)?.url as string | undefined
-                if (audioUrl && typeof audioUrl === 'string' && audioUrls.length < 2) {
-                  audioUrls.push(audioUrl)
+        while (true) {
+          const { done, value } = await rdr.read()
+          if (done) break
+          buf += dec.decode(value, { stream: true })
+          const lines = buf.split('\n'); buf = lines.pop() ?? ''
+          for (const line of lines) {
+            if (!line.startsWith('data:')) continue
+            const j = line.slice(5).trim()
+            if (!j || j === '[DONE]') continue
+            let chunk: Record<string, unknown>
+            try { chunk = JSON.parse(j) } catch { continue }
+            const choices = chunk.choices as Array<Record<string, unknown>> | undefined
+            if (!choices) continue
+            for (const choice of choices) {
+              const delta = choice.delta as Record<string, unknown> | undefined
+              if (!delta) continue
+              if (typeof delta.content === 'string') accum += delta.content
+              const audioArr = delta.audio as Array<Record<string, unknown>> | undefined
+              if (audioArr && !foundUrl) {
+                for (const item of audioArr) {
+                  const u = (item.audio_url as Record<string, unknown> | undefined)?.url as string | undefined
+                  if (u) { foundUrl = u; break }
                 }
               }
             }
           }
         }
-      }
-    } finally {
-      reader.cancel().catch(() => {})
+      } finally { rdr.cancel().catch(() => {}) }
+      return { audioUrl: foundUrl, content: accum }
     }
+
+    clearInterval(keepalive)
+
+    // Run both in parallel; if v2 fails, still send v1
+    const [r1Result, r2Result] = await Promise.allSettled([makeAceRequest(), makeAceRequest()])
+
+    const res1 = r1Result.status === 'fulfilled' ? r1Result.value : null
+    const res2 = r2Result.status === 'fulfilled' ? r2Result.value : null
+
+    if (!res1?.audioUrl && !res2?.audioUrl) {
+      const errMsg = r1Result.status === 'rejected' ? (r1Result.reason as Error).message : 'ACE Music returned no audio'
+      console.error('[/api/music] ACE both requests failed:', errMsg)
+      send('data: ' + JSON.stringify({ error: errMsg }) + '\n\n')
+      return
+    }
+
+    const contentAccum = res1?.content || res2?.content || ''
+    const audioUrls: string[] = []
+    if (res1?.audioUrl) audioUrls.push(res1.audioUrl)
+    if (res2?.audioUrl) audioUrls.push(res2.audioUrl)
 
     // ── Build final metadata ─────────────────────────────────────────────────
     // Extract title/style from ACE content if richer than what MiniMax gave us

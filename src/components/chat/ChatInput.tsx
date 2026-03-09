@@ -63,6 +63,7 @@ const VIDEO_MODELS = [
 ]
 
 const MUSIC_MODELS = [
+  { id: "music-2.5+", name: "Music-2.5+", tag: "Paid", desc: "$0.15 / 5 min — ultra quality" },
   { id: "music-2.5", name: "Music-2.5", tag: "Paid", desc: "$0.15 / 5 min — high quality" },
   { id: "music-2.0", name: "Music-2.0", tag: "Paid", desc: "$0.03 / 5 min — fast" },
   { id: "ace-step-free", name: "ACE-Step 1.5", tag: "Free", desc: "Unlimited free music — no credits" },
@@ -642,11 +643,17 @@ export function ChatInput() {
                 if (sseData.url) {
                   updateMessage(chatId, assistantMsgId, {
                     content: prompt,
-                    imageUrl: sseData.url,
+                    imageUrl: sseData.url as string,
                     imagePrompt: prompt,
                     isStreaming: false,
-                    type: "music",
+                    type: "ace_music",
                     model: model,
+                    aceMetadata: {
+                      title: (sseData.title as string) || prompt.slice(0, 60).replace(/\b\w/g, c => c.toUpperCase()).trim() || "Sparkie Mix",
+                      style: (sseData.style as string) || prompt.slice(0, 200),
+                      lyrics: (sseData.lyrics as string) || "",
+                      url2: undefined,
+                    },
                   })
                   const mediaChatTitle = useAppStore.getState().chats.find(c => c.id === chatId)?.title || "New Chat"
                   const safePrompt = prompt.slice(0, 40).replace(/[^a-z0-9 ]/gi, "").trim().replace(/\s+/g, "-") || "music"
