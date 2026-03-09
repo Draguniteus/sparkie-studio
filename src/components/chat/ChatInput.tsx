@@ -587,6 +587,38 @@ export function ChatInput() {
                   setStreaming(false)
                   return
                 }
+                // ACE Music: rich card with title, v1/v2, style, lyrics
+                if (sseData.type === "ace_music" && sseData.url) {
+                  updateMessage(chatId, assistantMsgId, {
+                    content: prompt,
+                    imageUrl: sseData.url as string,
+                    imagePrompt: prompt,
+                    isStreaming: false,
+                    type: "ace_music",
+                    model: "ace-step-free",
+                    aceMetadata: {
+                      title: (sseData.title as string) || "Sparkie Mix",
+                      style: (sseData.style as string) || prompt.slice(0, 120),
+                      lyrics: (sseData.lyrics as string) || "",
+                      url2: (sseData.url2 as string) || undefined,
+                    },
+                  })
+                  const mediaChatTitle = useAppStore.getState().chats.find(c => c.id === chatId)?.title || "New Chat"
+                  const safePrompt = prompt.slice(0, 40).replace(/[^a-z0-9 ]/gi, "").trim().replace(/\s+/g, "-") || "music"
+                  addAsset({
+                    name: `${safePrompt}-ace.mp3`,
+                    language: "",
+                    content: sseData.url as string,
+                    chatId,
+                    chatTitle: mediaChatTitle,
+                    fileId: assistantMsgId,
+                    assetType: "audio" as import("@/store/appStore").AssetType,
+                    source: "agent" as const,
+                  })
+                  updateWorklogEntry(logId, { status: "done", duration: Date.now() - startTime })
+                  setStreaming(false)
+                  return
+                }
                 if (sseData.url) {
                   updateMessage(chatId, assistantMsgId, {
                     content: prompt,
