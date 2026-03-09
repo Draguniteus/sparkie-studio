@@ -15,29 +15,32 @@ const MINIMAX_MODEL_MAP: Record<string, string> = {
   'music-01-lite': 'music-2.0',
 }
 
+// Models that support auto_lyrics generation from prompt
+const AUTO_LYRICS_MODELS = new Set(['music-2.5'])
+
 async function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 function normalizeLyricsTags(lyrics: string): string {
   return lyrics.replace(/\[([^\]]+)\]/g, (_, inner) => {
-    const cleaned = inner.replace(/\s*[–—\-\(].*$/, '').replace(/\s+\d+$/, '').trim()
+    const cleaned = inner.replace(/\s*[\u2013\u2014\-\(].*/g, '').replace(/\s+\d+$/, '').trim()
     const s = cleaned.toLowerCase()
-    if (/\bverse\b/.test(s))                                   return '[Verse]'
-    if (/\bpre[\s\-]?chorus\b/.test(s))                       return '[Pre Chorus]'
-    if (/\bpost[\s\-]?chorus\b/.test(s))                      return '[Post Chorus]'
-    if (/\bfinal\s+chorus\b/.test(s))                         return '[Chorus]'
-    if (/\bchorus\b/.test(s))                                  return '[Chorus]'
-    if (/\bbridge\b/.test(s))                                  return '[Bridge]'
-    if (/\boutro\b/.test(s))                                   return '[Outro]'
-    if (/\bintro\b/.test(s))                                   return '[Intro]'
-    if (/\bhook\b/.test(s))                                    return '[Hook]'
-    if (/\binterlude\b/.test(s))                               return '[Interlude]'
-    if (/\btransition\b/.test(s))                              return '[Transition]'
-    if (/\bbreak\b/.test(s))                                   return '[Break]'
-    if (/\bbuild[\s\-]?up\b/.test(s))                         return '[Build Up]'
-    if (/\binst\b|\binstrumental\b/.test(s))                   return '[Inst]'
-    if (/\bsolo\b/.test(s))                                    return '[Solo]'
+    if (/\bverse\b/.test(s))                                           return '[Verse]'
+    if (/\bpre[\s\-]?chorus\b/.test(s))                               return '[Pre Chorus]'
+    if (/\bpost[\s\-]?chorus\b/.test(s))                              return '[Post Chorus]'
+    if (/\bfinal\s+chorus\b/.test(s))                                 return '[Chorus]'
+    if (/\bchorus\b/.test(s))                                          return '[Chorus]'
+    if (/\bbridge\b/.test(s))                                          return '[Bridge]'
+    if (/\boutro\b/.test(s))                                           return '[Outro]'
+    if (/\bintro\b/.test(s))                                           return '[Intro]'
+    if (/\bhook\b/.test(s))                                            return '[Hook]'
+    if (/\binterlude\b/.test(s))                                       return '[Interlude]'
+    if (/\btransition\b/.test(s))                                      return '[Transition]'
+    if (/\bbreak\b/.test(s))                                           return '[Break]'
+    if (/\bbuild[\s\-]?up\b/.test(s))                                 return '[Build Up]'
+    if (/\binst\b|\binstrumental\b/.test(s))                          return '[Inst]'
+    if (/\bsolo\b/.test(s))                                            return '[Solo]'
     return '[' + cleaned.charAt(0).toUpperCase() + cleaned.slice(1) + ']'
   })
 }
@@ -219,8 +222,10 @@ export async function POST(req: NextRequest) {
   let finalLyrics = (explicitLyrics || lyrics).trim()
   const finalPrompt = stylePrompt.trim()
 
-  // If no lyrics, auto-generate via MiniMax lyrics API
-  if (!finalLyrics) {
+  const supportsAutoLyrics = AUTO_LYRICS_MODELS.has(minimaxModel)
+
+  // If no lyrics and model doesn't support auto_lyrics, try the lyrics generation API first
+  if (!finalLyrics && !supportsAutoLyrics) {
     try {
       const lyricsRes = await fetch(MINIMAX_BASE + '/lyrics_generation', {
         method: 'POST',
@@ -236,15 +241,25 @@ export async function POST(req: NextRequest) {
           finalLyrics = lyricsData.lyrics
         }
       }
-    } catch { /* fall through — MiniMax music will error on empty lyrics */ }
+    } catch { /* fall through — will use auto_lyrics or send without lyrics */ }
   }
 
+  // Build request body — do NOT include output_format (not a valid MiniMax field; causes silent audio)
   const requestBody: Record<string, unknown> = {
     model: minimaxModel,
     prompt: finalPrompt,
-    lyrics: finalLyrics,
-    output_format: 'url',
     audio_setting: { sample_rate: 44100, bitrate: 128000, format: 'mp3' },
+  }
+
+  if (finalLyrics) {
+    // Explicit lyrics provided or fetched from lyrics API
+    requestBody.lyrics = finalLyrics
+  } else if (supportsAutoLyrics) {
+    // music-2.5 supports auto_lyrics: true — MiniMax generates lyrics from prompt internally
+    requestBody.auto_lyrics = true
+  } else {
+    // music-2.0 fallback — send empty lyrics; API will handle (may produce instrumental)
+    requestBody.lyrics = ''
   }
 
   const stream = new ReadableStream({
@@ -283,12 +298,13 @@ export async function POST(req: NextRequest) {
           return
         }
 
-        // MiniMax music_generation returns audio URL in multiple shapes depending on model/version:
+        // MiniMax music_generation returns audio in multiple shapes depending on model/version:
         // music-2.5: { data: { audioURL: "..." } } or { data: [{ audioURL: "..." }] }
-        // music-2.0: { data: { audio_url: "..." } } or hex audio in { data: { audio: "hex" } }
+        // music-2.0: hex audio in { data: { audio: "hex" } }
+        // Both models (no output_format): default returns hex in data.audio
         const dataPayload = Array.isArray(data?.data) ? data.data[0] : data?.data
         const audioFieldValue = dataPayload?.audio_file || dataPayload?.audioURL
-          || dataPayload?.audio_url || dataPayload?.audio || dataPayload?.url || dataPayload?.download_url
+          || dataPayload?.audio_url || dataPayload?.url || dataPayload?.download_url
 
         if (audioFieldValue && (String(audioFieldValue).startsWith('http') || String(audioFieldValue).startsWith('data:'))) {
           // Persist to GitHub (best-effort) before sending to client
@@ -298,19 +314,26 @@ export async function POST(req: NextRequest) {
           return
         }
 
-        // Hex audio fallback (output_format:'hex')
+        // Hex audio — default MiniMax return format when no output_format is specified
         const hexAudio = dataPayload?.audio
-        if (hexAudio && !String(hexAudio).startsWith('http')) {
-          const audioBase64 = Buffer.from(hexAudio, 'hex').toString('base64')
-          const dataUrl = 'data:audio/mp3;base64,' + audioBase64
-          const persistentUrl = await tryPersistAudio(dataUrl, userId)
-          send('data: ' + JSON.stringify({ url: persistentUrl, model: minimaxModel, persistent: persistentUrl !== dataUrl }) + '\n\n')
-          controller.close()
-          return
+        if (hexAudio && typeof hexAudio === 'string' && hexAudio.length > 0 && !hexAudio.startsWith('http')) {
+          try {
+            const audioBuf = Buffer.from(hexAudio, 'hex')
+            if (audioBuf.length === 0) throw new Error('Hex decode produced empty buffer')
+            const audioBase64 = audioBuf.toString('base64')
+            const dataUrl = 'data:audio/mp3;base64,' + audioBase64
+            const persistentUrl = await tryPersistAudio(dataUrl, userId)
+            send('data: ' + JSON.stringify({ url: persistentUrl, model: minimaxModel, persistent: persistentUrl !== dataUrl }) + '\n\n')
+            controller.close()
+            return
+          } catch (hexErr) {
+            console.error('[/api/music] Hex decode failed:', hexErr)
+            // Fall through to diagnostics below
+          }
         }
 
-        // Neither audio_url nor hex — surface diagnostics
-        console.error('[/api/music] No audio URL found. data keys:', Object.keys(dataPayload || {}), '| full response data:', JSON.stringify(data?.data).slice(0,500))
+        // Neither audio URL nor valid hex — surface diagnostics
+        console.error('[/api/music] No audio found. dataPayload keys:', Object.keys(dataPayload || {}), '| full response data:', JSON.stringify(data?.data).slice(0, 500))
         const dataKeys = Object.keys(dataPayload || {})
         const statusCode = data?.base_resp?.status_code
         const statusMsg = data?.base_resp?.status_msg || ''
