@@ -1,195 +1,210 @@
-LyoqCiAqIFBhcnNlIEFJIHJlc3BvbnNlIHRvIGV4dHJhY3QgZmlsZSBibG9j
-a3MuCiAqIFN1cHBvcnRzIG11bHRpcGxlIG91dHB1dCBmb3JtYXRzIGZyb20g
-ZGlmZmVyZW50IG1vZGVscy4KICoKICogQXV0by13cmFwcGluZyBydWxlOgog
-KiBJZiBBTEwgcGFyc2VkIGZpbGUgbmFtZXMgc2hhcmUgbm8gY29tbW9uIHJv
-b3QgZm9sZGVyIChpLmUuLCB0aGV5IGFyZSBmbGF0IGxpa2UKICogInBhY2th
-Z2UuanNvbiIsICJzcmMvQXBwLmpzeCIpLCB0aGV5IGFyZSB3cmFwcGVkIGlu
-IGEgc2FuaXRpemVkIHByb2plY3ROYW1lIGZvbGRlci4KICovCgpleHBvcnQg
-aW50ZXJmYWNlIFBhcnNlZEZpbGUgewogIG5hbWU6IHN0cmluZwogIGNvbnRl
-bnQ6IHN0cmluZwp9CgpleHBvcnQgaW50ZXJmYWNlIFBhcnNlUmVzdWx0IHsK
-ICB0ZXh0OiBzdHJpbmcKICBmaWxlczogUGFyc2VkRmlsZVtdCiAgZm9sZGVy
-cz86IHN0cmluZ1tdICAvLyBleHBsaWNpdCAtLS1GT0xERVI6LS0tIGRlY2xh
-cmF0aW9ucyBmcm9tIGFnZW50Cn0KCi8qKgogKiBEZXJpdmUgYSBzYWZlIGZv
-bGRlciBuYW1lIGZyb20gdGhlIGNoYXQgdGl0bGUgb3IgcHJvbXB0LgogKiBl
-LmcuICJCdWlsZCBtZSBhIHRhc2sgbWFuYWdlciBhcHAiIOKGkiAidGFzay1t
-YW5hZ2VyIgogKiAgICAgICJOZXcgQ2hhdCIg4oaSICJwcm9qZWN0IgogKi8K
-ZXhwb3J0IGZ1bmN0aW9uIGRlcml2ZVByb2plY3ROYW1lKGNoYXRUaXRsZTog
-c3RyaW5nKTogc3RyaW5nIHsKICBpZiAoIWNoYXRUaXRsZSB8fCBjaGF0VGl0
-bGUudHJpbSgpID09PSAnJyB8fCBjaGF0VGl0bGUudG9Mb3dlckNhc2UoKSA9
-PT0gJ25ldyBjaGF0JykgewogICAgcmV0dXJuICdwcm9qZWN0JwogIH0KICBy
-ZXR1cm4gY2hhdFRpdGxlCiAgICAudG9Mb3dlckNhc2UoKQogICAgLnJlcGxh
-Y2UoL2J1aWxkIChtZSApP2E/bj8gPy9pLCAnJykgICAvLyBzdHJpcCAiYnVp
-bGQgbWUgYSIsICJidWlsZCBhIgogICAgLnJlcGxhY2UoL2FwcHxhcHBsaWNh
-dGlvbnx3ZWJzaXRlfHNpdGV8Z2FtZXx0b29sfGRhc2hib2FyZC9naSwgKG0p
-ID0+IG0pIC8vIGtlZXAgbWVhbmluZ2Z1bCBrZXl3b3JkcwogICAgLnRyaW0o
-KQogICAgLnJlcGxhY2UoL1teYS16MC05XSsvZywgJy0nKSAgICAgICAgICAv
-LyBub24tYWxwaGFudW0g4oaSIGRhc2gKICAgIC5yZXBsYWNlKC9eLSt8LSsk
-L2csICcnKSAgICAgICAgICAgICAvLyB0cmltIGxlYWRpbmcvdHJhaWxpbmcg
-ZGFzaGVzCiAgICAuc2xpY2UoMCwgMzIpICAgICAgICAgICAgICAgICAgICAg
-ICAgIC8vIG1heCAzMiBjaGFycwogICAgfHwgJ3Byb2plY3QnCn0KCi8qKgog
-KiBXcmFwIGZsYXQgZmlsZXMgKG5vIHNoYXJlZCByb290IGZvbGRlcikgaW5z
-aWRlIGEgbmFtZWQgcHJvamVjdCBmb2xkZXIuCiAqIElmIGZpbGVzIGFscmVh
-ZHkgc2hhcmUgYSBzaW5nbGUgcm9vdCBsaWtlICJ0YXNrbWFuYWdlci8uLi4i
-IGxlYXZlIHRoZW0gYXMtaXMuCiAqLwpmdW5jdGlvbiB3cmFwSW5Qcm9qZWN0
-Rm9sZGVyKGZpbGVzOiBQYXJzZWRGaWxlW10sIHByb2plY3ROYW1lOiBzdHJp
-bmcpOiBQYXJzZWRGaWxlW10gewogIGlmIChmaWxlcy5sZW5ndGggPT09IDAp
-IHJldHVybiBmaWxlcwoKICAvLyBHZXQgcm9vdCBzZWdtZW50cyBvZiBlYWNo
-IGZpbGUgcGF0aAogIGNvbnN0IHJvb3RzID0gZmlsZXMubWFwKGYgPT4gewog
-ICAgY29uc3QgcGFydHMgPSBmLm5hbWUucmVwbGFjZSgvXFwvZywgJy8nKS5z
-cGxpdCgnLycpCiAgICByZXR1cm4gcGFydHMubGVuZ3RoID4gMSA/IHBhcnRz
-WzBdIDogbnVsbAogIH0pCgogIC8vIElmIGV2ZXJ5IGZpbGUgYWxyZWFkeSBo
-YXMgYSBjb21tb24gcm9vdCBmb2xkZXIg4oaSIGFscmVhZHkgd3JhcHBlZCwg
-bGVhdmUgYWxvbmUKICBjb25zdCBub25OdWxsUm9vdHMgPSByb290cy5maWx0
-ZXIoQm9vbGVhbikKICBpZiAobm9uTnVsbFJvb3RzLmxlbmd0aCA9PT0gZmls
-ZXMubGVuZ3RoKSB7CiAgICBjb25zdCBmaXJzdFJvb3QgPSBub25OdWxsUm9v
-dHNbMF0KICAgIGlmIChub25OdWxsUm9vdHMuZXZlcnkociA9PiByID09PSBm
-aXJzdFJvb3QpKSB7CiAgICAgIHJldHVybiBmaWxlcyAvLyBhbHJlYWR5IHdy
-YXBwZWQgaW4gYSBmb2xkZXIKICAgIH0KICB9CgogIC8vIE90aGVyd2lzZSB3
-cmFwIGFsbCBmaWxlcyB1bmRlciBwcm9qZWN0TmFtZS8KICBjb25zdCBzYWZl
-ID0gcHJvamVjdE5hbWUgfHwgJ3Byb2plY3QnCiAgcmV0dXJuIGZpbGVzLm1h
-cChmID0+ICh7CiAgICAuLi5mLAogICAgbmFtZTogYCR7c2FmZX0vJHtmLm5h
-bWV9YAogIH0pKQp9CgpleHBvcnQgZnVuY3Rpb24gcGFyc2VBSVJlc3BvbnNl
-KHJhdzogc3RyaW5nLCBwcm9qZWN0TmFtZT86IHN0cmluZyk6IFBhcnNlUmVz
-dWx0IHsKICBjb25zdCBmaWxlczogUGFyc2VkRmlsZVtdID0gW10KCiAgLy8g
-RXh0cmFjdCAtLS1GT0xERVI6LS0tIG1hcmtlcnMgKGV4cGxpY2l0IGZvbGRl
-ciBkZWNsYXJhdGlvbnMgZnJvbSBhZ2VudCkKICBjb25zdCBmb2xkZXJSZWdl
-eCA9IC8tLS1GT0xERVI6XHMqKFteXG4tXVteXG5dKilccyotLS0vZwogIGNv
-bnN0IGZvbGRlcnM6IHN0cmluZ1tdID0gW10KICBsZXQgZm9sZGVyTWF0Y2g6
-IFJlZ0V4cEV4ZWNBcnJheSB8IG51bGwKICB3aGlsZSAoKGZvbGRlck1hdGNo
-ID0gZm9sZGVyUmVnZXguZXhlYyhyYXcpKSAhPT0gbnVsbCkgewogICAgY29u
-c3QgZm9sZGVyUGF0aCA9IGZvbGRlck1hdGNoWzFdLnRyaW0oKS5yZXBsYWNl
-KC9eXC8rfFwvKyQvZywgJycpICAvLyBub3JtYWxpemUKICAgIGlmIChmb2xk
-ZXJQYXRoKSBmb2xkZXJzLnB1c2goZm9sZGVyUGF0aCkKICB9CiAgLy8gU3Ry
-aXAgLS0tRk9MREVSOi0tLSBtYXJrZXJzIGZyb20gcmF3IGJlZm9yZSBmdXJ0
-aGVyIHBhcnNpbmcKICBjb25zdCByYXdXaXRob3V0Rm9sZGVycyA9IHJhdy5y
-ZXBsYWNlKC8tLS1GT0xERVI6XHMqW15cbi1dW15cbl0qXHMqLS0tXG4/L2cs
-ICcnKQoKICAvLyBOb3JtYWxpemUgbGluZSBlbmRpbmdzCiAgY29uc3Qgbm9y
-bWFsaXplZCA9IHJhd1dpdGhvdXRGb2xkZXJzLnJlcGxhY2UoL1xyXG4vZywg
-J1xuJykucmVwbGFjZSgvXHIvZywgJ1xuJykKCiAgLy8g4pSA4pSAIFByaW1h
-cnk6IC0tLUZJTEU6IG5hbWUtLS0gLi4uIC0tLUVORCBGSUxFLS0tIOKUgOKU
-gOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKU
-gOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgAogIGNvbnN0IHN0cmljdFJl
-Z2V4ID0gLy0tLUZJTEU6XHMqKFteXG4tXVteXG5dKilccyotLS1ccypcbihb
-XHNcU10qPyktLS1FTkQgRklMRS0tLS9nCiAgbGV0IG1hdGNoOiBSZWdFeHBF
-eGVjQXJyYXkgfCBudWxsCiAgd2hpbGUgKChtYXRjaCA9IHN0cmljdFJlZ2V4
-LmV4ZWMobm9ybWFsaXplZCkpICE9PSBudWxsKSB7CiAgICBjb25zdCBjb250
-ZW50ID0gbWF0Y2hbMl0udHJpbUVuZCgpCiAgICBpZiAoY29udGVudC5sZW5n
-dGggPiAwKSB7CiAgICAgIGZpbGVzLnB1c2goeyBuYW1lOiBtYXRjaFsxXS50
-cmltKCksIGNvbnRlbnQgfSkKICAgIH0KICB9CiAgaWYgKGZpbGVzLmxlbmd0
-aCA+IDApIHsKICAgIGNvbnN0IHRleHQgPSBub3JtYWxpemVkLnJlcGxhY2Uo
-Ly0tLUZJTEU6XHMqW15cbi1dW15cbl0qXHMqLS0tXHMqXG5bXHNcU10qPy0t
-LUVORCBGSUxFLS0tL2csICcnKS50cmltKCkKICAgIHJldHVybiB7IHRleHQs
-IGZpbGVzOiB3cmFwSW5Qcm9qZWN0Rm9sZGVyKGZpbGVzLCBwcm9qZWN0TmFt
-ZSB8fCAncHJvamVjdCcpLCBmb2xkZXJzIH0KICB9CgogIC8vIOKUgOKUgCBG
-YWxsYmFjayBBOiAtLS1GSUxFOiB3aXRob3V0IC0tLUVORCBGSUxFLS0tIOKU
-gOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKU
-gOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgAogIGNvbnN0IGxv
-b3NlUmVnZXggPSAvLS0tRklMRTpccyooW15cbi1dW15cbl0qKVxzKi0tLVxz
-KlxuKFtcc1xTXSo/KSg/PS0tLUZJTEU6fCQpL2cKICBjb25zdCBsb29zZU1h
-dGNoZXM6IEFycmF5PHsgbmFtZTogc3RyaW5nOyBjb250ZW50OiBzdHJpbmcg
-fT4gPSBbXQogIHdoaWxlICgobWF0Y2ggPSBsb29zZVJlZ2V4LmV4ZWMobm9y
-bWFsaXplZCkpICE9PSBudWxsKSB7CiAgICBjb25zdCBjb250ZW50ID0gbWF0
-Y2hbMl0udHJpbUVuZCgpCiAgICBpZiAoY29udGVudC5sZW5ndGggPiAwKSB7
-CiAgICAgIGxvb3NlTWF0Y2hlcy5wdXNoKHsgbmFtZTogbWF0Y2hbMV0udHJp
-bSgpLCBjb250ZW50IH0pCiAgICB9CiAgfQogIGlmIChsb29zZU1hdGNoZXMu
-bGVuZ3RoID4gMCkgewogICAgZm9yIChjb25zdCBmIG9mIGxvb3NlTWF0Y2hl
-cykgZmlsZXMucHVzaChmKQogICAgY29uc3QgdGV4dCA9IG5vcm1hbGl6ZWQu
-cmVwbGFjZSgvLS0tRklMRTpccypbXlxuLV1bXlxuXSpccyotLS1ccypcbltc
-c1xTXSo/KD89LS0tRklMRTp8JCkvZywgJycpLnRyaW0oKQogICAgcmV0dXJu
-IHsgdGV4dCwgZmlsZXM6IHdyYXBJblByb2plY3RGb2xkZXIoZmlsZXMsIHBy
-b2plY3ROYW1lIHx8ICdwcm9qZWN0JyksIGZvbGRlcnMgfQogIH0KCiAgLy8g
-4pSA4pSAIEZhbGxiYWNrIEI6IGZlbmNlZCBjb2RlIGJsb2NrcyDilIDilIDi
-lIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDi
-lIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDi
-lIDilIDilIDilIDilIDilIDilIAKICBjb25zdCBjb2RlQmxvY2tSZWdleCA9
-IC9gYGAoW15cbl0qKVxuKFtcc1xTXSo/KWBgYC9nCiAgbGV0IGNiTWF0Y2g6
-IFJlZ0V4cEV4ZWNBcnJheSB8IG51bGwKICBsZXQgZmlsZUluZGV4ID0gMAog
-IHdoaWxlICgoY2JNYXRjaCA9IGNvZGVCbG9ja1JlZ2V4LmV4ZWMobm9ybWFs
-aXplZCkpICE9PSBudWxsKSB7CiAgICBjb25zdCBsYW5nU3RyID0gY2JNYXRj
-aFsxXS50cmltKCkKICAgIGNvbnN0IGNvbnRlbnQgPSBjYk1hdGNoWzJdLnRy
-aW1FbmQoKQogICAgaWYgKCFjb250ZW50KSBjb250aW51ZQogICAgbGV0IG5h
-bWU6IHN0cmluZwogICAgaWYgKGxhbmdTdHIuaW5jbHVkZXMoJy4nKSkgewog
-ICAgICBuYW1lID0gbGFuZ1N0cgogICAgfSBlbHNlIHsKICAgICAgbmFtZSA9
-IGluZmVyRmlsZW5hbWUobGFuZ1N0ciwgY29udGVudCwgZmlsZUluZGV4KQog
-ICAgfQogICAgZmlsZXMucHVzaCh7IG5hbWUsIGNvbnRlbnQgfSkKICAgIGZp
-bGVJbmRleCsrCiAgfQogIGlmIChmaWxlcy5sZW5ndGggPiAwKSB7CiAgICBj
-b25zdCB0ZXh0ID0gbm9ybWFsaXplZC5yZXBsYWNlKC9gYGBbXlxuXSpcbltc
-c1xTXSo/YGBgL2csICcnKS50cmltKCkKICAgIHJldHVybiB7IHRleHQsIGZp
-bGVzOiB3cmFwSW5Qcm9qZWN0Rm9sZGVyKGZpbGVzLCBwcm9qZWN0TmFtZSB8
-fCAncHJvamVjdCcpLCBmb2xkZXJzIH0KICB9CgogIC8vIOKUgOKUgCBGYWxs
-YmFjayBDOiByYXcgSFRNTC9KUy9DU1MgKG5vIG1hcmtlcnMgYXQgYWxsKSDi
-lIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDi
-lIDilIDilIDilIDilIDilIDilIAKICAvLyBHdWFyZDogcmVqZWN0IE1pbmlN
-YXgvQUkgWE1MIHRvb2wtY2FsbCBvdXRwdXQg4oCUIG5ldmVyIHNhdmUgYXMg
-YSBmaWxlCiAgY29uc3QgaXNUb29sQ2FsbFhtbCA9IC88bWluaW1heDp0b29s
-X2NhbGx8PGludm9rZVxzfDx0b29sX2NhbGx8PGZ1bmN0aW9uX2NhbGxzL2ku
-dGVzdChub3JtYWxpemVkKQogIGlmIChpc1Rvb2xDYWxsWG1sKSB7CiAgICBy
-ZXR1cm4geyB0ZXh0OiAnJywgZmlsZXM6IFtdIH0KICB9CiAgLy8gR3VhcmQ6
-IHJlamVjdCBwbGFubmluZyB0ZXh0IC8gbmF0dXJhbCBsYW5ndWFnZSByZXNw
-b25zZXMgd2l0aG91dCBjb2RlCiAgY29uc3QgZmlyc3RMaW5lID0gbm9ybWFs
-aXplZC50cmltKCkuc3BsaXQoJ1xuJylbMF0KICBjb25zdCBpc05hdHVyYWxM
-YW5ndWFnZSA9IC9eKEknP2xsfEkgd2lsbHxMZXQgbWV8SGVyZSc/c3xTdXJl
-fE9rYXl8T2YgY291cnNlfENyZWF0aW5nfEJ1aWxkaW5nfEknP3ZlKS9pLnRl
-c3QoZmlyc3RMaW5lKQogICAgJiYgIW5vcm1hbGl6ZWQuaW5jbHVkZXMoJy0t
-LUZJTEU6JykKICAgICYmICEvWzx7XS8udGVzdChub3JtYWxpemVkLnNsaWNl
-KDAsIDUwKSkKICBpZiAoaXNOYXR1cmFsTGFuZ3VhZ2UpIHsKICAgIHJldHVy
-biB7IHRleHQ6IG5vcm1hbGl6ZWQsIGZpbGVzOiBbXSB9CiAgfQogIC8vIE9O
-TFkgZmlyZXMgd2hlbiB0aGVyZSBhcmUgemVybyAtLS1GSUxFOi0tLSBtYXJr
-ZXJzIGluIHRoZSBvdXRwdXQKICBjb25zdCBoYXNBbnlGaWxlTWFya2VyID0g
-Ly0tLUZJTEU6L2kudGVzdChub3JtYWxpemVkKQogIGlmICghaGFzQW55Rmls
-ZU1hcmtlciAmJiBub3JtYWxpemVkLnRyaW0oKS5sZW5ndGggPiA1MCkgewog
-ICAgY29uc3QgdHJpbW1lZCA9IG5vcm1hbGl6ZWQudHJpbSgpCiAgICBjb25z
-dCBsb29rc0xpa2VIVE1MID0gLzxodG1sfDwhRE9DVFlQRS9pLnRlc3QodHJp
-bW1lZCkKICAgIGNvbnN0IGxvb2tzTGlrZUpTID0gL14oY29uc3R8bGV0fHZh
-cnxmdW5jdGlvbnxpbXBvcnR8ZXhwb3J0fGNsYXNzKVxiLy50ZXN0KHRyaW1t
-ZWQpCiAgICBjb25zdCBsb29rc0xpa2VDU1MgPSAvXltcc1xTXSo/XHtbXHNc
-U10qP1x9Ly50ZXN0KHRyaW1tZWQpICYmICFsb29rc0xpa2VIVE1MICYmICFs
-b29rc0xpa2VKUwoKICAgIGxldCBmYWxsYmFja05hbWUgPSAnaW5kZXguaHRt
-bCcKICAgIGlmIChsb29rc0xpa2VKUyAmJiAhbG9va3NMaWtlSFRNTCkgZmFs
-bGJhY2tOYW1lID0gJ2luZGV4LmpzJwogICAgZWxzZSBpZiAobG9va3NMaWtl
-Q1NTKSBmYWxsYmFja05hbWUgPSAnc3R5bGVzLmNzcycKCiAgICBjb25zdCB3
-cmFwcGVkTmFtZSA9IHByb2plY3ROYW1lID8gYCR7cHJvamVjdE5hbWV9LyR7
-ZmFsbGJhY2tOYW1lfWAgOiBmYWxsYmFja05hbWUKICAgIHJldHVybiB7CiAg
-ICAgIHRleHQ6ICcnLAogICAgICBmaWxlczogW3sgbmFtZTogd3JhcHBlZE5h
-bWUsIGNvbnRlbnQ6IHRyaW1tZWQgfV0sCiAgICAgIGZvbGRlcnMKICAgIH0K
-ICB9CgogIHJldHVybiB7IHRleHQ6IG5vcm1hbGl6ZWQudHJpbSgpLCBmaWxl
-czogW10sIGZvbGRlcnMgfQp9CgpmdW5jdGlvbiBpbmZlckZpbGVuYW1lKGxh
-bmc6IHN0cmluZywgY29udGVudDogc3RyaW5nLCBpbmRleDogbnVtYmVyKTog
-c3RyaW5nIHsKICBjb25zdCBzdWZmaXggPSBpbmRleCA+IDAgPyBgJHtpbmRl
-eH1gIDogJycKICBjb25zdCBsID0gbGFuZy50b0xvd2VyQ2FzZSgpCiAgaWYg
-KGwgPT09ICdodG1sJyB8fCBjb250ZW50LmluY2x1ZGVzKCc8L2h0bWw+Jykg
-fHwgY29udGVudC5pbmNsdWRlcygnPGJvZHknKSkgcmV0dXJuIGBpbmRleCR7
-c3VmZml4fS5odG1sYAogIGlmIChsID09PSAnY3NzJyB8fCBsID09PSAnc2Nz
-cycpIHJldHVybiBgc3R5bGVzJHtzdWZmaXh9LiR7bH1gCiAgaWYgKGwgPT09
-ICd0eXBlc2NyaXB0JyB8fCBsID09PSAndHMnKSByZXR1cm4gYHNjcmlwdCR7
-c3VmZml4fS50c2AKICBpZiAobCA9PT0gJ3RzeCcpIHJldHVybiBgY29tcG9u
-ZW50JHtzdWZmaXh9LnRzeGAKICBpZiAobCA9PT0gJ2pzeCcpIHJldHVybiBg
-Y29tcG9uZW50JHtzdWZmaXh9LmpzeGAKICBpZiAobCA9PT0gJ2phdmFzY3Jp
-cHQnIHx8IGwgPT09ICdqcycpIHJldHVybiBgc2NyaXB0JHtzdWZmaXh9Lmpz
-YAogIGlmIChsID09PSAnanNvbicpIHJldHVybiBgZGF0YSR7c3VmZml4fS5q
-c29uYAogIGlmIChsID09PSAncHl0aG9uJyB8fCBsID09PSAncHknKSByZXR1
-cm4gYHNjcmlwdCR7c3VmZml4fS5weWAKICBpZiAobCA9PT0gJ2Jhc2gnIHx8
-IGwgPT09ICdzaCcpIHJldHVybiBgc2NyaXB0JHtzdWZmaXh9LnNoYAogIGlm
-IChsID09PSAnc3FsJykgcmV0dXJuIGBxdWVyeSR7c3VmZml4fS5zcWxgCiAg
-cmV0dXJuIGBmaWxlJHtzdWZmaXh9LnR4dGAKfQoKZXhwb3J0IGZ1bmN0aW9u
-IGdldExhbmd1YWdlRnJvbUZpbGVuYW1lKGZpbGVuYW1lOiBzdHJpbmcpOiBz
-dHJpbmcgewogIGNvbnN0IGV4dCA9IGZpbGVuYW1lLnNwbGl0KCcuJykucG9w
-KCk/LnRvTG93ZXJDYXNlKCkgfHwgJycKICBjb25zdCBtYXA6IFJlY29yZDxz
-dHJpbmcsIHN0cmluZz4gPSB7CiAgICB0czogJ3R5cGVzY3JpcHQnLCB0c3g6
-ICd0eXBlc2NyaXB0JywganM6ICdqYXZhc2NyaXB0JywganN4OiAnamF2YXNj
-cmlwdCcsCiAgICBqc29uOiAnanNvbicsIG1kOiAnbWFya2Rvd24nLCBtZHg6
-ICdtYXJrZG93bicsIGNzczogJ2NzcycsIHNjc3M6ICdzY3NzJywgc2Fzczog
-J3Njc3MnLAogICAgaHRtbDogJ2h0bWwnLCBweTogJ3B5dGhvbicsIHR4dDog
-J3BsYWludGV4dCcsIHN2ZzogJ3htbCcsCiAgICByczogJ3J1c3QnLCBnbzog
-J2dvJywgYzogJ2MnLCBjcHA6ICdjcHAnLCBjczogJ2NzaGFycCcsCiAgICBq
-YXZhOiAnamF2YScsIGt0OiAna290bGluJywgc3dpZnQ6ICdzd2lmdCcsIHJi
-OiAncnVieScsIHBocDogJ3BocCcsCiAgICB5YW1sOiAneWFtbCcsIHltbDog
-J3lhbWwnLCB0b21sOiAndG9tbCcsIHhtbDogJ3htbCcsIGNzdjogJ3BsYWlu
-dGV4dCcsCiAgICBzcWw6ICdzcWwnLCBncmFwaHFsOiAnZ3JhcGhxbCcsIHNo
-OiAnc2hlbGwnLCBiYXNoOiAnc2hlbGwnLCBwczE6ICdwb3dlcnNoZWxsJywK
-ICB9CiAgcmV0dXJuIG1hcFtleHRdIHx8ICdwbGFpbnRleHQnCn0KCmV4cG9y
-dCBmdW5jdGlvbiBnZXRGaWxlU2l6ZShjb250ZW50OiBzdHJpbmcpOiBzdHJp
-bmcgewogIGNvbnN0IGJ5dGVzID0gbmV3IFRleHRFbmNvZGVyKCkuZW5jb2Rl
-KGNvbnRlbnQpLmxlbmd0aAogIGlmIChieXRlcyA8IDEwMjQpIHJldHVybiBg
-JHtieXRlc30gQmAKICByZXR1cm4gYCR7KGJ5dGVzIC8gMTAyNCkudG9GaXhl
-ZCgxKX0gS0JgCn0K
+/**
+ * Parse AI response to extract file blocks.
+ * Supports multiple output formats from different models.
+ *
+ * Auto-wrapping rule:
+ * If ALL parsed file names share no common root folder (i.e., they are flat like
+ * "package.json", "src/App.jsx"), they are wrapped in a sanitized projectName folder.
+ */
+
+export interface ParsedFile {
+  name: string
+  content: string
+}
+
+export interface ParseResult {
+  text: string
+  files: ParsedFile[]
+  folders?: string[]  // explicit ---FOLDER:--- declarations from agent
+}
+
+/**
+ * Derive a safe folder name from the chat title or prompt.
+ * e.g. "Build me a task manager app" → "task-manager"
+ *      "New Chat" → "project"
+ */
+export function deriveProjectName(chatTitle: string): string {
+  if (!chatTitle || chatTitle.trim() === '' || chatTitle.toLowerCase() === 'new chat') {
+    return 'project'
+  }
+  return chatTitle
+    .toLowerCase()
+    .replace(/build (me )?a?n? ?/i, '')   // strip "build me a", "build a"
+    .replace(/app|application|website|site|game|tool|dashboard/gi, (m) => m) // keep meaningful keywords
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')          // non-alphanum → dash
+    .replace(/^-+|-+$/g, '')              // trim leading/trailing dashes
+    .slice(0, 32)                          // max 32 chars
+    || 'project'
+}
+
+/**
+ * Wrap flat files (no shared root folder) inside a named project folder.
+ * If files already share a single root like "taskmanager/..." leave them as-is.
+ */
+function wrapInProjectFolder(files: ParsedFile[], projectName: string): ParsedFile[] {
+  if (files.length === 0) return files
+
+  // Get root segments of each file path
+  const roots = files.map(f => {
+    const parts = f.name.replace(/\\/g, '/').split('/')
+    return parts.length > 1 ? parts[0] : null
+  })
+
+  // If every file already has a common root folder → already wrapped, leave alone
+  const nonNullRoots = roots.filter(Boolean)
+  if (nonNullRoots.length === files.length) {
+    const firstRoot = nonNullRoots[0]
+    if (nonNullRoots.every(r => r === firstRoot)) {
+      return files // already wrapped in a folder
+    }
+  }
+
+  // Otherwise wrap all files under projectName/
+  const safe = projectName || 'project'
+  return files.map(f => ({
+    ...f,
+    name: `${safe}/${f.name}`
+  }))
+}
+
+export function parseAIResponse(raw: string, projectName?: string): ParseResult {
+  const files: ParsedFile[] = []
+
+  // Extract ---FOLDER:--- markers (explicit folder declarations from agent)
+  const folderRegex = /---FOLDER:\s*([^\n-][^\n]*)\s*---/g
+  const folders: string[] = []
+  let folderMatch: RegExpExecArray | null
+  while ((folderMatch = folderRegex.exec(raw)) !== null) {
+    const folderPath = folderMatch[1].trim().replace(/^\/+|\/+$/g, '')  // normalize
+    if (folderPath) folders.push(folderPath)
+  }
+  // Strip ---FOLDER:--- markers from raw before further parsing
+  const rawWithoutFolders = raw.replace(/---FOLDER:\s*[^\n-][^\n]*\s*---\n?/g, '')
+
+  // Normalize line endings
+  const normalized = rawWithoutFolders.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+
+  // Primary: ---FILE: name--- ... ---END FILE---
+  const strictRegex = /---FILE:\s*([^\n-][^\n]*)\s*---\s*\n([\s\S]*?)---END FILE---/g
+  let match: RegExpExecArray | null
+  while ((match = strictRegex.exec(normalized)) !== null) {
+    const content = match[2].trimEnd()
+    if (content.length > 0) {
+      files.push({ name: match[1].trim(), content })
+    }
+  }
+  if (files.length > 0) {
+    const text = normalized.replace(/---FILE:\s*[^\n-][^\n]*\s*---\s*\n[\s\S]*?---END FILE---/g, '').trim()
+    return { text, files: wrapInProjectFolder(files, projectName || 'project'), folders }
+  }
+
+  // Fallback A: ---FILE: without ---END FILE---
+  const looseRegex = /---FILE:\s*([^\n-][^\n]*)\s*---\s*\n([\s\S]*?)(?=---FILE:|$)/g
+  const looseMatches: Array<{ name: string; content: string }> = []
+  while ((match = looseRegex.exec(normalized)) !== null) {
+    const content = match[2].trimEnd()
+    if (content.length > 0) {
+      looseMatches.push({ name: match[1].trim(), content })
+    }
+  }
+  if (looseMatches.length > 0) {
+    for (const f of looseMatches) files.push(f)
+    const text = normalized.replace(/---FILE:\s*[^\n-][^\n]*\s*---\s*\n[\s\S]*?(?=---FILE:|$)/g, '').trim()
+    return { text, files: wrapInProjectFolder(files, projectName || 'project'), folders }
+  }
+
+  // Fallback B: fenced code blocks
+  const codeBlockRegex = /```([^\n]*)\n([\s\S]*?)```/g
+  let cbMatch: RegExpExecArray | null
+  let fileIndex = 0
+  while ((cbMatch = codeBlockRegex.exec(normalized)) !== null) {
+    const langStr = cbMatch[1].trim()
+    const content = cbMatch[2].trimEnd()
+    if (!content) continue
+    let name: string
+    if (langStr.includes('.')) {
+      name = langStr
+    } else {
+      name = inferFilename(langStr, content, fileIndex)
+    }
+    files.push({ name, content })
+    fileIndex++
+  }
+  if (files.length > 0) {
+    const text = normalized.replace(/```[^\n]*\n[\s\S]*?```/g, '').trim()
+    return { text, files: wrapInProjectFolder(files, projectName || 'project'), folders }
+  }
+
+  // Fallback C: raw HTML/JS/CSS (no markers at all)
+  // Guard: reject MiniMax/AI XML tool-call output — never save as a file
+  const isToolCallXml = /<minimax:tool_call|<invoke\s|<tool_call|<function_calls/i.test(normalized)
+  if (isToolCallXml) {
+    return { text: '', files: [] }
+  }
+  // Guard: reject planning text / natural language responses without code
+  const firstLine = normalized.trim().split('\n')[0]
+  const isNaturalLanguage = /^(I'?ll|I will|Let me|Here'?s|Sure|Okay|Of course|Creating|Building|I'?ve)/i.test(firstLine)
+    && !normalized.includes('---FILE:')
+    && !/[<{]/.test(normalized.slice(0, 50))
+  if (isNaturalLanguage) {
+    return { text: normalized, files: [] }
+  }
+  // ONLY fires when there are zero ---FILE:--- markers in the output
+  const hasAnyFileMarker = /---FILE:/i.test(normalized)
+  if (!hasAnyFileMarker && normalized.trim().length > 50) {
+    const trimmed = normalized.trim()
+    const looksLikeHTML = /<html|<!DOCTYPE/i.test(trimmed)
+    const looksLikeJS = /^(const|let|var|function|import|export|class)\b/.test(trimmed)
+    const looksLikeCSS = /^[\s\S]*?\{[\s\S]*?\}/.test(trimmed) && !looksLikeHTML && !looksLikeJS
+
+    let fallbackName = 'index.html'
+    if (looksLikeJS && !looksLikeHTML) fallbackName = 'index.js'
+    else if (looksLikeCSS) fallbackName = 'styles.css'
+
+    const wrappedName = projectName ? `${projectName}/${fallbackName}` : fallbackName
+    return {
+      text: '',
+      files: [{ name: wrappedName, content: trimmed }],
+      folders
+    }
+  }
+
+  return { text: normalized.trim(), files: [], folders }
+}
+
+function inferFilename(lang: string, content: string, index: number): string {
+  const suffix = index > 0 ? `${index}` : ''
+  const l = lang.toLowerCase()
+  if (l === 'html' || content.includes('</html>') || content.includes('<body')) return `index${suffix}.html`
+  if (l === 'css' || l === 'scss') return `styles${suffix}.${l}`
+  if (l === 'typescript' || l === 'ts') return `script${suffix}.ts`
+  if (l === 'tsx') return `component${suffix}.tsx`
+  if (l === 'jsx') return `component${suffix}.jsx`
+  if (l === 'javascript' || l === 'js') return `script${suffix}.js`
+  if (l === 'json') return `data${suffix}.json`
+  if (l === 'python' || l === 'py') return `script${suffix}.py`
+  if (l === 'bash' || l === 'sh') return `script${suffix}.sh`
+  if (l === 'sql') return `query${suffix}.sql`
+  return `file${suffix}.txt`
+}
+
+export function getLanguageFromFilename(filename: string): string {
+  const ext = filename.split('.').pop()?.toLowerCase() || ''
+  const map: Record<string, string> = {
+    ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
+    json: 'json', md: 'markdown', mdx: 'markdown', css: 'css', scss: 'scss', sass: 'scss',
+    html: 'html', py: 'python', txt: 'plaintext', svg: 'xml',
+    rs: 'rust', go: 'go', c: 'c', cpp: 'cpp', cs: 'csharp',
+    java: 'java', kt: 'kotlin', swift: 'swift', rb: 'ruby', php: 'php',
+    yaml: 'yaml', yml: 'yaml', toml: 'toml', xml: 'xml', csv: 'plaintext',
+    sql: 'sql', graphql: 'graphql', sh: 'shell', bash: 'shell', ps1: 'powershell',
+  }
+  return map[ext] || 'plaintext'
+}
+
+export function getFileSize(content: string): string {
+  const bytes = new TextEncoder().encode(content).length
+  if (bytes < 1024) return `${bytes} B`
+  return `${(bytes / 1024).toFixed(1)} KB`
+}
