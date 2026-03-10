@@ -4904,7 +4904,7 @@ interface ModelSelection {
 
 // ─── BUILD MODE: Sparkie builds Vite/React apps for the live IDE preview ────
 // Triggered when chat receives mode: 'build' from the frontend.
-// Uses minimax-m2.5-free — user's preferred free build model.
+// Uses anthropic-claude-haiku-4.5 via DO Inference — confirmed working, no XML tool-call bug.
 // XML tool-call guard prevents silent empty builds.
 
 function buildSseEvent(event: string, data: Record<string, unknown>): string {
@@ -4935,8 +4935,10 @@ async function handleBuildMode(
         }
 
         const { messages, currentFiles, userProfile } = parsedBody
-        // minimax-m2.5-free — user's preferred build model, confirmed live on opencode.ai
-        const buildModel = 'minimax-m2.5-free'
+        // anthropic-claude-haiku-4.5 via DO Inference — confirmed working (17-file builds)
+        // minimax-m2.5-free hardwires tool-call XML output regardless of tool_choice:'none'
+        const buildModel = 'anthropic-claude-haiku-4.5'
+        const doKey = process.env.DO_MODEL_ACCESS_KEY ?? ''
 
         let identityContext = ''
         if (userId) {
@@ -4964,12 +4966,18 @@ async function handleBuildMode(
           ...messages,
         ]
 
-        const res = await fetch(`${OPENCODE_BASE}/chat/completions`, {
+        // Use DO Inference for Haiku — reliable, no XML tool-call bug
+        // Falls back to opencode.ai only if DO_MODEL_ACCESS_KEY is missing
+        const buildEndpoint = doKey
+          ? `${DO_INFERENCE_BASE}/chat/completions`
+          : `${OPENCODE_BASE}/chat/completions`
+        const buildAuthKey = doKey || apiKey
+        const res = await fetch(buildEndpoint, {
           method: 'POST',
           signal: AbortSignal.timeout(110_000),
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`,
+            Authorization: `Bearer ${buildAuthKey}`,
           },
           body: JSON.stringify({
             model: buildModel,
@@ -4977,7 +4985,6 @@ async function handleBuildMode(
             stream: true,
             max_tokens: 16000,
             temperature: 0.2,
-            tool_choice: 'none',
           }),
         })
 
