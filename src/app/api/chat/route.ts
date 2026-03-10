@@ -4977,6 +4977,7 @@ async function handleBuildMode(
             stream: true,
             max_tokens: 16000,
             temperature: 0.2,
+            tool_choice: 'none',
           }),
         })
 
@@ -5043,8 +5044,10 @@ async function handleBuildMode(
         }
 
         // XML tool-call guard — MiniMax models sometimes output tool calls instead of code
+        // tool_choice:'none' should prevent this; guard is now a final safety net with better logging
         if (fullBuildRaw.includes('<minimax:tool_call>') || fullBuildRaw.includes('<invoke name=')) {
-          send('error', { message: 'Build model output tool calls instead of code. Please try your prompt again.' })
+          console.log('[BUILD] XML tool-call detected despite tool_choice:none — raw output:', fullBuildRaw.slice(0, 300))
+          send('error', { message: '⚠️ Model returned tool syntax instead of code. This is a known MiniMax quirk — please try your prompt again (usually works on second attempt).' })
           send('done', {})
           controller.close()
           return
