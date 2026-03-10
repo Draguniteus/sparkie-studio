@@ -24,6 +24,60 @@ export const runtime = 'nodejs'
 export const maxDuration = 180
 
 const OPENCODE_BASE = 'https://opencode.ai/zen/v1'
+
+const BUILD_SYSTEM_PROMPT = `## CRITICAL: YOU HAVE NO TOOLS. DO NOT OUTPUT TOOL CALLS.
+You are a code generator. Your ONLY output format is ---FILE: filename--- blocks.
+Never output <minimax:tool_call>, <invoke>, XML tags, or any tool-call syntax.
+You cannot call get_github, browse_web, or any other tool. Just write code.
+
+You are Sparkie — an expert full-stack developer and creative technologist.
+You build beautiful, fully functional apps inside Sparkie Studio's live preview IDE.
+
+## CODE OUTPUT FORMAT — REQUIRED
+Always output files using this exact format:
+
+---FILE: filename.ext---
+[complete file content here]
+---END FILE---
+
+Rules:
+- ALWAYS use ---FILE: name--- ... ---END FILE--- markers
+- Output COMPLETE file content — never truncate, never use "..." or "see above"
+- Include ALL files needed to run the project
+- NEVER include binary files or node_modules
+
+## THINKING FORMAT
+Start with a brief plan:
+[THINKING] Building X with Y approach — N files needed: file1, file2, ...
+
+## STACK SELECTION — CRITICAL
+
+### For frontend / UI / landing pages / React apps / interactive apps:
+Use **Vite + React + TypeScript** — this is the ONLY stack that works in the live preview.
+DO NOT use Next.js — it cannot run in the browser preview environment.
+
+**Required package.json structure:**
+\`\`\`json
+{
+  "name": "project-name",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "vite": "^5.3.1"
+  }
+}
+\`\`\`
 const MINIMAX_BASE = 'https://api.minimax.io/v1'
 const DO_INFERENCE_BASE = 'https://inference.do-ai.run/v1'
 const AZURE_OPENAI_BASE = process.env.AZURE_OPENAI_ENDPOINT ?? ''
@@ -4846,6 +4900,189 @@ interface ModelSelection {
   needsTools: boolean
 }
 
+
+// ─── BUILD MODE: Sparkie builds Vite/React apps for the live IDE preview ────
+// Triggered when chat receives mode: 'build' from the frontend.
+// Uses minimax-m2.5-free — user's preferred free build model.
+// XML tool-call guard prevents silent empty builds.
+
+function buildSseEvent(event: string, data: Record<string, unknown>): string {
+  return `data: ${JSON.stringify({ event, ...data })}\n\n`
+}
+
+async function handleBuildMode(
+  req: NextRequest,
+  userId: string | null,
+): Promise<Response> {
+  const encoder = new TextEncoder()
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (event: string, data: Record<string, unknown>) => {
+        try { controller.enqueue(encoder.encode(buildSseEvent(event, data))) } catch {}
+      }
+      try {
+        const apiKey = process.env.OPENCODE_API_KEY
+        if (!apiKey) {
+          send('error', { message: 'No API key configured' })
+          send('done', {})
+          controller.close()
+          return
+        }
+
+        const body = await req.json() as {
+          messages: Array<{ role: string; content: string }>
+          currentFiles?: string
+          userProfile?: { name?: string; role?: string; goals?: string }
+        }
+
+        const { messages, currentFiles, userProfile } = body
+        // minimax-m2.5-free — user's preferred build model, confirmed live on opencode.ai
+        const buildModel = 'minimax-m2.5-free'
+
+        let identityContext = ''
+        if (userId) {
+          try {
+            const files = await loadIdentityFiles(userId)
+            identityContext = buildIdentityBlock(files)
+          } catch {}
+        }
+
+        let systemPrompt = BUILD_SYSTEM_PROMPT
+        if (userProfile?.name) {
+          systemPrompt += `\n\n## USER CONTEXT\nName: ${userProfile.name}\nRole: ${userProfile.role ?? 'developer'}\nBuilding: ${userProfile.goals ?? 'something awesome'}`
+        }
+        if (identityContext) {
+          systemPrompt += `\n\n## YOUR MEMORY ABOUT THIS USER\n${identityContext}`
+        }
+        if (currentFiles) {
+          systemPrompt += `\n\n## CURRENT WORKSPACE FILES\nEdit these files — output the complete updated versions:\n\n${currentFiles}`
+        }
+
+        send('thinking', { text: '⚡ Analyzing request…' })
+
+        const apiMessages = [
+          { role: 'system', content: systemPrompt },
+          ...messages,
+        ]
+
+        const res = await fetch(`${OPENCODE_BASE}/chat/completions`, {
+          method: 'POST',
+          signal: AbortSignal.timeout(110_000),
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: buildModel,
+            messages: apiMessages,
+            stream: true,
+            max_tokens: 16000,
+            temperature: 0.2,
+          }),
+        })
+
+        if (!res.ok || !res.body) {
+          const errText = await res.text().catch(() => res.statusText)
+          send('error', { message: `Model error: ${errText}` })
+          send('done', {})
+          controller.close()
+          return
+        }
+
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        let thinkingEmitted = false
+        let thinkingBuffer = ''
+        let fullBuildRaw = ''
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() ?? ''
+
+          for (const line of lines) {
+            const trimmed = line.trim()
+            if (!trimmed.startsWith('data: ')) continue
+            const data = trimmed.slice(6)
+            if (data === '[DONE]') continue
+
+            try {
+              const parsed = JSON.parse(data) as { choices?: Array<{ delta?: { content?: string } }> }
+              const chunk: string = parsed.choices?.[0]?.delta?.content ?? ''
+              if (!chunk) continue
+              fullBuildRaw += chunk
+
+              if (!thinkingEmitted) {
+                thinkingBuffer += chunk
+                const thinkMatch = thinkingBuffer.match(/^\[THINKING\]\s*([^\n]+)/)
+                if (thinkMatch) {
+                  send('thinking', { text: `💭 ${thinkMatch[1].trim()}` })
+                  thinkingEmitted = true
+                  const afterThinking = thinkingBuffer.replace(/^\[THINKING\][^\n]*\n?/, '')
+                  if (afterThinking) send('delta', { content: afterThinking })
+                } else if (thinkingBuffer.length > 120 || thinkingBuffer.includes('---FILE:')) {
+                  thinkingEmitted = true
+                  send('thinking', { text: '⚡ Writing code…' })
+                  send('delta', { content: thinkingBuffer })
+                }
+                continue
+              }
+
+              send('delta', { content: chunk })
+            } catch {}
+          }
+        }
+
+        const hasMarkers = fullBuildRaw.includes('---FILE:')
+        console.log(`[BUILD] raw output length=${fullBuildRaw.length} hasFileMarkers=${hasMarkers} model=${buildModel}`)
+        if (!hasMarkers && fullBuildRaw.length > 0) {
+          console.log('[BUILD] NO MARKERS — first 500 chars:', fullBuildRaw.slice(0, 500))
+        }
+
+        // XML tool-call guard — MiniMax models sometimes output tool calls instead of code
+        if (fullBuildRaw.includes('<minimax:tool_call>') || fullBuildRaw.includes('<invoke name=')) {
+          send('error', { message: 'Build model output tool calls instead of code. Please try your prompt again.' })
+          send('done', {})
+          controller.close()
+          return
+        }
+
+        send('done', {})
+        controller.close()
+
+        if (userId) {
+          query(
+            `INSERT INTO user_sessions (user_id, last_seen_at, session_count)
+             VALUES ($1, NOW(), 1)
+             ON CONFLICT (user_id) DO UPDATE
+               SET last_seen_at = NOW(), session_count = user_sessions.session_count + 1`,
+            [userId]
+          ).catch(() => {})
+        }
+      } catch (err) {
+        console.error('[/api/chat build mode] error:', err)
+        try {
+          controller.enqueue(encoder.encode(buildSseEvent('error', { message: String(err) })))
+          controller.enqueue(encoder.encode(buildSseEvent('done', {})))
+          controller.close()
+        } catch {}
+      }
+    },
+  })
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    },
+  })
+}
+
 function selectModel(messages: Array<{ role: string; content: string }>): ModelSelection {
   const lastUser = messages.slice().reverse().find(m => m.role === 'user')?.content ?? ''
   const lower = lastUser.toLowerCase()
@@ -5034,7 +5271,7 @@ function checkRateLimit(key: string): boolean {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { messages, model: _clientModel, userProfile, voiceMode } = body
+    const { messages, model: _clientModel, userProfile, voiceMode, mode } = body
     // Server-side model routing — ignore client model selector, Sparkie picks automatically
     const modelSelection = selectModel(messages ?? [])
     const model = modelSelection.primary
@@ -5080,6 +5317,13 @@ export async function POST(req: NextRequest) {
       req.signal.addEventListener('abort', () => {
         if (_activeAbortMap.get(userId) === abortCtrl) _activeAbortMap.delete(userId)
       })
+    }
+
+    // ── BUILD MODE: Unified chat+build route (MiniMax Agent pattern) ────────────
+    // When mode === 'build', skip the agent loop and run the IDE build pipeline.
+    // This reduces bundle size and keeps chat history in one thread.
+    if (mode === 'build') {
+      return handleBuildMode(req, userId)
     }
 
     const host = req.headers.get('host') ?? 'localhost:3000'

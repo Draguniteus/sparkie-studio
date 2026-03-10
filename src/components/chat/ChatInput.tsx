@@ -1208,10 +1208,10 @@ export function ChatInput() {
       // Cancel any in-flight agent request before starting a new one
       agentAbortRef.current?.abort()
       agentAbortRef.current = new AbortController()
-      const response = await fetch('/api/build', {
+      const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: [...apiMessages, { role: 'user', content: apiUserContent }], currentFiles: currentFilesPayload, model: selectedModel, userProfile: useAppStore.getState().userProfile }),
+        body: JSON.stringify({ messages: [...apiMessages, { role: 'user', content: apiUserContent }], currentFiles: currentFilesPayload, model: selectedModel, userProfile: useAppStore.getState().userProfile, mode: 'build' }),
         signal: agentAbortRef.current.signal,
       })
 
