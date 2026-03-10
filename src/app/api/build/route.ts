@@ -196,7 +196,7 @@ export async function POST(req: NextRequest) {
           userProfile?: { name?: string; role?: string; goals?: string }
         }
 
-        const { messages, currentFiles, model = 'minimax-m2.5', userProfile } = body
+        const { messages, currentFiles, model = 'minimax-m2.5-free', userProfile } = body
 
         let identityContext = ''
         if (userId) {
