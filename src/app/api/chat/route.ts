@@ -4904,7 +4904,7 @@ interface ModelSelection {
 
 // ─── BUILD MODE: Sparkie builds Vite/React apps for the live IDE preview ────
 // Triggered when chat receives mode: 'build' from the frontend.
-// Uses anthropic-claude-haiku-4.5 via DO Inference — confirmed working, no XML tool-call bug.
+// Uses anthropic-claude-4.5-haiku via DO Inference — confirmed working, no XML tool-call bug.
 // XML tool-call guard prevents silent empty builds.
 
 function buildSseEvent(event: string, data: Record<string, unknown>): string {
@@ -4935,9 +4935,9 @@ async function handleBuildMode(
         }
 
         const { messages, currentFiles, userProfile } = parsedBody
-        // anthropic-claude-haiku-4.5 via DO Inference — confirmed working (17-file builds)
+        // anthropic-claude-4.5-haiku via DO Inference — confirmed working (17-file builds)
         // minimax-m2.5-free hardwires tool-call XML output regardless of tool_choice:'none'
-        const buildModel = 'anthropic-claude-haiku-4.5'
+        const buildModel = 'anthropic-claude-4.5-haiku'
         const doKey = process.env.DO_MODEL_ACCESS_KEY ?? ''
 
         let identityContext = ''
