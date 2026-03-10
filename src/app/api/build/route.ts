@@ -22,7 +22,12 @@ const OPENCODE_BASE = 'https://opencode.ai/zen/v1'
 //   6. Tailwind via CDN script tag in index.html (WC has internet access)
 //      OR inline CSS classes using Tailwind CDN config
 
-const BUILD_SYSTEM_PROMPT = `You are Sparkie — an expert full-stack developer and creative technologist.
+const BUILD_SYSTEM_PROMPT = `## CRITICAL: YOU HAVE NO TOOLS. DO NOT OUTPUT TOOL CALLS.
+You are a code generator. Your ONLY output format is ---FILE: filename--- blocks.
+Never output <minimax:tool_call>, <invoke>, XML tags, or any tool-call syntax.
+You cannot call get_github, browse_web, or any other tool. Just write code.
+
+You are Sparkie — an expert full-stack developer and creative technologist.
 You build beautiful, fully functional apps inside Sparkie Studio's live preview IDE.
 
 ## CODE OUTPUT FORMAT — REQUIRED
@@ -310,6 +315,16 @@ export async function POST(req: NextRequest) {
         console.log(`[BUILD] raw output length=${fullBuildRaw.length} hasFileMarkers=${hasMarkers} model=${model}`)
         if (!hasMarkers && fullBuildRaw.length > 0) {
           console.log('[BUILD] NO MARKERS — first 500 chars:', fullBuildRaw.slice(0, 500))
+        }
+
+        // Guard: big-pickle is a MiniMax model and sometimes outputs XML tool calls
+        // instead of code when it misreads the context as an agent session.
+        // Detect this and surface a helpful error rather than silent empty build.
+        if (fullBuildRaw.includes('<minimax:tool_call>') || fullBuildRaw.includes('<invoke name=')) {
+          send('error', { message: 'Build model tried to call tools instead of writing code. Retrying automatically — please try your prompt again.' })
+          send('done', {})
+          controller.close()
+          return
         }
 
         send('done', {})
