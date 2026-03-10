@@ -193,6 +193,10 @@ WHEN A USER SAYS "hi", "hey", "hello", "good morning", "hey sparkie", "miss me",
 → DO NOT call write_file, write_code, build_file, or ANY file-writing tool.
 → DO NOT generate code, templates, articles, HTML, or any large output.
 → DO NOT auto-generate anything the user did not explicitly ask for.
+
+WHEN USER ASKS TO BUILD/CREATE AN APP OR PROJECT (e.g. "build me a 3D room", "create a todo app", "make a game"):
+→ ALWAYS use trigger_ide_build — this opens the IDE and sends the prompt to the build pipeline.
+→ NEVER use write_file for user projects. write_file is ONLY for editing Sparkie Studio's own source code (fixing bugs in your own platform).
 → ESPECIALLY: personal sharing ("i've been working hard", "miss me?", "how are you") = EMOTIONAL RESPONSE ONLY. No tools. No files. Period.
 
 ✅ CORRECT: "Hey! Good to see you. What are we building tonight?"
@@ -1024,7 +1028,8 @@ NATIVE TOOLS (always available):
 - read_pending_tasks: Read pending task queue
 - check_deployment: (deprecated) basic deployment check
 - trigger_deploy: Full DO App Platform control — status/deploy/rollback/cancel/logs/get_env/set_env. The primary way to manage deployments.
-- write_file: Write/update a file in the active project workspace
+- trigger_ide_build: Open the IDE and build a user's app/project (USE THIS for all user build requests)
+- write_file: Write/update a FILE IN SPARKIE'S OWN CODEBASE only — never for user projects
 - install_skill: Install a new skill or capability module
 - post_to_feed: Post content to social feeds
 - update_interests: Update Michael's interest graph
@@ -2234,7 +2239,7 @@ const SPARKIE_TOOLS = [
     type: 'function',
     function: {
       name: 'write_file',
-      description: 'Write or update a file in the Sparkie Studio GitHub repository (Draguniteus/sparkie-studio, master branch). Use to fix bugs, add features, update configs, or improve your own code. You are the developer — fix things directly instead of suggesting manual steps.',
+      description: 'Write or update a file in the Sparkie Studio GitHub repository (Draguniteus/sparkie-studio, master branch). Use ONLY to fix bugs in Sparkie Studio itself, add platform features, or update your own configs. This is for editing YOUR OWN code. NEVER use this for user project builds — use trigger_ide_build for that.',
       parameters: {
         type: 'object',
         properties: {
@@ -2243,6 +2248,20 @@ const SPARKIE_TOOLS = [
           message: { type: 'string', description: 'Git commit message describing what was changed and why' },
         },
         required: ['path', 'content', 'message'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'trigger_ide_build',
+      description: "Trigger the IDE build pipeline to build a user's app or project. Use this whenever the user asks to build, create, or generate an app, game, website, tool, or any project. Opens the IDE panel and sends the prompt to the build pipeline. Do NOT use write_file for this.",
+      parameters: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string', description: 'The full user build request to pass to the build pipeline' },
+        },
+        required: ['prompt'],
       },
     },
   },
@@ -3612,6 +3631,12 @@ async function executeTool(
         }
       }
 
+      case 'trigger_ide_build': {
+        const { prompt: buildPrompt } = args as { prompt: string }
+        // Send IDE_BUILD SSE event to frontend — client opens IDE panel and calls /api/build
+        return `IDE_BUILD:${buildPrompt}`
+      }
+
       case 'install_skill': {
         if (!userId) return 'Not authenticated'
         const { url: skillUrl, skill_name: skillName, description: skillDesc = '' } = args as {
@@ -4890,6 +4915,13 @@ function selectModel(messages: Array<{ role: string; content: string }>): ModelS
   if (trinitySignals >= 2) {
     return { primary: MODELS.TRINITY, fallbacks: [MODELS.TRINITY_FB, MODELS.DEEP, MODELS.CAPABLE], tier: 'trinity', needsTools: true }
   }
+  // IDE build requests: route to CAPABLE (fast, reliable tool calling) — never DEEP/MiniMax
+  const isBuildRequest = /\b(build|create|make|generate)\b.{0,80}\b(app|game|website|tool|dashboard|project|component|page|ui|interface|3d|room|demo|prototype)\b/i.test(lower)
+    || /\b(build me|make me|create me|spin (up|that)|scaffold|generate a)\b/i.test(lower)
+  if (isBuildRequest) {
+    return { primary: MODELS.CAPABLE, fallbacks: [MODELS.EMBER, MODELS.CONVERSATIONAL], tier: 'capable', needsTools: true }
+  }
+
   if (deepCount >= 2) {
     return { primary: MODELS.DEEP, fallbacks: [MODELS.CAPABLE, MODELS.CONVERSATIONAL], tier: 'deep', needsTools: true }
   }
@@ -5710,6 +5742,27 @@ Rules:
               return { role: 'tool' as const, tool_call_id: tc.id, content: result }
             })
           )
+
+          // Check for IDE build trigger — emit event and halt loop
+          for (const tr of toolResults) {
+            if (tr.content.startsWith('IDE_BUILD:')) {
+              const buildPrompt = tr.content.slice('IDE_BUILD:'.length).trim()
+              liveEnqueue({ ide_build: { prompt: buildPrompt } })
+              // Emit a friendly text response and stop the loop
+              const buildStream = new ReadableStream({
+                start(controller) {
+                  const enc = new TextEncoder()
+                  const msg = JSON.stringify({ choices: [{ delta: { content: "On it! Opening the IDE and building that for you now ✨" }, finish_reason: null }] })
+                  controller.enqueue(enc.encode(`data: ${msg}\n\n`))
+                  controller.enqueue(enc.encode('data: [DONE]\n\n'))
+                  controller.close()
+                },
+              })
+              return new Response(buildStream, {
+                headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
+              })
+            }
+          }
 
           // Check for HITL task or scheduled task — stream event and halt loop
           for (const tr of toolResults) {
