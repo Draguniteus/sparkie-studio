@@ -112,7 +112,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 
 **ESM rules — MANDATORY:**
 - package.json MUST have "type": "module"
-- vite.config.ts MUST use \`export default defineConfig\` (NOT module.exports)
+- vite.config.ts MUST use `export default defineConfig` (NOT module.exports)
 - tsconfig.json MUST have "module": "ESNext", "moduleResolution": "bundler"
 - NO require() calls anywhere
 - NO module.exports anywhere
@@ -226,6 +226,7 @@ export async function POST(req: NextRequest) {
 
         const res = await fetch(`${OPENCODE_BASE}/chat/completions`, {
           method: 'POST',
+          signal: AbortSignal.timeout(110_000),
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${apiKey}`,
