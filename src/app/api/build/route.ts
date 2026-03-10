@@ -162,6 +162,13 @@ Include React CDN if needed: \`<script crossorigin src="https://unpkg.com/react@
 - Responsive design
 - Handle errors gracefully
 - Rich with content — real copy, real icons (lucide-react works in Vite), real interactions
+
+## CRITICAL OUTPUT RULES — FOLLOW EXACTLY
+- Output ONLY file blocks using ---FILE: and ---END FILE--- markers. Nothing else after the [THINKING] line.
+- Start code output directly with: ---FILE: path/to/file.ext---
+- End each file with: ---END FILE---
+- No markdown fences, no explanations between files, no prose after [THINKING].
+- Never output anything outside these blocks.
 `
 
 function sseEvent(event: string, data: Record<string, unknown>): string {
@@ -253,6 +260,7 @@ export async function POST(req: NextRequest) {
         let buffer = ''
         let thinkingEmitted = false
         let thinkingBuffer = ''
+        let fullBuildRaw = '' // diagnostic logging
 
         while (true) {
           const { done, value } = await reader.read()
@@ -272,6 +280,7 @@ export async function POST(req: NextRequest) {
               const parsed = JSON.parse(data) as { choices?: Array<{ delta?: { content?: string } }> }
               const chunk: string = parsed.choices?.[0]?.delta?.content ?? ''
               if (!chunk) continue
+              fullBuildRaw += chunk
 
               if (!thinkingEmitted) {
                 thinkingBuffer += chunk
@@ -292,6 +301,13 @@ export async function POST(req: NextRequest) {
               send('delta', { content: chunk })
             } catch {}
           }
+        }
+
+        // Diagnostic: log whether ---FILE: markers appeared in raw output
+        const hasMarkers = fullBuildRaw.includes('---FILE:')
+        console.log(`[BUILD] raw output length=${fullBuildRaw.length} hasFileMarkers=${hasMarkers} model=${model}`)
+        if (!hasMarkers && fullBuildRaw.length > 0) {
+          console.log('[BUILD] NO MARKERS — first 500 chars:', fullBuildRaw.slice(0, 500))
         }
 
         send('done', {})
@@ -325,3 +341,4 @@ export async function POST(req: NextRequest) {
     },
   })
 }
+
