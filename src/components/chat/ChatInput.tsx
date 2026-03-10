@@ -1001,6 +1001,13 @@ export function ChatInput() {
               _setInlineFeedCards(prev => [...prev, parsed.worklog_card as WorklogCard])
               continue
             }
+            // IDE build trigger — chat route detected a build request, hand off to streamAgent
+            if (parsed.ide_build) {
+              const buildPrompt = (parsed.ide_build as { prompt: string }).prompt
+              // Let the current chat message finish, then trigger the build pipeline
+              setTimeout(() => streamAgent(chatId, buildPrompt), 100)
+              continue
+            }
             // Phase 5: task_chip — show "In memory:..." chip while tools run
             if (parsed.task_chip) {
               useAppStore.getState().setLongTaskLabel(parsed.task_chip as string)
