@@ -263,7 +263,7 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
   currentChatId: null,
   isLoading: false,
   isStreaming: false,
-  selectedModel: 'minimax-m2.5-free',
+  selectedModel: 'anthropic-claude-haiku-4.5', // default for builds; chat route uses selectModel() and ignores this
   lastMode: 'chat' as const,
 
   addMessage: (chatIdOrMsg, msgPartial) => {
