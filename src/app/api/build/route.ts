@@ -203,7 +203,9 @@ export async function POST(req: NextRequest) {
           userProfile?: { name?: string; role?: string; goals?: string }
         }
 
-        const { messages, currentFiles, model = 'anthropic-claude-haiku-4.5', userProfile } = body
+        const { messages, currentFiles, model: _clientModel, userProfile } = body
+        // Always use Haiku for builds — ignore client model selector (MiniMax can't output ---FILE: markers reliably)
+        const model = 'anthropic-claude-haiku-4.5'
 
         let identityContext = ''
         if (userId) {
