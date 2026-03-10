@@ -4912,7 +4912,11 @@ function buildSseEvent(event: string, data: Record<string, unknown>): string {
 }
 
 async function handleBuildMode(
-  req: NextRequest,
+  parsedBody: {
+    messages: Array<{ role: string; content: string }>
+    currentFiles?: string
+    userProfile?: { name?: string; role?: string; goals?: string }
+  },
   userId: string | null,
 ): Promise<Response> {
   const encoder = new TextEncoder()
@@ -4930,13 +4934,7 @@ async function handleBuildMode(
           return
         }
 
-        const body = await req.json() as {
-          messages: Array<{ role: string; content: string }>
-          currentFiles?: string
-          userProfile?: { name?: string; role?: string; goals?: string }
-        }
-
-        const { messages, currentFiles, userProfile } = body
+        const { messages, currentFiles, userProfile } = parsedBody
         // minimax-m2.5-free — user's preferred build model, confirmed live on opencode.ai
         const buildModel = 'minimax-m2.5-free'
 
@@ -5324,7 +5322,7 @@ export async function POST(req: NextRequest) {
     // When mode === 'build', skip the agent loop and run the IDE build pipeline.
     // This reduces bundle size and keeps chat history in one thread.
     if (mode === 'build') {
-      return handleBuildMode(req, userId)
+      return handleBuildMode(body, userId)
     }
 
     const host = req.headers.get('host') ?? 'localhost:3000'
