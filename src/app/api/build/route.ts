@@ -112,7 +112,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 
 **ESM rules — MANDATORY:**
 - package.json MUST have "type": "module"
-- vite.config.ts MUST use `export default defineConfig` (NOT module.exports)
+- vite.config.ts MUST use \`export default defineConfig\` (NOT module.exports)
 - tsconfig.json MUST have "module": "ESNext", "moduleResolution": "bundler"
 - NO require() calls anywhere
 - NO module.exports anywhere
