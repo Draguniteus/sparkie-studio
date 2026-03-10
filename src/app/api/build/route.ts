@@ -8,7 +8,6 @@ export const runtime = 'nodejs'
 export const maxDuration = 120
 
 const OPENCODE_BASE = 'https://opencode.ai/zen/v1'
-const DO_INFERENCE_BASE = 'https://inference.do-ai.run/v1'
 
 // ─── VITE TEMPLATE for WebContainer ──────────────────────────────────────────
 // WebContainer runs browser-side Node. It CAN run Vite (vite dev server works).
@@ -205,10 +204,8 @@ export async function POST(req: NextRequest) {
         }
 
         const { messages, currentFiles, model: _clientModel, userProfile } = body
-        // Always use Haiku via DO Inference — ignore client model selector
-        // DO_MODEL_ACCESS_KEY works for claude-4.5-haiku; opencode.ai free key gives FreeUsageLimitError
-        const model = 'anthropic-claude-4.5-haiku'
-        const doKey = process.env.DO_MODEL_ACCESS_KEY ?? ''
+        // Use big-pickle — code specialist, 200K ctx, free on opencode.ai (no quota issues)
+        const model = 'big-pickle'
 
         let identityContext = ''
         if (userId) {
@@ -236,16 +233,12 @@ export async function POST(req: NextRequest) {
           ...messages,
         ]
 
-        // Use DO Inference for Haiku (DO_MODEL_ACCESS_KEY) — opencode.ai free tier
-        // doesn't allow claude-haiku-4.5 (FreeUsageLimitError)
-        const buildEndpoint = doKey ? `${DO_INFERENCE_BASE}/chat/completions` : `${OPENCODE_BASE}/chat/completions`
-        const buildKey = doKey || apiKey
-        const res = await fetch(buildEndpoint, {
+        const res = await fetch(`${OPENCODE_BASE}/chat/completions`, {
           method: 'POST',
           signal: AbortSignal.timeout(110_000),
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${buildKey}`,
+            Authorization: `Bearer ${apiKey}`,
           },
           body: JSON.stringify({
             model,
@@ -314,7 +307,7 @@ export async function POST(req: NextRequest) {
 
         // Diagnostic: log whether ---FILE: markers appeared in raw output
         const hasMarkers = fullBuildRaw.includes('---FILE:')
-        console.log(`[BUILD] raw output length=${fullBuildRaw.length} hasFileMarkers=${hasMarkers} model=${model} endpoint=${buildEndpoint.includes('do-ai.run') ? 'DO-Inference' : 'opencode.ai'}`)
+        console.log(`[BUILD] raw output length=${fullBuildRaw.length} hasFileMarkers=${hasMarkers} model=${model}`)
         if (!hasMarkers && fullBuildRaw.length > 0) {
           console.log('[BUILD] NO MARKERS — first 500 chars:', fullBuildRaw.slice(0, 500))
         }
