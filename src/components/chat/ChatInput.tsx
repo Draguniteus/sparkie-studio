@@ -1207,6 +1207,7 @@ export function ChatInput() {
     if (!ideOpen) openIDE()
     setIDETab('process')
     addWorklogEntry({ type: 'action', content: 'Build started — analyzing request', status: 'running' })
+    useAppStore.getState().setLongTaskLabel('Building…')
 
     try {
       // Cancel any in-flight agent request before starting a new one
@@ -1491,6 +1492,7 @@ export function ChatInput() {
     } finally {
       setStreaming(false)
       setExecuting(false)
+      useAppStore.getState().setLongTaskLabel(null)
       saveChatFiles(chatId, useAppStore.getState().files)
     }
   }, [selectedModel, addMessage, updateMessage, setStreaming, setExecuting, openIDE, setIDETab, ideOpen, upsertFile, setActiveFile, clearLiveCode, appendLiveCode, addLiveCodeFile, addWorklogEntry, updateWorklogEntry, setContainerStatus, setPreviewUrl, saveChatFiles, addAsset, updateAsset])
