@@ -169,7 +169,9 @@ export function parseAIResponse(raw: string, projectName?: string): ParseResult 
   const isToolCallXml = /<minimax:tool_call|<invoke\s+name=|<tool_call|<function_calls/i.test(normalized)
   if (isToolCallXml) {
     const xmlFiles: ParsedFile[] = []
-    const invokeRe = /<invoke[^>]*name=["']write_file["'][^>]*>([\s\S]*?)<\/invoke>/gi
+    // M2.5 wraps each file in <minimax:tool_call><invoke name="write_file">...</invoke></minimax:tool_call>
+    // Tolerate truncated responses: match even if </invoke> closing tag is missing
+    const invokeRe = /<invoke[^>]*name=["']write_file["'][^>]*>([\s\S]*?)(?:<\/invoke>|<\/minimax:tool_call>)/gi
     let m
     while ((m = invokeRe.exec(normalized)) !== null) {
       const body = m[1]
@@ -182,8 +184,10 @@ export function parseAIResponse(raw: string, projectName?: string): ParseResult 
       }
     }
     if (xmlFiles.length > 0) {
+      console.log(`[PARSER] XML mode: extracted ${xmlFiles.length} file(s): ${xmlFiles.map(f => f.name).join(', ')}`)
       return { text: '', files: wrapInProjectFolder(xmlFiles, projectName || 'project'), folders: [] }
     }
+    console.log('[PARSER] XML detected but no write_file invokes found — raw len:', normalized.length)
     return { text: '', files: [] }
   }
   // Guard: reject planning text / natural language responses without code
