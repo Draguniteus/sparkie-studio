@@ -4884,7 +4884,7 @@ function formatConnectorResponse(actionSlug: string, data: Record<string, unknow
 // Three-tier model selection. Users never see model names — Sparkie picks automatically.
 
 const MODELS = {
-  CONVERSATIONAL: 'anthropic-claude-4.5-haiku',        // Tier 1   · Sparkie  — conversations, light tools (DO Inference)
+  CONVERSATIONAL: 'anthropic-claude-haiku-4.5',        // Tier 1   · Sparkie  — conversations, light tools (DO Inference)
   CAPABLE:        'llama3.3-70b-instruct',               // Tier 2   · Flame    — task execution, tools, coding, GitHub
   EMBER:          'big-pickle',                 // Tier 2.5 · Ember    — code specialist, agentic tool-calling, 200K ctx
   DEEP:           'minimax-m2.5-free',          // Tier 3   · Atlas    — heavy analysis, large refactors, deep dives
@@ -4904,7 +4904,7 @@ interface ModelSelection {
 
 // ─── BUILD MODE: Sparkie builds Vite/React apps for the live IDE preview ────
 // Triggered when chat receives mode: 'build' from the frontend.
-// Uses anthropic-claude-4.5-haiku via DO Inference — confirmed working, no XML tool-call bug.
+// Uses anthropic-claude-haiku-4.5 via DO Inference — confirmed working, no XML tool-call bug.
 // XML tool-call guard prevents silent empty builds.
 
 function buildSseEvent(event: string, data: Record<string, unknown>): string {
@@ -4935,9 +4935,9 @@ async function handleBuildMode(
         }
 
         const { messages, currentFiles, userProfile } = parsedBody
-        // anthropic-claude-4.5-haiku via DO Inference — confirmed working (17-file builds)
+        // anthropic-claude-haiku-4.5 via DO Inference — confirmed working (17-file builds)
         // minimax-m2.5-free hardwires tool-call XML output regardless of tool_choice:'none'
-        const buildModel = 'anthropic-claude-4.5-haiku'
+        const buildModel = 'anthropic-claude-haiku-4.5'
         const doKey = process.env.DO_MODEL_ACCESS_KEY ?? ''
 
         let identityContext = ''
@@ -5184,7 +5184,7 @@ function selectModel(messages: Array<{ role: string; content: string }>): ModelS
 
 // claude-haiku-4-5 and gpt-4.1 are served via DigitalOcean Inference
 // All other free models (big-pickle, minimax, trinity) go through opencode.ai/zen
-const DO_MODELS = new Set(['anthropic-claude-4.5-haiku', 'llama3.3-70b-instruct'])
+const DO_MODELS = new Set(['anthropic-claude-haiku-4.5', 'llama3.3-70b-instruct'])
 
 async function tryLLMCall(
   payload: Record<string, unknown>,
