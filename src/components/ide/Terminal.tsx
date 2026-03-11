@@ -131,7 +131,9 @@ export function Terminal() {
     console.log('[Terminal] useEffect pendingRunCommand:', pendingRunCommand, 'connected:', connected, 'ws:', wsRef.current?.readyState)
     if (!pendingRunCommand) return
     if (!connected || !wsRef.current || wsRef.current.readyState !== 1) {
-      console.log('[Terminal] BLOCKED — not connected or ws not open. connected:', connected, 'readyState:', wsRef.current?.readyState)
+      console.log('[Terminal] pendingRunCommand set but not yet connected — will fire on ws.onopen. connected:', connected, 'readyState:', wsRef.current?.readyState)
+      // Do NOT clear pendingRunCommand — ws.onopen will pick it up when connection opens.
+      // ws.onopen reads from useAppStore.getState().pendingRunCommand directly, so it will fire.
       return
     }
     const cmd = pendingRunCommand
