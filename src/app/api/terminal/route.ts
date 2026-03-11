@@ -6,9 +6,10 @@ import { authOptions } from '@/lib/auth'
 export const runtime = 'nodejs'
 export const maxDuration = 300
 
-// Session store — sandbox + WS clients per session
+// Session store — sandbox + PTY pid + SSE clients per session
 const sessions = new Map<string, {
   sbx: Sandbox
+  ptyPid: number | null
   clients: Set<{ send: (data: string) => void; close: () => void }>
   createdAt: number
 }>()
@@ -28,7 +29,7 @@ function sseEvent(type: string, data: string) {
   return `data: ${JSON.stringify({ type, data })}\n\n`
 }
 
-// POST /api/terminal — create session or send input
+// POST /api/terminal — create session, send input, or resize
 export async function POST(req: NextRequest) {
   const apiKey = process.env.E2B_API_KEY
   if (!apiKey) {
@@ -40,42 +41,79 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const body = await req.json() as { action: 'create' | 'input' | 'resize'; sessionId?: string; data?: string; cols?: number; rows?: number }
+  const body = await req.json() as {
+    action: 'create' | 'input' | 'resize'
+    sessionId?: string
+    data?: string
+    cols?: number
+    rows?: number
+  }
 
-  // ── Create new terminal session ──────────────────────────────────────────
+  // Create new terminal session
   if (body.action === 'create') {
     const sessionId = `term_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 
     try {
       const sbx = await Sandbox.create({ apiKey, timeoutMs: 30 * 60 * 1000 })
 
-      // Install agent-browser in the sandbox
-      sbx.commands.run('npm install -g agent-browser 2>/dev/null || true', { background: true }).catch(() => {})
+      const sess = {
+        sbx,
+        ptyPid: null as number | null,
+        clients: new Set<{ send: (data: string) => void; close: () => void }>(),
+        createdAt: Date.now(),
+      }
+      sessions.set(sessionId, sess)
 
-      sessions.set(sessionId, { sbx, clients: new Set(), createdAt: Date.now() })
+      // Create PTY — output broadcasts to all subscribed SSE clients
+      const pty = await sbx.pty.create({
+        onData: (data: Uint8Array) => {
+          const text = Buffer.from(data).toString('utf-8')
+          sess.clients.forEach(c => c.send(sseEvent('output', text)))
+        },
+        cols: 80,
+        rows: 24,
+        timeoutMs: 0,
+      })
 
-      // Return session ID + SSE stream URL for output
+      sess.ptyPid = pty.pid
+
       return NextResponse.json({
         sessionId,
-        wsUrl: `/api/terminal/stream?sessionId=${sessionId}`,
+        wsUrl: `/api/terminal?sessionId=${sessionId}`,
       })
     } catch (err) {
       return NextResponse.json({ error: String(err) }, { status: 500 })
     }
   }
 
-  // ── Send input to running session ────────────────────────────────────────
+  // Send input to running session
   if (body.action === 'input' && body.sessionId && body.data) {
     const sess = sessions.get(body.sessionId)
     if (!sess) return NextResponse.json({ error: 'Session not found' }, { status: 404 })
-    // Input is handled via SSE stream endpoint
+    if (sess.ptyPid === null) return NextResponse.json({ error: 'Terminal not ready' }, { status: 503 })
+    try {
+      await sess.sbx.pty.sendInput(sess.ptyPid, Buffer.from(body.data, 'utf-8'))
+    } catch (_) { /* ignore */ }
+    return NextResponse.json({ ok: true })
+  }
+
+  // Resize terminal
+  if (body.action === 'resize' && body.sessionId && body.cols && body.rows) {
+    const sess = sessions.get(body.sessionId)
+    if (!sess) return NextResponse.json({ error: 'Session not found' }, { status: 404 })
+    if (sess.ptyPid === null) return NextResponse.json({ ok: true })
+    try {
+      await sess.sbx.pty.resize(sess.ptyPid, { cols: body.cols, rows: body.rows })
+    } catch (_) { /* ignore */ }
     return NextResponse.json({ ok: true })
   }
 
   return NextResponse.json({ error: 'Invalid action' }, { status: 400 })
 }
 
-// GET /api/terminal — SSE stream for terminal I/O
+// GET /api/terminal — SSE stream; client subscribes to PTY output broadcast
+// No shell spawned here — PTY already running from POST create.
+// This is pure pub/sub: add client to broadcast set, stream PTY output.
 export async function GET(req: NextRequest) {
   const apiKey = process.env.E2B_API_KEY
   if (!apiKey) return NextResponse.json({ error: 'E2B_API_KEY not set' }, { status: 500 })
@@ -85,17 +123,6 @@ export async function GET(req: NextRequest) {
 
   const url = new URL(req.url)
   const sessionId = url.searchParams.get('sessionId')
-  const inputData = url.searchParams.get('input')
-
-  // Handle input forwarding via GET (for simple fetch-based input)
-  if (sessionId && inputData) {
-    const sess = sessions.get(sessionId)
-    if (sess) {
-      // Broadcast input to all clients as a command execution
-      sess.clients.forEach(c => c.send(sseEvent('input_echo', inputData)))
-    }
-    return NextResponse.json({ ok: true })
-  }
 
   if (!sessionId) return NextResponse.json({ error: 'sessionId required' }, { status: 400 })
 
@@ -105,7 +132,7 @@ export async function GET(req: NextRequest) {
   const encoder = new TextEncoder()
 
   const stream = new ReadableStream({
-    async start(controller) {
+    start(controller) {
       const send = (data: string) => {
         try { controller.enqueue(encoder.encode(data)) } catch {}
       }
@@ -114,23 +141,10 @@ export async function GET(req: NextRequest) {
       const client = { send, close }
       sess.clients.add(client)
 
+      // Immediately signal connected — PTY is already running
       send(sseEvent('connected', 'Shell ready'))
 
-      // Start an interactive shell in the sandbox
-      const shell = await sess.sbx.commands.run('/bin/bash --login -i 2>&1', {
-        background: true,
-        onStdout: (data) => send(sseEvent('output', data)),
-        onStderr: (data) => send(sseEvent('output', data)),
-      }).catch(() => null)
-
-      if (!shell) {
-        send(sseEvent('error', 'Failed to start shell'))
-        close()
-        sess.clients.delete(client)
-        return
-      }
-
-      // Keep alive ping
+      // Keep-alive ping every 15s
       const pingInterval = setInterval(() => send(sseEvent('ping', '')), 15000)
 
       req.signal.addEventListener('abort', () => {
