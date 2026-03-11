@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import type { Terminal as XTermType } from '@xterm/xterm'
 import type { FitAddon as FitAddonType } from '@xterm/addon-fit'
-import { useAppStore } from '@/store/appStore'
+import { useAppStore, flattenFileTree } from '@/store/appStore'
 import { Terminal as TermIcon, Play, Square, Trash2, ExternalLink } from 'lucide-react'
 
 // xterm loaded via npm imports (@xterm/xterm + @xterm/addon-fit)
@@ -169,11 +169,20 @@ export function Terminal() {
   // ── E2B PTY connection ────────────────────────────────────────────────────
   const connectE2B = useCallback(async (term: XTermInstance) => {
     try {
-      // Create a new E2B terminal session
+      // Create a new E2B terminal session, passing current project files so
+      // the sandbox already has them before the shell command fires.
+      const currentChat = useAppStore.getState().chats.find(
+        c => c.id === useAppStore.getState().currentChatId
+      )
+      const projectFiles = currentChat
+        ? flattenFileTree(currentChat.files)
+            .filter(f => f.type === 'file' && f.content)
+            .map(f => ({ name: f.name, content: f.content }))
+        : []
       const r = await fetch('/api/terminal', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'create' })
+        body: JSON.stringify({ action: 'create', files: projectFiles })
       })
       if (!r.ok) {
         term.write('\r\n\x1b[31m  [Terminal] E2B session unavailable — using build output mode\x1b[0m\r\n')
