@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json() as {
-    action: 'create' | 'input' | 'resize'
+    action: 'create' | 'input' | 'resize' | 'sync-files'
     sessionId?: string
     data?: string
     cols?: number
@@ -127,6 +127,26 @@ export async function POST(req: NextRequest) {
       await sess.sbx.pty.resize(sess.ptyPid, { cols: body.cols, rows: body.rows })
     } catch (_) { /* ignore */ }
     return NextResponse.json({ ok: true })
+  }
+
+  // Sync files into an existing session sandbox (called just before firing run command)
+  if (body.action === 'sync-files' && body.sessionId) {
+    const sess = sessions.get(body.sessionId)
+    if (!sess) return NextResponse.json({ error: 'Session not found' }, { status: 404 })
+    const files = (body as typeof body & { files?: { name: string; content: string }[] }).files ?? []
+    if (files.length > 0) {
+      const firstNested = files.find(f => f.name.includes('/'))
+      const projectRoot = firstNested ? firstNested.name.split('/')[0] : 'project'
+      await Promise.all(
+        files.map(f => {
+          const filePath = f.name.startsWith(projectRoot + '/')
+            ? `/home/user/${f.name}`
+            : `/home/user/${projectRoot}/${f.name}`
+          return sess.sbx.files.write(filePath, f.content)
+        })
+      )
+    }
+    return NextResponse.json({ ok: true, synced: files.length })
   }
 
   return NextResponse.json({ error: 'Invalid action' }, { status: 400 })
