@@ -4959,12 +4959,12 @@ async function handleBuildMode(
         let fullBuildRaw = ''
         let thinkingEmitted = false
         let agentMessages: Array<{ role: string; content: unknown; tool_calls?: unknown; tool_call_id?: string; name?: string }> = [...apiMessages]
-        const MAX_TURNS = 12
+        const MAX_TURNS = 25
 
         for (let turn = 0; turn < MAX_TURNS; turn++) {
           const turnRes = await fetch(buildEndpoint, {
             method: 'POST',
-            signal: AbortSignal.timeout(60_000),
+            signal: AbortSignal.timeout(120_000),
             headers: {
               'Content-Type': 'application/json',
               Authorization: `Bearer ${apiKey}`,
@@ -5077,8 +5077,16 @@ async function handleBuildMode(
                 const fContent = args.content ?? ''
                 console.log(`[BUILD] Turn ${turn}: write_file -> ${fPath}`)
                 // Emit as synthetic XML so existing fileParser.ts pipeline picks it up
-                const xml = `<minimax:tool_call>\n<invoke name="write_file">\n<parameter name="path">${fPath}</parameter>\n<parameter name="content">${fContent}</parameter>\n</invoke>\n</minimax:tool_call>`
-                send('delta', { content: xml })
+                const xmlOpen = `<minimax:tool_call>\n<invoke name="write_file">\n<parameter name="path">${fPath}</parameter>\n<parameter name="content">`
+                const xmlClose = `</parameter>\n</invoke>\n</minimax:tool_call>`
+                // Stream file content in chunks so Process tab shows live typing
+                const CHUNK_SIZE = 80
+                send('delta', { content: xmlOpen })
+                for (let ci = 0; ci < fContent.length; ci += CHUNK_SIZE) {
+                  send('delta', { content: fContent.slice(ci, ci + CHUNK_SIZE) })
+                }
+                send('delta', { content: xmlClose })
+                const xml = xmlOpen + fContent + xmlClose
                 fullBuildRaw += xml
                 agentMessages = [...agentMessages, {
                   role: 'tool',
