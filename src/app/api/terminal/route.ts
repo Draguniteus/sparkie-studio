@@ -56,6 +56,27 @@ export async function POST(req: NextRequest) {
     try {
       const sbx = await Sandbox.create({ apiKey, timeoutMs: 30 * 60 * 1000 })
 
+      // Write project files into the sandbox before the shell starts.
+      // Files arrive as { name, content } pairs; they are written under
+      // /home/user/<projectRoot>/ where projectRoot is derived from the
+      // first path that contains a '/' separator (e.g. "sparkie" from
+      // "sparkie/src/App.tsx"), or "project" if all files are at the root.
+      const files = (body as typeof body & { files?: { name: string; content: string }[] }).files ?? []
+      if (files.length > 0) {
+        // Derive project root from first file that has a path separator
+        const firstNested = files.find(f => f.name.includes('/'))
+        const projectRoot = firstNested ? firstNested.name.split('/')[0] : 'project'
+        await Promise.all(
+          files.map(f => {
+            // If file.name already starts with projectRoot, use as-is; otherwise prefix it
+            const filePath = f.name.startsWith(projectRoot + '/')
+              ? `/home/user/${f.name}`
+              : `/home/user/${projectRoot}/${f.name}`
+            return sbx.files.write(filePath, f.content)
+          })
+        )
+      }
+
       const sess = {
         sbx,
         ptyPid: null as number | null,
