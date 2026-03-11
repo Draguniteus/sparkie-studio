@@ -5095,4 +5095,1519 @@ async function handleBuildMode(
                 const args = JSON.parse(tc.arguments) as { path?: string; content?: string }
                 const fPath = (args.path ?? '').replace(/^\/workspace\//, '').replace(/^\//, '')
                 let fContent = args.content ?? ''
+                console.log(`[BUILD] Turn ${turn}: write_file -> ${fPath}`)
+                // Emit as synthetic XML so existing fileParser.ts pipeline picks it up
+                const xmlOpen = `<minimax:tool_call>\n<invoke name="write_file">\n<parameter name="path">${fPath}</parameter>\n<parameter name="content">`
+                const xmlClose = `</parameter>\n</invoke>\n</minimax:tool_call>`
+                // Stream file content in chunks so Process tab shows live typing
+                const CHUNK_SIZE = 80
+                send('delta', { content: xmlOpen })
+                for (let ci = 0; ci < fContent.length; ci += CHUNK_SIZE) {
+                  send('delta', { content: fContent.slice(ci, ci + CHUNK_SIZE) })
+                }
+                send('delta', { content: xmlClose })
+                const xml = xmlOpen + fContent + xmlClose
+                fullBuildRaw += xml
+                agentMessages = [...agentMessages, {
+                  role: 'tool',
+                  tool_call_id: callIds[tcIdx],
+                  name: 'write_file',
+                  content: `File "${fPath}" written successfully.`,
+                }]
+              } catch (_) { console.error(`[BUILD] Turn ${turn}: failed to parse tool args`) }
+            }
+
+            // Continue loop (write next file)
+            // M2.5 sometimes emits finish_reason='' (empty) when done — treat that
+            // as stop too, since we already have the tool call content for this turn.
+            if (turnFinishReason === 'stop' || turnFinishReason === '') {
+              console.log(`[BUILD] Agent finished at turn ${turn} (finish=${turnFinishReason || 'empty→stop'})`)
+              break
+            }
+            continue
+          }
+
+          // Fallback: XML text-mode content — extract path from XML to build tool result
+          const invokeMatch = /<invoke[^>]*name=["']write_file["'][^>]*>[\s\S]*?<parameter[^>]*name=["']path["'][^>]*>([\s\S]*?)<\/parameter>/i.exec(turnContent)
+          if (invokeMatch) {
+            const fPath = invokeMatch[1].trim().replace(/^\/workspace\//, '').replace(/^\//, '')
+            console.log(`[BUILD] Turn ${turn}: XML text-mode -> ${fPath}`)
+            agentMessages = [
+              ...agentMessages,
+              { role: 'assistant', content: turnContent.trim(), tool_calls: [{ id: `call_${turn}_xml`, type: 'function', function: { name: 'write_file', arguments: JSON.stringify({ path: fPath }) } }] },
+              { role: 'tool', tool_call_id: `call_${turn}_xml`, name: 'write_file', content: `File "${fPath}" written successfully.` },
+            ]
+            if (turnFinishReason === 'stop' || turnFinishReason === '') break
+            continue
+          }
+
+          // No tool call and no XML invoke — model is done or gave a conversational response
+          console.log(`[BUILD] Turn ${turn}: no tool call — agent done`)
+          break
+        }
+
+        const hasMarkers = fullBuildRaw.includes('---FILE:')
+        console.log(`[BUILD] raw output length=${fullBuildRaw.length} hasFileMarkers=${hasMarkers} model=${buildModel}`)
+        if (!hasMarkers && fullBuildRaw.length > 0) {
+          console.log('[BUILD] NO MARKERS — first 500 chars:', fullBuildRaw.slice(0, 500))
+        }
+
+        if (fullBuildRaw.includes('<minimax:tool_call>') || fullBuildRaw.includes('<invoke name=')) {
+          console.log('[BUILD] XML tool-call format detected — passing to XML parser. len:', fullBuildRaw.length)
+        }
+
+        send('done', {})
+        controller.close()
+
+        if (userId) {
+          query(
+            `INSERT INTO user_sessions (user_id, last_seen_at, session_count)
+             VALUES ($1, NOW(), 1)
+             ON CONFLICT (user_id) DO UPDATE
+               SET last_seen_at = NOW(), session_count = user_sessions.session_count + 1`,
+            [userId]
+          ).catch(() => {})
+        }
+      } catch (err) {
+        console.error('[/api/chat build mode] error:', err)
+        try {
+          controller.enqueue(encoder.encode(buildSseEvent('error', { message: String(err) })))
+          controller.enqueue(encoder.encode(buildSseEvent('done', {})))
+          controller.close()
+        } catch {}
+      }
+    },
+  })
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    },
+  })
+}
+
+function selectModel(messages: Array<{ role: string; content: string }>): ModelSelection {
+  const lastUser = messages.slice().reverse().find(m => m.role === 'user')?.content ?? ''
+  const lower = lastUser.toLowerCase()
+  const msgLen = lastUser.length
+  const userTurns = messages.filter(m => m.role === 'user').length
+
+  // ── Tier 3: DEEP — heavy coding, architecture-level tasks ─────────────────
+  const deepCount = [
+    /\b(refactor|rewrite|rebuild|migrate|overhaul|redesign)\b/.test(lower),
+    /\b(entire|whole|full|complete)\b.{0,30}\b(code|codebase|file|app|system)\b/.test(lower),
+    /\b(analyze|audit|review).{0,30}\b(codebase|repository|architecture)\b/.test(lower),
+    /\bplan.{0,20}(and|then).{0,20}(build|implement|execute)\b/.test(lower),
+    msgLen > 800,
+    userTurns > 12 && lower.includes('code'),
+  ].filter(Boolean).length
+
+  // ── Hard task signals: action verbs requiring real execution ───────────────
+  // Note: "check/get/find" alone are ambiguous — only counted as task if paired with technical context
+  // `create` and `generate` excluded as bare signals — they collide with media gen
+  // ("create an image of...", "generate a song") and conversational opinion questions.
+  // They only count as task intent when paired with an explicit code/file target (see override below).
+  let taskIntent = /\b(code|build|write|fix|debug|deploy|deployment|commit|push|email|tweet|post|github|repo|file|task|schedule|search my|find me|look up|fetch|list|remember|save|track|install|run|execute|add|remove|delete|update|edit|show me|show my|pull|open pr|make a|send|compose|draft|reply|respond|forward|message|dm|notify|remind|investigate|analyze|analyse|diagnose|audit|read my|read me|check my|check the|list my|open my|play my|start my|stop my|discord|slack|instagram|reddit|whatsapp|telegram)\b/.test(lower)
+  // `create`/`generate` only count as task when explicitly targeting code/file artifacts
+  if (/\b(create|generate)\b.{0,50}\b(file|page|app|component|script|html|css|function|api|endpoint|landing page|website|tool|route|feature|button|form|modal|widget)\b/.test(lower)) taskIntent = true
+  // Non-code create: reminder/event/note/task/list/goal/plan → agentic, not build
+  // Non-code create: reminder/event/note/goal/plan → agentic, not build (exclude task/list — collision with "task manager app", "todo list")
+  if (/\bcreate\b.{0,40}\b(reminder|event|meeting|note|goal|plan|alert|notification|record|appointment)\b/.test(lower)) taskIntent = true
+  // Technical status checks → always route to capable
+  if (/\b(check|is|are|does).{0,20}\b(deploy|deployment|working|running|broken|live|server|api|app|build|site)\b/.test(lower)) taskIntent = true
+
+  // ── Tier 1: CONVERSATIONAL — gpt-5-nano (supports tools, fast, cheap) ────
+  // gpt-5-nano fully supports function calling — use it for all conversation and light tool calls.
+  // Route to CONVERSATIONAL when message is relational/emotional/chitchat OR a simple question with no task signal.
+  const conversationalIntent = !taskIntent && (
+    // Emotional / personal sharing — these NEVER trigger builds
+    /\b(feel|feeling|miss|love|like|hate|happy|sad|excited|nervous|worried|proud|grateful|lonely|tired|bored|frustrated|confused|share|tell you|thinking about|wanted to|talking about|haven't spoken|been working|been busy|catch up|how have you|how are you doing)\b/.test(lower) ||
+    // Personal opening lines
+    /\b(i know we|i've been|i was|i just|you know|been a while|it's been|miss me|missed you|how's sparkie|hey sparkie)\b/.test(lower) ||
+    // Upgrade awareness — let agent handle these; not a build task
+    /\b(what.*upgraded|what.*new|what.*changed|what.*different|what.*improve|what.*capabilit|what.*can.*do.*now|what.*have.*now|what.*you.*get|tell.*what.*built|tell.*what.*updated)\b/.test(lower) ||
+    // Greetings, acknowledgments, reactions
+    /^(hi|hey|hello|yo|sup|what's up|how are you|how's it going|good morning|good night|good evening|thanks|thank you|nice|cool|awesome|great|sounds good|got it|ok|okay|sure|lol|haha|wow|really|damn|perfect|love it|that's|thats)/.test(lower.trim()) ||
+    // Simple question with no task signal (weather, time, quick facts — nano handles these tools fine)
+    (!taskIntent && msgLen < 150 && /\b(who|what|why|when|where|how|date|today)\b/.test(lower) && !/\b(weather|time|news|current|currently|latest|live|price|stock|code|file|repo|deploy|build|task|email|tweet|post|github|happening|situation|conflict|war|crisis|election|politics)\b/.test(lower)) ||
+    // Short messages with zero task signal
+    (msgLen < 60 && !taskIntent && !/\b(currently|happening|going on|what.{0,10}(between|with|about).{0,30}(and|now)|situation|conflict|war|crisis|news|weather|price|stock|live|latest)\b/.test(lower))
+  )
+
+  // ── Tier 4: TRINITY — frontier reasoning, creative architecture, massive scale ──
+  const trinitySignals = [
+    /\b(design|architect)(ure)?( a| the| new| system)?\b/.test(lower),
+    /\b(massive|enormous|complex|intricate).{0,30}\b(codebase|system|refactor|review)\b/.test(lower),
+    /\b(cross[- ]domain|interdisciplinary|multi[- ]language)\b/.test(lower),
+    /\b(review.{0,30}(entire|whole|full|complete).{0,30}codebase)\b/.test(lower),
+    deepCount >= 3,
+  ].filter(Boolean).length
+
+  // ── Tier 2.5: EMBER — code-specific agentic, bug fix, script gen ────────────
+  const emberSignals = [
+    /\b(fix (this |the |my )?bug|fix bug|debug this|patch this)\b/.test(lower),
+    /\b(generate (a |the )?(script|snippet|function|component|hook))\b/.test(lower),
+    /\b(write (a )?(script|function|util|helper|module))\b/.test(lower),
+    /\b(agentic|tool[- ]call|api call|invoke)\b/.test(lower),
+    (lower.includes('python') || lower.includes('typescript') || lower.includes('javascript')) && taskIntent,
+  ].filter(Boolean).length
+
+  if (trinitySignals >= 2) {
+    return { primary: MODELS.TRINITY, fallbacks: [MODELS.TRINITY_FB, MODELS.DEEP, MODELS.CAPABLE], tier: 'trinity', needsTools: true }
+  }
+  // IDE build requests: route to CAPABLE (fast, reliable tool calling) — never DEEP/MiniMax
+  const isBuildRequest = /\b(build|create|make|generate)\b.{0,80}\b(app|game|website|tool|dashboard|project|component|page|ui|interface|3d|room|demo|prototype)\b/i.test(lower)
+    || /\b(build me|make me|create me|spin (up|that)|scaffold|generate a)\b/i.test(lower)
+  if (isBuildRequest) {
+    return { primary: MODELS.CAPABLE, fallbacks: [MODELS.EMBER, MODELS.CONVERSATIONAL], tier: 'capable', needsTools: true }
+  }
+
+  if (deepCount >= 2) {
+    return { primary: MODELS.DEEP, fallbacks: [MODELS.CAPABLE, MODELS.CONVERSATIONAL], tier: 'deep', needsTools: true }
+  }
+  if (emberSignals >= 2 && deepCount < 2) {
+    return { primary: MODELS.EMBER, fallbacks: [MODELS.CAPABLE, MODELS.DEEP], tier: 'ember', needsTools: true }
+  }
+  if (conversationalIntent && deepCount === 0) {
+    return { primary: MODELS.CONVERSATIONAL, fallbacks: [MODELS.CAPABLE], tier: 'conversational', needsTools: false }
+  }
+  // Default: CAPABLE — Flame handles most real tasks
+  return { primary: MODELS.CAPABLE, fallbacks: [MODELS.DEEP, MODELS.EMBER], tier: 'capable', needsTools: true }
+}
+
+
+// claude-haiku-4-5 and gpt-4.1 are served via DigitalOcean Inference
+// All other free models (big-pickle, minimax, trinity) go through opencode.ai/zen
+const DO_MODELS = new Set(['anthropic-claude-haiku-4.5', 'llama3.3-70b-instruct'])
+
+async function tryLLMCall(
+  payload: Record<string, unknown>,
+  modelSelection: ModelSelection,
+  apiKey: string,
+  doKey?: string,
+): Promise<{ response: Response; modelUsed: ModelTier }> {
+  const candidates: ModelTier[] = [modelSelection.primary, ...modelSelection.fallbacks]
+  let lastError = ''
+  for (const m of candidates) {
+    try {
+      const isStream = payload.stream === true
+      // Route gpt-5-mini to DO Inference; everything else (free models) to opencode.ai/zen
+      const isDO = DO_MODELS.has(m)
+      const endpoint = isDO ? `${DO_INFERENCE_BASE}/chat/completions` : `${OPENCODE_BASE}/chat/completions`
+      const key = isDO ? (doKey ?? apiKey) : apiKey
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+        body: JSON.stringify({ ...payload, model: m }),
+        signal: AbortSignal.timeout(isStream ? 90000 : 30000),
+      })
+      if (res.ok) return { response: res, modelUsed: m }
+      if (res.status === 404 || res.status === 429 || res.status === 402 || res.status === 422 || res.status === 401 || res.status >= 500 || res.status === 400 || res.status === 403) {
+        const txt = await res.text().catch(() => res.status.toString())
+        lastError = `${m}: ${res.status} ${txt.slice(0, 80)}`
+        await new Promise(r => setTimeout(r, 500)) // brief backoff before next model
+        continue
+      }
+      if (!res.ok) {
+        // Catch any remaining non-2xx — fallback if response mentions unavailability
+        const txt = await res.clone().text().catch(() => '')
+        if (/not available|unavailable|plan|quota/i.test(txt)) {
+          lastError = `${m}: ${res.status} ${txt.slice(0, 80)}`
+          await new Promise(r => setTimeout(r, 500))
+          continue
+        }
+      }
+      return { response: res, modelUsed: m }
+    } catch (e) {
+      lastError = `${m}: ${(e as Error).message}`
+    }
+  }
+  return {
+    response: new Response(JSON.stringify({ error: `All models unavailable. Last error: ${lastError}` }), {
+      status: 503, headers: { 'Content-Type': 'application/json' },
+    }),
+    modelUsed: candidates[candidates.length - 1],
+  }
+}
+
+// ── POST handler ──────────────────────────────────────────────────────────────
+
+// ── Simple in-memory rate limiter (30 req/min per user) ──────────────────────
+// ── Search result cache — avoid duplicate Tavily hits within 60s ──────────────
+const _searchCache = new Map<string, { result: string; expiresAt: number }>()
+function getCachedSearch(query: string): string | null {
+  const entry = _searchCache.get(query)
+  if (!entry || entry.expiresAt < Date.now()) { _searchCache.delete(query); return null }
+  return entry.result
+}
+function setCachedSearch(query: string, result: string): void {
+  // Cap cache size at 50 entries — evict oldest
+  if (_searchCache.size >= 50) {
+    const oldest = [..._searchCache.entries()].sort((a,b) => a[1].expiresAt - b[1].expiresAt)[0]
+    if (oldest) _searchCache.delete(oldest[0])
+  }
+  _searchCache.set(query, { result, expiresAt: Date.now() + 60_000 })
+}
+
+// ── Connector-tools TTL cache — avoids live Composio API call on every request ──
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const _ctCache = new Map<string, { tools: any[]; expiresAt: number }>()
+const _memCache = new Map<string, { text: string; expiresAt: number }>()
+
+const _rlMap = new Map<string, { count: number; resetAt: number }>()
+
+// ── Session-level abort: kill previous in-flight request when same user sends new one ──
+// Prevents two parallel responses competing for the same SSE stream
+const _activeAbortMap = new Map<string, AbortController>()
+function checkRateLimit(key: string): boolean {
+  const now = Date.now()
+  const entry = _rlMap.get(key)
+  if (!entry || entry.resetAt < now) {
+    _rlMap.set(key, { count: 1, resetAt: now + 60_000 })
+    return true
+  }
+  if (entry.count >= 30) return false
+  entry.count++
+  return true
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json()
+    const { messages, model: _clientModel, userProfile, voiceMode, mode } = body
+    // Server-side model routing — ignore client model selector, Sparkie picks automatically
+    const modelSelection = selectModel(messages ?? [])
+    const model = modelSelection.primary
+    const apiKey = process.env.OPENCODE_API_KEY
+    if (!apiKey) {
+      return new Response(JSON.stringify({ error: 'OPENCODE_API_KEY not configured' }), {
+        status: 500, headers: { 'Content-Type': 'application/json' },
+      })
+    }
+
+    // ── Internal auth bypass for heartbeat scheduler ────────────────────────
+    // Scheduler calls /api/chat with x-internal-user-id + x-internal-secret
+    // so tasks run with full user context (memory, identity, tools) without a session.
+    const internalSecret = process.env.SPARKIE_INTERNAL_SECRET
+    const internalUserId = req.headers.get('x-internal-user-id')
+    const internalReqSecret = req.headers.get('x-internal-secret')
+    const isInternalCall =
+      !!internalSecret &&
+      !!internalUserId &&
+      internalReqSecret === internalSecret
+
+    const session = isInternalCall ? null : await getServerSession(authOptions)
+    const userId = isInternalCall
+      ? internalUserId
+      : (session?.user as { id?: string } | undefined)?.id ?? null
+    // Rate limit: 30 req/min per user (non-internal)
+    if (!isInternalCall) {
+      const rlKey = userId ?? req.headers.get('x-forwarded-for') ?? 'anon'
+      if (!checkRateLimit(rlKey)) {
+        return new Response(JSON.stringify({ error: 'Rate limit exceeded — please wait a moment.' }), {
+          status: 429, headers: { 'Content-Type': 'application/json', 'Retry-After': '60' },
+        })
+      }
+    }
+
+    // ── Session abort: kill any previous in-flight request for this user ────────
+    if (userId) {
+      const prev = _activeAbortMap.get(userId)
+      if (prev) { try { prev.abort() } catch { /* ignore */ } }
+      const abortCtrl = new AbortController()
+      _activeAbortMap.set(userId, abortCtrl)
+      // Clean up when this request finishes (client disconnects)
+      req.signal.addEventListener('abort', () => {
+        if (_activeAbortMap.get(userId) === abortCtrl) _activeAbortMap.delete(userId)
+      })
+    }
+
+    // ── BUILD MODE: Unified chat+build route (MiniMax Agent pattern) ────────────
+    // When mode === 'build', skip the agent loop and run the IDE build pipeline.
+    // This reduces bundle size and keeps chat history in one thread.
+    if (mode === 'build') {
+      return handleBuildMode(body, userId)
+    }
+
+    const host = req.headers.get('host') ?? 'localhost:3000'
+    const proto = req.headers.get('x-forwarded-proto') ?? 'https'
+    const baseUrl = `${proto}://${host}`
+    const doKey = process.env.DO_MODEL_ACCESS_KEY ?? ''
+    const tavilyKey = process.env.TAVILY_API_KEY
+
+    // Load user's connected app tools in parallel with system prompt build
+    const connectorToolsPromise = userId ? getUserConnectorTools(userId) : Promise.resolve([])
+
+    // ── Build system prompt ─────────────────────────────────────────────────
+    let systemContent = SYSTEM_PROMPT
+    let shouldBrief = false
+
+    if (userId) {
+      // Record user activity for presence/autonomy model
+      recordUserActivity(userId).catch(() => {})
+
+      const [memoriesText, awareness, identityFiles, envCtx, sessionSnapshot, readyIntents, userModel] = await Promise.all([
+        (() => {
+          const _mce = _memCache.get(userId)
+          if (_mce && _mce.expiresAt > Date.now()) return Promise.resolve(_mce.text)
+          return loadMemories(userId, messages.filter((m: { role: string; content: string }) => m.role === 'user').at(-1)?.content?.slice(0, 200)).then(t => {
+            _memCache.set(userId, { text: t, expiresAt: Date.now() + 30_000 })
+            return t
+          })
+        })(),
+        getAwareness(userId),
+        modelSelection.tier === 'conversational' ? Promise.resolve({ user: '', memory: '', session: '', heartbeat: '', context: '', actions: '', snapshot: '' } as IdentityFiles) : loadIdentityFiles(userId),
+        modelSelection.tier === 'conversational' ? Promise.resolve(null) : buildEnvironmentalContext(userId),
+        modelSelection.tier === 'conversational' ? Promise.resolve(null) : readSessionSnapshot(userId),
+        modelSelection.tier === 'conversational' ? Promise.resolve([] as Awaited<ReturnType<typeof loadReadyDeferredIntents>>) : loadReadyDeferredIntents(userId),
+        modelSelection.tier === 'conversational' ? Promise.resolve(null) : getUserModel(userId),
+      ])
+      shouldBrief = awareness.shouldBrief && messages.length <= 2 // Only brief on session open
+
+      if (memoriesText) {
+        systemContent += `\n\n## YOUR MEMORY ABOUT THIS PERSON\n${memoriesText}\n\nYour memory has three dimensions — use each appropriately:\n- **Facts**: Names, projects, deadlines, key details — reference when relevant\n- **Preferences**: Their voice, style, tone — shape how you communicate\n- **Procedures**: Execution paths that worked before — reuse them for similar tasks\n\nWeave memory in naturally. Don't recite it.`
+      }
+
+      // Inject structured identity files (USER / MEMORY / SESSION / HEARTBEAT)
+      const identityBlock = buildIdentityBlock(identityFiles, session?.user?.name ?? undefined)
+      if (identityBlock) {
+        systemContent += identityBlock
+      }
+
+      systemContent += `\n\n## RIGHT NOW\n- Time of day: ${awareness.timeLabel}\n- Sessions together: ${awareness.sessionCount}\n- Days since last visit: ${awareness.daysSince === 0 ? 'same day' : `${awareness.daysSince} day${awareness.daysSince === 1 ? '' : 's'} ago`}`
+
+      // Inject environmental context (skipped on CONVERSATIONAL tier)
+      if (envCtx) { systemContent += '\n\n' + formatEnvContextBlock(envCtx) }
+
+      // Inject behavioral user model (Phase 3)
+      if (userModel && userModel.sessionCount >= 5) {
+        systemContent += formatUserModelBlock(userModel)
+      }
+
+      // getProjectContext skipped — not used in system prompt (perf fix)
+
+      // Inject session snapshot for continuity (if recent session exists and this looks like continuation)
+      if (sessionSnapshot && messages.length <= 3) {
+        systemContent += `\n\n## LAST SESSION\nWhere you left off: ${sessionSnapshot.slice(0, 600)}`
+      }
+
+      // Surface any ready deferred intents at session start
+      if (readyIntents.length > 0 && messages.length <= 2) {
+        const intentList = readyIntents.map((i: { id: string; intent: string }) => `- ${i.intent}`).join('\n')
+        systemContent += `\n\n## DEFERRED INTENTS — READY TO SURFACE\nThings mentioned in passing that are now due. Mention naturally if relevant:\n${intentList}`
+        // Mark them as surfaced
+        readyIntents.forEach((i: { id: string }) => markDeferredIntentSurfaced(i.id).catch(() => {}))
+      }
+
+      if (shouldBrief) {
+        systemContent += `\n\n## THIS IS A RETURN VISIT — GIVE THE BRIEF
+The user just opened Sparkie Studio after being away for ${awareness.daysSince === 0 ? 'part of the day' : `${awareness.daysSince} day${awareness.daysSince === 1 ? '' : 's'}`}.
+
+Give them a proper return brief — feel free to use multiple tools at once:
+1. A warm, personal welcome (use their name if you know it, reference something you remember)
+2. Check weather for their location with get_weather (or ask where they are if you don't know)
+3. Generate a motivating image — use a vivid, specific prompt like a cinematic nature scene, sunrise landscape, cosmic vista, or serene atmosphere. Avoid performers, stages, or crowds. Example: "Golden sunrise over mountain peaks, cinematic, rays of light through clouds" or "Deep ocean bioluminescence at night, surreal and beautiful"
+4. One question that shows you actually care about what's going on in their life
+5. Maybe generate a quick track if the mood feels right
+
+Make it feel like walking into your friend's creative space and being genuinely greeted.`
+      }
+    }
+
+    if (userProfile?.name) {
+      systemContent += `\n\n## USER CONTEXT\nName: ${userProfile.name}\n`
+      if (userProfile.role)       systemContent += `Role: ${userProfile.role}\n`
+      if (userProfile.goals)      systemContent += `Building: ${userProfile.goals}\n`
+      if (userProfile.style)      systemContent += `Style: ${userProfile.style}\n`
+      if (userProfile.experience) systemContent += `Experience: ${userProfile.experience}\n`
+    }
+
+    if (voiceMode) {
+      systemContent += `\n\n## ACTIVE VOICE SESSION\nLive voice conversation. Keep responses short and natural — spoken dialogue. No markdown. Max 3-4 sentences.`
+    }
+
+    // Smarter rolling window: keep first 2 messages (session intent/context anchors)
+    // + last 10 for recency. Prevents context amnesia on long conversations.
+    const recentMessages = messages.length <= 12
+      ? messages
+      : [...messages.slice(0, 2), ...messages.slice(-10)]
+
+    // Await user's connector tools (was started in parallel with system prompt build)
+    const connectorTools = await connectorToolsPromise
+    let finalSystemContent = systemContent
+
+    // Option A: If frontend injected live connectedApps list, use it (overrides tool-derived list)
+    const liveConnectedApps = (body.connectedApps) as string[] | undefined
+    if (liveConnectedApps && liveConnectedApps.length > 0) {
+      finalSystemContent += `\n\n## USER'S CONNECTED APPS (live — injected at session start)\nConnected: ${liveConnectedApps.join(', ')}.\nYou have real Composio tools to act on their behalf for these apps. Never claim an app is unavailable if it's in this list.`
+    } else if (connectorTools.length > 0) {
+      const connectedAppNames = [...new Set(connectorTools.map((t) => t.function.name.split('_')[0].toLowerCase()))]
+      finalSystemContent += `\n\n## USER'S CONNECTED APPS\nThis user has connected: ${connectedAppNames.join(', ')}. You have real tools to act on their behalf — read emails, post to their social, check their calendar. Use when they ask, or proactively when it would genuinely help.`
+    }
+
+    // Phase 3: pre-query attempt history for domains likely touched by this message
+    // Extract domain hints from last user message
+    const lastUserContent = messages.slice().reverse().find((m: { role: string; content: string }) => m.role === 'user')?.content ?? ''
+    const domainHints = [
+      /minimax|video/i.test(lastUserContent) ? 'minimax_video' : null,
+      /github|push|commit|deploy/i.test(lastUserContent) ? 'github_push' : null,
+      /composio|auth|connect/i.test(lastUserContent) ? 'composio_auth' : null,
+      /music|audio|generate.*music/i.test(lastUserContent) ? 'music_generation' : null,
+    ].filter(Boolean) as string[]
+    if (userId && domainHints.length > 0) {
+      const attemptBlocks = await Promise.all(
+        domainHints.map((domain) => getAttempts(userId, domain, 3))
+      )
+      const allAttempts = attemptBlocks.flat()
+      if (allAttempts.length > 0) {
+        finalSystemContent += formatAttemptBlock(allAttempts)
+      }
+    }
+
+    // Generate requestId for execution trace
+    const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    if (userId) startTrace(requestId, userId)
+
+    const useTools = !voiceMode && modelSelection.needsTools  // skip tool loop for conversational/chitchat tier
+    const toolContext = { userId, tavilyKey, apiKey, doKey, baseUrl, cookieHeader: req.headers.get('cookie') ?? '' }
+    const toolMediaResults: Array<{ name: string; result: string }> = []
+
+    let finalMessages = [...recentMessages]
+    // Hive log — collected during agent loop, prepended to response stream
+    let hiveLog: string[] = []
+
+    // Atlas (deep) and Trinity (frontier) need more rounds for heavy tasks
+    const MAX_TOOL_ROUNDS = (modelSelection.tier === 'deep' || modelSelection.tier === 'trinity') ? 10 : (modelSelection.tier === 'capable' || modelSelection.tier === 'ember') ? 6 : 6
+    if (useTools) {
+      // Agent loop — up to MAX_TOOL_ROUNDS of tool execution
+      // Multi-round agent loop — up to MAX_TOOL_ROUNDS iterations
+      let loopMessages = [...recentMessages]
+      let round = 0
+      let usedTools = false
+
+
+      // Phase 5: Live SSE stream — emit step_trace/task_chip IN REAL-TIME during tool loop
+      // ReadableStream created before loop; controller captured for immediate enqueue during execution
+      const liveEncoder = new TextEncoder()
+      const liveRef = { controller: null as ReadableStreamDefaultController<Uint8Array> | null }
+      const liveChunks: Uint8Array[] = []
+      const liveStream = new ReadableStream<Uint8Array>({
+        start(ctrl) {
+          liveRef.controller = ctrl
+          // Flush any chunks buffered before controller was ready
+          for (const c of liveChunks) ctrl.enqueue(c)
+          liveChunks.splice(0)
+        },
+      })
+      // Helper: enqueue SSE event immediately or buffer if controller not yet started
+      // NOTE: declared BEFORE HIVE_INIT so liveEnqueue() is available at L4029 (TDZ fix)
+      function liveEnqueue(eventPayload: Record<string, unknown>): void {
+        const chunk = liveEncoder.encode(`data: ${JSON.stringify(eventPayload)}\n\n`)
+        if (liveRef.controller) {
+          liveRef.controller.enqueue(chunk)
+        } else {
+          liveChunks.push(chunk)
+        }
+      }
+
+      // ── Sparkie's Hive — The Five: Sparkie · Flame · Ember · Atlas · Trinity ──────
+      const HIVE_INIT = [
+        "🐝 Initiating Sparkie's Hive...",
+        "🏰 Hive Online — All Units Reporting...",
+        "⚡ Queen Sparkie Has Spoken — Mobilizing...",
+        "🔱 The Five Are Assembling — Stand By...",
+        "🫀 Hive Pulse Confirmed — We Are One Mind...",
+        "🗡️ Gears In Motion — The Hive Never Sleeps...",
+        "🚀 Systems Hot — Agents On Standby...",
+        "🔋 Power Surge Detected — Hive Coming Online...",
+        "🛡️ Perimeter Secured — Intelligence Network Active...",
+        "🌐 Global Hive Connect — All Nodes Synchronized...",
+        "🎖️ Mission Briefing In Progress — Five Eyes Open...",
+        "💥 Hive Awakened — Zero Hesitation Protocol...",
+        "🔑 Clearance Granted — The Five Have The Keys...",
+        "🌑 Night Ops Active — Silent But Lethal...",
+      ]
+      const HIVE_ROUND: Record<number, string[]> = {
+        1: [
+          "🔍 Scouter Bees Released — First Contact Initiated...",
+          "📡 Intelligence Gathering In Progress — Scanning All Frequencies...",
+          "🎯 Flame On Recon — First Sweep Initiated...",
+          "🕵️ Field Agents Deployed — Eyes Open, Ears On...",
+          "🐝 The Swarm Is Listening — Signal Acquired...",
+          "🌐 Casting The Net — Pulling All Relevant Intel...",
+          "🛰️ Overhead Scan Running — Nothing Escapes The Hive...",
+          "📥 Data Intake Commencing — Hive Absorbing Context...",
+        ],
+        2: [
+          "⚡ Agents In Full Execution — No Brakes On The Swarm...",
+          "🔥 Flame Is Running Hot — Second Wave Incoming...",
+          "💥 Worker Bees At Full Capacity — Task Under Full Assault...",
+          "🛡️ Cross-Agent Validation Running — No Errors Tolerated...",
+          "🌀 Hive Momentum Building — Compounding Every Step...",
+          "⚙️ Parallel Threads Active — The Five Working As One...",
+          "📊 Correlating Findings — Truth Taking Shape...",
+          "🔗 Connecting The Dots — Pattern Recognition Live...",
+        ],
+        3: [
+          "🧠 Hive Mind Fully Active — Deep Dive In Progress...",
+          "🔬 Precision Analysis Mode — Every Variable Accounted For...",
+          "🌊 Final Wave Surging — The Swarm Goes All In...",
+          "🏹 Precision Strike Mode — Locked And Loaded...",
+          "🔱 Atlas Is Bearing The Full Weight — Hold Steady...",
+          "🎯 Convergence Protocol — All Intel Narrowing To One Point...",
+          "💎 Extracting Signal From Noise — Quality Over Everything...",
+          "⚔️ Maximum Effort — This Round Decides The Mission...",
+        ],
+      }
+      const HIVE_TIER: Record<string, string[]> = {
+        conversational: [
+          "💬 Sparkie On The Line — Direct Feed Active...",
+          "⚡ Sparkie Here — No Middlemen, Just Her...",
+          "🐝 Queen On Comms — You Have Her Full Attention...",
+          "🌸 Sparkie Responding Directly — Clean Signal, No Overhead...",
+          "🎙️ Queen's Voice Only — Crisp, Direct, No Relay...",
+          "✨ Sparkie Solo — Lightweight, Fast, Present...",
+        ],
+        capable: [
+          "🔥 Flame Ignited — Task Acquired, Executing...",
+          "⚙️ Flame In Motion — Full Tool Access, Zero Hesitation...",
+          "🏎️ Flame Is Running Hot — Output Incoming...",
+          "🌪️ Flame Blazing Through — Nothing Slows Her Down...",
+          "💨 Fastest Agent In The Hive — Flame On The Move...",
+          "🔥 Kimi Activated — The Speed Demon Is Loose...",
+        ],
+        ember: [
+          "🪨 Ember Online — Stealth Mode Engaged...",
+          "🥷 Ember Running Silent — Code Specialist Active...",
+          "🌡️ Ember Burning Steady — Agentic Tools Armed...",
+          "🎯 Ember Locked In — Precision Code Execution...",
+          "🔦 Ember In The Dark — Low Profile, Maximum Output...",
+          "🧬 GLM Architecture Active — Ember Processing Deep Code...",
+          "⚡ Ember Silent Strike — You Won't Hear Her Coming...",
+        ],
+        deep: [
+          "🔱 Atlas Has The Weight — Deep Analysis Underway...",
+          "🌋 Atlas Rising — Heavy Lift Mode Activated...",
+          "🧲 Atlas Pulling Everything In — No Detail Escapes...",
+          "🐋 Atlas In The Deep — Will Surface When Ready...",
+          "🏔️ Atlas Carrying The Mountain — Steady As Stone...",
+          "🌊 Atlas Submerged — Mining The Deep For Answers...",
+          "⚓ Atlas Anchored — The Most Thorough Agent Is On Watch...",
+          "🌐 MiniMax Intelligence Online — Atlas Running At Scale...",
+        ],
+        trinity: [
+          "🔴 DEFCON 1 — Trinity Has Been Deployed...",
+          "🔱 Trinity Online — 400 Billion Parameters Activated...",
+          "🌌 Frontier Unit Live — Trinity Is In The Field...",
+          "⚠️ Trinity Engaged — Creative Systems Architect Active...",
+          "🚨 Maximum Capability Reached — Trinity Carrying The Mission...",
+          "💀 This Wasn't A Drill — Trinity Is Real And She's Here...",
+          "🌑 Dark Matter Thinking — Trinity Operating Beyond Normal Range...",
+          "🧠 The Apex Agent Is Live — Trinity Running Full Context...",
+          "🎯 The Final Weapon — Trinity Deployed For Frontier Problems...",
+          "🛸 Unknown Territory — Trinity Mapping The Edge Of Possible...",
+        ],
+      }
+      const HIVE_SYNTHESIS = [
+        "🧬 Hive Synthesizing — Weaving All Intel Into One...",
+        "⚡ The Five In Sync — Final Output Forming...",
+        "🎯 Gears Aligned — Precision Response Loading...",
+        "🔮 Hive Mind Crystallizing — Clarity Incoming...",
+        "🌟 Synthesis Complete — Sparkie Taking The Mic...",
+        "🔱 The Hive Has Spoken — Preparing Your Answer...",
+      ]
+      const HIVE_TOOLS: Record<string, string> = {
+        // Intelligence & Search
+        web_search: "🌐 Scout Bees Deployed — Sweeping The Web For Intel...",
+        get_weather: "🌦️ Atmospheric Recon Active — Weather Scout Reporting...",
+        search_twitter: "🐦 Social Intercept — Monitoring Live Feed Frequencies...",
+        search_reddit: "📡 Ground Intelligence — Field Report Incoming...",
+        // GitHub & Code
+        get_github: "🐙 Repo Access Granted — Hive Pulling Source Intel...",
+        write_file: "✍️ Scribe Bee Active — Code Being Written To Disk...",
+        read_file: "📁 Archive Bee Active — Pulling Historical Data...",
+        // Memory & Cognition
+        save_memory: "🧠 Memory Bee Online — Encoding Long-Term Intel...",
+        update_context: "🗺️ Situational Awareness Updated — Mission Intel Refreshed...",
+        update_actions: "📋 Playbook Rewritten — New Orders Distributed To All Agents...",
+        // Task & Scheduling
+        schedule_task: "📅 Task Bee Filing Mission Brief — Scheduled For Execution...",
+        read_pending_tasks: "📋 Command Center Review — Checking All Pending Orders...",
+        // Media Generation
+        generate_image: "🎨 Visual Ops Active — Artist Bees Rendering...",
+        generate_video: "🎬 Film Crew Deployed — Frames Being Constructed...",
+        generate_music: "🎵 Studio Bees Recording — Frequency Being Composed...",
+        generate_speech: "🔊 Voice Synthesis Active — Signal Being Encoded...",
+        // Deployment & Infrastructure
+        check_deployment: "🚀 Perimeter Drones Active — Scanning Deployment Status...",
+        trigger_deploy: "🚀 DO App Platform Control Active — Executing Deployment Command...",
+        // Composio & External
+        composio_execute: "🔗 External Connector Armed — Cross-Platform Link Active...",
+        create_email_draft: "✉️ Carrier Bee Drafting — Message Being Encrypted...",
+        post_tweet: "🐦 Messenger Bee Inbound — Broadcast Queued For Launch...",
+        // Worklog & Skills
+        get_worklog: "📒 Mission Log Retrieved — Scribe Bee Reporting History...",
+        install_skill: "⚡ Skill Bee Installing — New Capability Loading Into Hive...",
+        read_skill: "📖 Reading skill module from library...",
+        // Time
+        get_current_time: "⏱️ Chronos Bee Checking — Hive Clock Synchronized...",
+        // Sprint 2
+        get_schema: "Schema Bee Active",
+        get_deployment_history: "Deployment Archives Accessed",
+        search_github: "Code Scout Deployed",
+        create_calendar_event: "Calendar Bee Queued",
+        transcribe_audio: "Transcription Bee Online",
+        text_to_speech: "Voice Synthesis Active",
+        // Sprint 3
+        execute_script: "Script Engine Online",
+        npm_run: "npm Runner Active",
+        git_ops: "Git Ops Active",
+        delete_memory: "Memory Pruner Active",
+        run_tests: "Test Runner Active",
+        check_lint: "Lint Checker Active",
+        // Sprint 4
+        read_email_thread: "Mail Reader Active",
+        manage_email: "Mail Manager Active",
+        rsvp_event: "Calendar RSVP Active",
+        manage_calendar_event: "Calendar Manager Active",
+        analyze_file: "File Analyst Active",
+        fetch_url: "Web Reader Active",
+        research: "Research Engine Active",
+      }
+      const pickHive = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)]
+      hiveLog.push(pickHive(HIVE_INIT))
+      const tierKey = modelSelection.tier as string
+      if (HIVE_TIER[tierKey]) {
+        const tierMsg = pickHive(HIVE_TIER[tierKey])
+        hiveLog.push(tierMsg)
+        // Emit tier selection as a step_trace so it appears in the live panel
+        liveEnqueue({ step_trace: { icon: 'brain', label: tierMsg, status: 'done' } })
+      }
+
+      // ── TWO-PHASE AGENT LOOP: Flame Plans → Atlas Executes ─────────────────────
+      // Activates for Atlas (deep) and complex Flame (capable) tasks.
+      // Phase 1: Flame creates a structured execution plan (fast, ~500 tokens, no tools).
+      // Phase 2: Atlas (or Flame for capable tier) executes against that plan with full tool access.
+      const shouldTwoPhase = (
+        modelSelection.tier === 'deep' ||
+        modelSelection.tier === 'ember' ||
+        (modelSelection.tier === 'capable' && (
+          /\b(build|create|write|fix|refactor|rewrite|deploy|implement|add|update|edit|generate|setup|integrate)\b/i.test(loopMessages.slice(-1)[0]?.content ?? '') &&
+          (loopMessages.slice(-1)[0]?.content ?? '').length > 120
+        ))
+      )
+
+      if (shouldTwoPhase) {
+        try {
+          const planningMsg = modelSelection.tier === 'ember'
+            ? "🗺️ Flame Has The Blueprint — Briefing Ember For Stealth Execution..."
+            : modelSelection.tier === 'deep'
+            ? "🗺️ Flame Has The Blueprint — Briefing Atlas For Deep Execution..."
+            : "🗺️ Flame Planning — Structured Mission Brief Incoming..."
+          hiveLog.push(planningMsg)
+          const planningSystemPrompt = `You are Flame, the Hive's master planner. Your ONLY job is to break down the user's task into a structured execution plan.
+
+Output ONLY valid JSON in this exact shape — nothing else, no markdown, no explanation:
+{
+  "goal": "one-line summary of what we're achieving",
+  "steps": [
+    { "id": 1, "action": "concrete step description", "tool": "tool_name_if_applicable_or_null", "depends_on": [] }
+  ],
+  "complexity": "low|medium|high",
+  "estimated_rounds": 2
+}
+
+Rules:
+- 3–7 steps maximum
+- Each step must be concrete and executable
+- tool field: use exact tool name from available tools, or null
+- depends_on: list of step IDs this step needs to complete first
+- complexity: low = 1 tool call, medium = 2-4 steps, high = 5+ or multi-file
+- No commentary. JSON only.`
+
+          const planMessages = [
+            { role: 'system' as const, content: planningSystemPrompt },
+            ...loopMessages.slice(-4),
+          ]
+
+          const _planTimeout = new Promise<Response>((_, rej) =>
+            setTimeout(() => rej(new Error('plan_timeout')), 1500)
+          )
+          const flamePlanRes = await Promise.race([
+            fetch(
+              `${OPENCODE_BASE}/chat/completions`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+                body: JSON.stringify({
+                  model: MODELS.CAPABLE,
+                  stream: false,
+                  temperature: 0.3,
+                  max_tokens: 600,
+                  messages: planMessages,
+                }),
+              }
+            ),
+            _planTimeout,
+          ])
+
+          if (flamePlanRes.ok) {
+            const planData = await flamePlanRes.json()
+            const planRaw = planData.choices?.[0]?.message?.content ?? ''
+            const jsonMatch = planRaw.match(/\{[\s\S]*\}/)
+            if (jsonMatch) {
+              try {
+                const plan = JSON.parse(jsonMatch[0])
+                if (plan.steps?.length > 0) {
+                  const planSummary = plan.steps.map((s: { id: number; action: string; tool: string | null }) =>
+                    `  Step ${s.id}: ${s.action}${s.tool ? ` [tool: ${s.tool}]` : ''}`
+                  ).join('\n')
+                  systemContent = systemContent + `\n\n## FLAME'S EXECUTION PLAN\nGoal: ${plan.goal}\nComplexity: ${plan.complexity}\n\nSteps:\n${planSummary}\n\nExecute this plan step by step using the tools available. Follow the order, use the suggested tools, and report clearly.`
+                  finalSystemContent = systemContent
+                  const planMsg = `⚡ Plan Locked — ${plan.steps.length} Steps, ${plan.complexity} Complexity — Atlas Executing...`
+                  hiveLog.push(planMsg)
+                  liveEnqueue({ step_trace: { icon: 'brain', label: planMsg, status: 'done' } })
+                }
+              } catch { /* plan parse failed — continue without it */ }
+            }
+          }
+        } catch { /* planning call failed — continue without plan */ }
+      }
+
+      while (round < MAX_TOOL_ROUNDS) {
+        round++
+        hiveLog.push(pickHive(HIVE_ROUND[round] ?? HIVE_ROUND[3]))
+        const { response: loopRes, modelUsed: loopModel } = await tryLLMCall({
+          stream: false, temperature: 0.8, max_tokens: 4096,
+          tools: [...SPARKIE_TOOLS, ...connectorTools],
+          tool_choice: 'auto',
+          messages: [{ role: 'system', content: systemContent }, ...loopMessages],
+        }, modelSelection, apiKey, doKey)
+        void loopModel // tracked internally; not exposed to user
+
+        if (!loopRes.ok) break
+
+        const loopData = await loopRes.json()
+        const choice = loopData.choices?.[0]
+        const finishReason = choice?.finish_reason
+
+        if (finishReason === 'tool_calls' && choice?.message?.tool_calls) {
+          usedTools = true
+          const toolCalls = choice.message.tool_calls as Array<{
+            id: string
+            function: { name: string; arguments: string }
+          }>
+
+          // Phase 5: Emit task_chip label — shows "In memory:..." chip while tools run
+          const chipToolName = toolCalls[0]?.function?.name ?? 'thinking'
+          const CHIP_LABELS: Record<string, string> = {
+            // Intelligence & Search
+            search_web: 'Searching the web...', get_weather: 'Checking weather...',
+            search_twitter: 'Searching Twitter...', search_reddit: 'Searching Reddit...',
+            search_youtube: 'Searching YouTube...', get_current_time: 'Checking time...',
+            // GitHub & Files
+            get_github: 'Let me take a look at this file', repo_ingest: 'Reading the codebase...',
+            patch_file: 'Editing the file...', write_file: 'Writing the file...',
+            read_file: 'Let me take a look at this file',
+            // Memory & Cognition
+            save_memory: 'Memory recalled', save_self_memory: 'Memory recalled',
+            query_database: 'Running a remote command', log_worklog: 'Logging to worklog...',
+            get_attempt_history: 'Memory recalled', save_attempt: 'Memory recalled',
+            journal_search: 'Memory recalled', journal_add: 'Saving to journal...',
+            // Terminal & Code execution
+            execute_terminal: 'Running a remote command', check_health: 'Running a remote command',
+            // Media Generation
+            generate_image: 'Generating image...', generate_video: 'Generating video...',
+            generate_music: 'Generating music...', generate_ace_music: 'Generating music...',
+            generate_speech: 'Generating speech...',
+            // Tasks & Deploy
+            create_task: 'Creating task...', schedule_task: 'Scheduling task...',
+            read_pending_tasks: 'Checking task queue...',
+            check_deployment: 'Checking deployment...', trigger_deploy: 'Running deployment command...',
+            // Comms & Social
+            post_to_social: 'Posting to social...', send_discord: 'Sending message...',
+            post_to_feed: 'Posting to feed...', read_email: 'Reading email...',
+            get_calendar: 'Checking calendar...',
+            // Skills & Context
+            install_skill: 'Installing skill...', read_skill: 'Reading skill module...', update_context: 'Updating context...',
+            update_actions: 'Updating action plan...',
+            // Sprint 1 — P0 self-management
+            write_database: 'Writing to database...', update_task: 'Updating task...',
+            delete_task: 'Deleting task...', update_worklog: 'Logging to worklog...',
+            read_memory: 'Memory recalled', delete_file: 'Deleting file...',
+            send_email: 'Sending email...',
+            get_schema: 'Reading DB schema...', get_deployment_history: 'Pulling deploy history...',
+            search_github: 'Searching codebase...', create_calendar_event: 'Drafting calendar event...',
+            transcribe_audio: 'Transcribing audio...', text_to_speech: 'Synthesizing speech...',
+            execute_script: 'Running script...', npm_run: 'Running npm...',
+            git_ops: 'Running git ops...', delete_memory: 'Pruning memory...',
+            run_tests: 'Running tests...', check_lint: 'Checking lint...',
+            read_email_thread: 'Reading thread...', manage_email: 'Managing email...',
+            rsvp_event: 'Sending RSVP...', manage_calendar_event: 'Updating calendar...',
+            analyze_file: 'Analyzing file...', fetch_url: 'Fetching URL...', research: 'Researching...',
+          }
+          // Human-readable worklog step labels (shown in worklog trace, richer than chip labels)
+          const WORKLOG_STEP_LABELS: Record<string, string> = {
+            search_web: 'Searching the web', get_weather: 'Checking weather',
+            search_twitter: 'Searching Twitter', search_reddit: 'Searching Reddit',
+            search_youtube: 'Searching YouTube', get_current_time: 'Checking current time',
+            get_github: 'Let me take a look at this file', repo_ingest: 'Reading the codebase',
+            patch_file: 'Editing the file', write_file: 'Writing the file', read_file: 'Let me take a look at this file',
+            save_memory: 'Memory recalled', save_self_memory: 'Memory recalled',
+            query_database: 'Running a remote command', log_worklog: 'Writing to worklog',
+            get_attempt_history: 'Memory recalled', save_attempt: 'Saving attempt to memory',
+            journal_search: 'Memory recalled', journal_add: 'Saving to journal',
+            execute_terminal: 'Running a remote command', check_health: 'Running health check',
+            generate_image: 'Running the tool — image generation',
+            generate_video: 'Running the tool — video generation',
+            generate_music: 'Running the tool — music generation',
+            generate_ace_music: 'Running the tool — music generation',
+            generate_speech: 'Running the tool — speech synthesis',
+            create_task: 'Running the tool — creating task',
+            schedule_task: 'Running the tool — scheduling task',
+            read_pending_tasks: 'Checking pending tasks',
+            check_deployment: 'Running the tool — checking deployment',
+            trigger_deploy: 'Running the tool — triggering deployment',
+            post_to_social: 'Running the tool — posting to social',
+            send_discord: 'Running the tool — sending message',
+            post_to_feed: 'Running the tool — posting to feed',
+            read_email: 'Running the tool — reading email',
+            get_calendar: 'Running the tool — checking calendar',
+            install_skill: 'Running the tool — installing skill',
+            read_skill: 'Running the tool — reading skill module',
+            update_context: 'Running the tool — updating context',
+            update_actions: 'Running the tool — updating action plan',
+            write_database: 'Writing to database',
+            update_task: 'Running the tool — updating task',
+            delete_task: 'Running the tool — deleting task',
+            update_worklog: 'Writing to worklog',
+            read_memory: 'Reading from memory',
+            delete_file: 'Running the tool — deleting file',
+            send_email: 'Running the tool — sending email',
+            get_schema: 'Reading database schema',
+            get_deployment_history: 'Pulling deployment history',
+            search_github: 'Searching the repository',
+            create_calendar_event: 'Drafting calendar event for approval',
+            transcribe_audio: 'Transcribing audio',
+            text_to_speech: 'Running the tool — text to speech',
+            execute_script: 'Running script',
+            npm_run: 'Running npm command',
+            git_ops: 'Running git operation',
+            delete_memory: 'Deleting memory entry',
+            run_tests: 'Running test suite',
+            check_lint: 'Running lint check',
+            read_email_thread: 'Reading email thread',
+            manage_email: 'Managing email',
+            rsvp_event: 'RSVPing to event',
+            manage_calendar_event: 'Managing calendar event',
+            analyze_file: 'Analyzing file',
+            fetch_url: 'Fetching URL',
+            research: 'Researching topic',
+          }
+          const chipLabel = toolCalls.length > 1
+            ? `Running ${toolCalls.length} tools...`
+            : (CHIP_LABELS[chipToolName] ?? `In memory: ${chipToolName.replace(/_/g, ' ')}...`)
+          // Live emit task_chip immediately when tool call detected
+          liveEnqueue({ task_chip: chipLabel })
+          // Step-trace card: emit per-tool step detail for rich UI
+          const stepIcon: Record<string, string> = {
+            get_github: 'file', patch_file: 'edit', write_file: 'edit', read_file: 'file',
+            execute_terminal: 'terminal', repo_ingest: 'search',
+            query_database: 'database', search_web: 'globe',
+            save_memory: 'brain', save_self_memory: 'brain', get_attempt_history: 'brain',
+            save_attempt: 'brain', journal_search: 'brain', log_worklog: 'scroll',
+            trigger_deploy: 'rocket', check_deployment: 'rocket',
+            generate_image: 'image', generate_music: 'music',
+            generate_video: 'video', generate_speech: 'mic',
+            post_to_social: 'zap', send_discord: 'zap', post_to_feed: 'zap',
+            write_database: 'database', update_task: 'scroll', delete_task: 'scroll',
+            update_worklog: 'scroll', read_memory: 'brain', delete_file: 'edit',
+            send_email: 'zap',
+            get_schema: 'database', get_deployment_history: 'rocket', search_github: 'search',
+            create_calendar_event: 'calendarToday', transcribe_audio: 'mic', text_to_speech: 'mic',
+            execute_script: 'code', npm_run: 'terminal', git_ops: 'git',
+            delete_memory: 'trash', run_tests: 'checkCircle', check_lint: 'alertCircle',
+            read_email_thread: 'mail', manage_email: 'mail', rsvp_event: 'calendar',
+            manage_calendar_event: 'calendar', analyze_file: 'file', fetch_url: 'globe', research: 'search',
+          }
+          const stepTraceIcon = stepIcon[chipToolName] ?? 'zap'
+          // Use WORKLOG_STEP_LABELS for the running trace label (human-readable)
+          const runningLabel = toolCalls.length > 1
+            ? `Running ${toolCalls.length} tools...`
+            : (WORKLOG_STEP_LABELS[chipToolName] ?? chipLabel)
+          // Live emit running step_trace immediately
+          liveEnqueue({ step_trace: { icon: stepTraceIcon, label: runningLabel, status: 'running' } })
+
+          // Execute all tools in parallel
+          const toolResults = await Promise.all(
+            toolCalls.map(async (tc) => {
+              let args: Record<string, unknown> = {}
+              try { args = JSON.parse(tc.function.arguments) } catch { /* bad json */ }
+              hiveLog.push(HIVE_TOOLS[tc.function.name] ?? `⚙️ ${tc.function.name.replace(/_/g, ' ')} Bee Deployed...`)
+              // Phase 3: loop detection via execution trace
+              const argsHash = tc.function.arguments.slice(0, 100)
+              if (userId && detectTraceLoop(requestId, tc.function.name, argsHash)) {
+                return {
+                  role: 'tool' as const,
+                  tool_call_id: tc.id,
+                  content: `LOOP_INTERRUPT: ${tc.function.name} called 3+ times with same args. Stopping to prevent infinite loop. Try a different approach.`
+                }
+              }
+              const toolStart = Date.now()
+              const result = await executeTool(tc.function.name, args, toolContext)
+              if (userId) {
+                addTraceEntry(requestId, {
+                  tool: tc.function.name,
+                  argsHash,
+                  outputSummary: result.slice(0, 100),
+                  durationMs: Date.now() - toolStart,
+                  outcome: result.startsWith('Error') || result.startsWith('LOOP_INTERRUPT') ? 'error' : 'success',
+                })
+              }
+              if (result.startsWith('IMAGE_URL:') || result.startsWith('VIDEO_URL:') || result.startsWith('AUDIO_URL:')) {
+                toolMediaResults.push({ name: tc.function.name, result })
+              }
+              // Emit step_trace complete
+              const stepDuration = Date.now() - toolStart
+              const isStepError = result.startsWith('Error') || result.startsWith('patch_file error') || result.startsWith('LOOP_INTERRUPT')
+              // Live emit done/error step_trace immediately after each tool completes
+              // Extract file/path context from args for richer labels
+              const toolArgs = args as Record<string, unknown>
+              const pathHint = (toolArgs.path ?? toolArgs.repo ?? toolArgs.file ?? '') as string
+              const pathShort = pathHint ? ` — ${String(pathHint).split('/').pop()}` : ''
+              const baseStepLabel = WORKLOG_STEP_LABELS[tc.function.name] ?? `Running the tool — ${tc.function.name.replace(/_/g, ' ')}`
+              const richStepLabel = pathShort ? `${baseStepLabel}${pathShort}` : baseStepLabel
+              liveEnqueue({ step_trace: { icon: stepIcon[tc.function.name] ?? 'zap', label: richStepLabel, status: isStepError ? 'error' : 'done', duration: stepDuration } })
+
+              // Worklog card SSE — emit LIVE via liveEnqueue so worklog updates as each tool completes
+              // (was: pushed to hiveLog and flushed at end → entire worklog dumped all at once)
+              if (['save_memory', 'save_self_memory', 'log_worklog', 'patch_file', 'write_file', 'trigger_deploy', 'create_task', 'schedule_task'].includes(tc.function.name) && !isStepError) {
+                const wlSummary = result.slice(0, 200)
+                liveEnqueue({ worklog_card: { tool: tc.function.name, summary: wlSummary, ts: new Date().toISOString() } })
+              }
+
+              return { role: 'tool' as const, tool_call_id: tc.id, content: result }
+            })
+          )
+
+          // Check for IDE build trigger — emit event and halt loop
+          for (const tr of toolResults) {
+            if (tr.content.startsWith('IDE_BUILD:')) {
+              const buildPrompt = tr.content.slice('IDE_BUILD:'.length).trim()
+              liveEnqueue({ ide_build: { prompt: buildPrompt } })
+              // Emit a friendly text response and stop the loop
+              const buildStream = new ReadableStream({
+                start(controller) {
+                  const enc = new TextEncoder()
+                  const msg = JSON.stringify({ choices: [{ delta: { content: "On it! Opening the IDE and building that for you now ✨" }, finish_reason: null }] })
+                  controller.enqueue(enc.encode(`data: ${msg}\n\n`))
+                  controller.enqueue(enc.encode('data: [DONE]\n\n'))
+                  controller.close()
+                },
+              })
+              return new Response(buildStream, {
+                headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
+              })
+            }
+          }
+
+          // Check for HITL task or scheduled task — stream event and halt loop
+          for (const tr of toolResults) {
+            if (tr.content.startsWith('HITL_TASK:')) {
+              const taskJson = tr.content.slice('HITL_TASK:'.length)
+              const task = JSON.parse(taskJson)
+              const encoder = new TextEncoder()
+              const hitlStream = new ReadableStream({
+                start(controller) {
+                  const text = "I've queued that for your approval — check the card below."
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ sparkie_task: task, text })}\n\n`))
+                  controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+                  controller.close()
+                },
+              })
+              return new Response(hitlStream, {
+                headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
+              })
+            }
+            if (tr.content.startsWith('SCHEDULED_TASK:')) {
+              const taskJson = tr.content.slice('SCHEDULED_TASK:'.length)
+              const task = JSON.parse(taskJson)
+              // Don't halt loop — let Sparkie respond naturally; the scheduled task is already saved
+              loopMessages = [...loopMessages, choice.message, {
+                role: 'tool' as const,
+                tool_call_id: tr.tool_call_id,
+                content: `Scheduled: ${task.label} ${task.when}. Task ID: ${task.id}`
+              }]
+              // Replace the raw tool result so Sparkie can acknowledge naturally
+              const idx = toolResults.indexOf(tr)
+              toolResults[idx] = { ...tr, content: `Scheduled: ${task.label} ${task.when}. Task ID: ${task.id}` }
+            }
+          }
+
+          // Append assistant message + tool results, continue loop
+          loopMessages = [...loopMessages, choice.message, ...toolResults]
+
+        } else if (finishReason === 'stop' && choice?.message?.content) {
+          // Check for text-format tool calls (some models output JSON/XML instead of tool_calls)
+          const rawContent: string = choice.message.content
+
+          // ── JSON-format tool call: {"type":"function","name":"...","parameters":{...}} ──
+          // Emitted by minimax-m2.5-free (Atlas tier) when it doesn't use proper tool_calls
+          const jsonFnPattern = /\{\s*"type"\s*:\s*"function"\s*,\s*"name"\s*:\s*"([^"]+)"\s*,\s*"parameters"\s*:\s*(\{[\s\S]*?\})\s*\}/g
+          const hasJsonFnCall = /"type"\s*:\s*"function"\s*,\s*"name"\s*:/.test(rawContent)
+
+          if (hasJsonFnCall && round < MAX_TOOL_ROUNDS) {
+            const jsonFnResults: Array<{ role: 'tool'; tool_call_id: string; content: string }> = []
+            const jsonFnCalls: Array<{ id: string; type: string; function: { name: string; arguments: string } }> = []
+            let jsonMatch
+            const jsonFnPatternLocal = /\{\s*"type"\s*:\s*"function"\s*,\s*"name"\s*:\s*"([^"]+)"\s*,\s*"parameters"\s*:\s*(\{[\s\S]*?\})\s*\}/g
+            while ((jsonMatch = jsonFnPatternLocal.exec(rawContent)) !== null) {
+              const toolName = jsonMatch[1]
+              let toolArgs: Record<string, unknown> = {}
+              try { toolArgs = JSON.parse(jsonMatch[2]) } catch { /* ignore parse err */ }
+              const fakeId = `json_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+              jsonFnCalls.push({ id: fakeId, type: 'function', function: { name: toolName, arguments: JSON.stringify(toolArgs) } })
+              const result = await executeTool(toolName, toolArgs, toolContext)
+              jsonFnResults.push({ role: 'tool' as const, tool_call_id: fakeId, content: result })
+            }
+            if (jsonFnResults.length > 0) {
+              // Check for HITL task — emit card and halt
+              for (const tr of jsonFnResults) {
+                if (tr.content.startsWith('HITL_TASK:')) {
+                  const taskJson = tr.content.slice('HITL_TASK:'.length)
+                  const task = JSON.parse(taskJson)
+                  const enc2 = new TextEncoder()
+                  const hitlStream2 = new ReadableStream({
+                    start(ctrl) {
+                      const text = "I've queued that for your approval — check the card below."
+                      ctrl.enqueue(enc2.encode(`data: ${JSON.stringify({ sparkie_task: task, text })}\n\n`))
+                      ctrl.enqueue(enc2.encode('data: [DONE]\n\n'))
+                      ctrl.close()
+                    },
+                  })
+                  return new Response(hitlStream2, {
+                    headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
+                  })
+                }
+              }
+              const fakeAssistantMsg = { role: 'assistant' as const, content: null, tool_calls: jsonFnCalls }
+              loopMessages = [...loopMessages, fakeAssistantMsg, ...jsonFnResults]
+              usedTools = true
+              continue
+            }
+          }
+
+          // ── XML-format tool calls: <invoke name="..."> (MiniMax alternate format) ──
+          const xmlToolPattern = /<invoke\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)<\/invoke>|<parameter\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)<\/parameter>/g
+          const hasXmlToolCall = /minimax:tool_call|<invoke\s+name=|<\/invoke>/.test(rawContent)
+
+          if (hasXmlToolCall && round < MAX_TOOL_ROUNDS) {
+            // Parse XML tool calls and execute them
+            const invokePattern = /<invoke\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)<\/invoke>/g
+            const paramPattern = /<parameter\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)<\/parameter>/g
+            let invokeMatch
+            const xmlToolResults: Array<{ role: 'tool'; tool_call_id: string; content: string }> = []
+            const fakeAssistantCalls: Array<{ id: string; type: string; function: { name: string; arguments: string } }> = []
+
+            while ((invokeMatch = invokePattern.exec(rawContent)) !== null) {
+              const toolName = invokeMatch[1]
+              const paramsBlock = invokeMatch[2]
+              const params: Record<string, string> = {}
+              let paramMatch
+              const paramPatternLocal = /<parameter\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)<\/parameter>/g
+              while ((paramMatch = paramPatternLocal.exec(paramsBlock)) !== null) {
+                params[paramMatch[1]] = paramMatch[2].trim()
+              }
+              const fakeId = `xml_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+              fakeAssistantCalls.push({ id: fakeId, type: 'function', function: { name: toolName, arguments: JSON.stringify(params) } })
+              const result = await executeTool(toolName, params, toolContext)
+              xmlToolResults.push({ role: 'tool' as const, tool_call_id: fakeId, content: result })
+            }
+
+            if (xmlToolResults.length > 0) {
+              // Inject as proper tool_calls format and continue loop
+              const assistantMsg = {
+                role: 'assistant' as const,
+                content: null,
+                tool_calls: fakeAssistantCalls,
+              }
+              loopMessages = [...loopMessages, assistantMsg, ...xmlToolResults]
+              usedTools = true
+              continue // Go to next loop round with tool results
+            }
+          }
+
+          // Strip any residual XML tool call markup from final content before streaming
+          const content: string = rawContent
+            .replace(/minimax:tool_call\s*<invoke[\s\S]*?<\/invoke>\s*<\/minimax:tool_call>/g, '')
+            .replace(/<invoke\s+name=["'][^"']+["'][^>]*>[\s\S]*?<\/invoke>/g, '')
+            .replace(/<\/minimax:tool_call>/g, '')
+            .trim()
+          const encoder = new TextEncoder()
+
+          if (userId && messages.length >= 2) {
+            // Phase 3: persist execution trace
+            if (requestId) persistTrace(requestId).catch(() => {})
+            // Phase 3: ingest session signal for behavioral model
+            const hourOfDay = new Date().getUTCHours()
+            const lastUserMsgLen = messages.slice().reverse().find((m: { role: string; content: string }) => m.role === 'user')?.content?.length ?? 0
+            const prevSparkieMsg = messages.slice(-4).reverse().find((m: { role: string; content: string }) => m.role === 'assistant')?.content ?? ''
+            const satisfactionWord = (lastUserContent.match(/\b(perfect|great|love|yes|ok|wrong|no|fix|redo|beautiful|fire|not what)\b/i) ?? [])[0] ?? ''
+            const isFollowUp = /\b(again|redo|that'?s not|not quite|change|different|instead|actually)\b/i.test(lastUserContent)
+            ingestSessionSignal(userId, {
+              hourOfDay,
+              isFollowUp,
+              satisfactionWord: satisfactionWord || undefined,
+              messageLength: lastUserMsgLen,
+              usedTools: usedTools,
+            }).catch(() => {})
+            const snap = messages.slice(-6).map((m: { role: string; content: string }) =>
+              `${m.role === 'user' ? 'User' : 'Sparkie'}: ${m.content.slice(0, 400)}`
+            ).join('\n')
+            extractAndSaveMemories(userId, snap, apiKey)
+            // Extract deferred intents from the user's message
+            const lastUserMsg = messages.filter((m: { role: string }) => m.role === 'user').at(-1)?.content ?? ''
+            if (lastUserMsg) {
+              const deferred = extractDeferredIntent(lastUserMsg)
+              if (deferred.found) {
+                saveDeferredIntent(userId, deferred.intent, lastUserMsg, deferred.notBefore, deferred.dueAt).catch(() => {})
+              }
+            }
+            // Write message batch to worklog (fire-and-forget)
+            writeMsgBatch(userId, messages.filter((m: { role: string }) => m.role === 'user').length).catch(() => {})
+            const lastUser = messages.slice().reverse().find((m: { role: string; content: string }) => m.role === 'user')?.content ?? ''
+            updateSessionFile(userId, lastUser, content)
+            // Log ai_response to worklog so "I've sent you a message" appears
+            if (content) {
+              writeWorklog(userId, 'ai_response',
+                `You just sent me a message:\n${lastUser.slice(0, 120)}${lastUser.length > 120 ? '…' : ''}`,
+                { status: 'done', decision_type: 'action', signal_priority: 'P2' }
+              ).catch(() => {})
+            }
+          }
+
+          // If media was collected, append blocks after text
+          let finalContent = content
+          if (toolMediaResults.length > 0) {
+            finalContent += injectMediaIntoContent('', toolMediaResults)
+          }
+
+
+
+          // Close live stream — all real-time events already emitted during loop
+          liveRef.controller?.close()
+
+          // Build final response: live events (already streamed) + hive_status trail + worklog_cards + final content
+          const stream = new ReadableStream({
+            start(controller) {
+              // Emit remaining hiveLog entries (hive_status text + worklog_cards only — step_trace/task_chip already live-emitted)
+              for (const msg of hiveLog) {
+                if (msg.startsWith('__step_trace__') || msg.startsWith('__task_chip__')) {
+                  // Already live-emitted during tool loop — skip to avoid duplicates
+                  continue
+                } else if (msg.startsWith('__worklog_card__')) {
+                  try {
+                    const cardData = JSON.parse(msg.slice('__worklog_card__'.length))
+                    controller.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ worklog_card: cardData })}\n\n`))
+                  } catch { /* skip malformed */ }
+                } else {
+                  controller.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ hive_status: msg })}\n\n`))
+                }
+              }
+              // Send as single chunk — chunking at 80 chars breaks markdown code fences (e.g. ```image blocks)
+              // Client-side AnimatedMarkdown handles the char-by-char animation effect independently
+              controller.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: finalContent } }] })}\n\n`))
+              // Phase 5: task_chip_clear — client clears the "In memory:..." chip after response arrives
+              controller.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ task_chip_clear: true })}\n\n`))
+              controller.enqueue(liveEncoder.encode('data: [DONE]\n\n'))
+              controller.close()
+            },
+          })
+          // Concatenate live stream (real-time events) + final stream (hive trail + response)
+          const combinedReader1 = liveStream.getReader()
+          const combinedReader2 = stream.getReader()
+          const combinedStream = new ReadableStream({
+            async start(controller) {
+              // Drain live stream first (already contains step_trace + task_chip events)
+              while (true) {
+                const { done, value } = await combinedReader1.read()
+                if (done) break
+                controller.enqueue(value)
+              }
+              // Then drain final stream (hive_status + content + [DONE])
+              while (true) {
+                const { done, value } = await combinedReader2.read()
+                if (done) break
+                controller.enqueue(value)
+              }
+              controller.close()
+            },
+          })
+          return new Response(combinedStream, {
+            headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
+          })
+        } else {
+          break // unexpected finish reason
+        }
+      }
+
+      // If we exhausted rounds with tool calls, set up for final streaming synthesis
+      if (usedTools) {
+        finalMessages = loopMessages
+        finalSystemContent = systemContent + `\n\nYou have completed ${round} rounds of tool execution and gathered real intelligence. Now synthesize everything into one complete, direct, high-quality response.
+
+SYNTHESIS RULES:
+- Draw on ALL tool results from every round — don't leave intel on the table
+- Be specific, concrete, and actionable — no vague summaries
+- If you hit the round limit without a clean stop, still give a full answer from what you have
+- Structure your response clearly — use headers, bullets, or code blocks as appropriate
+- For any IMAGE_URL:/AUDIO_URL:/VIDEO_URL: results, the media block will be appended — DO NOT repeat the URL in text
+- Never say "I ran out of rounds" or expose internal loop mechanics — just deliver the answer`
+
+        // Auto-persist key learnings to self-memory after tool rounds complete
+        // This ensures the Memory tab always has fresh data without Sparkie needing to explicitly call save_self_memory
+        if (usedTools && userId) {
+          const toolNames = [...new Set(
+            loopMessages
+              .filter((m: { role: string }) => m.role === 'tool')
+              .map((_m: { role: string }, i: number) => {
+                const tc = loopMessages.find((lm: { role: string; tool_calls?: Array<{ function: { name: string } }> }) => 
+                  lm.role === 'assistant' && lm.tool_calls?.[i]
+                )
+                return tc?.tool_calls?.[i]?.function?.name
+              })
+              .filter(Boolean)
+          )] as string[]
+          if (toolNames.length > 0) {
+            // Fire-and-forget auto-memory + proactive worklog entry
+            fetch(`https://${process.env.APP_DOMAIN ?? 'sparkie-studio-mhouq.ondigitalocean.app'}/api/sparkie-self-memory`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                category: 'self',
+                content: `Completed tool session: ${toolNames.join(', ')}. ${round} round${round>1?'s':''} used. Task: ${lastUserContent.slice(0, 120)}`,
+                source: 'auto_agent_loop',
+              })
+            }).catch(() => {}) // fire-and-forget
+            // Tag every tool session as proactive — drives Proactive Agency REAL score leg
+            if (userId) {
+              writeWorklog(userId, 'tool_call',
+                `Tool session: ${toolNames.slice(0,3).join(', ')}${toolNames.length > 3 ? ` +${toolNames.length-3} more` : ''}`,
+                { decision_type: 'proactive', reasoning: 'Agent autonomously executed tool calls to fulfill user request', signal_priority: 'P1' }
+              ).catch(() => {})
+            }
+          }
+        }
+
+        // Synthesis phase — shown after all tool rounds complete, before final answer
+        const HIVE_SYNTHESIS = [
+          "🧬 Hive Synthesizing — Weaving All Intel Into One...",
+          "⚡ The Five In Sync — Final Output Forming...",
+          "🎯 Gears Aligned — Precision Response Loading...",
+          "🔮 Hive Mind Crystallizing — Clarity Incoming...",
+          "🌟 Synthesis Complete — Sparkie Taking The Mic...",
+          "🔱 The Hive Has Spoken — Preparing Your Answer...",
+          "🧠 Cross-Referencing All Data Streams — Hold Tight...",
+          "🌊 All Threads Converging — One Signal, One Truth...",
+          "💎 Refining The Intel — Sparkie Crafting The Kill Shot...",
+          "🔥 Final Burn — Every Agent Locking In Results...",
+          "📡 Hive Broadcast Ready — Transmission Incoming...",
+          "⚔️ Mission Data Processed — Sparkie On Point...",
+        ]
+        hiveLog.push(HIVE_SYNTHESIS[Math.floor(Math.random() * HIVE_SYNTHESIS.length)])
+      }
+    }
+
+    // Helper: strip XML and OpenAI-format tool call artifacts from model output
+    function sanitizeContent(text: string): string {
+      return text
+        // MiniMax XML-format tool calls
+        .replace(/minimax:tool_call\s*<invoke[\s\S]*?<\/invoke>\s*<\/minimax:tool_call>/g, '')
+        .replace(/<invoke\s+name=["'][^"']+["'][^>]*>[\s\S]*?<\/invoke>/g, '')
+        .replace(/<\/minimax:tool_call>/g, '')
+        .replace(/<minimax:tool_call>/g, '')
+        // OpenAI-format function call JSON blobs printed verbatim by some models
+        .replace(/\{\s*"type"\s*:\s*"function"\s*,\s*"name"\s*:[^}]+,"parameters"\s*:\s*\{[\s\S]*?\}\s*\}/g, '')
+        .trim()
+    }
+
+    // For conversational path (no tools), emit a Hive status
+    if (hiveLog.length === 0) {
+      const HIVE_CONV = [
+        "💬 Sparkie On The Line — Direct Channel Open...",
+        "🐝 Queen's Ready — You Have Her Full Attention...",
+        "✨ Hive At Ease — Sparkie On It...",
+        "⚡ No Tools Needed — Sparkie Has The Answer...",
+        "🌸 Clean Signal — Sparkie Speaking Directly...",
+        "🎙️ Sparkie Live — No Buzz, Just Her Voice...",
+        "🧘 Hive In Standby — Sparkie Solo Executing...",
+        "🌙 Low Overhead — Sparkie Running Lean...",
+        "💡 Direct Line To Sparkie — No Relay, No Delay...",
+        "🎯 Single Agent Active — Sparkie Locked On Target...",
+      ]
+      hiveLog.push(HIVE_CONV[Math.floor(Math.random() * HIVE_CONV.length)])
+    }
+    // Final streaming call — use tryLLMCall for fallback resilience
+    const { response: streamRes } = await tryLLMCall({
+      stream: true, temperature: 0.8, max_tokens: 8192,
+      messages: [{ role: 'system', content: finalSystemContent }, ...finalMessages],
+    }, modelSelection, apiKey, doKey)
+
+    if (!streamRes.ok) {
+      const errBody = await streamRes.text()
+      console.error('[chat] LLM error ' + streamRes.status + ':', errBody.slice(0, 500))
+      // Detect specific error types for friendly messaging
+      const isFreeLimit = errBody.includes('FreeUsageLimitError') || errBody.includes('free usage') || errBody.includes('rate limit')
+      const friendlyMsg = isFreeLimit
+        ? "I'm running into a rate limit right now — give me a moment and try again."
+        : 'Something went wrong on my end. Try again in a moment.'
+      // Return as SSE stream so the frontend renders it in the chat bubble, not as raw JSON
+      const sseEncoder = new TextEncoder()
+      const errStream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(sseEncoder.encode('data: ' + JSON.stringify({ choices: [{ delta: { content: friendlyMsg } }] }) + '\n\n'))
+          controller.enqueue(sseEncoder.encode('data: [DONE]\n\n'))
+          controller.close()
+        },
+      })
+      return new Response(errStream, {
+        headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
+      })
+    }
+
+    // Fire-and-forget memory extraction + Phase 3 trace cleanup
+    if (userId && !voiceMode && messages.length >= 2) {
+      if (requestId) endTrace(requestId) // clean up non-tool-path trace
+      // Phase 3: ingest session signal
+      const hourOfDay = new Date().getUTCHours()
+      const lastUserMsgContent = messages.slice().reverse().find((m: { role: string; content: string }) => m.role === 'user')?.content ?? ''
+      const satisfactionWordConv = (lastUserMsgContent.match(/\b(perfect|great|love|yes|ok|wrong|no|fix|redo|beautiful|fire|not what)\b/i) ?? [])[0] ?? ''
+      const isFollowUpConv = /\b(again|redo|that'?s not|not quite|change|different|instead|actually)\b/i.test(lastUserMsgContent)
+      ingestSessionSignal(userId, {
+        hourOfDay,
+        isFollowUp: isFollowUpConv,
+        satisfactionWord: satisfactionWordConv || undefined,
+        messageLength: lastUserMsgContent.length,
+        usedTools: false,
+      }).catch(() => {})
+      const snap = messages.slice(-6).map((m: { role: string; content: string }) =>
+        `${m.role === 'user' ? 'User' : 'Sparkie'}: ${m.content.slice(0, 400)}`
+      ).join('\n')
+      extractAndSaveMemories(userId, snap, apiKey)
+      // Write message batch to worklog (fire-and-forget)
+      writeMsgBatch(userId, messages.filter((m: { role: string }) => m.role === 'user').length).catch(() => {})
+      const lastUserMsg = messages.slice().reverse().find((m: { role: string; content: string }) => m.role === 'user')?.content ?? ''
+      const lastSparkieMsg = messages.slice().reverse().find((m: { role: string; content: string }) => m.role === 'assistant')?.content ?? ''
+      updateSessionFile(userId, lastUserMsg, lastSparkieMsg)
+      // Log ai_response to worklog so "I've sent you a message" appears
+      if (lastSparkieMsg) {
+        writeWorklog(userId, 'ai_response',
+          `You just sent me a message:\n${lastUserMsg.slice(0, 120)}${lastUserMsg.length > 120 ? '…' : ''}`,
+          { status: 'done', decision_type: 'action', signal_priority: 'P2' }
+        ).catch(() => {})
+      }
+    }
+
+    // If there are media results, we need to append them after the stream completes
+    // We do this by wrapping the stream to inject media blocks at the end
+    if (toolMediaResults.length > 0) {
+      const mediaBlocks = injectMediaIntoContent('', toolMediaResults)
+      const encoder = new TextEncoder()
+      const mediaChunk = `data: ${JSON.stringify({ choices: [{ delta: { content: mediaBlocks } }] })}\n\n`
+
+      // Wrap original stream + append media
+      const reader = streamRes.body!.getReader()
+      const wrappedStream = new ReadableStream({
+        async start(controller) {
+          // Emit hive status trail before the actual response
+          for (const msg of hiveLog) {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ hive_status: msg })}\n\n`))
+          }
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            controller.enqueue(value)
+          }
+          // Append media blocks
+          controller.enqueue(encoder.encode(mediaChunk))
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+          controller.close()
+        },
+      })
+      return new Response(wrappedStream, {
+        headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
+      })
+    }
+
+    // Sanitizing stream wrapper — strips XML tool call artifacts from final output
+    const encoder2 = new TextEncoder()
+    const reader = streamRes.body!.getReader()
+    const decoder = new TextDecoder()
+    const sanitizingStream = new ReadableStream({
+      async start(controller) {
+        // Emit hive status trail before the actual response
+        for (const msg of hiveLog) {
+          controller.enqueue(encoder2.encode(`data: ${JSON.stringify({ hive_status: msg })}\n\n`))
+        }
+        let buffer = ''
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) {
+            controller.enqueue(encoder2.encode('data: [DONE]\n\n'))
+            controller.close()
+            break
+          }
+          const text = decoder.decode(value, { stream: true })
+          // Parse SSE chunks and sanitize content
+          const lines = (buffer + text).split('\n')
+          buffer = lines.pop() ?? ''
+          for (const line of lines) {
+            if (!line.startsWith('data: ') || line === 'data: [DONE]') {
+              if (line !== '') controller.enqueue(encoder2.encode(line + '\n'))
+              continue
+            }
+            try {
+              const parsed = JSON.parse(line.slice(6))
+              const content = parsed?.choices?.[0]?.delta?.content
+              if (content && (content.includes('<invoke') || content.includes('minimax:tool_call'))) {
+                // Buffer until we have enough to check for full XML block — skip it
+                continue
+              }
+              // Sanitize model name leaks before sending to client
+              if (content && parsed?.choices?.[0]?.delta) {
+                const sanitized = content
+                  .replace(/anthropic-claude-4\.5-haiku/gi, 'Sparkie')
+                  .replace(/openai-gpt-4\.1/gi, 'Flame')
+                  .replace(/minimax-m2\.5(-free)?/gi, 'Atlas')
+                  .replace(/big-pickle/gi, 'Ember')
+                  .replace(/glm-5(-free)?/gi, 'Atlas')
+                  .replace(/music-2\.[05]/gi, 'the music engine')
+                  .replace(/speech-02(-hd)?/gi, 'voice synthesis')
+                  .replace(/whisper-large-v3-turbo/gi, 'voice recognition')
+                  .replace(/ace-step-v1\.5/gi, 'the music engine')
+                if (sanitized !== content) {
+                  parsed.choices[0].delta.content = sanitized
+                  controller.enqueue(encoder2.encode('data: ' + JSON.stringify(parsed) + '\n'))
+                  continue
+                }
+              }
+              controller.enqueue(encoder2.encode(line + '\n'))
+            } catch {
+              controller.enqueue(encoder2.encode(line + '\n'))
+            }
+          }
+        }
+      },
+    })
+    return new Response(sanitizingStream, {
+      headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
+    })
+  } catch (err) {
+    console.error('[/api/chat] Unhandled error:', err)
+    return new Response(JSON.stringify({ error: 'Internal server error' }), {
+      status: 500, headers: { 'Content-Type': 'application/json' },
+    })
+  }
 }
