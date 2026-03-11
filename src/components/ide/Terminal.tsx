@@ -260,7 +260,7 @@ export function Terminal() {
               if (!url.startsWith('http')) url = 'http://' + url
               serverUrlDetectedRef.current = true
               setPreviewUrl(url)
-              setContainerStatus('running')
+              setContainerStatus('ready')
               setIDETab('preview')
               term.write('\r\n\x1b[32m  [Sparkie]\x1b[0m Preview ready → ' + url + '\r\n')
             }
