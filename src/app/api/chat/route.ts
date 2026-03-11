@@ -5015,13 +5015,9 @@ async function handleBuildMode(
         }
 
         // XML tool-call guard — MiniMax models sometimes output tool calls instead of code
-        // tool_choice:'none' should prevent this; guard is now a final safety net with better logging
+        // MiniMax-M2.5 outputs XML tool calls — fileParser.ts now extracts files from that XML.
         if (fullBuildRaw.includes('<minimax:tool_call>') || fullBuildRaw.includes('<invoke name=')) {
-          console.log('[BUILD] XML tool-call detected despite tool_choice:none — raw output:', fullBuildRaw.slice(0, 300))
-          send('error', { message: '⚠️ Model returned tool syntax instead of code. This is a known MiniMax quirk — please try your prompt again (usually works on second attempt).' })
-          send('done', {})
-          controller.close()
-          return
+          console.log('[BUILD] XML tool-call format detected — passing to XML parser. len:', fullBuildRaw.length)
         }
 
         send('done', {})
