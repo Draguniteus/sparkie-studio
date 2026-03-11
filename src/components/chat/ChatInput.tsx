@@ -446,7 +446,7 @@ export function ChatInput() {
             // Show file badge in LiveCodeView header
             addLiveCodeFile(file.name)
             // Broadcast to Process tab so it shows each file as it's written
-            window.dispatchEvent(new CustomEvent('sparkie_step_trace', { detail: { icon: 'file', label: file.name, status: 'done' } as import('@/store/appStore').StepTrace }))
+            window.dispatchEvent(new CustomEvent('sparkie_step_trace', { detail: { icon: 'file', label: file.name, status: 'done' } }))
           } else {
             // Update existing file content as it grows
             // Update with complete final content (handles folder-prefixed paths)
@@ -470,7 +470,7 @@ export function ChatInput() {
           filesCreated++
           addLiveCodeFile(file.name)
           // Broadcast to Process tab so it shows each file as it's written
-          window.dispatchEvent(new CustomEvent('sparkie_step_trace', { detail: { icon: 'file', label: file.name, status: 'done' } as import('@/store/appStore').StepTrace }))
+          window.dispatchEvent(new CustomEvent('sparkie_step_trace', { detail: { icon: 'file', label: file.name, status: 'done' } }))
         } else {
           // Update with complete final content (handles folder-prefixed paths)
           upsertFile(file.name, file.content, getLanguageFromFilename(file.name))
@@ -1275,7 +1275,7 @@ export function ChatInput() {
                   if (filesCreated === 0) setActiveFile(fileId)
                   addLiveCodeFile(file.name)
                   // Broadcast to Process tab so it shows each file as it's written
-                  window.dispatchEvent(new CustomEvent('sparkie_step_trace', { detail: { icon: 'file', label: file.name, status: 'done' } as import('@/store/appStore').StepTrace }))
+                  window.dispatchEvent(new CustomEvent('sparkie_step_trace', { detail: { icon: 'file', label: file.name, status: 'done' } }))
                   addWorklogEntry({ type: 'code', content: `Writing ${file.name}`, status: 'running' })
                   // Track in assets
                   const chatTitle = useAppStore.getState().chats.find(c => c.id === chatId)?.title || 'New Chat'
@@ -1299,7 +1299,7 @@ export function ChatInput() {
                   if (filesCreated === 0) setActiveFile(fileId)
                   addLiveCodeFile(file.name)
                   // Broadcast to Process tab so it shows each file as it's written
-                  window.dispatchEvent(new CustomEvent('sparkie_step_trace', { detail: { icon: 'file', label: file.name, status: 'done' } as import('@/store/appStore').StepTrace }))
+                  window.dispatchEvent(new CustomEvent('sparkie_step_trace', { detail: { icon: 'file', label: file.name, status: 'done' } }))
                   const chatTitle = useAppStore.getState().chats.find(c => c.id === chatId)?.title || 'New Chat'
                   addAsset({ name: file.name, language: getLanguageFromFilename(file.name), content: file.content, chatId, chatTitle, fileId, assetType: detectAssetTypeFromName(file.name), source: 'agent' as const })
                   filesCreated++
