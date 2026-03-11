@@ -50,7 +50,7 @@ export function Terminal() {
   const prevOutputRef = useRef('')
   const serverUrlDetectedRef = useRef(false)
 
-  // ââ Load xterm + init terminal ââââââââââââââââââââââââââââââââ
+  // Ã¢ÂÂÃ¢ÂÂ Load xterm + init terminal Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
   useEffect(() => {
     if (!termRef.current) return
 
@@ -96,8 +96,8 @@ export function Terminal() {
       xtermRef.current = term
       fitRef.current = fitAddon
 
-      term.write('\r\n\x1b[33m  â Sparkie Terminal\x1b[0m\r\n')
-      term.write('\x1b[2m  Ready â E2B sandbox will connect when a build completes.\x1b[0m\r\n\r\n')
+      term.write('\r\n\x1b[33m  Ã¢ÂÂ Sparkie Terminal\x1b[0m\r\n')
+      term.write('\x1b[2m  Ready Ã¢ÂÂ E2B sandbox will connect when a build completes.\x1b[0m\r\n\r\n')
       // connectE2B is called lazily from the pendingRunCommand useEffect,
       // not here at mount. Connecting at mount causes the SSE stream to
       // time out (DO 30s idle limit) before the build finishes.
@@ -113,7 +113,7 @@ export function Terminal() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ââ Sync legacy terminalOutput â xterm (for WebContainer builds) âââââââââ
+  // Ã¢ÂÂÃ¢ÂÂ Sync legacy terminalOutput Ã¢ÂÂ xterm (for WebContainer builds) Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
   useEffect(() => {
     if (!xtermRef.current || e2bMode) return
     const newOutput = terminalOutput.slice(prevOutputRef.current.length)
@@ -123,7 +123,7 @@ export function Terminal() {
     }
   }, [terminalOutput, e2bMode])
 
-  // ââ flattenWithPaths: flatten FileNode tree preserving full relative paths â
+  // Ã¢ÂÂÃ¢ÂÂ flattenWithPaths: flatten FileNode tree preserving full relative paths Ã¢ÂÂ
   // flattenFileTree (from appStore) returns leaf nodes but loses folder path context.
   // This version walks the tree with a running prefix so E2B gets the correct paths
   // (e.g. sparkie/src/App.tsx instead of just App.tsx).
@@ -140,10 +140,10 @@ export function Terminal() {
     })
   }
 
-  // ââ Auto-run: execute pendingRunCommand via lazy E2B connect âââââââââââââââ
+  // Ã¢ÂÂÃ¢ÂÂ Auto-run: execute pendingRunCommand via lazy E2B connect Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
   // Called by build pipeline after files are written and package.json has scripts.dev.
   // Strategy: connect E2B lazily here (not at mount) so the SSE stream is opened
-  // only when there is a command to run â avoids DO's 30s idle timeout killing
+  // only when there is a command to run Ã¢ÂÂ avoids DO's 30s idle timeout killing
   // the connection during the 2-3 minute build window.
   useEffect(() => {
     console.log('[Terminal] useEffect pendingRunCommand:', pendingRunCommand, 'connected:', connected, 'ws:', wsRef.current?.readyState)
@@ -152,7 +152,7 @@ export function Terminal() {
     // If already connected (user manually opened terminal during build), fire directly.
     if (connected && wsRef.current?.readyState === 1) {
       const cmd = pendingRunCommand
-      console.log('[Terminal] already connected â FIRING command:', cmd)
+      console.log('[Terminal] already connected Ã¢ÂÂ FIRING command:', cmd)
       setPendingRunCommand(null)
       serverUrlDetectedRef.current = false
       setContainerStatus('installing')
@@ -165,7 +165,7 @@ export function Terminal() {
       return
     }
 
-    // Not connected yet — lazy connect now with project files, then fire command.
+    // Not connected yet â lazy connect now with project files, then fire command.
     const cmd = pendingRunCommand
     console.log('[Terminal] lazy E2B connect for command:', cmd)
     setPendingRunCommand(null)
@@ -182,9 +182,15 @@ export function Terminal() {
     const projectFiles = currentChat
       ? flattenWithPaths(currentChat.files)
       : []
-    console.log('[Terminal] lazy connect — passing', projectFiles.length, 'files to E2B')
+    console.log('[Terminal] lazy connect â passing', projectFiles.length, 'files to E2B')
 
     term.write('\r\n\x1b[2m  Connecting to E2B sandbox\u2026\x1b[0m\r\n')
+
+    // These must be declared before ws shim (ws.close() references es)
+    let sessionId = ''
+    let esRetries = 0
+    const maxEsRetries = 5
+    let es: EventSource
 
     // ws shim must be declared before createES (createES closes over it)
     type WsShim = {
@@ -210,18 +216,15 @@ export function Terminal() {
       close: () => { es.close(); ws.readyState = 3 },
     }
 
-    // EventSource factory with retry — handles 404 if session isn't registered yet
-    let sessionId = ''
-    let esRetries = 0
-    const maxEsRetries = 5
-    let es: EventSource
+    // EventSource factory with retry â handles 404 if session isn't registered yet
+
 
     function createES(): EventSource {
       const _es = new EventSource(`/api/terminal?sessionId=${sessionId}`)
       console.log('[Terminal] EventSource opening for sessionId=', sessionId)
 
       _es.onopen = () => {
-        console.log('[Terminal] EventSource onopen — shell ready, firing cmd:', cmd)
+        console.log('[Terminal] EventSource onopen â shell ready, firing cmd:', cmd)
         esRetries = 0
         ws.readyState = 1
         wsRef.current = _es as unknown as WebSocket
@@ -256,7 +259,7 @@ export function Terminal() {
 
       _es.onmessage = (e) => {
         let payload: { type: string; data: string } | null = null
-        try { payload = JSON.parse(e.data) } catch { return }
+        try { payload = JSON.parse(e.data) } catch (_) { return }
         if (!payload) return
         const raw = payload.data ?? ''
         if (payload.type === 'ping') return
@@ -329,12 +332,12 @@ export function Terminal() {
       })
   }, [pendingRunCommand, connected, setPendingRunCommand, setContainerStatus, setE2bMode, setConnected, setPreviewUrl, setIDETab])
 
-  // ââ Server URL detection: watch WS output for localhost:PORT â set preview â
+  // Ã¢ÂÂÃ¢ÂÂ Server URL detection: watch WS output for localhost:PORT Ã¢ÂÂ set preview Ã¢ÂÂ
   // Patches the ws.onmessage handler at connection time is fragile (closure).
   // Instead we intercept via xterm.write with a post-write URL scan on raw data.
-  // Implemented in connectE2B â see ws.onmessage extension below.
+  // Implemented in connectE2B Ã¢ÂÂ see ws.onmessage extension below.
 
-  // ââ ResizeObserver âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // Ã¢ÂÂÃ¢ÂÂ ResizeObserver Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
   useEffect(() => {
     if (!termRef.current || !fitRef.current) return
     const ro = new ResizeObserver(() => fitRef.current?.fit())
@@ -342,7 +345,7 @@ export function Terminal() {
     return () => ro.disconnect()
   }, [])
 
-  // ââ E2B PTY connection ââââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // Ã¢ÂÂÃ¢ÂÂ E2B PTY connection Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
     function clearTerminal() {
     xtermRef.current?.clear()
     prevOutputRef.current = ''
@@ -389,7 +392,7 @@ export function Terminal() {
         es.onerror = () => { if (es.readyState === EventSource.CLOSED) { ws.readyState = 3; setConnected(false); term.write('\r\n\x1b[33m  [E2B]\x1b[0m Session ended\r\n') } }
         es.onmessage = (e) => {
           let payload: { type: string; data: string } | null = null
-          try { payload = JSON.parse(e.data) } catch { return }
+          try { payload = JSON.parse(e.data) } catch (_) { return }
           if (!payload) return
           if (payload.type === 'ping') return
           if (payload.type === 'connected') { ws.readyState = 1; ws.onopen?.(); return }
