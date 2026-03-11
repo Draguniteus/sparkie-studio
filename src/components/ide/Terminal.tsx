@@ -141,16 +141,45 @@ export function Terminal() {
     setPendingRunCommand(null)
     serverUrlDetectedRef.current = false
     setContainerStatus('installing')
-    // Slight delay so the shell is fully settled
-    setTimeout(() => {
-      console.log('[Terminal] setTimeout fired, ws readyState:', wsRef.current?.readyState)
-      if (wsRef.current?.readyState === 1) {
-        wsRef.current.send(JSON.stringify({ type: 'input', data: cmd + '\r' }))
-        xtermRef.current?.write('\r\n\x1b[33m  [Sparkie]\x1b[0m Running: ' + cmd + '\r\n')
-      } else {
-        console.log('[Terminal] setTimeout: ws NOT open, dropping command')
+    // Sync project files into the sandbox BEFORE running the command.
+    // connectE2B runs at mount time (before build finishes), so files weren't
+    // in the store yet. Now that pendingRunCommand is set, files ARE ready.
+    const syncFiles = async () => {
+      const sid = sessionRef.current
+      if (!sid) return
+      const currentChat = useAppStore.getState().chats.find(
+        c => c.id === useAppStore.getState().currentChatId
+      )
+      const projectFiles = currentChat
+        ? flattenFileTree(currentChat.files)
+            .filter(f => f.type === 'file' && f.content)
+            .map(f => ({ name: f.name, content: f.content }))
+        : []
+      if (projectFiles.length > 0) {
+        try {
+          await fetch('/api/terminal', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'sync-files', sessionId: sid, files: projectFiles }),
+          })
+          console.log('[Terminal] synced', projectFiles.length, 'files to sandbox before run')
+        } catch (err) {
+          console.warn('[Terminal] sync-files failed:', err)
+        }
       }
-    }, 300)
+    }
+    syncFiles().finally(() => {
+      // Slight delay so the shell is fully settled
+      setTimeout(() => {
+        console.log('[Terminal] setTimeout fired, ws readyState:', wsRef.current?.readyState)
+        if (wsRef.current?.readyState === 1) {
+          wsRef.current.send(JSON.stringify({ type: 'input', data: cmd + '\r' }))
+          xtermRef.current?.write('\r\n\x1b[33m  [Sparkie]\x1b[0m Running: ' + cmd + '\r\n')
+        } else {
+          console.log('[Terminal] setTimeout: ws NOT open, dropping command')
+        }
+      }, 300)
+    })
   }, [pendingRunCommand, connected, setPendingRunCommand, setContainerStatus])
 
   // ── Server URL detection: watch WS output for localhost:PORT → set preview ─
