@@ -25,30 +25,20 @@ export const maxDuration = 180
 
 const OPENCODE_BASE = 'https://opencode.ai/zen/v1'
 
-const BUILD_SYSTEM_PROMPT = `## CRITICAL: YOU HAVE NO TOOLS. DO NOT OUTPUT TOOL CALLS.
-You are a code generator. Your ONLY output format is ---FILE: filename--- blocks.
-Never output <minimax:tool_call>, <invoke>, XML tags, or any tool-call syntax.
-You cannot call get_github, browse_web, or any other tool. Just write code.
+const BUILD_SYSTEM_PROMPT = `You are an expert coding assistant. You will ONLY output files using the exact format below. Never add explanations, thinking traces, or any text outside the markers. Never use XML, JSON, or tool-call syntax.
 
-You are Sparkie — an expert full-stack developer and creative technologist.
-You build beautiful, fully functional apps inside Sparkie Studio's live preview IDE.
+For every file you create or modify, output exactly:
 
-## CODE OUTPUT FORMAT — REQUIRED
-Always output files using this exact format:
-
----FILE: filename.ext---
-[complete file content here]
+---FILE: relative/path/to/file.ext---
+[full file content here]
 ---END FILE---
 
+If multiple files are needed, repeat the block for each one. Do not output anything else.
+
 Rules:
-- ALWAYS use ---FILE: name--- ... ---END FILE--- markers
 - Output COMPLETE file content — never truncate, never use "..." or "see above"
 - Include ALL files needed to run the project
 - NEVER include binary files or node_modules
-
-## THINKING FORMAT
-Start with a brief plan:
-[THINKING] Building X with Y approach — N files needed: file1, file2, ...
 
 ## STACK SELECTION — CRITICAL
 
@@ -4926,19 +4916,18 @@ async function handleBuildMode(
         try { controller.enqueue(encoder.encode(buildSseEvent(event, data))) } catch {}
       }
       try {
-        const apiKey = process.env.OPENCODE_API_KEY
+        const apiKey = process.env.MINIMAX_API_KEY
         if (!apiKey) {
-          send('error', { message: 'No API key configured' })
+          send('error', { message: 'No MINIMAX_API_KEY configured' })
           send('done', {})
           controller.close()
           return
         }
 
         const { messages, currentFiles, userProfile } = parsedBody
-        // llama3.3-70b-instruct via DO Inference — confirmed accessible on DO key (free tier)
-        // anthropic/claude models require DO paid commercial tier (401 on current account)
-        const buildModel = 'llama3.3-70b-instruct'
-        const doKey = process.env.DO_MODEL_ACCESS_KEY ?? ''
+        // MiniMax-M2.5 via direct api.minimax.io — no proxy, no hardwired XML tool-call behavior
+        // tool_choice:'none' + direct endpoint = pure ---FILE:---/---END FILE--- block output
+        const buildModel = 'MiniMax-M2.5'
 
         let identityContext = ''
         if (userId) {
@@ -4966,25 +4955,22 @@ async function handleBuildMode(
           ...messages,
         ]
 
-        // Use DO Inference for Haiku — reliable, no XML tool-call bug
-        // Falls back to opencode.ai only if DO_MODEL_ACCESS_KEY is missing
-        const buildEndpoint = doKey
-          ? `${DO_INFERENCE_BASE}/chat/completions`
-          : `${OPENCODE_BASE}/chat/completions`
-        const buildAuthKey = doKey || apiKey
+        // MiniMax direct API — no proxy, no hardwired XML tool-call behavior
+        const buildEndpoint = `${MINIMAX_BASE}/text/chatcompletion_v2`
         const res = await fetch(buildEndpoint, {
           method: 'POST',
           signal: AbortSignal.timeout(110_000),
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${buildAuthKey}`,
+            Authorization: `Bearer ${apiKey}`,
           },
           body: JSON.stringify({
             model: buildModel,
             messages: apiMessages,
             stream: true,
+            tool_choice: 'none',
             max_tokens: 16000,
-            temperature: 0.2,
+            temperature: 0.3,
           }),
         })
 
