@@ -4936,141 +4936,184 @@ async function handleBuildMode(
 
         // MiniMax direct API — no proxy, no hardwired XML tool-call behavior
         const buildEndpoint = `${MINIMAX_BASE}/text/chatcompletion_v2`
-        const res = await fetch(buildEndpoint, {
-          method: 'POST',
-          signal: AbortSignal.timeout(110_000),
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model: buildModel,
-            messages: apiMessages,
-            stream: true,
-            max_tokens: 32000,
-            temperature: 0.1,
-            tools: [{
-              type: 'function',
-              function: {
-                name: 'write_file',
-                description: 'Write a file to the project workspace. Call this once per file. Call it multiple times to write multiple files.',
-                parameters: {
-                  type: 'object',
-                  properties: {
-                    path: { type: 'string', description: 'File path relative to project root, e.g. src/App.tsx' },
-                    content: { type: 'string', description: 'Complete file content. Never truncate.' },
-                  },
-                  required: ['path', 'content'],
-                },
+        const WRITE_FILE_TOOL = {
+          type: 'function' as const,
+          function: {
+            name: 'write_file',
+            description: 'Write a complete file to the project. Call once per file. You will be called again for each remaining file.',
+            parameters: {
+              type: 'object',
+              properties: {
+                path: { type: 'string', description: 'File path relative to project root, e.g. src/App.tsx' },
+                content: { type: 'string', description: 'Complete file content, never truncated.' },
               },
-            }],
-            tool_choice: 'auto',
-          }),
-        })
-
-        if (!res.ok || !res.body) {
-          const errText = await res.text().catch(() => res.statusText)
-          send('error', { message: `Model error: ${errText}` })
-          send('done', {})
-          controller.close()
-          return
+              required: ['path', 'content'],
+            },
+          },
         }
 
-        const reader = res.body.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ''
-        let thinkingEmitted = false
-        let thinkingBuffer = ''
+        // ── Multi-turn agent loop with native tool calling ────────────────────
+        // M2.5 calls write_file exactly once per turn (architectural behavior).
+        // We inject a tool result after each file to drive the next turn.
+        // Loop until finish_reason='stop' (no more files) or MAX_TURNS reached.
         let fullBuildRaw = ''
-        // Accumulate structured tool_calls from delta.tool_calls (M2.5 native function calling)
-        const toolCallAccumulator: Record<number, { name: string; arguments: string }> = {}
+        let thinkingEmitted = false
+        let agentMessages: Array<{ role: string; content: unknown; tool_calls?: unknown; tool_call_id?: string; name?: string }> = [...apiMessages]
+        const MAX_TURNS = 12
 
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
+        for (let turn = 0; turn < MAX_TURNS; turn++) {
+          const turnRes = await fetch(buildEndpoint, {
+            method: 'POST',
+            signal: AbortSignal.timeout(60_000),
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+              model: buildModel,
+              messages: agentMessages,
+              stream: true,
+              max_tokens: 6000,
+              temperature: 0.1,
+              tools: [WRITE_FILE_TOOL],
+              tool_choice: 'auto',
+            }),
+          })
 
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split('\n')
-          buffer = lines.pop() ?? ''
+          if (!turnRes.ok || !turnRes.body) {
+            console.error(`[BUILD] Turn ${turn} error: ${turnRes.status}`)
+            break
+          }
 
-          for (const line of lines) {
-            const trimmed = line.trim()
-            if (!trimmed.startsWith('data: ')) continue
-            const data = trimmed.slice(6)
-            if (data === '[DONE]') continue
+          const turnReader = turnRes.body.getReader()
+          const turnDecoder = new TextDecoder()
+          let turnBuf = ''
+          let turnContent = ''
+          let turnFinishReason = ''
+          // Accumulate structured tool_calls across deltas
+          const tcAcc: Record<number, { id: string; name: string; arguments: string }> = {}
 
-            try {
-              const parsed = JSON.parse(data) as {
-                choices?: Array<{
-                  delta?: {
-                    content?: string
-                    tool_calls?: Array<{ index: number; function?: { name?: string; arguments?: string } }>
+          while (true) {
+            const { done, value } = await turnReader.read()
+            if (done) break
+            turnBuf += turnDecoder.decode(value, { stream: true })
+            const lines = turnBuf.split('\n')
+            turnBuf = lines.pop() ?? ''
+
+            for (const line of lines) {
+              const trimmed = line.trim()
+              if (!trimmed.startsWith('data: ')) continue
+              const data = trimmed.slice(6)
+              if (data === '[DONE]') continue
+              try {
+                const parsed = JSON.parse(data) as {
+                  choices?: Array<{
+                    delta?: {
+                      content?: string
+                      tool_calls?: Array<{ index: number; id?: string; function?: { name?: string; arguments?: string } }>
+                    }
+                    finish_reason?: string
+                  }>
+                }
+                const choice = parsed.choices?.[0]
+                if (!choice) continue
+                if (choice.finish_reason) turnFinishReason = choice.finish_reason
+
+                // Accumulate structured tool_calls
+                if (choice.delta?.tool_calls) {
+                  for (const tc of choice.delta.tool_calls) {
+                    if (!tcAcc[tc.index]) tcAcc[tc.index] = { id: '', name: '', arguments: '' }
+                    if (tc.id) tcAcc[tc.index].id += tc.id
+                    if (tc.function?.name) tcAcc[tc.index].name += tc.function.name
+                    if (tc.function?.arguments) tcAcc[tc.index].arguments += tc.function.arguments
                   }
-                }>
-              }
-              const delta = parsed.choices?.[0]?.delta
-              if (!delta) continue
-
-              // Accumulate structured tool_calls (native function calling)
-              if (delta.tool_calls) {
-                for (const tc of delta.tool_calls) {
-                  if (!toolCallAccumulator[tc.index]) toolCallAccumulator[tc.index] = { name: '', arguments: '' }
-                  if (tc.function?.name) toolCallAccumulator[tc.index].name += tc.function.name
-                  if (tc.function?.arguments) toolCallAccumulator[tc.index].arguments += tc.function.arguments
+                  if (!thinkingEmitted) {
+                    thinkingEmitted = true
+                    send('thinking', { text: '⚡ Writing code…' })
+                  }
                 }
-                // Emit progress so UI shows activity
-                if (!thinkingEmitted) {
-                  thinkingEmitted = true
-                  send('thinking', { text: '⚡ Writing code…' })
+
+                // Accumulate text content (XML text-mode or conversational)
+                const chunk = choice.delta?.content ?? ''
+                if (chunk) {
+                  turnContent += chunk
+                  fullBuildRaw += chunk
+                  if (!thinkingEmitted) {
+                    if (turnContent.length > 120 || turnContent.includes('<invoke') || turnContent.includes('---FILE:')) {
+                      thinkingEmitted = true
+                      send('thinking', { text: '⚡ Writing code…' })
+                      send('delta', { content: turnContent })
+                    }
+                  } else {
+                    send('delta', { content: chunk })
+                  }
                 }
-                continue
-              }
-
-              // Accumulate text content (XML text-mode tool calls)
-              const chunk: string = delta.content ?? ''
-              if (!chunk) continue
-              fullBuildRaw += chunk
-
-              if (!thinkingEmitted) {
-                thinkingBuffer += chunk
-                const thinkMatch = thinkingBuffer.match(/^\[THINKING\]\s*([^\n]+)/)
-                if (thinkMatch) {
-                  send('thinking', { text: `💭 ${thinkMatch[1].trim()}` })
-                  thinkingEmitted = true
-                  const afterThinking = thinkingBuffer.replace(/^\[THINKING\][^\n]*\n?/, '')
-                  if (afterThinking) send('delta', { content: afterThinking })
-                } else if (thinkingBuffer.length > 120 || thinkingBuffer.includes('---FILE:') || thinkingBuffer.includes('<invoke')) {
-                  thinkingEmitted = true
-                  send('thinking', { text: '⚡ Writing code…' })
-                  send('delta', { content: thinkingBuffer })
-                }
-                continue
-              }
-
-              send('delta', { content: chunk })
-            } catch {}
+              } catch (_) { /* malformed SSE line */ }
+            }
           }
-        }
 
-        // If structured tool_calls were accumulated, convert to XML format for the existing parser
-        const toolCallEntries = Object.values(toolCallAccumulator)
-        if (toolCallEntries.length > 0) {
-          console.log(`[BUILD] Structured tool_calls: ${toolCallEntries.length} call(s)`)
-          let syntheticXml = '<minimax:tool_call>\n'
-          for (const tc of toolCallEntries) {
-            if (tc.name !== 'write_file') continue
-            try {
-              const args = JSON.parse(tc.arguments) as { path?: string; content?: string }
-              const fPath = (args.path ?? '').replace(/^\/workspace\//, '')
-              const fContent = args.content ?? ''
-              syntheticXml += `<invoke name="write_file">\n<parameter name="path">${fPath}</parameter>\n<parameter name="content">${fContent}</parameter>\n</invoke>\n`
-              console.log(`[BUILD] Tool call: write_file -> ${fPath}`)
-            } catch { /* malformed args */ }
+          const tcEntries = Object.values(tcAcc)
+          console.log(`[BUILD] Turn ${turn}: finish=${turnFinishReason} tcCalls=${tcEntries.length} contentLen=${turnContent.length}`)
+
+          // If structured tool_calls received — preferred path
+          if (tcEntries.length > 0) {
+            const assistantTurn: { role: string; content: string | null; tool_calls: unknown[] } = {
+              role: 'assistant',
+              content: turnContent || null,
+              tool_calls: tcEntries.map((tc, i) => ({
+                id: tc.id || `call_${turn}_${i}`,
+                type: 'function',
+                function: { name: tc.name, arguments: tc.arguments },
+              })),
+            }
+            agentMessages = [...agentMessages, assistantTurn]
+
+            // Inject tool result for each file written; also stream synthetic XML to client parser
+            for (const tc of tcEntries) {
+              if (tc.name !== 'write_file') continue
+              try {
+                const args = JSON.parse(tc.arguments) as { path?: string; content?: string }
+                const fPath = (args.path ?? '').replace(/^\/workspace\//, '').replace(/^\//, '')
+                const fContent = args.content ?? ''
+                console.log(`[BUILD] Turn ${turn}: write_file -> ${fPath}`)
+                // Emit as synthetic XML so existing fileParser.ts pipeline picks it up
+                const xml = `<minimax:tool_call>\n<invoke name="write_file">\n<parameter name="path">${fPath}</parameter>\n<parameter name="content">${fContent}</parameter>\n</invoke>\n</minimax:tool_call>`
+                send('delta', { content: xml })
+                fullBuildRaw += xml
+                agentMessages = [...agentMessages, {
+                  role: 'tool',
+                  tool_call_id: tc.id || `call_${turn}`,
+                  name: 'write_file',
+                  content: `File "${fPath}" written successfully.`,
+                }]
+              } catch (_) { console.error(`[BUILD] Turn ${turn}: failed to parse tool args`) }
+            }
+
+            // Continue loop (write next file)
+            if (turnFinishReason === 'stop') {
+              console.log(`[BUILD] Agent finished at turn ${turn} (finish=stop)`)
+              break
+            }
+            continue
           }
-          syntheticXml += '</minimax:tool_call>'
-          // Send as delta so the client parser sees it
-          send('delta', { content: syntheticXml })
-          fullBuildRaw += syntheticXml
+
+          // Fallback: XML text-mode content — extract path from XML to build tool result
+          const invokeMatch = /<invoke[^>]*name=["']write_file["'][^>]*>[\s\S]*?<parameter[^>]*name=["']path["'][^>]*>([\s\S]*?)<\/parameter>/i.exec(turnContent)
+          if (invokeMatch) {
+            const fPath = invokeMatch[1].trim().replace(/^\/workspace\//, '').replace(/^\//, '')
+            console.log(`[BUILD] Turn ${turn}: XML text-mode -> ${fPath}`)
+            agentMessages = [
+              ...agentMessages,
+              { role: 'assistant', content: turnContent.trim() },
+              { role: 'tool', tool_call_id: `call_${turn}`, name: 'write_file', content: `File "${fPath}" written successfully.` },
+            ]
+            if (turnFinishReason === 'stop') break
+            continue
+          }
+
+          // No tool call and no XML invoke — model is done or gave a conversational response
+          console.log(`[BUILD] Turn ${turn}: no tool call — agent done`)
+          break
         }
 
         const hasMarkers = fullBuildRaw.includes('---FILE:')
@@ -5079,8 +5122,6 @@ async function handleBuildMode(
           console.log('[BUILD] NO MARKERS — first 500 chars:', fullBuildRaw.slice(0, 500))
         }
 
-        // XML tool-call guard — MiniMax models sometimes output tool calls instead of code
-        // MiniMax-M2.5 outputs XML tool calls — fileParser.ts now extracts files from that XML.
         if (fullBuildRaw.includes('<minimax:tool_call>') || fullBuildRaw.includes('<invoke name=')) {
           console.log('[BUILD] XML tool-call format detected — passing to XML parser. len:', fullBuildRaw.length)
         }
