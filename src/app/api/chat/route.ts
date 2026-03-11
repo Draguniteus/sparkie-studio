@@ -4914,7 +4914,7 @@ async function handleBuildMode(
         if (!apiKey) {
           send('error', { message: 'No MINIMAX_API_KEY configured' })
           send('done', {})
-          controller.close()
+          try { controller.close() } catch (_) {}
           return
         }
 
@@ -4977,6 +4977,8 @@ async function handleBuildMode(
         const MAX_TURNS = 25
 
         for (let turn = 0; turn < MAX_TURNS; turn++) {
+          // Heartbeat: keep QUIC/HTTP connection alive during long multi-turn builds
+          if (turn > 0) { try { controller.enqueue(encoder.encode(': heartbeat\n\n')) } catch (_) {} }
           const turnRes = await fetch(buildEndpoint, {
             method: 'POST',
             signal: AbortSignal.timeout(120_000),
@@ -5157,7 +5159,7 @@ async function handleBuildMode(
         }
 
         send('done', {})
-        controller.close()
+        try { controller.close() } catch (_) {}
 
         if (userId) {
           query(
@@ -5184,6 +5186,7 @@ async function handleBuildMode(
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       Connection: 'keep-alive',
+      'Alt-Svc': 'clear',
     },
   })
 }
