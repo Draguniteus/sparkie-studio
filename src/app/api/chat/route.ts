@@ -38,6 +38,21 @@ You write ONE file per response using the write_file tool. After each file you w
 - Write each file completely. Do NOT truncate or use "// ... rest of code" placeholders.
 - After writing the last file, respond with just: "Done."
 
+## COMPONENT SPLITTING — MANDATORY
+
+**NEVER put all logic into one component file.** Each logical piece = its own file.
+For any 3D/canvas/interactive app with multiple visual elements, you MUST split into separate files:
+- src/components/Scene.tsx or similar root component
+- src/components/Floor.tsx (floor/ground geometry)
+- src/components/Walls.tsx (walls/boundaries)
+- src/components/Furniture.tsx (furniture/objects)
+- src/components/Decorations.tsx (decorative items)
+- src/components/Lighting.tsx or similar (lights/ambient)
+- src/components/Particles.tsx or similar (particles/effects) if applicable
+
+**If you catch yourself writing more than ~150 lines in a single component: STOP. Split into sub-files.**
+Each component file must be UNDER 200 lines. Large components = build failure.
+
 ## STACK SELECTION — CRITICAL
 
 ### For frontend / UI / landing pages / React apps / interactive apps:
