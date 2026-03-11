@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Terminal as XTermType } from '@xterm/xterm'
 import type { FitAddon as FitAddonType } from '@xterm/addon-fit'
 import { useAppStore, flattenFileTree } from '@/store/appStore'
@@ -301,11 +301,53 @@ export function Terminal() {
     wsRef.current?.close()
     setConnected(false)
     setE2bMode(false)
-    if (xtermRef.current) {
-      xtermRef.current.clear()
-      xtermRef.current.write('\r\n\x1b[33m  Reconnecting...\x1b[0m\r\n')
-      connectE2B(xtermRef.current)
-    }
+    sessionRef.current = ''
+    const term = xtermRef.current
+    if (!term) return
+    term.clear()
+    term.write('\r\n\x1b[33m  Reconnecting\u2026\x1b[0m\r\n')
+    const currentChat = useAppStore.getState().chats.find(
+      c => c.id === useAppStore.getState().currentChatId
+    )
+    const projectFiles = currentChat
+      ? flattenFileTree(currentChat.files)
+          .filter(f => f.type === 'file' && f.content)
+          .map(f => ({ name: f.name, content: f.content }))
+      : []
+    fetch('/api/terminal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'create', files: projectFiles }),
+    })
+      .then(async res => {
+        if (!res.ok) { term.write('\r\n\x1b[31m  [E2B] Reconnect failed\x1b[0m\r\n'); return }
+        const { sessionId } = await res.json() as { sessionId: string; wsUrl: string }
+        sessionRef.current = sessionId
+        setE2bMode(true)
+        const es = new EventSource(`/api/terminal?sessionId=${sessionId}`)
+        type WsShim = { readyState: number; onopen: (() => void) | null; onclose: (() => void) | null; onerror: (() => void) | null; onmessage: ((e: { data: string }) => void) | null; send: (d: string) => void; close: () => void }
+        const ws: WsShim = {
+          readyState: 0, onopen: null, onclose: null, onerror: null, onmessage: null,
+          send: (data: string) => {
+            const p = JSON.parse(data) as { type: string; data?: string; cols?: number; rows?: number }
+            fetch('/api/terminal', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: p.type === 'input' ? 'input' : 'resize', sessionId, ...p }) }).catch(() => {})
+          },
+          close: () => { es.close(); ws.readyState = 3 },
+        }
+        wsRef.current = ws as unknown as WebSocket
+        es.onopen = () => { ws.readyState = 1; setConnected(true); fitRef.current?.fit(); term.write('\x1b[32m  [E2B]\x1b[0m Shell ready\r\n\r\n') }
+        es.onerror = () => { if (es.readyState === EventSource.CLOSED) { ws.readyState = 3; setConnected(false); term.write('\r\n\x1b[33m  [E2B]\x1b[0m Session ended\r\n') } }
+        es.onmessage = (e) => {
+          let payload: { type: string; data: string } | null = null
+          try { payload = JSON.parse(e.data) } catch { return }
+          if (!payload) return
+          if (payload.type === 'ping') return
+          if (payload.type === 'connected') { ws.readyState = 1; ws.onopen?.(); return }
+          term.write(payload.data ?? '')
+        }
+      })
+      .catch(() => term.write('\r\n\x1b[31m  [E2B] Reconnect error\x1b[0m\r\n'))
   }
 
   const statusColor =
