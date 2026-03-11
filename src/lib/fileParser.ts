@@ -71,6 +71,33 @@ function wrapInProjectFolder(files: ParsedFile[], projectName: string): ParsedFi
 export function parseAIResponse(raw: string, projectName?: string): ParseResult {
   const files: ParsedFile[] = []
 
+  // ── JSON mode (MiniMax-M2.5 with response_format:{type:'json_object'}) ────
+  // Output: {"files":[{"path":"...","content":"..."},...]}
+  {
+    const trimmed = raw.trim().replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '')
+    try {
+      const parsed = JSON.parse(trimmed)
+      const arr: Array<{ path?: string; name?: string; content?: string }> =
+        Array.isArray(parsed?.files) ? parsed.files :
+        Array.isArray(parsed) ? parsed : []
+      if (arr.length > 0) {
+        const jsonFiles: ParsedFile[] = []
+        for (const f of arr) {
+          const filePath = (f.path || f.name || '').trim()
+          const fileContent = (f.content ?? '').trimEnd()
+          if (filePath && fileContent.length > 0) {
+            jsonFiles.push({ name: filePath, content: fileContent })
+          }
+        }
+        if (jsonFiles.length > 0) {
+          return { text: '', files: wrapInProjectFolder(jsonFiles, projectName || 'project'), folders: [] }
+        }
+      }
+    } catch (_) {
+      // Not JSON — fall through to marker-based parsing
+    }
+  }
+
   // Extract ---FOLDER:--- markers (explicit folder declarations from agent)
   const folderRegex = /---FOLDER:\s*([^\n-][^\n]*)\s*---/g
   const folders: string[] = []
