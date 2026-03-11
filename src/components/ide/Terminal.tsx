@@ -50,7 +50,7 @@ export function Terminal() {
   const prevOutputRef = useRef('')
   const serverUrlDetectedRef = useRef(false)
 
-  // ── Load xterm + init terminal ────────────────────────────────
+  // ââ Load xterm + init terminal ââââââââââââââââââââââââââââââââ
   useEffect(() => {
     if (!termRef.current) return
 
@@ -96,8 +96,8 @@ export function Terminal() {
       xtermRef.current = term
       fitRef.current = fitAddon
 
-      term.write('\r\n\x1b[33m  ❖ Sparkie Terminal\x1b[0m\r\n')
-      term.write('\x1b[2m  Ready — E2B sandbox will connect when a build completes.\x1b[0m\r\n\r\n')
+      term.write('\r\n\x1b[33m  â Sparkie Terminal\x1b[0m\r\n')
+      term.write('\x1b[2m  Ready â E2B sandbox will connect when a build completes.\x1b[0m\r\n\r\n')
       // connectE2B is called lazily from the pendingRunCommand useEffect,
       // not here at mount. Connecting at mount causes the SSE stream to
       // time out (DO 30s idle limit) before the build finishes.
@@ -113,7 +113,7 @@ export function Terminal() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ── Sync legacy terminalOutput → xterm (for WebContainer builds) ─────────
+  // ââ Sync legacy terminalOutput â xterm (for WebContainer builds) âââââââââ
   useEffect(() => {
     if (!xtermRef.current || e2bMode) return
     const newOutput = terminalOutput.slice(prevOutputRef.current.length)
@@ -123,7 +123,7 @@ export function Terminal() {
     }
   }, [terminalOutput, e2bMode])
 
-  // ── flattenWithPaths: flatten FileNode tree preserving full relative paths ─
+  // ââ flattenWithPaths: flatten FileNode tree preserving full relative paths â
   // flattenFileTree (from appStore) returns leaf nodes but loses folder path context.
   // This version walks the tree with a running prefix so E2B gets the correct paths
   // (e.g. sparkie/src/App.tsx instead of just App.tsx).
@@ -140,10 +140,10 @@ export function Terminal() {
     })
   }
 
-  // ── Auto-run: execute pendingRunCommand via lazy E2B connect ───────────────
+  // ââ Auto-run: execute pendingRunCommand via lazy E2B connect âââââââââââââââ
   // Called by build pipeline after files are written and package.json has scripts.dev.
   // Strategy: connect E2B lazily here (not at mount) so the SSE stream is opened
-  // only when there is a command to run — avoids DO's 30s idle timeout killing
+  // only when there is a command to run â avoids DO's 30s idle timeout killing
   // the connection during the 2-3 minute build window.
   useEffect(() => {
     console.log('[Terminal] useEffect pendingRunCommand:', pendingRunCommand, 'connected:', connected, 'ws:', wsRef.current?.readyState)
@@ -152,7 +152,7 @@ export function Terminal() {
     // If already connected (user manually opened terminal during build), fire directly.
     if (connected && wsRef.current?.readyState === 1) {
       const cmd = pendingRunCommand
-      console.log('[Terminal] already connected — FIRING command:', cmd)
+      console.log('[Terminal] already connected â FIRING command:', cmd)
       setPendingRunCommand(null)
       serverUrlDetectedRef.current = false
       setContainerStatus('installing')
@@ -184,121 +184,157 @@ export function Terminal() {
       : []
     console.log('[Terminal] lazy connect — passing', projectFiles.length, 'files to E2B')
 
-    term.write('\r\n\x1b[2m  Connecting to E2B sandbox…\x1b[0m\r\n')
+    term.write('\r\n\x1b[2m  Connecting to E2B sandbox\u2026\x1b[0m\r\n')
+
+    // ws shim must be declared before createES (createES closes over it)
+    type WsShim = {
+      readyState: number
+      onopen: (() => void) | null
+      onclose: (() => void) | null
+      onerror: (() => void) | null
+      onmessage: ((e: { data: string }) => void) | null
+      send: (data: string) => void
+      close: () => void
+    }
+    const ws: WsShim = {
+      readyState: 0,
+      onopen: null, onclose: null, onerror: null, onmessage: null,
+      send: (data: string) => {
+        const parsed = JSON.parse(data) as { type: string; data?: string; cols?: number; rows?: number }
+        fetch('/api/terminal', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: parsed.type === 'input' ? 'input' : 'resize', sessionId, ...parsed }),
+        }).catch(() => {})
+      },
+      close: () => { es.close(); ws.readyState = 3 },
+    }
+
+    // EventSource factory with retry — handles 404 if session isn't registered yet
+    let sessionId = ''
+    let esRetries = 0
+    const maxEsRetries = 5
+    let es: EventSource
+
+    function createES(): EventSource {
+      const _es = new EventSource(`/api/terminal?sessionId=${sessionId}`)
+      console.log('[Terminal] EventSource opening for sessionId=', sessionId)
+
+      _es.onopen = () => {
+        console.log('[Terminal] EventSource onopen — shell ready, firing cmd:', cmd)
+        esRetries = 0
+        ws.readyState = 1
+        wsRef.current = _es as unknown as WebSocket
+        setConnected(true)
+        term.write('\x1b[32m  [E2B]\x1b[0m Shell ready\r\n\r\n')
+        fitRef.current?.fit()
+        setTimeout(() => {
+          if (wsRef.current?.readyState === 1) {
+            wsRef.current.send(JSON.stringify({ type: 'input', data: cmd + '\r' }))
+            term.write('\r\n\x1b[33m  [Sparkie]\x1b[0m Running: ' + cmd + '\r\n')
+          }
+        }, 300)
+      }
+
+      _es.onerror = () => {
+        console.error('[Terminal] EventSource error, readyState:', _es.readyState, 'retries:', esRetries)
+        if (_es.readyState === EventSource.CLOSED && esRetries < maxEsRetries) {
+          esRetries++
+          _es.close()
+          console.log('[Terminal] Retrying EventSource... attempt', esRetries)
+          term.write('\r\n\x1b[33m  [E2B]\x1b[0m Retrying connection (' + esRetries + '/' + maxEsRetries + ')...\r\n')
+          setTimeout(() => { es = createES() }, 600)
+        } else if (_es.readyState === EventSource.CLOSED) {
+          ws.readyState = 3
+          setConnected(false)
+          setContainerStatus('error')
+          term.write('\r\n\x1b[31m  [E2B]\x1b[0m Connection failed after ' + maxEsRetries + ' retries\r\n')
+        } else {
+          term.write('\r\n\x1b[31m  [E2B]\x1b[0m Connection error (readyState=' + _es.readyState + ')\r\n')
+        }
+      }
+
+      _es.onmessage = (e) => {
+        let payload: { type: string; data: string } | null = null
+        try { payload = JSON.parse(e.data) } catch { return }
+        if (!payload) return
+        const raw = payload.data ?? ''
+        if (payload.type === 'ping') return
+        if (payload.type === 'connected') {
+          ws.readyState = 1
+          ws.onopen?.()
+          return
+        }
+        term.write(raw)
+        // Server URL detection
+        if (!serverUrlDetectedRef.current) {
+          const urlMatch = raw.match(/https?:\/\/[^\s]+:[0-9]+/) ??
+                           raw.match(/Local:\s+(https?:\/\/[^\s]+)/) ??
+                           raw.match(/localhost:[0-9]+/)
+          if (urlMatch) {
+            let url = urlMatch[1] ?? urlMatch[0]
+            if (!url.startsWith('http')) url = 'http://' + url
+            serverUrlDetectedRef.current = true
+            setPreviewUrl(url)
+            setContainerStatus('ready')
+            setIDETab('preview')
+            term.write('\r\n\x1b[32m  [Sparkie]\x1b[0m Preview ready \u2192 ' + url + '\r\n')
+          }
+        }
+        if (raw.includes('ERROR') || raw.includes('error TS') || raw.includes('ENOENT')) {
+          term.write('\r\n\x1b[31m  [Sparkie]\x1b[0m Build error detected \u2014 check above \u2191\r\n')
+        }
+      }
+
+      return _es
+    }
+
+    // Kick off E2B create with 60s timeout
+    const abortCtrl = new AbortController()
+    const fetchTimeout = setTimeout(() => {
+      abortCtrl.abort()
+      term.write('\r\n\x1b[31m  [Terminal] E2B create timed out (60s)\x1b[0m\r\n')
+      setContainerStatus('error')
+    }, 60000)
 
     fetch('/api/terminal', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'create', files: projectFiles }),
+      signal: abortCtrl.signal,
     })
-      .then(async r => {
-        if (!r.ok) {
-          term.write('\r\n\x1b[31m  [Terminal] E2B unavailable — cannot run dev server\x1b[0m\r\n')
-          setContainerStatus('idle')
+      .then(async res => {
+        clearTimeout(fetchTimeout)
+        if (!res.ok) {
+          const errText = await res.text().catch(() => 'unknown')
+          console.error('[Terminal] E2B create failed:', res.status, errText)
+          term.write('\r\n\x1b[31m  [Terminal] E2B create failed (' + res.status + '): ' + errText.slice(0, 80) + '\x1b[0m\r\n')
+          setContainerStatus('error')
           return
         }
-        const { sessionId } = await r.json() as { sessionId: string; wsUrl: string }
-        sessionRef.current = sessionId
+        const data = await res.json() as { sessionId: string; wsUrl: string }
+        console.log('[Terminal] E2B session created:', data.sessionId)
+        sessionId = data.sessionId
+        sessionRef.current = data.sessionId
         setE2bMode(true)
-
-        const sseUrl = `/api/terminal?sessionId=${sessionId}`
-        const es = new EventSource(sseUrl)
-
-        type WsShim = {
-          readyState: number
-          onopen: (() => void) | null
-          onclose: (() => void) | null
-          onerror: (() => void) | null
-          onmessage: ((e: { data: string }) => void) | null
-          send: (data: string) => void
-          close: () => void
-        }
-        const ws: WsShim = {
-          readyState: 0,
-          onopen: null, onclose: null, onerror: null, onmessage: null,
-          send: (data: string) => {
-            const parsed = JSON.parse(data) as { type: string; data?: string; cols?: number; rows?: number }
-            fetch('/api/terminal', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ action: parsed.type === 'input' ? 'input' : 'resize', sessionId, ...parsed }),
-            }).catch(() => {})
-          },
-          close: () => { es.close(); ws.readyState = 3 },
-        }
         wsRef.current = ws as unknown as WebSocket
-
-        es.onopen = () => {
-          ws.readyState = 1
-          setConnected(true)
-          term.write('\x1b[32m  [E2B]\x1b[0m Shell ready\r\n\r\n')
-          fitRef.current?.fit()
-          // Fire the command now that we're connected.
-          console.log('[Terminal] lazy es.onopen — FIRING:', cmd)
-          setTimeout(() => {
-            if (wsRef.current?.readyState === 1) {
-              wsRef.current.send(JSON.stringify({ type: 'input', data: cmd + '\r' }))
-              term.write('\r\n\x1b[33m  [Sparkie]\x1b[0m Running: ' + cmd + '\r\n')
-            }
-          }, 300)
-        }
-
-        es.onerror = () => {
-          if (es.readyState === EventSource.CLOSED) {
-            ws.readyState = 3
-            setConnected(false)
-            term.write('\r\n\x1b[33m  [E2B]\x1b[0m Session ended\r\n')
-          } else {
-            term.write('\r\n\x1b[31m  [E2B]\x1b[0m Connection error\r\n')
-          }
-        }
-
-        es.onmessage = (e) => {
-          let payload: { type: string; data: string } | null = null
-          try { payload = JSON.parse(e.data) } catch { return }
-          if (!payload) return
-          const raw = payload.data ?? ''
-          if (payload.type === 'ping') return
-          if (payload.type === 'connected') {
-            ws.readyState = 1
-            ws.onopen?.()
-            return
-          }
-          term.write(raw)
-          // ── Server URL detection ─────────────────────────────────────────
-          if (!serverUrlDetectedRef.current) {
-            const urlMatch = raw.match(/https?:\/\/[^\s]+:[0-9]+/) ??
-                             raw.match(/Local:\s+(https?:\/\/[^\s]+)/) ??
-                             raw.match(/localhost:[0-9]+/)
-            if (urlMatch) {
-              let url = urlMatch[1] ?? urlMatch[0]
-              if (!url.startsWith('http')) url = 'http://' + url
-              serverUrlDetectedRef.current = true
-              setPreviewUrl(url)
-              setContainerStatus('ready')
-              setIDETab('preview')
-              term.write('\r\n\x1b[32m  [Sparkie]\x1b[0m Preview ready → ' + url + '\r\n')
-            }
-          }
-          // ── Build error detection ────────────────────────────────────────
-          if (raw.includes('ERROR') || raw.includes('error TS') || raw.includes('ENOENT')) {
-            term.write('\r\n\x1b[31m  [Sparkie]\x1b[0m Build error detected — check above ↑\r\n')
-          }
-        }
+        es = createES()
       })
       .catch(err => {
-        console.error('[Terminal] lazy connect failed:', err)
+        clearTimeout(fetchTimeout)
+        if ((err as Error).name === 'AbortError') return  // already handled
+        console.error('[Terminal] lazy connect fetch failed:', err)
         term.write('\r\n\x1b[31m  [Terminal] E2B connect failed: ' + String(err) + '\x1b[0m\r\n')
-        setContainerStatus('idle')
+        setContainerStatus('error')
       })
   }, [pendingRunCommand, connected, setPendingRunCommand, setContainerStatus, setE2bMode, setConnected, setPreviewUrl, setIDETab])
 
-  // ── Server URL detection: watch WS output for localhost:PORT → set preview ─
+  // ââ Server URL detection: watch WS output for localhost:PORT â set preview â
   // Patches the ws.onmessage handler at connection time is fragile (closure).
   // Instead we intercept via xterm.write with a post-write URL scan on raw data.
-  // Implemented in connectE2B — see ws.onmessage extension below.
+  // Implemented in connectE2B â see ws.onmessage extension below.
 
-  // ── ResizeObserver ─────────────────────────────────────────────────────────────────
+  // ââ ResizeObserver âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
   useEffect(() => {
     if (!termRef.current || !fitRef.current) return
     const ro = new ResizeObserver(() => fitRef.current?.fit())
@@ -306,7 +342,7 @@ export function Terminal() {
     return () => ro.disconnect()
   }, [])
 
-  // ── E2B PTY connection ────────────────────────────────────────────────────
+  // ââ E2B PTY connection ââââââââââââââââââââââââââââââââââââââââââââââââââââ
     function clearTerminal() {
     xtermRef.current?.clear()
     prevOutputRef.current = ''
