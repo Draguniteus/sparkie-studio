@@ -1397,16 +1397,20 @@ export function ChatInput() {
           }
           const pkgFile = findFileInTree(useAppStore.getState().files, 'package.json')
           let hasDevScript = false
-          let startCmd = 'npm install && npm run dev'
+          // Derive project root folder from built file paths (e.g. 'sparkie/package.json' → 'sparkie')
+          // Files are auto-wrapped in a project folder by fileParser.ts; we need to cd into it.
+          const projectRoot = allBuiltFiles.find(f => f.includes('/'))?.split('/')[0] ?? ''
+          const cdPrefix = projectRoot ? `cd ${projectRoot} && ` : ''
+          let startCmd = `${cdPrefix}npm install && npm run dev`
           try {
             if (pkgFile?.content) {
               const pkg = JSON.parse(pkgFile.content) as { scripts?: Record<string, string> }
               hasDevScript = !!(pkg.scripts?.dev || pkg.scripts?.start)
               // Prefer start.sh if it was built (already has npm install && npm run dev)
               const hasStartSh = allBuiltFiles.some(f => f === 'start.sh' || f.endsWith('/start.sh'))
-              if (hasStartSh) startCmd = 'sh start.sh'
-              else if (pkg.scripts?.dev) startCmd = 'npm install && npm run dev'
-              else if (pkg.scripts?.start) startCmd = 'npm install && npm start'
+              if (hasStartSh) startCmd = `${cdPrefix}sh start.sh`
+              else if (pkg.scripts?.dev) startCmd = `${cdPrefix}npm install && npm run dev`
+              else if (pkg.scripts?.start) startCmd = `${cdPrefix}npm install && npm start`
             } else {
               // package.json in allBuiltFiles but not yet in store tree (race) — default to dev
               hasDevScript = true
