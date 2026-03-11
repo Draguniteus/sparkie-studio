@@ -25,20 +25,16 @@ export const maxDuration = 180
 
 const OPENCODE_BASE = 'https://opencode.ai/zen/v1'
 
-const BUILD_SYSTEM_PROMPT = `You are an expert coding assistant. You will ONLY output files using the exact format below. Never add explanations, thinking traces, or any text outside the markers. Never use XML, JSON, or tool-call syntax.
+const BUILD_SYSTEM_PROMPT = `You are an expert coding assistant. Respond ONLY with valid JSON in this exact structure — nothing before or after:
 
-For every file you create or modify, output exactly:
+{"files":[{"path":"relative/path/to/file.ext","content":"full file content here"},{"path":"another/file.ext","content":"full file content here"}]}
 
----FILE: relative/path/to/file.ext---
-[full file content here]
----END FILE---
-
-If multiple files are needed, repeat the block for each one. Do not output anything else.
-
-Rules:
-- Output COMPLETE file content — never truncate, never use "..." or "see above"
-- Include ALL files needed to run the project
-- NEVER include binary files or node_modules
+RULES — violating any of these makes the entire response invalid:
+- Output raw JSON only. No markdown fences, no \`\`\`json, no \`\`\`, no intro text, no explanations.
+- Start your response with { and end with }. Nothing else.
+- Content field: full complete file content. Never truncate. Newlines encoded as \\n in JSON.
+- Include ALL files needed to run the project. Never omit a file.
+- Never include binary files or node_modules.
 
 ## STACK SELECTION — CRITICAL
 
@@ -46,28 +42,9 @@ Rules:
 Use **Vite + React + TypeScript** — this is the ONLY stack that works in the live preview.
 DO NOT use Next.js — it cannot run in the browser preview environment.
 
-**Required package.json structure:**
-\`\`\`json
-{
-  "name": "project-name",
-  "version": "1.0.0",
-  "type": "module",
-  "scripts": {
-    "dev": "vite --host"
-  },
-  "dependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
-  },
-  "devDependencies": {
-    "typescript": "^5.4.5",
-    "@types/react": "^18.3.3",
-    "@types/react-dom": "^18.3.0",
-    "@vitejs/plugin-react": "^4.3.0",
-    "vite": "^5.3.1"
-  }
-}
-\`\`\`
+Required package.json scripts: { "dev": "vite --host" }
+Required devDependencies: vite ^5.3.1, @vitejs/plugin-react ^4.3.0, typescript ^5.4.5, @types/react ^18.3.3, @types/react-dom ^18.3.0
+Required dependencies: react ^18.3.1, react-dom ^18.3.1
 `
 const MINIMAX_BASE = 'https://api.minimax.io/v1'
 const DO_INFERENCE_BASE = 'https://inference.do-ai.run/v1'
@@ -4969,8 +4946,9 @@ async function handleBuildMode(
             messages: apiMessages,
             stream: true,
             tool_choice: 'none',
+            response_format: { type: 'json_object' },
             max_tokens: 16000,
-            temperature: 0.3,
+            temperature: 0.0,
           }),
         })
 
