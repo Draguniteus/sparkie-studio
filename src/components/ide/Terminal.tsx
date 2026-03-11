@@ -50,7 +50,7 @@ export function Terminal() {
   const prevOutputRef = useRef('')
   const serverUrlDetectedRef = useRef(false)
 
-  // ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ Load xterm + init terminal ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
+  // ── Load xterm + init terminal ────────────────────────────────
   useEffect(() => {
     if (!termRef.current) return
 
@@ -96,8 +96,19 @@ export function Terminal() {
       xtermRef.current = term
       fitRef.current = fitAddon
 
-      term.write('\r\n\x1b[33m  ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ Sparkie Terminal\x1b[0m\r\n')
-      term.write('\x1b[2m  Ready ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ E2B sandbox will connect when a build completes.\x1b[0m\r\n\r\n')
+      // ── Post-load pending command trigger ─────────────────────
+      // If pendingRunCommand was set BEFORE xterm loaded (race: build finished
+      // while CDN scripts were still fetching), the useEffect returned early
+      // because term was null. Now that xterm is ready, re-trigger it.
+      const alreadyPending = useAppStore.getState().pendingRunCommand
+      if (alreadyPending) {
+        console.log('[Terminal] xterm just loaded with pending command — re-triggering:', alreadyPending)
+        useAppStore.getState().setPendingRunCommand(null)
+        setTimeout(() => useAppStore.getState().setPendingRunCommand(alreadyPending), 0)
+      }
+
+      term.write('\r\n\x1b[33m  ❖ Sparkie Terminal\x1b[0m\r\n')
+      term.write('\x1b[2m  Ready — E2B sandbox will connect when a build completes.\x1b[0m\r\n\r\n')
       // connectE2B is called lazily from the pendingRunCommand useEffect,
       // not here at mount. Connecting at mount causes the SSE stream to
       // time out (DO 30s idle limit) before the build finishes.
@@ -113,7 +124,7 @@ export function Terminal() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ Sync legacy terminalOutput ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ xterm (for WebContainer builds) ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
+  // ── Sync legacy terminalOutput → xterm (for WebContainer builds) ─────────
   useEffect(() => {
     if (!xtermRef.current || e2bMode) return
     const newOutput = terminalOutput.slice(prevOutputRef.current.length)
@@ -123,7 +134,7 @@ export function Terminal() {
     }
   }, [terminalOutput, e2bMode])
 
-  // ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ flattenWithPaths: flatten FileNode tree preserving full relative paths ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
+  // ── flattenWithPaths: flatten FileNode tree preserving full relative paths ──
   // flattenFileTree (from appStore) returns leaf nodes but loses folder path context.
   // This version walks the tree with a running prefix so E2B gets the correct paths
   // (e.g. sparkie/src/App.tsx instead of just App.tsx).
@@ -140,10 +151,10 @@ export function Terminal() {
     })
   }
 
-  // ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ Auto-run: execute pendingRunCommand via lazy E2B connect ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
+  // ── Auto-run: execute pendingRunCommand via lazy E2B connect ────────────────
   // Called by build pipeline after files are written and package.json has scripts.dev.
   // Strategy: connect E2B lazily here (not at mount) so the SSE stream is opened
-  // only when there is a command to run ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ avoids DO's 30s idle timeout killing
+  // only when there is a command to run — avoids DO's 30s idle timeout killing
   // the connection during the 2-3 minute build window.
   useEffect(() => {
     console.log('[Terminal] useEffect pendingRunCommand:', pendingRunCommand, 'connected:', connected, 'ws:', wsRef.current?.readyState)
@@ -152,7 +163,7 @@ export function Terminal() {
     // If already connected (user manually opened terminal during build), fire directly.
     if (connected && wsRef.current?.readyState === 1) {
       const cmd = pendingRunCommand
-      console.log('[Terminal] already connected ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ FIRING command:', cmd)
+      console.log('[Terminal] already connected — FIRING command:', cmd)
       setPendingRunCommand(null)
       serverUrlDetectedRef.current = false
       setContainerStatus('installing')
@@ -165,15 +176,21 @@ export function Terminal() {
       return
     }
 
-    // Not connected yet ÃÂ¢ÃÂÃÂ lazy connect now with project files, then fire command.
+    // Not connected yet — lazy connect now with project files, then fire command.
+    // CRITICAL: check xtermRef BEFORE consuming pendingRunCommand.
+    // If xterm hasn't loaded yet (async CDN scripts still fetching), keep the
+    // command in state — the loadXterm().then() post-load trigger will re-fire it.
+    const term = xtermRef.current
+    if (!term) {
+      console.log('[Terminal] lazy connect — xterm not ready yet, keeping command in state')
+      return
+    }
+
     const cmd = pendingRunCommand
     console.log('[Terminal] lazy E2B connect for command:', cmd)
     setPendingRunCommand(null)
     serverUrlDetectedRef.current = false
     setContainerStatus('installing')
-
-    const term = xtermRef.current!
-    if (!term) return
 
     // Collect project files now (build is done, files ARE in the store).
     const currentChat = useAppStore.getState().chats.find(
@@ -182,7 +199,7 @@ export function Terminal() {
     const projectFiles = currentChat
       ? flattenWithPaths(currentChat.files)
       : []
-    console.log('[Terminal] lazy connect ÃÂ¢ÃÂÃÂ passing', projectFiles.length, 'files to E2B')
+    console.log('[Terminal] lazy connect — passing', projectFiles.length, 'files to E2B')
 
     term.write('\r\n\x1b[2m  Connecting to E2B sandbox\u2026\x1b[0m\r\n')
 
@@ -216,15 +233,13 @@ export function Terminal() {
       close: () => { es.close(); ws.readyState = 3 },
     }
 
-    // EventSource factory with retry ÃÂ¢ÃÂÃÂ handles 404 if session isn't registered yet
-
-
+    // EventSource factory with retry — handles 404 if session isn't registered yet
     function createES(): EventSource {
       const _es = new EventSource(`/api/terminal?sessionId=${sessionId}`)
       console.log('[Terminal] EventSource opening for sessionId=', sessionId)
 
       _es.onopen = () => {
-        console.log('[Terminal] EventSource onopen ÃÂ¢ÃÂÃÂ shell ready, firing cmd:', cmd)
+        console.log('[Terminal] EventSource onopen — shell ready, firing cmd:', cmd)
         esRetries = 0
         ws.readyState = 1
         wsRef.current = _es as unknown as WebSocket
@@ -332,12 +347,7 @@ export function Terminal() {
       })
   }, [pendingRunCommand, connected, setPendingRunCommand, setContainerStatus, setE2bMode, setConnected, setPreviewUrl, setIDETab])
 
-  // ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ Server URL detection: watch WS output for localhost:PORT ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ set preview ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
-  // Patches the ws.onmessage handler at connection time is fragile (closure).
-  // Instead we intercept via xterm.write with a post-write URL scan on raw data.
-  // Implemented in connectE2B ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ see ws.onmessage extension below.
-
-  // ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ ResizeObserver ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
+  // ── ResizeObserver ─────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!termRef.current || !fitRef.current) return
     const ro = new ResizeObserver(() => fitRef.current?.fit())
@@ -345,8 +355,7 @@ export function Terminal() {
     return () => ro.disconnect()
   }, [])
 
-  // ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ E2B PTY connection ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
-    function clearTerminal() {
+  function clearTerminal() {
     xtermRef.current?.clear()
     prevOutputRef.current = ''
   }
