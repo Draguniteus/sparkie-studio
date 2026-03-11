@@ -138,17 +138,25 @@ export function Terminal() {
   // Set by build pipeline after detecting package.json with scripts.dev.
   // Clears itself after sending so it doesn't re-fire on reconnect.
   useEffect(() => {
+    console.log('[Terminal] useEffect pendingRunCommand:', pendingRunCommand, 'connected:', connected, 'ws:', wsRef.current?.readyState)
     if (!pendingRunCommand) return
-    if (!connected || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
+    if (!connected || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      console.log('[Terminal] BLOCKED — not connected or ws not open. connected:', connected, 'readyState:', wsRef.current?.readyState)
+      return
+    }
     const cmd = pendingRunCommand
+    console.log('[Terminal] FIRING command:', cmd)
     setPendingRunCommand(null)
     serverUrlDetectedRef.current = false
     setContainerStatus('installing')
     // Slight delay so the shell is fully settled
     setTimeout(() => {
+      console.log('[Terminal] setTimeout fired, ws readyState:', wsRef.current?.readyState)
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({ type: 'input', data: cmd + '\r' }))
         xtermRef.current?.write('\r\n\x1b[33m  [Sparkie]\x1b[0m Running: ' + cmd + '\r\n')
+      } else {
+        console.log('[Terminal] setTimeout: ws NOT open, dropping command')
       }
     }, 300)
   }, [pendingRunCommand, connected, setPendingRunCommand, setContainerStatus])
@@ -197,7 +205,9 @@ export function Terminal() {
         // The useEffect can't re-run synchronously after setConnected(true), so we also
         // consume pendingRunCommand here to eliminate the connected=false race window.
         const pending = useAppStore.getState().pendingRunCommand
+        console.log('[Terminal] ws.onopen — pendingRunCommand in store:', pending)
         if (pending) {
+          console.log('[Terminal] ws.onopen FIRING command:', pending)
           useAppStore.getState().setPendingRunCommand(null)
           serverUrlDetectedRef.current = false
           setContainerStatus('installing')
