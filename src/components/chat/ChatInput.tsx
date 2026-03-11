@@ -1425,7 +1425,7 @@ export function ChatInput() {
             // Delay 800ms so Terminal component mounts and connectE2B() starts
             // before the command lands — eliminates the mounting race where
             // setPendingRunCommand fires before ws.onopen is registered.
-            setTimeout(() => setPendingRunCommand(startCmd), 800)
+            setTimeout(() => setPendingRunCommand(startCmd), 200)
             // Update wrap message
             const nodeWrapPhrases = [
               `Installing dependencies and starting the dev server — preview will load automatically once it's up!`,
