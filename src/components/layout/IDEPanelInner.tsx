@@ -274,11 +274,11 @@ export function IDEPanelInner() {
           </div>
         )}
 
-        {ideTab === 'terminal' && (
-          <div className="h-full">
-            <Terminal />
-          </div>
-        )}
+        {/* Terminal is always mounted so E2B connects on IDE open,
+             not on tab switch — eliminates the cold-start race with pendingRunCommand. */}
+        <div className={`h-full ${ideTab === 'terminal' ? '' : 'hidden'}`}>
+          <Terminal />
+        </div>
       </div>
     </div>
   )
