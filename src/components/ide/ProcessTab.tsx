@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAppStore, StepTrace } from '@/store/appStore'
 import { useShallow } from 'zustand/react/shallow'
 import { Brain, CheckCircle, AlertCircle, Loader2, Zap } from 'lucide-react'
@@ -11,29 +11,52 @@ const STEP_ICON_MAP: Record<string, string> = {
   rocket: '🚀', image: '🎨', music: '🎵', video: '🎬', mic: '🎤', zap: '⚡',
 }
 
-function TraceRow({ trace }: { trace: StepTrace }) {
+// Stable key for a trace row — label + status so React can track identity
+function traceKey(trace: StepTrace) {
+  return `${trace.label}__${trace.status}`
+}
+
+function TraceRow({ trace, isNew }: { trace: StepTrace; isNew?: boolean }) {
   const icon = STEP_ICON_MAP[trace.icon] ?? '⚡'
+  const [visible, setVisible] = useState(!isNew)
+
+  // Fade+slide in on mount for new rows
+  useEffect(() => {
+    if (isNew) {
+      const raf = requestAnimationFrame(() => setVisible(true))
+      return () => cancelAnimationFrame(raf)
+    }
+  }, [isNew])
+
   return (
-    <div className={`flex items-center gap-2.5 px-3 py-2 rounded-lg border text-[11px] ${
-      trace.status === 'error'
-        ? 'bg-red-500/5 border-red-500/15 text-red-400'
-        : trace.status === 'running'
-        ? 'bg-purple-500/8 border-purple-500/20 text-purple-300'
-        : 'bg-hive-elevated/40 border-white/4 text-text-secondary'
-    }`}>
-      <span className="text-[13px] shrink-0">{icon}</span>
-      <span className="flex-1 truncate">{trace.label}</span>
+    <div
+      style={{
+        opacity: visible ? 1 : 0,
+        transform: visible ? 'translateY(0)' : 'translateY(-6px)',
+        transition: 'opacity 220ms ease, transform 220ms ease',
+      }}
+      className={`flex items-start gap-2.5 px-3 py-2 rounded-lg border text-[11px] ${
+        trace.status === 'error'
+          ? 'bg-red-500/5 border-red-500/15 text-red-400'
+          : trace.status === 'running'
+          ? 'bg-purple-500/8 border-purple-500/20 text-purple-300'
+          : 'bg-hive-elevated/40 border-white/4 text-text-secondary'
+      }`}
+    >
+      <span className="text-[13px] shrink-0 mt-px">{icon}</span>
+      {/* Use break-all so long paths wrap instead of truncating */}
+      <span className="flex-1 break-all leading-snug">{trace.label}</span>
       {trace.status === 'running' && (
-        <Loader2 size={10} className="shrink-0 text-purple-400 animate-spin" />
+        <Loader2 size={10} className="shrink-0 text-purple-400 animate-spin mt-0.5" />
       )}
       {trace.status === 'done' && (
-        <CheckCircle size={10} className="shrink-0 text-green-400" />
+        <CheckCircle size={10} className="shrink-0 text-green-400 mt-0.5" />
       )}
       {trace.status === 'error' && (
-        <AlertCircle size={10} className="shrink-0 text-red-400" />
+        <AlertCircle size={10} className="shrink-0 text-red-400 mt-0.5" />
       )}
       {trace.duration != null && trace.status !== 'running' && (
-        <span className="text-[9px] tabular-nums shrink-0 text-text-muted/60">
+        <span className="text-[9px] tabular-nums shrink-0 text-text-muted/60 mt-0.5">
           {trace.duration < 1000 ? `${trace.duration}ms` : `${(trace.duration / 1000).toFixed(1)}s`}
         </span>
       )}
@@ -51,6 +74,9 @@ export function ProcessTab() {
   )
 
   const [liveTraces, setLiveTraces] = useState<StepTrace[]>([])
+  // Track which trace keys are brand-new (for enter animation)
+  const seenKeysRef = useRef<Set<string>>(new Set())
+  const scrollRef = useRef<HTMLDivElement>(null)
 
   // Subscribe to live step_trace SSE events
   useEffect(() => {
@@ -60,7 +86,10 @@ export function ProcessTab() {
       setLiveTraces(prev => {
         if (trace.status === 'running') {
           const allSettled = prev.length > 0 && prev.every(t => t.status !== 'running')
-          if (allSettled) return [trace]
+          if (allSettled) {
+            seenKeysRef.current = new Set()
+            return [trace]
+          }
           return [...prev, trace]
         }
         const idx = prev.findIndex(t => t.label === trace.label && t.status === 'running')
@@ -72,10 +101,20 @@ export function ProcessTab() {
     return () => window.removeEventListener('sparkie_step_trace', handler)
   }, [])
 
+  // Auto-scroll to bottom as new traces arrive
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    }
+  }, [liveTraces.length])
+
   // Clear live traces 3s after longTaskLabel clears (response done)
   useEffect(() => {
     if (!longTaskLabel && liveTraces.length > 0) {
-      const t = setTimeout(() => setLiveTraces([]), 3000)
+      const t = setTimeout(() => {
+        setLiveTraces([])
+        seenKeysRef.current = new Set()
+      }, 3000)
       return () => clearTimeout(t)
     }
   }, [longTaskLabel])
@@ -98,6 +137,16 @@ export function ProcessTab() {
 
   const isLive = !!longTaskLabel || liveTraces.some(t => t.status === 'running')
   const hasContent = liveTraces.length > 0 || recentFrozen.length > 0
+
+  // Determine which live trace keys are new (not yet seen)
+  const newKeys = new Set<string>()
+  for (const trace of liveTraces) {
+    const k = traceKey(trace)
+    if (!seenKeysRef.current.has(k)) {
+      newKeys.add(k)
+      seenKeysRef.current.add(k)
+    }
+  }
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -122,14 +171,17 @@ export function ProcessTab() {
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-3">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 flex flex-col gap-3">
         {/* Live traces */}
         {liveTraces.length > 0 && (
           <div className="flex flex-col gap-1">
             <p className="text-[10px] text-text-muted px-1 mb-0.5 uppercase tracking-wide">Live</p>
-            {liveTraces.map((trace, i) => (
-              <TraceRow key={i} trace={trace} />
-            ))}
+            {liveTraces.map((trace) => {
+              const k = traceKey(trace)
+              return (
+                <TraceRow key={k} trace={trace} isNew={newKeys.has(k)} />
+              )
+            })}
           </div>
         )}
 
