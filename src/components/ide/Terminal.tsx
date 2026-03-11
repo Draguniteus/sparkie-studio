@@ -97,11 +97,10 @@ export function Terminal() {
       fitRef.current = fitAddon
 
       term.write('\r\n\x1b[33m  ❖ Sparkie Terminal\x1b[0m\r\n')
-      term.write('\x1b[2m  Connected to E2B cloud sandbox\x1b[0m\r\n')
-      term.write('\x1b[2m  Type commands below — press Enter to run\x1b[0m\r\n\r\n')
-
-      // Connect E2B terminal session
-      connectE2B(term)
+      term.write('\x1b[2m  Ready — E2B sandbox will connect when a build completes.\x1b[0m\r\n\r\n')
+      // connectE2B is called lazily from the pendingRunCommand useEffect,
+      // not here at mount. Connecting at mount causes the SSE stream to
+      // time out (DO 30s idle limit) before the build finishes.
     }).catch(err => {
       console.error('xterm load failed:', err)
     })
@@ -124,63 +123,160 @@ export function Terminal() {
     }
   }, [terminalOutput, e2bMode])
 
-  // ── Auto-run: execute pendingRunCommand when E2B shell is ready ──────────
-  // Set by build pipeline after detecting package.json with scripts.dev.
-  // Clears itself after sending so it doesn't re-fire on reconnect.
+  // ── Auto-run: execute pendingRunCommand via lazy E2B connect ───────────────
+  // Called by build pipeline after files are written and package.json has scripts.dev.
+  // Strategy: connect E2B lazily here (not at mount) so the SSE stream is opened
+  // only when there is a command to run — avoids DO's 30s idle timeout killing
+  // the connection during the 2-3 minute build window.
   useEffect(() => {
     console.log('[Terminal] useEffect pendingRunCommand:', pendingRunCommand, 'connected:', connected, 'ws:', wsRef.current?.readyState)
     if (!pendingRunCommand) return
-    if (!connected || !wsRef.current || wsRef.current.readyState !== 1) {
-      console.log('[Terminal] pendingRunCommand set but not yet connected — will fire on ws.onopen. connected:', connected, 'readyState:', wsRef.current?.readyState)
-      // Do NOT clear pendingRunCommand — ws.onopen will pick it up when connection opens.
-      // ws.onopen reads from useAppStore.getState().pendingRunCommand directly, so it will fire.
-      return
-    }
-    const cmd = pendingRunCommand
-    console.log('[Terminal] FIRING command:', cmd)
-    setPendingRunCommand(null)
-    serverUrlDetectedRef.current = false
-    setContainerStatus('installing')
-    // Sync project files into the sandbox BEFORE running the command.
-    // connectE2B runs at mount time (before build finishes), so files weren't
-    // in the store yet. Now that pendingRunCommand is set, files ARE ready.
-    const syncFiles = async () => {
-      const sid = sessionRef.current
-      if (!sid) return
-      const currentChat = useAppStore.getState().chats.find(
-        c => c.id === useAppStore.getState().currentChatId
-      )
-      const projectFiles = currentChat
-        ? flattenFileTree(currentChat.files)
-            .filter(f => f.type === 'file' && f.content)
-            .map(f => ({ name: f.name, content: f.content }))
-        : []
-      if (projectFiles.length > 0) {
-        try {
-          await fetch('/api/terminal', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'sync-files', sessionId: sid, files: projectFiles }),
-          })
-          console.log('[Terminal] synced', projectFiles.length, 'files to sandbox before run')
-        } catch (err) {
-          console.warn('[Terminal] sync-files failed:', err)
-        }
-      }
-    }
-    syncFiles().finally(() => {
-      // Slight delay so the shell is fully settled
+
+    // If already connected (user manually opened terminal during build), fire directly.
+    if (connected && wsRef.current?.readyState === 1) {
+      const cmd = pendingRunCommand
+      console.log('[Terminal] already connected — FIRING command:', cmd)
+      setPendingRunCommand(null)
+      serverUrlDetectedRef.current = false
+      setContainerStatus('installing')
       setTimeout(() => {
-        console.log('[Terminal] setTimeout fired, ws readyState:', wsRef.current?.readyState)
         if (wsRef.current?.readyState === 1) {
           wsRef.current.send(JSON.stringify({ type: 'input', data: cmd + '\r' }))
           xtermRef.current?.write('\r\n\x1b[33m  [Sparkie]\x1b[0m Running: ' + cmd + '\r\n')
-        } else {
-          console.log('[Terminal] setTimeout: ws NOT open, dropping command')
         }
       }, 300)
+      return
+    }
+
+    // Not connected yet — lazy connect now with project files, then fire command.
+    const cmd = pendingRunCommand
+    console.log('[Terminal] lazy E2B connect for command:', cmd)
+    setPendingRunCommand(null)
+    serverUrlDetectedRef.current = false
+    setContainerStatus('installing')
+
+    const term = xtermRef.current
+    if (!term) return
+
+    // Collect project files now (build is done, files ARE in the store).
+    const currentChat = useAppStore.getState().chats.find(
+      c => c.id === useAppStore.getState().currentChatId
+    )
+    const projectFiles = currentChat
+      ? flattenFileTree(currentChat.files)
+          .filter(f => f.type === 'file' && f.content)
+          .map(f => ({ name: f.name, content: f.content }))
+      : []
+    console.log('[Terminal] lazy connect — passing', projectFiles.length, 'files to E2B')
+
+    term.write('\r\n\x1b[2m  Connecting to E2B sandbox…\x1b[0m\r\n')
+
+    fetch('/api/terminal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'create', files: projectFiles }),
     })
-  }, [pendingRunCommand, connected, setPendingRunCommand, setContainerStatus])
+      .then(async r => {
+        if (!r.ok) {
+          term.write('\r\n\x1b[31m  [Terminal] E2B unavailable — cannot run dev server\x1b[0m\r\n')
+          setContainerStatus('idle')
+          return
+        }
+        const { sessionId } = await r.json() as { sessionId: string; wsUrl: string }
+        sessionRef.current = sessionId
+        setE2bMode(true)
+
+        const sseUrl = `/api/terminal?sessionId=${sessionId}`
+        const es = new EventSource(sseUrl)
+
+        type WsShim = {
+          readyState: number
+          onopen: (() => void) | null
+          onclose: (() => void) | null
+          onerror: (() => void) | null
+          onmessage: ((e: { data: string }) => void) | null
+          send: (data: string) => void
+          close: () => void
+        }
+        const ws: WsShim = {
+          readyState: 0,
+          onopen: null, onclose: null, onerror: null, onmessage: null,
+          send: (data: string) => {
+            const parsed = JSON.parse(data) as { type: string; data?: string; cols?: number; rows?: number }
+            fetch('/api/terminal', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: parsed.type === 'input' ? 'input' : 'resize', sessionId, ...parsed }),
+            }).catch(() => {})
+          },
+          close: () => { es.close(); ws.readyState = 3 },
+        }
+        wsRef.current = ws as unknown as WebSocket
+
+        es.onopen = () => {
+          ws.readyState = 1
+          setConnected(true)
+          term.write('\x1b[32m  [E2B]\x1b[0m Shell ready\r\n\r\n')
+          fitRef.current?.fit()
+          // Fire the command now that we're connected.
+          console.log('[Terminal] lazy es.onopen — FIRING:', cmd)
+          setTimeout(() => {
+            if (wsRef.current?.readyState === 1) {
+              wsRef.current.send(JSON.stringify({ type: 'input', data: cmd + '\r' }))
+              term.write('\r\n\x1b[33m  [Sparkie]\x1b[0m Running: ' + cmd + '\r\n')
+            }
+          }, 300)
+        }
+
+        es.onerror = () => {
+          if (es.readyState === EventSource.CLOSED) {
+            ws.readyState = 3
+            setConnected(false)
+            term.write('\r\n\x1b[33m  [E2B]\x1b[0m Session ended\r\n')
+          } else {
+            term.write('\r\n\x1b[31m  [E2B]\x1b[0m Connection error\r\n')
+          }
+        }
+
+        es.onmessage = (e) => {
+          let payload: { type: string; data: string } | null = null
+          try { payload = JSON.parse(e.data) } catch { return }
+          if (!payload) return
+          const raw = payload.data ?? ''
+          if (payload.type === 'ping') return
+          if (payload.type === 'connected') {
+            ws.readyState = 1
+            ws.onopen?.()
+            return
+          }
+          term.write(raw)
+          // ── Server URL detection ─────────────────────────────────────────
+          if (!serverUrlDetectedRef.current) {
+            const urlMatch = raw.match(/https?:\/\/[^\s]+:[0-9]+/) ??
+                             raw.match(/Local:\s+(https?:\/\/[^\s]+)/) ??
+                             raw.match(/localhost:[0-9]+/)
+            if (urlMatch) {
+              let url = urlMatch[1] ?? urlMatch[0]
+              if (!url.startsWith('http')) url = 'http://' + url
+              serverUrlDetectedRef.current = true
+              setPreviewUrl(url)
+              setContainerStatus('running')
+              setIDETab('preview')
+              term.write('\r\n\x1b[32m  [Sparkie]\x1b[0m Preview ready → ' + url + '\r\n')
+            }
+          }
+          // ── Build error detection ────────────────────────────────────────
+          if (raw.includes('ERROR') || raw.includes('error TS') || raw.includes('ENOENT')) {
+            term.write('\r\n\x1b[31m  [Sparkie]\x1b[0m Build error detected — check above ↑\r\n')
+          }
+        }
+      })
+      .catch(err => {
+        console.error('[Terminal] lazy connect failed:', err)
+        term.write('\r\n\x1b[31m  [Terminal] E2B connect failed: ' + String(err) + '\x1b[0m\r\n')
+        setContainerStatus('idle')
+      })
+  }, [pendingRunCommand, connected, setPendingRunCommand, setContainerStatus, setE2bMode, setConnected, setPreviewUrl, setIDETab])
 
   // ── Server URL detection: watch WS output for localhost:PORT → set preview ─
   // Patches the ws.onmessage handler at connection time is fragile (closure).
