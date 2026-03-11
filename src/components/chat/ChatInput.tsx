@@ -1421,11 +1421,12 @@ export function ChatInput() {
             })
             // Switch to terminal tab so user sees npm install progress
             setIDETab('terminal')
-            // Signal Terminal.tsx to run the command when E2B shell is ready.
-            // Delay 800ms so Terminal component mounts and connectE2B() starts
-            // before the command lands — eliminates the mounting race where
-            // setPendingRunCommand fires before ws.onopen is registered.
-            setTimeout(() => setPendingRunCommand(startCmd), 200)
+            // Set command synchronously WHILE isExecuting=true, so IDEPanelInner's
+            // WebContainer auto-run useEffect is blocked by its isExecuting guard.
+            // Terminal is always-mounted; E2B is already connected (open for the
+            // duration of the build). The useEffect [pendingRunCommand, connected]
+            // fires immediately and sends the command to the live shell.
+            setPendingRunCommand(startCmd)
             // Update wrap message
             const nodeWrapPhrases = [
               `Installing dependencies and starting the dev server — preview will load automatically once it's up!`,
