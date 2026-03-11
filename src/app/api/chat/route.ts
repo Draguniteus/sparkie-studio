@@ -5094,8 +5094,20 @@ async function handleBuildMode(
               try {
                 const args = JSON.parse(tc.arguments) as { path?: string; content?: string }
                 const fPath = (args.path ?? '').replace(/^\/workspace\//, '').replace(/^\//, '')
-                const fContent = args.content ?? ''
-                console.log(`[BUILD] Turn ${turn}: write_file -> ${fPath}`)
+                let fContent = args.content ?? ''
+                // Sanitize malformed CSS hex values emitted by M2.5:
+                // Pattern 1: `color: 5b7;` → `color: #5b7;` (bare 3/6-char hex after colon)
+                // Pattern 2: `#e8d font-size:` → `#e8d;\n  font-size:` (runon after hex)
+                // Apply to all files since CSS may be inline in TSX too
+                fContent = fContent
+                  .replace(/(:\s*)([0-9a-fA-F]{3,6})(?=\s*;)/g, (_, pre, hex) => {
+                    // Only fix if it looks like a hex color (not a number like 100 or 0)
+                    return /^[0-9a-fA-F]{3}$|^[0-9a-fA-F]{6}$/.test(hex) && !/^\d+$/.test(hex)
+                      ? \`\${pre}#\${hex}\`
+                      : \`\${pre}\${hex}\`
+                  })
+                  .replace(/(#[0-9a-fA-F]{3,6})\s+([a-z-]+:)/g, '$1;\n  $2')
+                console.log(\`[BUILD] Turn \${turn}: write_file -> \${fPath}\`)
                 // Emit as synthetic XML so existing fileParser.ts pipeline picks it up
                 const xmlOpen = `<minimax:tool_call>\n<invoke name="write_file">\n<parameter name="path">${fPath}</parameter>\n<parameter name="content">`
                 const xmlClose = `</parameter>\n</invoke>\n</minimax:tool_call>`
@@ -5118,8 +5130,10 @@ async function handleBuildMode(
             }
 
             // Continue loop (write next file)
-            if (turnFinishReason === 'stop') {
-              console.log(`[BUILD] Agent finished at turn ${turn} (finish=stop)`)
+            // M2.5 sometimes emits finish_reason='' (empty) when done — treat that
+            // as stop too, since we already have the tool call content for this turn.
+            if (turnFinishReason === 'stop' || turnFinishReason === '') {
+              console.log(`[BUILD] Agent finished at turn ${turn} (finish=${turnFinishReason || 'empty→stop'})`)
               break
             }
             continue
@@ -5135,7 +5149,7 @@ async function handleBuildMode(
               { role: 'assistant', content: turnContent.trim(), tool_calls: [{ id: `call_${turn}_xml`, type: 'function', function: { name: 'write_file', arguments: JSON.stringify({ path: fPath }) } }] },
               { role: 'tool', tool_call_id: `call_${turn}_xml`, name: 'write_file', content: `File "${fPath}" written successfully.` },
             ]
-            if (turnFinishReason === 'stop') break
+            if (turnFinishReason === 'stop' || turnFinishReason === '') break
             continue
           }
 
