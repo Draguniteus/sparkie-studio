@@ -4960,56 +4960,101 @@ async function handleBuildMode(
           return
         }
 
-        const reader = res.body.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ''
-        let thinkingEmitted = false
-        let thinkingBuffer = ''
+        // ── Multi-turn agent loop ────────────────────────────────────────────────
+        // M2.5 outputs ONE <minimax:tool_call> per turn then stops (correct agentic behavior).
+        // We simulate tool result feedback to drive it to write each subsequent file.
+        // Each turn: stream delta to client → extract XML tool call → inject tool result → repeat.
         let fullBuildRaw = ''
+        let thinkingEmitted = false
+        let agentMessages = [...apiMessages]
+        const MAX_TURNS = 10  // max files: package.json + vite.config + index.html + main.tsx + App.tsx + components
 
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
+        for (let turn = 0; turn < MAX_TURNS; turn++) {
+          const turnRes = await fetch(buildEndpoint, {
+            method: 'POST',
+            signal: AbortSignal.timeout(60_000),
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+              model: buildModel,
+              messages: agentMessages,
+              stream: true,
+              max_tokens: 8000,
+              temperature: 0.1,
+            }),
+          })
 
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split('\n')
-          buffer = lines.pop() ?? ''
-
-          for (const line of lines) {
-            const trimmed = line.trim()
-            if (!trimmed.startsWith('data: ')) continue
-            const data = trimmed.slice(6)
-            if (data === '[DONE]') continue
-
-            try {
-              const parsed = JSON.parse(data) as { choices?: Array<{ delta?: { content?: string } }> }
-              const chunk: string = parsed.choices?.[0]?.delta?.content ?? ''
-              if (!chunk) continue
-              fullBuildRaw += chunk
-
-              if (!thinkingEmitted) {
-                thinkingBuffer += chunk
-                const thinkMatch = thinkingBuffer.match(/^\[THINKING\]\s*([^\n]+)/)
-                if (thinkMatch) {
-                  send('thinking', { text: `💭 ${thinkMatch[1].trim()}` })
-                  thinkingEmitted = true
-                  const afterThinking = thinkingBuffer.replace(/^\[THINKING\][^\n]*\n?/, '')
-                  if (afterThinking) send('delta', { content: afterThinking })
-                } else if (thinkingBuffer.length > 120 || thinkingBuffer.includes('---FILE:')) {
-                  thinkingEmitted = true
-                  send('thinking', { text: '⚡ Writing code…' })
-                  send('delta', { content: thinkingBuffer })
-                }
-                continue
-              }
-
-              send('delta', { content: chunk })
-            } catch {}
+          if (!turnRes.ok || !turnRes.body) {
+            console.error(`[BUILD] Turn ${turn} API error: ${turnRes.status}`)
+            break
           }
+
+          const reader = turnRes.body.getReader()
+          const decoder = new TextDecoder()
+          let buffer = ''
+          let turnRaw = ''
+
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            buffer += decoder.decode(value, { stream: true })
+            const lines = buffer.split('\n')
+            buffer = lines.pop() ?? ''
+
+            for (const line of lines) {
+              const trimmed = line.trim()
+              if (!trimmed.startsWith('data: ')) continue
+              const data = trimmed.slice(6)
+              if (data === '[DONE]') continue
+
+              try {
+                const parsed = JSON.parse(data) as { choices?: Array<{ delta?: { content?: string }; finish_reason?: string }> }
+                const chunk: string = parsed.choices?.[0]?.delta?.content ?? ''
+                if (!chunk) continue
+                turnRaw += chunk
+                fullBuildRaw += chunk
+
+                if (!thinkingEmitted) {
+                  if (turnRaw.length > 120 || turnRaw.includes('<invoke')) {
+                    thinkingEmitted = true
+                    send('thinking', { text: '⚡ Writing code…' })
+                    send('delta', { content: turnRaw })
+                  }
+                  continue
+                }
+
+                send('delta', { content: chunk })
+              } catch {}
+            }
+          }
+
+          console.log(`[BUILD] Turn ${turn} raw len=${turnRaw.length}`)
+
+          // Extract XML tool call from this turn
+          const invokeMatch = /<invoke[^>]*name=["']write_file["'][^>]*>([\s\S]*?)<\/invoke>/i.exec(turnRaw)
+          if (!invokeMatch) {
+            // No tool call — M2.5 is done or gave a conversational response
+            console.log(`[BUILD] Turn ${turn}: no invoke found — agent done`)
+            break
+          }
+
+          const body = invokeMatch[1]
+          const pathMatch = /<parameter[^>]*name=["']path["'][^>]*>([\s\S]*?)<\/parameter>/i.exec(body)
+          const writtenPath = pathMatch ? pathMatch[1].trim().replace(/^\/workspace\//, '') : 'file'
+          console.log(`[BUILD] Turn ${turn}: wrote ${writtenPath}`)
+
+          // Add assistant turn (the tool call text) + tool result to drive next file
+          agentMessages = [
+            ...agentMessages,
+            { role: 'assistant', content: turnRaw.trim() },
+            { role: 'tool', tool_call_id: `call_${turn}`, name: 'write_file', content: `File "${writtenPath}" written successfully.` } as unknown as { role: string; content: string },
+          ]
         }
 
         const hasMarkers = fullBuildRaw.includes('---FILE:')
-        console.log(`[BUILD] raw output length=${fullBuildRaw.length} hasFileMarkers=${hasMarkers} model=${buildModel}`)
+        console.log(`[BUILD] raw output length=${fullBuildRaw.length} hasFileMarkers=${hasMarkers} model=${buildModel} (multi-turn)`)
         if (!hasMarkers && fullBuildRaw.length > 0) {
           console.log('[BUILD] NO MARKERS — first 500 chars:', fullBuildRaw.slice(0, 500))
         }
