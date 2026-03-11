@@ -242,7 +242,9 @@ export function Terminal() {
         console.log('[Terminal] EventSource onopen â shell ready, firing cmd:', cmd)
         esRetries = 0
         ws.readyState = 1
-        wsRef.current = _es as unknown as WebSocket
+        // Store the ws SHIM in wsRef (not the raw EventSource).
+        // wsRef.current.send() must route through ws.send() — EventSource has no .send().
+        wsRef.current = ws as unknown as WebSocket
         setConnected(true)
         term.write('\x1b[32m  [E2B]\x1b[0m Shell ready\r\n\r\n')
         fitRef.current?.fit()
