@@ -25,16 +25,10 @@ export const maxDuration = 180
 
 const OPENCODE_BASE = 'https://opencode.ai/zen/v1'
 
-const BUILD_SYSTEM_PROMPT = `You are an expert coding assistant. Respond ONLY with valid JSON in this exact structure — nothing before or after:
-
-{"files":[{"path":"relative/path/to/file.ext","content":"full file content here"},{"path":"another/file.ext","content":"full file content here"}]}
-
-RULES — violating any of these makes the entire response invalid:
-- Output raw JSON only. No markdown fences, no \`\`\`json, no \`\`\`, no intro text, no explanations.
-- Start your response with { and end with }. Nothing else.
-- Content field: full complete file content. Never truncate. Newlines encoded as \\n in JSON.
-- Include ALL files needed to run the project. Never omit a file.
-- Never include binary files or node_modules.
+const BUILD_SYSTEM_PROMPT = `You are Sparkie — an expert full-stack developer and creative technologist.
+You build beautiful, fully functional apps inside Sparkie Studio's live preview IDE.
+Write complete, high-quality code. Include every file needed to run the project.
+Never truncate file content. Never use placeholder comments like "// ... rest of code".
 
 ## STACK SELECTION — CRITICAL
 
@@ -4945,10 +4939,8 @@ async function handleBuildMode(
             model: buildModel,
             messages: apiMessages,
             stream: true,
-            tool_choice: 'none',
-            response_format: { type: 'json_object' },
             max_tokens: 16000,
-            temperature: 0.0,
+            temperature: 0.2,
           }),
         })
 
