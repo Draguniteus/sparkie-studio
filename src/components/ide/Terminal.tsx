@@ -1,16 +1,12 @@
 "use client"
 
 import { useEffect, useRef, useState, useCallback } from 'react'
+import type { Terminal as XTermType } from '@xterm/xterm'
+import type { FitAddon as FitAddonType } from '@xterm/addon-fit'
 import { useAppStore } from '@/store/appStore'
 import { Terminal as TermIcon, Play, Square, Trash2, ExternalLink } from 'lucide-react'
 
-declare global {
-  interface Window {
-    Terminal: new (options?: Record<string, unknown>) => XTermInstance
-    FitAddon: new () => { fit(): void; proposeDimensions(): { cols: number; rows: number } | undefined }
-    _xtermLoaded?: boolean
-  }
-}
+// xterm loaded via npm imports (@xterm/xterm + @xterm/addon-fit)
 
 interface XTermInstance {
   open(el: HTMLElement): void
@@ -22,26 +18,20 @@ interface XTermInstance {
   loadAddon(addon: unknown): void
 }
 
-function loadXterm(): Promise<void> {
-  if (window._xtermLoaded) return Promise.resolve()
-  return new Promise((resolve, reject) => {
-    const css = document.createElement('link')
-    css.rel = 'stylesheet'
-    css.href = 'https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css'
-    document.head.appendChild(css)
-
-    const script = document.createElement('script')
-    script.src = 'https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js'
-    script.onload = () => {
-      const fitScript = document.createElement('script')
-      fitScript.src = 'https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js'
-      fitScript.onload = () => { window._xtermLoaded = true; resolve() }
-      fitScript.onerror = reject
-      document.head.appendChild(fitScript)
-    }
-    script.onerror = reject
-    document.head.appendChild(script)
-  })
+async function loadXterm(): Promise<{ Terminal: typeof XTermType; FitAddon: typeof FitAddonType }> {
+  const [{ Terminal }, { FitAddon }] = await Promise.all([
+    import('@xterm/xterm'),
+    import('@xterm/addon-fit'),
+  ])
+  // Inject xterm CSS once
+  if (!document.getElementById('xterm-css')) {
+    const link = document.createElement('link')
+    link.id = 'xterm-css'
+    link.rel = 'stylesheet'
+    link.href = 'https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css'
+    document.head.appendChild(link)
+  }
+  return { Terminal, FitAddon }
 }
 
 export function Terminal() {
@@ -64,10 +54,10 @@ export function Terminal() {
   useEffect(() => {
     if (!termRef.current) return
 
-    loadXterm().then(() => {
+    loadXterm().then(({ Terminal, FitAddon }) => {
       if (!termRef.current || xtermRef.current) return
 
-      const term = new window.Terminal({
+      const term = new Terminal({
         fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", monospace',
         fontSize: 12,
         lineHeight: 1.4,
@@ -99,7 +89,7 @@ export function Terminal() {
         scrollback: 3000,
       })
 
-      const fitAddon = new window.FitAddon()
+      const fitAddon = new FitAddon()
       term.loadAddon(fitAddon)
       term.open(termRef.current)
       fitAddon.fit()
