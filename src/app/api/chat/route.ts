@@ -5057,11 +5057,14 @@ async function handleBuildMode(
 
           // If structured tool_calls received — preferred path
           if (tcEntries.length > 0) {
+            // Pre-compute stable callId: M2.5 sends tc.id as '' in SSE deltas.
+            // Old code: assistant used call_${turn}_${i} but tool result used call_${turn} → mismatch → empty Turn 1.
+            const tcWithIds = tcEntries.map((tc, i) => ({ ...tc, callId: tc.id || `call_${turn}_${i}` }))
             const assistantTurn: { role: string; content: string | null; tool_calls: unknown[] } = {
               role: 'assistant',
               content: turnContent || null,
-              tool_calls: tcEntries.map((tc, i) => ({
-                id: tc.id || `call_${turn}_${i}`,
+              tool_calls: tcWithIds.map((tc) => ({
+                id: tc.callId,
                 type: 'function',
                 function: { name: tc.name, arguments: tc.arguments },
               })),
@@ -5090,7 +5093,7 @@ async function handleBuildMode(
                 fullBuildRaw += xml
                 agentMessages = [...agentMessages, {
                   role: 'tool',
-                  tool_call_id: tc.id || `call_${turn}`,
+                  tool_call_id: tc.callId,
                   name: 'write_file',
                   content: `File "${fPath}" written successfully.`,
                 }]
@@ -5112,8 +5115,8 @@ async function handleBuildMode(
             console.log(`[BUILD] Turn ${turn}: XML text-mode -> ${fPath}`)
             agentMessages = [
               ...agentMessages,
-              { role: 'assistant', content: turnContent.trim() },
-              { role: 'tool', tool_call_id: `call_${turn}`, name: 'write_file', content: `File "${fPath}" written successfully.` },
+              { role: 'assistant', content: turnContent.trim(), tool_calls: [{ id: `call_${turn}_xml`, type: 'function', function: { name: 'write_file', arguments: JSON.stringify({ path: fPath }) } }] },
+              { role: 'tool', tool_call_id: `call_${turn}_xml`, name: 'write_file', content: `File "${fPath}" written successfully.` },
             ]
             if (turnFinishReason === 'stop') break
             continue
