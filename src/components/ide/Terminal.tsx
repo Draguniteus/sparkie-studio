@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Terminal as XTermType } from '@xterm/xterm'
 import type { FitAddon as FitAddonType } from '@xterm/addon-fit'
-import { useAppStore, flattenFileTree } from '@/store/appStore'
+import { useAppStore } from '@/store/appStore'
 import { Terminal as TermIcon, Play, Square, Trash2, ExternalLink } from 'lucide-react'
 
 // xterm loaded via npm imports (@xterm/xterm + @xterm/addon-fit)
@@ -123,6 +123,23 @@ export function Terminal() {
     }
   }, [terminalOutput, e2bMode])
 
+  // ── flattenWithPaths: flatten FileNode tree preserving full relative paths ─
+  // flattenFileTree (from appStore) returns leaf nodes but loses folder path context.
+  // This version walks the tree with a running prefix so E2B gets the correct paths
+  // (e.g. sparkie/src/App.tsx instead of just App.tsx).
+  type E2BFile = { name: string; content: string }
+  function flattenWithPaths(
+    nodes: import('@/store/appStore').FileNode[],
+    prefix = ''
+  ): E2BFile[] {
+    return nodes.flatMap(n => {
+      const p = prefix ? `${prefix}/${n.name}` : n.name
+      if (n.type === 'folder') return flattenWithPaths(n.children ?? [], p)
+      if (n.type === 'archive') return []
+      return n.content ? [{ name: p, content: n.content }] : []
+    })
+  }
+
   // ── Auto-run: execute pendingRunCommand via lazy E2B connect ───────────────
   // Called by build pipeline after files are written and package.json has scripts.dev.
   // Strategy: connect E2B lazily here (not at mount) so the SSE stream is opened
@@ -163,9 +180,7 @@ export function Terminal() {
       c => c.id === useAppStore.getState().currentChatId
     )
     const projectFiles = currentChat
-      ? flattenFileTree(currentChat.files)
-          .filter(f => f.type === 'file' && f.content)
-          .map(f => ({ name: f.name, content: f.content }))
+      ? flattenWithPaths(currentChat.files)
       : []
     console.log('[Terminal] lazy connect — passing', projectFiles.length, 'files to E2B')
 
@@ -310,9 +325,7 @@ export function Terminal() {
       c => c.id === useAppStore.getState().currentChatId
     )
     const projectFiles = currentChat
-      ? flattenFileTree(currentChat.files)
-          .filter(f => f.type === 'file' && f.content)
-          .map(f => ({ name: f.name, content: f.content }))
+      ? flattenWithPaths(currentChat.files)
       : []
     fetch('/api/terminal', {
       method: 'POST',
