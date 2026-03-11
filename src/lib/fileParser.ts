@@ -164,9 +164,26 @@ export function parseAIResponse(raw: string, projectName?: string): ParseResult 
   }
 
   // Fallback C: raw HTML/JS/CSS (no markers at all)
-  // Guard: reject MiniMax/AI XML tool-call output — never save as a file
-  const isToolCallXml = /<minimax:tool_call|<invoke\s|<tool_call|<function_calls/i.test(normalized)
+  // ── MiniMax XML tool-call parser ─────────────────────────────────────────
+  // M2.5 always outputs <invoke name="write_file"> XML. Extract files from it.
+  const isToolCallXml = /<minimax:tool_call|<invoke\s+name=|<tool_call|<function_calls/i.test(normalized)
   if (isToolCallXml) {
+    const xmlFiles: ParsedFile[] = []
+    const invokeRe = /<invoke[^>]*name=["']write_file["'][^>]*>([\s\S]*?)<\/invoke>/gi
+    let m
+    while ((m = invokeRe.exec(normalized)) !== null) {
+      const body = m[1]
+      const pPath = /<parameter[^>]*name=["']path["'][^>]*>([\s\S]*?)<\/parameter>/i.exec(body)
+      const pContent = /<parameter[^>]*name=["']content["'][^>]*>([\s\S]*?)<\/parameter>/i.exec(body)
+      if (pPath && pContent) {
+        const fp = pPath[1].trim().replace(/^\/workspace\//, '').replace(/^\//, '')
+        const fc = pContent[1].trimEnd()
+        if (fp && fc.length > 0) xmlFiles.push({ name: fp, content: fc })
+      }
+    }
+    if (xmlFiles.length > 0) {
+      return { text: '', files: wrapInProjectFolder(xmlFiles, projectName || 'project'), folders: [] }
+    }
     return { text: '', files: [] }
   }
   // Guard: reject planning text / natural language responses without code
