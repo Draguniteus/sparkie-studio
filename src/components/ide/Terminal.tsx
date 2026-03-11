@@ -130,7 +130,7 @@ export function Terminal() {
   useEffect(() => {
     console.log('[Terminal] useEffect pendingRunCommand:', pendingRunCommand, 'connected:', connected, 'ws:', wsRef.current?.readyState)
     if (!pendingRunCommand) return
-    if (!connected || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+    if (!connected || !wsRef.current || wsRef.current.readyState !== 1) {
       console.log('[Terminal] BLOCKED — not connected or ws not open. connected:', connected, 'readyState:', wsRef.current?.readyState)
       return
     }
@@ -142,7 +142,7 @@ export function Terminal() {
     // Slight delay so the shell is fully settled
     setTimeout(() => {
       console.log('[Terminal] setTimeout fired, ws readyState:', wsRef.current?.readyState)
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
+      if (wsRef.current?.readyState === 1) {
         wsRef.current.send(JSON.stringify({ type: 'input', data: cmd + '\r' }))
         xtermRef.current?.write('\r\n\x1b[33m  [Sparkie]\x1b[0m Running: ' + cmd + '\r\n')
       } else {
@@ -181,19 +181,44 @@ export function Terminal() {
       sessionRef.current = sessionId
       setE2bMode(true)
 
-      // Connect WebSocket for PTY I/O
-      const ws = new WebSocket(wsUrl)
-      wsRef.current = ws
+      // Connect via EventSource (SSE) for PTY output + POST for input
+      // DO App Platform does not support WS upgrades — SSE+POST is the correct protocol.
+      const sseUrl = `/api/terminal?sessionId=${sessionId}`
+      const es = new EventSource(sseUrl)
 
-      ws.onopen = () => {
+      // Create a WebSocket-shaped shim so the rest of the code is unchanged
+      type WsShim = {
+        readyState: number
+        onopen: (() => void) | null
+        onclose: (() => void) | null
+        onerror: (() => void) | null
+        onmessage: ((e: { data: string }) => void) | null
+        send: (data: string) => void
+        close: () => void
+      }
+      const ws: WsShim = {
+        readyState: 0, // CONNECTING
+        onopen: null, onclose: null, onerror: null, onmessage: null,
+        send: (data: string) => {
+          const parsed = JSON.parse(data) as { type: string; data?: string; cols?: number; rows?: number }
+          fetch('/api/terminal', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: parsed.type === 'resize' ? 'resize' : 'input', sessionId, data: parsed.data, cols: parsed.cols, rows: parsed.rows }),
+          }).catch(() => {})
+        },
+        close: () => { es.close(); ws.readyState = 3 },
+      }
+      wsRef.current = ws as unknown as WebSocket
+
+      es.onopen = () => {
+        ws.readyState = 1 // OPEN
+        ws.readyState = 1
         setConnected(true)
         term.write('\x1b[32m  [E2B]\x1b[0m Shell ready\r\n\r\n')
         // Send terminal size
-        const dims = fitRef.current?.fit()
-        void dims
+        fitRef.current?.fit()
         // ── Race fix: fire any pending command that was already set before we connected ──
-        // The useEffect can't re-run synchronously after setConnected(true), so we also
-        // consume pendingRunCommand here to eliminate the connected=false race window.
         const pending = useAppStore.getState().pendingRunCommand
         console.log('[Terminal] ws.onopen — pendingRunCommand in store:', pending)
         if (pending) {
@@ -202,15 +227,24 @@ export function Terminal() {
           serverUrlDetectedRef.current = false
           setContainerStatus('installing')
           setTimeout(() => {
-            if (ws.readyState === WebSocket.OPEN) {
+            if (ws.readyState === 1) {
               ws.send(JSON.stringify({ type: 'input', data: pending + '\r' }))
               term.write('\r\n\x1b[33m  [Sparkie]\x1b[0m Running: ' + pending + '\r\n')
             }
           }, 300)
         }
       }
-      ws.onmessage = (e) => {
-        const raw = e.data as string
+      es.onmessage = (e) => {
+        let payload: { type: string; data: string } | null = null
+        try { payload = JSON.parse(e.data) } catch { return }
+        if (!payload) return
+        const raw = payload.data ?? ''
+        if (payload.type === 'ping') return
+        if (payload.type === 'connected') {
+          ws.readyState = 1
+          ws.onopen?.()
+          return
+        }
         term.write(raw)
         // ── Server URL detection ────────────────────────────────────────────
         // Detect Vite/Next/Express/Parcel/CRA server URLs in terminal output.
@@ -240,24 +274,26 @@ export function Terminal() {
           term.write('\r\n\x1b[31m  [Sparkie]\x1b[0m Build error detected — check above ↑\r\n')
         }
       }
-      ws.onclose = () => {
-        setConnected(false)
-        term.write('\r\n\x1b[33m  [E2B]\x1b[0m Session ended\r\n')
-      }
-      ws.onerror = () => {
-        term.write('\r\n\x1b[31m  [E2B]\x1b[0m WebSocket error\r\n')
+      es.onerror = () => {
+        if (es.readyState === EventSource.CLOSED) {
+          ws.readyState = 3
+          setConnected(false)
+          term.write('\r\n\x1b[33m  [E2B]\x1b[0m Session ended\r\n')
+        } else {
+          term.write('\r\n\x1b[31m  [E2B]\x1b[0m Connection error\r\n')
+        }
       }
 
       // Forward keystrokes to sandbox
       term.onData((data) => {
-        if (ws.readyState === WebSocket.OPEN) {
+        if (ws.readyState === 1) {
           ws.send(JSON.stringify({ type: 'input', data }))
         }
       })
 
       // Forward resize events
       term.onResize(({ cols, rows }) => {
-        if (ws.readyState === WebSocket.OPEN) {
+        if (ws.readyState === 1) {
           ws.send(JSON.stringify({ type: 'resize', cols, rows }))
         }
       })
