@@ -180,7 +180,7 @@ export function Terminal() {
     // CRITICAL: check xtermRef BEFORE consuming pendingRunCommand.
     // If xterm hasn't loaded yet (async CDN scripts still fetching), keep the
     // command in state â the loadXterm().then() post-load trigger will re-fire it.
-    const term = xtermRef.current
+    const term = xtermRef.current!
     if (!term) {
       console.log('[Terminal] lazy connect â xterm not ready yet, keeping command in state')
       return
