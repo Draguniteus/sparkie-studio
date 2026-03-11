@@ -5057,14 +5057,15 @@ async function handleBuildMode(
 
           // If structured tool_calls received — preferred path
           if (tcEntries.length > 0) {
-            // Pre-compute stable callId: M2.5 sends tc.id as '' in SSE deltas.
-            // Old code: assistant used call_${turn}_${i} but tool result used call_${turn} → mismatch → empty Turn 1.
-            const tcWithIds = tcEntries.map((tc, i) => ({ ...tc, callId: tc.id || `call_${turn}_${i}` }))
+            // Pre-compute stable callIds[] — same index as tcEntries.
+            // M2.5 sends tc.id='' in SSE deltas; spreading caused TS to lose callId type.
+            // Use parallel array to avoid type inference issues.
+            const callIds = tcEntries.map((tc, i) => tc.id || `call_${turn}_${i}`)
             const assistantTurn: { role: string; content: string | null; tool_calls: unknown[] } = {
               role: 'assistant',
               content: turnContent || null,
-              tool_calls: tcWithIds.map((tc) => ({
-                id: tc.callId,
+              tool_calls: tcEntries.map((tc, i) => ({
+                id: callIds[i],
                 type: 'function',
                 function: { name: tc.name, arguments: tc.arguments },
               })),
@@ -5093,7 +5094,7 @@ async function handleBuildMode(
                 fullBuildRaw += xml
                 agentMessages = [...agentMessages, {
                   role: 'tool',
-                  tool_call_id: tc.callId,
+                  tool_call_id: callIds[tcIdx],
                   name: 'write_file',
                   content: `File "${fPath}" written successfully.`,
                 }]
