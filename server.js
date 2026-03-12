@@ -115,9 +115,12 @@ app.prepare().then(() => {
     ws.on('message', (raw) => {
       let msg
       try { msg = JSON.parse(raw.toString()) } catch (_) { return }
+      console.log('[WS] message type:', msg && msg.type)
 
       if (msg.type === 'input' && typeof msg.data === 'string' && sess.ptyPid !== null) {
-        sess.sbx.pty.sendInput(sess.ptyPid, Buffer.from(msg.data, 'utf-8')).catch(() => {})
+        sess.sbx.pty.sendInput(sess.ptyPid, Buffer.from(msg.data, 'utf-8')).catch((e) => {
+          console.error('[WS] pty.sendInput error:', e)
+        })
       } else if (msg.type === 'resize' && sess.ptyPid !== null) {
         const cols = Math.max(1, parseInt(msg.cols, 10) || 80)
         const rows = Math.max(1, parseInt(msg.rows, 10) || 24)
@@ -125,12 +128,14 @@ app.prepare().then(() => {
       }
     })
 
-    ws.on('close', () => {
+    ws.on('close', (code, reason) => {
+      console.log('[WS] close event code:', code, 'reason:', reason?.toString())
       clearInterval(pingInterval)
       sess.clients.delete(ws)
     })
 
-    ws.on('error', () => {
+    ws.on('error', (err) => {
+      console.error('[WS] error event:', err.message)
       clearInterval(pingInterval)
       sess.clients.delete(ws)
     })
