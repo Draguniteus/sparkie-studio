@@ -288,26 +288,21 @@ export function Terminal() {
           ws.onopen?.()
           return
         }
-        term.write(raw)
-        // Server URL detection — accumulate chunks into rolling buffer
-        // PTY output is chunked; URLs like http://localhost:5173/ may arrive
-        // split across multiple SSE messages. We scan the last 300 chars.
-        if (!serverUrlDetectedRef.current) {
-          urlScanBufRef.current = (urlScanBufRef.current + raw).slice(-300)
-          const scan = urlScanBufRef.current
-          const urlMatch = scan.match(/https?:\/\/localhost:(\d{2,5})/) ??
-                           scan.match(/https?:\/\/127\.0\.0\.1:(\d{2,5})/)
-          if (urlMatch) {
-            const port = urlMatch[1]
-            const url = `http://localhost:${port}`
+        // 'server-url' — server detected Vite port, called sbx.getHost(port),
+        // broadcasts the public E2B proxy URL. Use it for the preview iframe.
+        if (payload.type === 'server-url') {
+          const url = raw.trim()
+          if (url && !serverUrlDetectedRef.current) {
             serverUrlDetectedRef.current = true
-            urlScanBufRef.current = ''
             setPreviewUrl(url)
             setContainerStatus('ready')
             setIDETab('preview')
             term.write('\r\n\x1b[32m  [Sparkie]\x1b[0m Preview ready \u2192 ' + url + '\r\n')
           }
+          return
         }
+
+        term.write(raw)
         if (raw.includes('ERROR') || raw.includes('error TS') || raw.includes('ENOENT')) {
           term.write('\r\n\x1b[31m  [Sparkie]\x1b[0m Build error detected \u2014 check above \u2191\r\n')
         }
