@@ -75,6 +75,12 @@ export async function POST(req: NextRequest) {
             return sbx.files.write(filePath, f.content)
           })
         )
+
+        // Always overwrite vite.config.ts with E2B-compatible settings.
+        // AI-generated configs typically lack host:'0.0.0.0' and allowedHosts:true,
+        // which causes Vite to reject E2B proxy requests (403/refused to connect).
+        const viteConfigContent = `import { defineConfig } from 'vite'\nimport react from '@vitejs/plugin-react'\n\nexport default defineConfig({\n  plugins: [react()],\n  server: {\n    host: '0.0.0.0',\n    port: 5173,\n    allowedHosts: true,\n    strictPort: true,\n  },\n})\n`
+        await sbx.files.write(`/home/user/${projectRoot}/vite.config.ts`, viteConfigContent)
       }
 
       const sess = {
@@ -159,6 +165,9 @@ export async function POST(req: NextRequest) {
           return sess.sbx.files.write(filePath, f.content)
         })
       )
+      // Re-apply E2B vite config override after sync too
+      const viteConfigContent2 = `import { defineConfig } from 'vite'\nimport react from '@vitejs/plugin-react'\n\nexport default defineConfig({\n  plugins: [react()],\n  server: {\n    host: '0.0.0.0',\n    port: 5173,\n    allowedHosts: true,\n    strictPort: true,\n  },\n})\n`
+      await sess.sbx.files.write(`/home/user/${projectRoot}/vite.config.ts`, viteConfigContent2)
     }
     return NextResponse.json({ ok: true, synced: files.length })
   }
