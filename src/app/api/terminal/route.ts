@@ -77,7 +77,7 @@ export async function POST(req: NextRequest) {
           const msg = encodeMessage('output', text)
           sess.clients.forEach(c => {
             if (c.readyState === 1 /* WebSocket.OPEN */) {
-              c.send(msg)
+              try { c.send(msg) } catch (_) {}
             }
           })
         },
