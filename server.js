@@ -10,9 +10,7 @@
  *   Both this file and src/app/api/terminal/route.ts use the same
  *   global.__terminalSessions Map (initialized by terminalSessions.ts).
  *   We access it via global after app.prepare() — by then, Next.js has
- *   loaded route.ts which initialises the global. We use a poll/wait
- *   loop to handle the rare case where the first request arrives before
- *   the global is populated.
+ *   loaded route.ts which initialises the global.
  *
  * Upgrade path:   /api/terminal-ws?sessionId=<id>
  * All other paths: delegated to Next.js as normal.
@@ -48,6 +46,27 @@ function getSessions() {
   return global.__terminalSessions || null
 }
 
+/**
+ * Self-ping keepalive — prevents DO App Platform from hibernating the
+ * instance after idle periods. Fires every 4 minutes. Without this,
+ * a 30-minute idle gap causes the Node event loop to freeze; subsequent
+ * WS upgrades complete at the TCP level but the proxy tears down the
+ * socket before any frames are exchanged (→ code 1006).
+ */
+function startKeepalive(serverPort) {
+  const INTERVAL_MS = 4 * 60 * 1000 // 4 minutes
+  setInterval(() => {
+    try {
+      const req = http.get(`http://localhost:${serverPort}/api/health`, (res) => {
+        res.resume() // drain the response
+      })
+      req.on('error', () => {}) // ignore errors silently
+      req.end()
+    } catch (_) {}
+  }, INTERVAL_MS)
+  console.log(`> Keepalive ping active (every ${INTERVAL_MS / 60000}m → /api/health)`)
+}
+
 app.prepare().then(() => {
   const server = http.createServer((req, res) => {
     handle(req, res, parse(req.url, true))
@@ -76,9 +95,6 @@ app.prepare().then(() => {
       return
     }
 
-    // Sessions global is populated by terminalSessions.ts when Next.js loads route.ts.
-    // In practice it's always ready by the time a WS connection arrives (after POST /api/terminal create),
-    // but we guard defensively.
     const sessions = getSessions()
     if (!sessions) {
       console.log('[WS] close: sessions global not ready')
@@ -152,5 +168,6 @@ app.prepare().then(() => {
   server.listen(port, () => {
     console.log(`> Sparkie Studio ready on http://localhost:${port}`)
     console.log(`> WebSocket terminal on ws://localhost:${port}/api/terminal-ws`)
+    startKeepalive(port)
   })
 })
