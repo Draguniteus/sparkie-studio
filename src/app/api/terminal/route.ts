@@ -40,6 +40,16 @@ export async function POST(req: NextRequest) {
       if (files.length > 0) {
         const firstNested = files.find(f => f.name.includes('/'))
         const projectRoot = firstNested ? firstNested.name.split('/')[0] : 'project'
+        // mkdir -p all parent dirs before writing — E2B requires dirs to exist
+        const dirs = new Set<string>()
+        files.forEach(f => {
+          const fullPath = f.name.startsWith(projectRoot + '/')
+            ? `/home/user/${f.name}`
+            : `/home/user/${projectRoot}/${f.name}`
+          const dir = fullPath.substring(0, fullPath.lastIndexOf('/'))
+          dirs.add(dir)
+        })
+        await sbx.commands.run(`mkdir -p ${[...dirs].join(' ')}`)
         await Promise.all(
           files.map(f => {
             const filePath = f.name.startsWith(projectRoot + '/')
@@ -125,6 +135,16 @@ export async function POST(req: NextRequest) {
     if (files.length > 0) {
       const firstNested = files.find(f => f.name.includes('/'))
       const projectRoot = firstNested ? firstNested.name.split('/')[0] : 'project'
+      // mkdir -p all parent dirs before writing — E2B requires dirs to exist
+      const syncDirs = new Set<string>()
+      files.forEach(f => {
+        const fullPath = f.name.startsWith(projectRoot + '/')
+          ? `/home/user/${f.name}`
+          : `/home/user/${projectRoot}/${f.name}`
+        const dir = fullPath.substring(0, fullPath.lastIndexOf('/'))
+        syncDirs.add(dir)
+      })
+      await sess.sbx.commands.run(`mkdir -p ${[...syncDirs].join(' ')}`)
       await Promise.all(
         files.map(f => {
           const filePath = f.name.startsWith(projectRoot + '/')
