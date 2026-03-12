@@ -53,22 +53,20 @@ app.prepare().then(() => {
     handle(req, res, parse(req.url, true))
   })
 
-  const wss = new WebSocketServer({ noServer: true })
+  // Attached mode: ws package handles the upgrade + all response headers internally.
+  // This is the DO App Platform-compatible pattern (matches the official DO WS sample).
+  // Path filtering happens inside the connection handler instead of in an upgrade handler.
+  const wss = new WebSocketServer({ server })
 
-  server.on('upgrade', (req, socket, head) => {
+  wss.on('connection', (ws, req) => {
     const { pathname, query } = parse(req.url, true)
 
+    // Only handle our WS path — close anything else cleanly
     if (pathname !== '/api/terminal-ws') {
-      socket.destroy()
+      ws.close(1008, 'Not found')
       return
     }
 
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      wss.emit('connection', ws, req, query)
-    })
-  })
-
-  wss.on('connection', (ws, _req, query) => {
     const sessionId = query && query.sessionId
     console.log('[WS] connection sessionId:', sessionId)
     if (!sessionId) {
@@ -102,8 +100,7 @@ app.prepare().then(() => {
     // Register client
     sess.clients.add(ws)
 
-    // Defer 'connected' send by one tick — DO's reverse proxy needs a tick
-    // to fully establish the backend tunnel before we can send frames.
+    // Send 'connected' after one tick
     setImmediate(() => {
       try { ws.send(encodeMessage('connected', 'Shell ready')) } catch (_) {}
     })

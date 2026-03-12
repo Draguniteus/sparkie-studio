@@ -1,4 +1,4 @@
-// deploy-trigger: 2026-03-06T00:00:00Z
+// deploy-trigger: 2026-03-12T21:40:00Z
 import { getToken } from 'next-auth/jwt';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
@@ -6,11 +6,12 @@ import type { NextRequest } from 'next/server';
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Always pass: auth endpoints, static, public assets, health
+  // Always pass: auth endpoints, static, public assets, health, WebSocket upgrade
   if (
     pathname.startsWith('/api/auth') ||
     pathname.startsWith('/api/health') ||
     pathname.startsWith('/api/migrate') ||
+    pathname.startsWith('/api/terminal-ws') ||
     pathname.startsWith('/auth') ||
     pathname.startsWith('/_next') ||
     pathname.startsWith('/favicon')
