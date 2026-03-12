@@ -51,7 +51,9 @@ export function Terminal() {
   const serverUrlDetectedRef = useRef(false)
   // Rolling output buffer for URL detection — PTY output is chunked, URLs
   // may arrive split across multiple SSE messages. Scan the last 300 chars.
-  const urlScanBufRef = useRef('')
+  // Pre-computed E2B public URL returned at session create time.
+  // Activated client-side when Vite prints its 'ready' line.
+  const eagerPreviewUrlRef = useRef<string | null>(null)
 
   // ââ Load xterm + init terminal ââââââââââââââââââââââââââââââââ
   useEffect(() => {
@@ -307,21 +309,20 @@ export function Terminal() {
           ws.onopen?.()
           return
         }
-        // 'server-url' — server detected Vite port, called sbx.getHost(port),
-        // broadcasts the public E2B proxy URL. Use it for the preview iframe.
-        if (payload.type === 'server-url') {
-          const url = raw.trim()
-          if (url && !serverUrlDetectedRef.current) {
+        // Client-side Vite ready detection using the pre-computed E2B public URL.
+        // eagerPreviewUrlRef is set at session create time from POST response.
+        // Vite always prints 'ready in' or 'Local:' when the dev server is up.
+        term.write(raw)
+        if (!serverUrlDetectedRef.current && eagerPreviewUrlRef.current) {
+          if (raw.includes('ready in') || raw.includes('Local:') || raw.includes('Network:')) {
             serverUrlDetectedRef.current = true
+            const url = eagerPreviewUrlRef.current
             setPreviewUrl(url)
             setContainerStatus('ready')
             setIDETab('preview')
             term.write('\r\n\x1b[32m  [Sparkie]\x1b[0m Preview ready \u2192 ' + url + '\r\n')
           }
-          return
         }
-
-        term.write(raw)
         if (raw.includes('ERROR') || raw.includes('error TS') || raw.includes('ENOENT')) {
           term.write('\r\n\x1b[31m  [Sparkie]\x1b[0m Build error detected \u2014 check above \u2191\r\n')
         }
@@ -353,10 +354,11 @@ export function Terminal() {
           setContainerStatus('error')
           return
         }
-        const data = await res.json() as { sessionId: string; wsUrl: string }
-        console.log('[Terminal] E2B session created:', data.sessionId)
+        const data = await res.json() as { sessionId: string; wsUrl: string; previewUrl?: string | null }
+        console.log('[Terminal] E2B session created:', data.sessionId, 'previewUrl:', data.previewUrl)
         sessionId = data.sessionId
         sessionRef.current = data.sessionId
+        if (data.previewUrl) eagerPreviewUrlRef.current = data.previewUrl
         setE2bMode(true)
         wsRef.current = ws as unknown as WebSocket
         es = createES()
