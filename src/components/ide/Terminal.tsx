@@ -4,26 +4,14 @@ import { useEffect, useRef, useState } from 'react'
 import type { Terminal as XTermType } from '@xterm/xterm'
 import type { FitAddon as FitAddonType } from '@xterm/addon-fit'
 import { useAppStore } from '@/store/appStore'
+import type { FileNode } from '@/store/appStore'
 import { Terminal as TermIcon, Play, Trash2, ExternalLink } from 'lucide-react'
-
-// xterm loaded via npm imports (@xterm/xterm + @xterm/addon-fit)
-
-interface XTermInstance {
-  open(el: HTMLElement): void
-  write(data: string): void
-  clear(): void
-  dispose(): void
-  onData(cb: (data: string) => void): void
-  onResize(cb: (size: { cols: number; rows: number }) => void): void
-  loadAddon(addon: unknown): void
-}
 
 async function loadXterm(): Promise<{ Terminal: typeof XTermType; FitAddon: typeof FitAddonType }> {
   const [{ Terminal }, { FitAddon }] = await Promise.all([
     import('@xterm/xterm'),
     import('@xterm/addon-fit'),
   ])
-  // Inject xterm CSS once
   if (!document.getElementById('xterm-css')) {
     const link = document.createElement('link')
     link.id = 'xterm-css'
@@ -38,6 +26,27 @@ async function loadXterm(): Promise<{ Terminal: typeof XTermType; FitAddon: type
 function buildWsUrl(path: string): string {
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${proto}//${window.location.host}${path}`
+}
+
+type E2BFile = { name: string; content: string }
+
+function flattenWithPaths(nodes: FileNode[], prefix = ''): E2BFile[] {
+  return nodes.flatMap(n => {
+    const p = prefix ? `${prefix}/${n.name}` : n.name
+    if (n.type === 'folder') return flattenWithPaths(n.children ?? [], p)
+    if (n.type === 'archive') return []
+    return n.content ? [{ name: p, content: n.content }] : []
+  })
+}
+
+interface XTermInstance {
+  open(el: HTMLElement): void
+  write(data: string): void
+  clear(): void
+  dispose(): void
+  onData(cb: (data: string) => void): void
+  onResize(cb: (size: { cols: number; rows: number }) => void): void
+  loadAddon(addon: unknown): void
 }
 
 export function Terminal() {
@@ -57,7 +66,7 @@ export function Terminal() {
   const serverUrlDetectedRef = useRef(false)
   const eagerPreviewUrlRef = useRef<string | null>(null)
 
-  // ── Load xterm + init terminal ────────────────────────────────────────────
+  // ── Load xterm + init terminal ──────────────────────────────────────────
   useEffect(() => {
     if (!termRef.current) return
 
@@ -103,10 +112,8 @@ export function Terminal() {
       xtermRef.current = term
       fitRef.current = fitAddon
 
-      // Post-load pending command trigger
       const alreadyPending = useAppStore.getState().pendingRunCommand
       if (alreadyPending) {
-        console.log('[Terminal] xterm just loaded with pending command – re-triggering:', alreadyPending)
         useAppStore.getState().setPendingRunCommand(null)
         setTimeout(() => useAppStore.getState().setPendingRunCommand(alreadyPending), 0)
       }
@@ -125,7 +132,7 @@ export function Terminal() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ── Sync legacy terminalOutput → xterm (for WebContainer builds) ──────────
+  // ── Sync legacy terminalOutput → xterm (for WebContainer builds) ────────
   useEffect(() => {
     if (!xtermRef.current || e2bMode) return
     const newOutput = terminalOutput.slice(prevOutputRef.current.length)
@@ -135,22 +142,7 @@ export function Terminal() {
     }
   }, [terminalOutput, e2bMode])
 
-  // ── flattenWithPaths: flatten FileNode tree preserving full relative paths ──
-  type E2BFile = { name: string; content: string }
-  function flattenWithPaths(
-    nodes: import('@/store/appStore').FileNode[],
-    prefix = ''
-  ): E2BFile[] {
-    return nodes.flatMap(n => {
-      const p = prefix ? `${prefix}/${n.name}` : n.name
-      if (n.type === 'folder') return flattenWithPaths(n.children ?? [], p)
-      if (n.type === 'archive') return []
-      return n.content ? [{ name: p, content: n.content }] : []
-    })
-  }
-
   // ── Open a WebSocket to the terminal server ──────────────────────────────
-  // Returns the WebSocket; caller fires pendingRunCommand in onopen.
   function openWebSocket(sessionId: string, cmd: string, term: XTermInstance) {
     const url = buildWsUrl(`/api/terminal-ws?sessionId=${sessionId}`)
     console.log('[Terminal] Opening WebSocket:', url)
@@ -167,12 +159,14 @@ export function Terminal() {
       setE2bMode(true)
       term.write('\x1b[32m  [E2B]\x1b[0m Shell ready\r\n\r\n')
       fitRef.current?.fit()
-      setTimeout(() => {
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({ type: 'input', data: cmd + '\r' }))
-          term.write('\r\n\x1b[33m  [Sparkie]\x1b[0m Running: ' + cmd + '\r\n')
-        }
-      }, 300)
+      if (cmd) {
+        setTimeout(() => {
+          if (wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({ type: 'input', data: cmd + '\r' }))
+            term.write('\r\n\x1b[33m  [Sparkie]\x1b[0m Running: ' + cmd + '\r\n')
+          }
+        }, 300)
+      }
     }
 
     ws.onmessage = (e) => {
@@ -180,13 +174,8 @@ export function Terminal() {
       try { payload = JSON.parse(e.data) } catch (_) { return }
       if (!payload) return
       const raw = payload.data ?? ''
-      if (payload.type === 'ping') return
-      if (payload.type === 'connected') {
-        // Server sends 'connected' immediately on WS open — already handled by onopen
-        return
-      }
+      if (payload.type === 'ping' || payload.type === 'connected') return
       term.write(raw)
-      // Client-side Vite ready detection
       if (!serverUrlDetectedRef.current && eagerPreviewUrlRef.current) {
         if (raw.includes('ready in') || raw.includes('Local:') || raw.includes('Network:')) {
           serverUrlDetectedRef.current = true
@@ -206,7 +195,6 @@ export function Terminal() {
       console.log('[Terminal] WebSocket closed:', e.code, e.reason)
       setConnected(false)
       if (e.code !== 1000 && e.code !== 1001 && wsRetries < maxWsRetries) {
-        // Unexpected close — retry
         wsRetries++
         term.write('\r\n\x1b[33m  [E2B]\x1b[0m Reconnecting (' + wsRetries + '/' + maxWsRetries + ')...\r\n')
         setTimeout(() => openWebSocket(sessionId, cmd, term), 600 * wsRetries)
@@ -218,17 +206,14 @@ export function Terminal() {
 
     ws.onerror = (err) => {
       console.error('[Terminal] WebSocket error:', err)
-      // onclose will fire after onerror — retry logic lives there
     }
 
-    // Wire xterm keyboard input → WebSocket
     term.onData((data: string) => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({ type: 'input', data }))
       }
     })
 
-    // Wire xterm resize → WebSocket
     term.onResize(({ cols, rows }: { cols: number; rows: number }) => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({ type: 'resize', cols, rows }))
@@ -238,15 +223,12 @@ export function Terminal() {
     return ws
   }
 
-  // ── Auto-run: execute pendingRunCommand via lazy E2B connect ──────────────
+  // ── Auto-run: execute pendingRunCommand via lazy E2B connect ────────────
   useEffect(() => {
-    console.log('[Terminal] useEffect pendingRunCommand:', pendingRunCommand, 'connected:', connected, 'ws readyState:', wsRef.current?.readyState)
     if (!pendingRunCommand) return
 
-    // If already connected, fire directly
     if (connected && wsRef.current?.readyState === WebSocket.OPEN) {
       const cmd = pendingRunCommand
-      console.log('[Terminal] already connected – FIRING command:', cmd)
       setPendingRunCommand(null)
       serverUrlDetectedRef.current = false
       setContainerStatus('installing')
@@ -260,13 +242,9 @@ export function Terminal() {
     }
 
     const term = xtermRef.current
-    if (!term) {
-      console.log('[Terminal] lazy connect – xterm not ready yet, keeping command in state')
-      return
-    }
+    if (!term) return
 
     const cmd = pendingRunCommand
-    console.log('[Terminal] lazy E2B connect for command:', cmd)
     setPendingRunCommand(null)
     serverUrlDetectedRef.current = false
     setContainerStatus('installing')
@@ -275,7 +253,6 @@ export function Terminal() {
       c => c.id === useAppStore.getState().currentChatId
     )
     const projectFiles = currentChat ? flattenWithPaths(currentChat.files) : []
-    console.log('[Terminal] lazy connect – passing', projectFiles.length, 'files to E2B')
 
     term.write('\r\n\x1b[2m  Connecting to E2B sandbox…\x1b[0m\r\n')
 
@@ -296,30 +273,25 @@ export function Terminal() {
         clearTimeout(fetchTimeout)
         if (!res.ok) {
           const errText = await res.text().catch(() => 'unknown')
-          console.error('[Terminal] E2B create failed:', res.status, errText)
           term.write('\r\n\x1b[31m  [Terminal] E2B create failed (' + res.status + '): ' + errText.slice(0, 80) + '\x1b[0m\r\n')
           setContainerStatus('error')
           return
         }
         const data = await res.json() as { sessionId: string; wsUrl: string; previewUrl?: string | null }
-        console.log('[Terminal] E2B session created:', data.sessionId, 'previewUrl:', data.previewUrl)
         sessionRef.current = data.sessionId
         if (data.previewUrl) eagerPreviewUrlRef.current = data.previewUrl
-
-        // Open the WebSocket connection — no more EventSource
         openWebSocket(data.sessionId, cmd, term)
       })
       .catch(err => {
         clearTimeout(fetchTimeout)
         if ((err as Error).name === 'AbortError') return
-        console.error('[Terminal] lazy connect fetch failed:', err)
         term.write('\r\n\x1b[31m  [Terminal] E2B connect failed: ' + String(err) + '\x1b[0m\r\n')
         setContainerStatus('error')
       })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingRunCommand, connected, setPendingRunCommand, setContainerStatus, setPreviewUrl, setIDETab])
+  }, [pendingRunCommand, connected])
 
-  // ── ResizeObserver ────────────────────────────────────────────────────────
+  // ── ResizeObserver ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!termRef.current || !fitRef.current) return
     const ro = new ResizeObserver(() => fitRef.current?.fit())
@@ -359,7 +331,6 @@ export function Terminal() {
         const data = await res.json() as { sessionId: string; wsUrl: string; previewUrl?: string | null }
         sessionRef.current = data.sessionId
         if (data.previewUrl) eagerPreviewUrlRef.current = data.previewUrl
-        // Reconnect opens a new WS — fire empty cmd to just get shell
         openWebSocket(data.sessionId, '', term)
       })
       .catch(() => term.write('\r\n\x1b[31m  [E2B] Reconnect error\x1b[0m\r\n'))
@@ -381,7 +352,6 @@ export function Terminal() {
 
   return (
     <div className="h-full flex flex-col bg-[#0a0a0a]">
-      {/* Toolbar */}
       <div className="flex items-center gap-2 px-3 py-1.5 bg-hive-700 border-b border-hive-border shrink-0">
         <TermIcon size={11} className="text-text-muted" />
         <span className="text-[11px] text-text-muted font-medium">Terminal</span>
@@ -417,8 +387,6 @@ export function Terminal() {
           </button>
         </div>
       </div>
-
-      {/* xterm.js mount point */}
       <div ref={termRef} className="flex-1 overflow-hidden p-1" style={{ minHeight: 0 }} />
     </div>
   )
