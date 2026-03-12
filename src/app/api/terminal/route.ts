@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { Sandbox } from '@e2b/code-interpreter'
 import { getServerSession } from 'next-auth/next'
 import { authOptions } from '@/lib/auth'
-import { sessions, encodeMessage, type WsClient } from '@/lib/terminalSessions'
+import { sessions, encodeMessage } from '@/lib/terminalSessions'
+import type { WsClient } from '@/lib/terminalSessions'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300
@@ -47,8 +48,6 @@ export async function POST(req: NextRequest) {
             return sbx.files.write(filePath, f.content)
           })
         )
-
-        // Always overwrite vite.config.ts with E2B-compatible settings
         const viteConfigContent = `import { defineConfig } from 'vite'\nimport react from '@vitejs/plugin-react'\n\nexport default defineConfig({\n  plugins: [react()],\n  server: {\n    host: '0.0.0.0',\n    port: 5173,\n    allowedHosts: true,\n    strictPort: true,\n  },\n})\n`
         await sbx.files.write(`/home/user/${projectRoot}/vite.config.ts`, viteConfigContent)
       }
@@ -67,7 +66,7 @@ export async function POST(req: NextRequest) {
           const text = Buffer.from(data).toString('utf-8')
           const msg = encodeMessage('output', text)
           sess.clients.forEach(c => {
-            if (c.readyState === 1 /* OPEN */) {
+            if (c.readyState === 1 /* WebSocket.OPEN */) {
               c.send(msg)
             }
           })
@@ -79,12 +78,11 @@ export async function POST(req: NextRequest) {
 
       sess.ptyPid = pty.pid
 
-      // Eagerly resolve the public E2B proxy URL for port 5173
       let previewUrl: string | null = null
       try {
         previewUrl = `https://${sbx.getHost(5173)}`
       } catch (_) {
-        // getHost unavailable — Terminal will fall back to client-side detection
+        // getHost unavailable
       }
 
       return NextResponse.json({
@@ -119,7 +117,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true })
   }
 
-  // Sync files into an existing session sandbox
+  // Sync files into existing session sandbox
   if (body.action === 'sync-files' && body.sessionId) {
     const sess = sessions.get(body.sessionId)
     if (!sess) return NextResponse.json({ error: 'Session not found' }, { status: 404 })
@@ -135,8 +133,8 @@ export async function POST(req: NextRequest) {
           return sess.sbx.files.write(filePath, f.content)
         })
       )
-      const viteConfigContent2 = `import { defineConfig } from 'vite'\nimport react from '@vitejs/plugin-react'\n\nexport default defineConfig({\n  plugins: [react()],\n  server: {\n    host: '0.0.0.0',\n    port: 5173,\n    allowedHosts: true,\n    strictPort: true,\n  },\n})\n`
-      await sess.sbx.files.write(`/home/user/${projectRoot}/vite.config.ts`, viteConfigContent2)
+      const viteConfig = `import { defineConfig } from 'vite'\nimport react from '@vitejs/plugin-react'\n\nexport default defineConfig({\n  plugins: [react()],\n  server: {\n    host: '0.0.0.0',\n    port: 5173,\n    allowedHosts: true,\n    strictPort: true,\n  },\n})\n`
+      await sess.sbx.files.write(`/home/user/${projectRoot}/vite.config.ts`, viteConfig)
     }
     return NextResponse.json({ ok: true, synced: files.length })
   }
