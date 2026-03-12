@@ -49,6 +49,9 @@ export function Terminal() {
   const [e2bMode, setE2bMode]    = useState(false)
   const prevOutputRef = useRef('')
   const serverUrlDetectedRef = useRef(false)
+  // Rolling output buffer for URL detection — PTY output is chunked, URLs
+  // may arrive split across multiple SSE messages. Scan the last 300 chars.
+  const urlScanBufRef = useRef('')
 
   // ââ Load xterm + init terminal ââââââââââââââââââââââââââââââââ
   useEffect(() => {
@@ -286,15 +289,19 @@ export function Terminal() {
           return
         }
         term.write(raw)
-        // Server URL detection
+        // Server URL detection — accumulate chunks into rolling buffer
+        // PTY output is chunked; URLs like http://localhost:5173/ may arrive
+        // split across multiple SSE messages. We scan the last 300 chars.
         if (!serverUrlDetectedRef.current) {
-          const urlMatch = raw.match(/https?:\/\/[^\s]+:[0-9]+/) ??
-                           raw.match(/Local:\s+(https?:\/\/[^\s]+)/) ??
-                           raw.match(/localhost:[0-9]+/)
+          urlScanBufRef.current = (urlScanBufRef.current + raw).slice(-300)
+          const scan = urlScanBufRef.current
+          const urlMatch = scan.match(/https?:\/\/localhost:(\d{2,5})/) ??
+                           scan.match(/https?:\/\/127\.0\.0\.1:(\d{2,5})/)
           if (urlMatch) {
-            let url = urlMatch[1] ?? urlMatch[0]
-            if (!url.startsWith('http')) url = 'http://' + url
+            const port = urlMatch[1]
+            const url = `http://localhost:${port}`
             serverUrlDetectedRef.current = true
+            urlScanBufRef.current = ''
             setPreviewUrl(url)
             setContainerStatus('ready')
             setIDETab('preview')
