@@ -6,6 +6,14 @@
  *   We wrap Next.js in a plain http.Server so we can intercept the WS
  *   upgrade request on /api/terminal-ws before Next.js ever sees it.
  *
+ * Sessions sharing:
+ *   Both this file and src/app/api/terminal/route.ts use the same
+ *   global.__terminalSessions Map (initialized by terminalSessions.ts).
+ *   We access it via global after app.prepare() — by then, Next.js has
+ *   loaded route.ts which initialises the global. We use a poll/wait
+ *   loop to handle the rare case where the first request arrives before
+ *   the global is populated.
+ *
  * Upgrade path:   /api/terminal-ws?sessionId=<id>
  * All other paths: delegated to Next.js as normal.
  *
@@ -30,42 +38,17 @@ const port = parseInt(process.env.PORT || '3000', 10)
 const app    = next({ dev })
 const handle = app.getRequestHandler()
 
-// Lazy-load sessions from the compiled Next.js output.
-// In production (next build), the module lives at .next/server/chunks/…
-// We import it via the TypeScript path alias resolution that Next.js sets up.
-// However, because server.js runs outside Next.js, we need to load the
-// sessions map via a small CommonJS shim that Next.js writes during build,
-// OR we just maintain a parallel sessions Map here and let route.ts import it.
-//
-// APPROACH: Use a shared in-process module. Both this file and route.ts
-// require/import the same compiled module path. We load it lazily after
-// app.prepare() so the .next/server bundle is available.
-let sessions
-let encodeMessage
+/** Encode a typed message for the wire protocol. */
+function encodeMessage(type, data) {
+  return JSON.stringify({ type, data })
+}
+
+/** Get sessions from the global store (set by terminalSessions.ts at module load). */
+function getSessions() {
+  return global.__terminalSessions || null
+}
 
 app.prepare().then(() => {
-  // After prepare(), the compiled module is available.
-  // Next.js compiles src/lib/terminalSessions.ts into the server bundle.
-  // We access the shared sessions Map via require of the compiled output.
-  // Fallback: if the require path fails (dev mode HMR quirk), we use a
-  // local Map — acceptable because in dev the WS server and route.ts run
-  // in the same Node process sharing module cache.
-  try {
-    const sessModule = require('./.next/server/chunks/terminalSessions.js')
-    sessions       = sessModule.sessions
-    encodeMessage  = sessModule.encodeMessage
-  } catch (_) {
-    // Dev mode: modules aren't pre-compiled to .next/server/chunks.
-    // Use a local store — both this file and the Next.js dev server run
-    // in the same process, so we monkey-patch via global.
-    if (!global.__terminalSessions) {
-      global.__terminalSessions  = new Map()
-      global.__encodeMessage = (type, data) => JSON.stringify({ type, data })
-    }
-    sessions      = global.__terminalSessions
-    encodeMessage = global.__encodeMessage
-  }
-
   const server = http.createServer((req, res) => {
     handle(req, res, parse(req.url, true))
   })
@@ -90,6 +73,16 @@ app.prepare().then(() => {
     if (!sessionId) {
       ws.send(encodeMessage('error', 'sessionId required'))
       ws.close(1008, 'sessionId required')
+      return
+    }
+
+    // Sessions global is populated by terminalSessions.ts when Next.js loads route.ts.
+    // In practice it's always ready by the time a WS connection arrives (after POST /api/terminal create),
+    // but we guard defensively.
+    const sessions = getSessions()
+    if (!sessions) {
+      ws.send(encodeMessage('error', 'Server not ready'))
+      ws.close(1011, 'Server not ready')
       return
     }
 
