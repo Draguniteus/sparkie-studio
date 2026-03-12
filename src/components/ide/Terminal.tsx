@@ -241,7 +241,26 @@ export function Terminal() {
       const _es = new EventSource(`/api/terminal?sessionId=${sessionId}`)
       console.log('[Terminal] EventSource opening for sessionId=', sessionId)
 
+      // Self-healing: if onopen doesn't fire within 20s, force a retry.
+      // Handles proxy buffering, cold-start delays, or network hiccups.
+      const openTimeoutId = setTimeout(() => {
+        if (_es.readyState !== EventSource.OPEN) {
+          console.warn('[Terminal] EventSource open timeout â forcing retry')
+          _es.close()
+          if (esRetries < maxEsRetries) {
+            esRetries++
+            setTimeout(() => { es = createES() }, 500)
+          } else {
+            ws.readyState = 3
+            setConnected(false)
+            setContainerStatus('error')
+            term.write('\r\n\x1b[31m  [E2B]\x1b[0m Connection timed out\r\n')
+          }
+        }
+      }, 20000)
+
       _es.onopen = () => {
+        clearTimeout(openTimeoutId)
         console.log('[Terminal] EventSource onopen â shell ready, firing cmd:', cmd)
         esRetries = 0
         ws.readyState = 1
