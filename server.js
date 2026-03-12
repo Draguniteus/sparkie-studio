@@ -70,8 +70,10 @@ app.prepare().then(() => {
 
   wss.on('connection', (ws, _req, query) => {
     const sessionId = query && query.sessionId
+    console.log('[WS] connection sessionId:', sessionId)
     if (!sessionId) {
-      ws.send(encodeMessage('error', 'sessionId required'))
+      console.log('[WS] close: no sessionId')
+      try { ws.send(encodeMessage('error', 'sessionId required')) } catch (_) {}
       ws.close(1008, 'sessionId required')
       return
     }
@@ -81,30 +83,34 @@ app.prepare().then(() => {
     // but we guard defensively.
     const sessions = getSessions()
     if (!sessions) {
-      ws.send(encodeMessage('error', 'Server not ready'))
+      console.log('[WS] close: sessions global not ready')
+      try { ws.send(encodeMessage('error', 'Server not ready')) } catch (_) {}
       ws.close(1011, 'Server not ready')
       return
     }
 
     const sess = sessions.get(sessionId)
     if (!sess) {
-      ws.send(encodeMessage('error', 'Session not found'))
+      console.log('[WS] close: session not found. map size:', sessions.size)
+      try { ws.send(encodeMessage('error', 'Session not found')) } catch (_) {}
       ws.close(1008, 'Session not found')
       return
     }
+
+    console.log('[WS] session ok, ptyPid:', sess.ptyPid)
 
     // Register client
     sess.clients.add(ws)
 
     // Send connected event immediately
-    ws.send(encodeMessage('connected', 'Shell ready'))
+    try { ws.send(encodeMessage('connected', 'Shell ready')) } catch (_) {}
 
-    // Keep-alive ping every 15s
+    // Keep-alive ping every 5s (DO proxy may close idle WS faster than 15s)
     const pingInterval = setInterval(() => {
       if (ws.readyState === ws.OPEN) {
-        ws.send(encodeMessage('ping', ''))
+        try { ws.send(encodeMessage('ping', '')) } catch (_) {}
       }
-    }, 15000)
+    }, 5000)
 
     ws.on('message', (raw) => {
       let msg
