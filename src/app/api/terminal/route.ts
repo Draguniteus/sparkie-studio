@@ -2,35 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { Sandbox } from '@e2b/code-interpreter'
 import { getServerSession } from 'next-auth/next'
 import { authOptions } from '@/lib/auth'
+import { sessions, encodeMessage } from '@/lib/terminalSessions'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300
 export const dynamic = 'force-dynamic'
 
-// Session store — sandbox + PTY pid + SSE clients per session
-const sessions = new Map<string, {
-  sbx: Sandbox
-  ptyPid: number | null
-  clients: Set<{ send: (data: string) => void; close: () => void }>
-  createdAt: number
-}>()
-
-// Clean up sessions older than 30 minutes
-setInterval(() => {
-  const cutoff = Date.now() - 30 * 60 * 1000
-  for (const [id, sess] of sessions.entries()) {
-    if (sess.createdAt < cutoff) {
-      sess.sbx.kill().catch(() => {})
-      sessions.delete(id)
-    }
-  }
-}, 5 * 60 * 1000)
-
-function sseEvent(type: string, data: string) {
-  return `data: ${JSON.stringify({ type, data })}\n\n`
-}
-
-// POST /api/terminal — create session, send input, or resize
+// POST /api/terminal — create session, send input, resize, or sync-files
 export async function POST(req: NextRequest) {
   const apiKey = process.env.E2B_API_KEY
   if (!apiKey) {
@@ -57,19 +35,12 @@ export async function POST(req: NextRequest) {
     try {
       const sbx = await Sandbox.create({ apiKey, timeoutMs: 30 * 60 * 1000 })
 
-      // Write project files into the sandbox before the shell starts.
-      // Files arrive as { name, content } pairs; they are written under
-      // /home/user/<projectRoot>/ where projectRoot is derived from the
-      // first path that contains a '/' separator (e.g. "sparkie" from
-      // "sparkie/src/App.tsx"), or "project" if all files are at the root.
       const files = (body as typeof body & { files?: { name: string; content: string }[] }).files ?? []
       if (files.length > 0) {
-        // Derive project root from first file that has a path separator
         const firstNested = files.find(f => f.name.includes('/'))
         const projectRoot = firstNested ? firstNested.name.split('/')[0] : 'project'
         await Promise.all(
           files.map(f => {
-            // If file.name already starts with projectRoot, use as-is; otherwise prefix it
             const filePath = f.name.startsWith(projectRoot + '/')
               ? `/home/user/${f.name}`
               : `/home/user/${projectRoot}/${f.name}`
@@ -77,9 +48,7 @@ export async function POST(req: NextRequest) {
           })
         )
 
-        // Always overwrite vite.config.ts with E2B-compatible settings.
-        // AI-generated configs typically lack host:'0.0.0.0' and allowedHosts:true,
-        // which causes Vite to reject E2B proxy requests (403/refused to connect).
+        // Always overwrite vite.config.ts with E2B-compatible settings
         const viteConfigContent = `import { defineConfig } from 'vite'\nimport react from '@vitejs/plugin-react'\n\nexport default defineConfig({\n  plugins: [react()],\n  server: {\n    host: '0.0.0.0',\n    port: 5173,\n    allowedHosts: true,\n    strictPort: true,\n  },\n})\n`
         await sbx.files.write(`/home/user/${projectRoot}/vite.config.ts`, viteConfigContent)
       }
@@ -87,18 +56,21 @@ export async function POST(req: NextRequest) {
       const sess = {
         sbx,
         ptyPid: null as number | null,
-        clients: new Set<{ send: (data: string) => void; close: () => void }>(),
+        clients: new Set<import('ws').WebSocket>(),
         createdAt: Date.now(),
       }
       sessions.set(sessionId, sess)
 
-      // Create PTY — output broadcasts to all subscribed SSE clients.
-      // Preview URL is resolved eagerly above at session creation time (sbx.getHost(5173)).
-      // Terminal.tsx watches PTY output for Vite "ready" signal and activates it client-side.
+      // Create PTY — output broadcasts to all connected WS clients
       const pty = await sbx.pty.create({
         onData: (data: Uint8Array) => {
           const text = Buffer.from(data).toString('utf-8')
-          sess.clients.forEach(c => c.send(sseEvent('output', text)))
+          const msg = encodeMessage('output', text)
+          sess.clients.forEach(c => {
+            if (c.readyState === 1 /* OPEN */) {
+              c.send(msg)
+            }
+          })
         },
         cols: 80,
         rows: 24,
@@ -107,10 +79,7 @@ export async function POST(req: NextRequest) {
 
       sess.ptyPid = pty.pid
 
-      // Eagerly resolve the public E2B proxy URL for port 5173 (Vite default).
-      // This is done at session creation time — before the command runs — so
-      // Terminal.tsx has the URL ready the moment Vite prints "ready in Xms".
-      // Avoids server-side ANSI parsing, race conditions, and getHost exceptions.
+      // Eagerly resolve the public E2B proxy URL for port 5173
       let previewUrl: string | null = null
       try {
         previewUrl = `https://${sbx.getHost(5173)}`
@@ -120,7 +89,7 @@ export async function POST(req: NextRequest) {
 
       return NextResponse.json({
         sessionId,
-        wsUrl: `/api/terminal?sessionId=${sessionId}`,
+        wsUrl: `/api/terminal-ws?sessionId=${sessionId}`,
         previewUrl,
       })
     } catch (err) {
@@ -150,7 +119,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true })
   }
 
-  // Sync files into an existing session sandbox (called just before firing run command)
+  // Sync files into an existing session sandbox
   if (body.action === 'sync-files' && body.sessionId) {
     const sess = sessions.get(body.sessionId)
     if (!sess) return NextResponse.json({ error: 'Session not found' }, { status: 404 })
@@ -166,7 +135,6 @@ export async function POST(req: NextRequest) {
           return sess.sbx.files.write(filePath, f.content)
         })
       )
-      // Re-apply E2B vite config override after sync too
       const viteConfigContent2 = `import { defineConfig } from 'vite'\nimport react from '@vitejs/plugin-react'\n\nexport default defineConfig({\n  plugins: [react()],\n  server: {\n    host: '0.0.0.0',\n    port: 5173,\n    allowedHosts: true,\n    strictPort: true,\n  },\n})\n`
       await sess.sbx.files.write(`/home/user/${projectRoot}/vite.config.ts`, viteConfigContent2)
     }
@@ -174,68 +142,4 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json({ error: 'Invalid action' }, { status: 400 })
-}
-
-// GET /api/terminal — SSE stream; client subscribes to PTY output broadcast
-// No shell spawned here — PTY already running from POST create.
-// This is pure pub/sub: add client to broadcast set, stream PTY output.
-export async function GET(req: NextRequest) {
-  const apiKey = process.env.E2B_API_KEY
-  if (!apiKey) return NextResponse.json({ error: 'E2B_API_KEY not set' }, { status: 500 })
-
-  // Auth check must happen BEFORE the ReadableStream is created.
-  // If getServerSession is called inside the stream's start() callback,
-  // Next.js may buffer the response waiting for async resolution — preventing
-  // the client's EventSource from ever receiving the opening 'connected' event.
-  const authSession = await getServerSession(authOptions)
-  if (!authSession?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
-  const url = new URL(req.url)
-  const sessionId = url.searchParams.get('sessionId')
-
-  if (!sessionId) return NextResponse.json({ error: 'sessionId required' }, { status: 400 })
-
-  const sess = sessions.get(sessionId)
-  if (!sess) return NextResponse.json({ error: 'Session not found' }, { status: 404 })
-
-  const encoder = new TextEncoder()
-
-  // Pre-encode the first event so it's immediately enqueued when the stream starts.
-  // This ensures the browser's EventSource receives data right away and fires onopen.
-  const connectedChunk = encoder.encode(sseEvent('connected', 'Shell ready'))
-
-  const stream = new ReadableStream({
-    start(controller) {
-      const send = (data: string) => {
-        try { controller.enqueue(encoder.encode(data)) } catch {}
-      }
-      const close = () => { try { controller.close() } catch {} }
-
-      const client = { send, close }
-      sess.clients.add(client)
-
-      // Flush the connected event immediately — PTY is already running.
-      // Enqueuing synchronously in start() guarantees no buffering delay.
-      controller.enqueue(connectedChunk)
-
-      // Keep-alive ping every 15s to prevent proxy/CDN from closing idle SSE streams
-      const pingInterval = setInterval(() => send(sseEvent('ping', '')), 15000)
-
-      req.signal.addEventListener('abort', () => {
-        clearInterval(pingInterval)
-        sess.clients.delete(client)
-        close()
-      })
-    }
-  })
-
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache, no-transform',
-      'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no',
-      'Transfer-Encoding': 'chunked',
-    }
-  })
 }
