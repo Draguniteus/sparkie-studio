@@ -4990,7 +4990,7 @@ async function handleBuildMode(
               model: buildModel,
               messages: agentMessages,
               stream: true,
-              max_tokens: 8000,
+              max_tokens: 16000,
               temperature: 0.1,
               tools: [WRITE_FILE_TOOL],
               tool_choice: 'auto',
@@ -5116,7 +5116,7 @@ async function handleBuildMode(
                   name: 'write_file',
                   content: `File "${fPath}" written successfully.`,
                 }]
-              } catch (_) { console.error(`[BUILD] Turn ${turn}: failed to parse tool args`) }
+              } catch (parseErr) { console.error(`[BUILD] Turn ${turn}: failed to parse tool args. len=${tc.arguments?.length} err=${parseErr}. First 200: ${tc.arguments?.slice(0,200)}`) }
             }
 
             // Continue loop (write next file)
