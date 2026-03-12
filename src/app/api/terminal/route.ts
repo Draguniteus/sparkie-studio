@@ -5,6 +5,7 @@ import { authOptions } from '@/lib/auth'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300
+export const dynamic = 'force-dynamic'
 
 // Session store — sandbox + PTY pid + SSE clients per session
 const sessions = new Map<string, {
@@ -182,6 +183,10 @@ export async function GET(req: NextRequest) {
   const apiKey = process.env.E2B_API_KEY
   if (!apiKey) return NextResponse.json({ error: 'E2B_API_KEY not set' }, { status: 500 })
 
+  // Auth check must happen BEFORE the ReadableStream is created.
+  // If getServerSession is called inside the stream's start() callback,
+  // Next.js may buffer the response waiting for async resolution — preventing
+  // the client's EventSource from ever receiving the opening 'connected' event.
   const authSession = await getServerSession(authOptions)
   if (!authSession?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -195,6 +200,10 @@ export async function GET(req: NextRequest) {
 
   const encoder = new TextEncoder()
 
+  // Pre-encode the first event so it's immediately enqueued when the stream starts.
+  // This ensures the browser's EventSource receives data right away and fires onopen.
+  const connectedChunk = encoder.encode(sseEvent('connected', 'Shell ready'))
+
   const stream = new ReadableStream({
     start(controller) {
       const send = (data: string) => {
@@ -205,10 +214,11 @@ export async function GET(req: NextRequest) {
       const client = { send, close }
       sess.clients.add(client)
 
-      // Immediately signal connected — PTY is already running
-      send(sseEvent('connected', 'Shell ready'))
+      // Flush the connected event immediately — PTY is already running.
+      // Enqueuing synchronously in start() guarantees no buffering delay.
+      controller.enqueue(connectedChunk)
 
-      // Keep-alive ping every 15s
+      // Keep-alive ping every 15s to prevent proxy/CDN from closing idle SSE streams
       const pingInterval = setInterval(() => send(sseEvent('ping', '')), 15000)
 
       req.signal.addEventListener('abort', () => {
@@ -222,9 +232,10 @@ export async function GET(req: NextRequest) {
   return new Response(stream, {
     headers: {
       'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
+      'Cache-Control': 'no-cache, no-transform',
       'Connection': 'keep-alive',
       'X-Accel-Buffering': 'no',
+      'Transfer-Encoding': 'chunked',
     }
   })
 }
