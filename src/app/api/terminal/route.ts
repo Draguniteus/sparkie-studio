@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { Sandbox } from '@e2b/code-interpreter'
 import { getServerSession } from 'next-auth/next'
 import { authOptions } from '@/lib/auth'
-import { sessions, encodeMessage } from '@/lib/terminalSessions'
+import { sessions, encodeMessage, type WsClient } from '@/lib/terminalSessions'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300
@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
       const sess = {
         sbx,
         ptyPid: null as number | null,
-        clients: new Set<import('ws').WebSocket>(),
+        clients: new Set<WsClient>(),
         createdAt: Date.now(),
       }
       sessions.set(sessionId, sess)
