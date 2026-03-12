@@ -154,7 +154,7 @@ export function Terminal() {
 
     ws.onopen = () => {
       console.log('[Terminal] WebSocket onopen – shell ready, firing cmd:', cmd)
-      wsRetries = 0
+      // Do NOT reset wsRetries here — it's passed in via retryCount and must accumulate
       setConnected(true)
       setE2bMode(true)
       term.write('\x1b[32m  [E2B]\x1b[0m Shell ready\r\n\r\n')
