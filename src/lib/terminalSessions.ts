@@ -3,16 +3,21 @@
  * Shared session store — imported by both the POST route handler
  * (api/terminal/route.ts) and the custom WS server (server.js).
  *
- * IMPORTANT: We use a global variable as the backing store so that both
- * server.js (the custom HTTP/WS server) and the Next.js route handler
- * (compiled into .next/server) operate on the exact same Map, even though
- * they are loaded as separate modules in the same Node.js process.
+ * NOTE: We intentionally avoid importing from 'ws' here.
+ * The ws package is a CommonJS dependency used only in server.js (runtime).
+ * Importing ws types in TypeScript causes tsc to try to resolve ws's
+ * type declarations, which can fail in the Next.js build context.
+ * We use `unknown` + a runtime duck-type cast instead.
  */
 
 import type { Sandbox } from '@e2b/code-interpreter'
-import type { WebSocket as WsClient } from 'ws'
 
-export type { WsClient }
+// Intentionally typed as unknown — at runtime this will be a ws.WebSocket instance.
+// server.js (CommonJS) adds/removes clients directly; route.ts casts appropriately.
+export type WsClient = {
+  readyState: number
+  send(data: string): void
+}
 
 export interface TerminalSession {
   sbx: Sandbox
@@ -43,7 +48,7 @@ export const sessions: Map<string, TerminalSession> = global.__terminalSessions
 export const encodeMessage: (type: string, data: string) => string =
   global.__terminalEncodeMessage
 
-// Reap sessions older than 30 minutes (only register the interval once)
+// Reap sessions older than 30 minutes (only register once)
 if (!(global as Record<string, unknown>).__terminalReaperStarted) {
   (global as Record<string, unknown>).__terminalReaperStarted = true
   setInterval(() => {
