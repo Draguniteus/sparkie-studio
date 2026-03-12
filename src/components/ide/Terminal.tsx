@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { Terminal as XTermType } from '@xterm/xterm'
 import type { FitAddon as FitAddonType } from '@xterm/addon-fit'
 import { useAppStore } from '@/store/appStore'
-import { Terminal as TermIcon, Play, Square, Trash2, ExternalLink } from 'lucide-react'
+import { Terminal as TermIcon, Play, Trash2, ExternalLink } from 'lucide-react'
 
 // xterm loaded via npm imports (@xterm/xterm + @xterm/addon-fit)
 
@@ -34,6 +34,12 @@ async function loadXterm(): Promise<{ Terminal: typeof XTermType; FitAddon: type
   return { Terminal, FitAddon }
 }
 
+/** Build a WebSocket URL from the current page origin. */
+function buildWsUrl(path: string): string {
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${proto}//${window.location.host}${path}`
+}
+
 export function Terminal() {
   const {
     containerStatus, previewUrl, terminalOutput,
@@ -49,13 +55,9 @@ export function Terminal() {
   const [e2bMode, setE2bMode]    = useState(false)
   const prevOutputRef = useRef('')
   const serverUrlDetectedRef = useRef(false)
-  // Rolling output buffer for URL detection — PTY output is chunked, URLs
-  // may arrive split across multiple SSE messages. Scan the last 300 chars.
-  // Pre-computed E2B public URL returned at session create time.
-  // Activated client-side when Vite prints its 'ready' line.
   const eagerPreviewUrlRef = useRef<string | null>(null)
 
-  // ââ Load xterm + init terminal ââââââââââââââââââââââââââââââââ
+  // ── Load xterm + init terminal ────────────────────────────────────────────
   useEffect(() => {
     if (!termRef.current) return
 
@@ -101,22 +103,16 @@ export function Terminal() {
       xtermRef.current = term
       fitRef.current = fitAddon
 
-      // ââ Post-load pending command trigger âââââââââââââââââââââ
-      // If pendingRunCommand was set BEFORE xterm loaded (race: build finished
-      // while CDN scripts were still fetching), the useEffect returned early
-      // because term was null. Now that xterm is ready, re-trigger it.
+      // Post-load pending command trigger
       const alreadyPending = useAppStore.getState().pendingRunCommand
       if (alreadyPending) {
-        console.log('[Terminal] xterm just loaded with pending command â re-triggering:', alreadyPending)
+        console.log('[Terminal] xterm just loaded with pending command – re-triggering:', alreadyPending)
         useAppStore.getState().setPendingRunCommand(null)
         setTimeout(() => useAppStore.getState().setPendingRunCommand(alreadyPending), 0)
       }
 
-      term.write('\r\n\x1b[33m  â Sparkie Terminal\x1b[0m\r\n')
-      term.write('\x1b[2m  Ready â E2B sandbox will connect when a build completes.\x1b[0m\r\n\r\n')
-      // connectE2B is called lazily from the pendingRunCommand useEffect,
-      // not here at mount. Connecting at mount causes the SSE stream to
-      // time out (DO 30s idle limit) before the build finishes.
+      term.write('\r\n\x1b[33m  ⚡ Sparkie Terminal\x1b[0m\r\n')
+      term.write('\x1b[2m  Ready – E2B sandbox will connect when a build completes.\x1b[0m\r\n\r\n')
     }).catch(err => {
       console.error('xterm load failed:', err)
     })
@@ -129,7 +125,7 @@ export function Terminal() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ââ Sync legacy terminalOutput â xterm (for WebContainer builds) âââââââââ
+  // ── Sync legacy terminalOutput → xterm (for WebContainer builds) ──────────
   useEffect(() => {
     if (!xtermRef.current || e2bMode) return
     const newOutput = terminalOutput.slice(prevOutputRef.current.length)
@@ -139,10 +135,7 @@ export function Terminal() {
     }
   }, [terminalOutput, e2bMode])
 
-  // ââ flattenWithPaths: flatten FileNode tree preserving full relative paths ââ
-  // flattenFileTree (from appStore) returns leaf nodes but loses folder path context.
-  // This version walks the tree with a running prefix so E2B gets the correct paths
-  // (e.g. sparkie/src/App.tsx instead of just App.tsx).
+  // ── flattenWithPaths: flatten FileNode tree preserving full relative paths ──
   type E2BFile = { name: string; content: string }
   function flattenWithPaths(
     nodes: import('@/store/appStore').FileNode[],
@@ -156,24 +149,109 @@ export function Terminal() {
     })
   }
 
-  // ââ Auto-run: execute pendingRunCommand via lazy E2B connect ââââââââââââââââ
-  // Called by build pipeline after files are written and package.json has scripts.dev.
-  // Strategy: connect E2B lazily here (not at mount) so the SSE stream is opened
-  // only when there is a command to run â avoids DO's 30s idle timeout killing
-  // the connection during the 2-3 minute build window.
+  // ── Open a WebSocket to the terminal server ──────────────────────────────
+  // Returns the WebSocket; caller fires pendingRunCommand in onopen.
+  function openWebSocket(sessionId: string, cmd: string, term: XTermInstance) {
+    const url = buildWsUrl(`/api/terminal-ws?sessionId=${sessionId}`)
+    console.log('[Terminal] Opening WebSocket:', url)
+    const ws = new WebSocket(url)
+    wsRef.current = ws
+
+    let wsRetries = 0
+    const maxWsRetries = 5
+
+    ws.onopen = () => {
+      console.log('[Terminal] WebSocket onopen – shell ready, firing cmd:', cmd)
+      wsRetries = 0
+      setConnected(true)
+      setE2bMode(true)
+      term.write('\x1b[32m  [E2B]\x1b[0m Shell ready\r\n\r\n')
+      fitRef.current?.fit()
+      setTimeout(() => {
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({ type: 'input', data: cmd + '\r' }))
+          term.write('\r\n\x1b[33m  [Sparkie]\x1b[0m Running: ' + cmd + '\r\n')
+        }
+      }, 300)
+    }
+
+    ws.onmessage = (e) => {
+      let payload: { type: string; data: string } | null = null
+      try { payload = JSON.parse(e.data) } catch (_) { return }
+      if (!payload) return
+      const raw = payload.data ?? ''
+      if (payload.type === 'ping') return
+      if (payload.type === 'connected') {
+        // Server sends 'connected' immediately on WS open — already handled by onopen
+        return
+      }
+      term.write(raw)
+      // Client-side Vite ready detection
+      if (!serverUrlDetectedRef.current && eagerPreviewUrlRef.current) {
+        if (raw.includes('ready in') || raw.includes('Local:') || raw.includes('Network:')) {
+          serverUrlDetectedRef.current = true
+          const url = eagerPreviewUrlRef.current
+          setPreviewUrl(url)
+          setContainerStatus('ready')
+          setIDETab('preview')
+          term.write('\r\n\x1b[32m  [Sparkie]\x1b[0m Preview ready → ' + url + '\r\n')
+        }
+      }
+      if (raw.includes('ERROR') || raw.includes('error TS') || raw.includes('ENOENT')) {
+        term.write('\r\n\x1b[31m  [Sparkie]\x1b[0m Build error detected — check above ↑\r\n')
+      }
+    }
+
+    ws.onclose = (e) => {
+      console.log('[Terminal] WebSocket closed:', e.code, e.reason)
+      setConnected(false)
+      if (e.code !== 1000 && e.code !== 1001 && wsRetries < maxWsRetries) {
+        // Unexpected close — retry
+        wsRetries++
+        term.write('\r\n\x1b[33m  [E2B]\x1b[0m Reconnecting (' + wsRetries + '/' + maxWsRetries + ')...\r\n')
+        setTimeout(() => openWebSocket(sessionId, cmd, term), 600 * wsRetries)
+      } else if (wsRetries >= maxWsRetries) {
+        setContainerStatus('error')
+        term.write('\r\n\x1b[31m  [E2B]\x1b[0m Connection failed after ' + maxWsRetries + ' retries\r\n')
+      }
+    }
+
+    ws.onerror = (err) => {
+      console.error('[Terminal] WebSocket error:', err)
+      // onclose will fire after onerror — retry logic lives there
+    }
+
+    // Wire xterm keyboard input → WebSocket
+    term.onData((data: string) => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'input', data }))
+      }
+    })
+
+    // Wire xterm resize → WebSocket
+    term.onResize(({ cols, rows }: { cols: number; rows: number }) => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'resize', cols, rows }))
+      }
+    })
+
+    return ws
+  }
+
+  // ── Auto-run: execute pendingRunCommand via lazy E2B connect ──────────────
   useEffect(() => {
-    console.log('[Terminal] useEffect pendingRunCommand:', pendingRunCommand, 'connected:', connected, 'ws:', wsRef.current?.readyState)
+    console.log('[Terminal] useEffect pendingRunCommand:', pendingRunCommand, 'connected:', connected, 'ws readyState:', wsRef.current?.readyState)
     if (!pendingRunCommand) return
 
-    // If already connected (user manually opened terminal during build), fire directly.
-    if (connected && wsRef.current?.readyState === 1) {
+    // If already connected, fire directly
+    if (connected && wsRef.current?.readyState === WebSocket.OPEN) {
       const cmd = pendingRunCommand
-      console.log('[Terminal] already connected â FIRING command:', cmd)
+      console.log('[Terminal] already connected – FIRING command:', cmd)
       setPendingRunCommand(null)
       serverUrlDetectedRef.current = false
       setContainerStatus('installing')
       setTimeout(() => {
-        if (wsRef.current?.readyState === 1) {
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
           wsRef.current.send(JSON.stringify({ type: 'input', data: cmd + '\r' }))
           xtermRef.current?.write('\r\n\x1b[33m  [Sparkie]\x1b[0m Running: ' + cmd + '\r\n')
         }
@@ -181,13 +259,9 @@ export function Terminal() {
       return
     }
 
-    // Not connected yet â lazy connect now with project files, then fire command.
-    // CRITICAL: check xtermRef BEFORE consuming pendingRunCommand.
-    // If xterm hasn't loaded yet (async CDN scripts still fetching), keep the
-    // command in state â the loadXterm().then() post-load trigger will re-fire it.
-    const term = xtermRef.current!
+    const term = xtermRef.current
     if (!term) {
-      console.log('[Terminal] lazy connect â xterm not ready yet, keeping command in state')
+      console.log('[Terminal] lazy connect – xterm not ready yet, keeping command in state')
       return
     }
 
@@ -197,141 +271,14 @@ export function Terminal() {
     serverUrlDetectedRef.current = false
     setContainerStatus('installing')
 
-    // Collect project files now (build is done, files ARE in the store).
     const currentChat = useAppStore.getState().chats.find(
       c => c.id === useAppStore.getState().currentChatId
     )
-    const projectFiles = currentChat
-      ? flattenWithPaths(currentChat.files)
-      : []
-    console.log('[Terminal] lazy connect â passing', projectFiles.length, 'files to E2B')
+    const projectFiles = currentChat ? flattenWithPaths(currentChat.files) : []
+    console.log('[Terminal] lazy connect – passing', projectFiles.length, 'files to E2B')
 
-    term.write('\r\n\x1b[2m  Connecting to E2B sandbox\u2026\x1b[0m\r\n')
+    term.write('\r\n\x1b[2m  Connecting to E2B sandbox…\x1b[0m\r\n')
 
-    // These must be declared before ws shim (ws.close() references es)
-    let sessionId = ''
-    let esRetries = 0
-    const maxEsRetries = 5
-    let es!: EventSource
-
-    // ws shim must be declared before createES (createES closes over it)
-    type WsShim = {
-      readyState: number
-      onopen: (() => void) | null
-      onclose: (() => void) | null
-      onerror: (() => void) | null
-      onmessage: ((e: { data: string }) => void) | null
-      send: (data: string) => void
-      close: () => void
-    }
-    const ws: WsShim = {
-      readyState: 0,
-      onopen: null, onclose: null, onerror: null, onmessage: null,
-      send: (data: string) => {
-        const parsed = JSON.parse(data) as { type: string; data?: string; cols?: number; rows?: number }
-        fetch('/api/terminal', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: parsed.type === 'input' ? 'input' : 'resize', sessionId, ...parsed }),
-        }).catch(() => {})
-      },
-      close: () => { es.close(); ws.readyState = 3 },
-    }
-
-    // EventSource factory with retry â handles 404 if session isn't registered yet
-    function createES(): EventSource {
-      const _es = new EventSource(`/api/terminal?sessionId=${sessionId}`)
-      console.log('[Terminal] EventSource opening for sessionId=', sessionId)
-
-      // Self-healing: if onopen doesn't fire within 20s, force a retry.
-      // Handles proxy buffering, cold-start delays, or network hiccups.
-      const openTimeoutId = setTimeout(() => {
-        if (_es.readyState !== EventSource.OPEN) {
-          console.warn('[Terminal] EventSource open timeout â forcing retry')
-          _es.close()
-          if (esRetries < maxEsRetries) {
-            esRetries++
-            setTimeout(() => { es = createES() }, 500)
-          } else {
-            ws.readyState = 3
-            setConnected(false)
-            setContainerStatus('error')
-            term.write('\r\n\x1b[31m  [E2B]\x1b[0m Connection timed out\r\n')
-          }
-        }
-      }, 20000)
-
-      _es.onopen = () => {
-        clearTimeout(openTimeoutId)
-        console.log('[Terminal] EventSource onopen â shell ready, firing cmd:', cmd)
-        esRetries = 0
-        ws.readyState = 1
-        // Store the ws SHIM in wsRef (not the raw EventSource).
-        // wsRef.current.send() must route through ws.send() — EventSource has no .send().
-        wsRef.current = ws as unknown as WebSocket
-        setConnected(true)
-        term.write('\x1b[32m  [E2B]\x1b[0m Shell ready\r\n\r\n')
-        fitRef.current?.fit()
-        setTimeout(() => {
-          if (wsRef.current?.readyState === 1) {
-            wsRef.current.send(JSON.stringify({ type: 'input', data: cmd + '\r' }))
-            term.write('\r\n\x1b[33m  [Sparkie]\x1b[0m Running: ' + cmd + '\r\n')
-          }
-        }, 300)
-      }
-
-      _es.onerror = () => {
-        console.error('[Terminal] EventSource error, readyState:', _es.readyState, 'retries:', esRetries)
-        if (_es.readyState === EventSource.CLOSED && esRetries < maxEsRetries) {
-          esRetries++
-          _es.close()
-          console.log('[Terminal] Retrying EventSource... attempt', esRetries)
-          term.write('\r\n\x1b[33m  [E2B]\x1b[0m Retrying connection (' + esRetries + '/' + maxEsRetries + ')...\r\n')
-          setTimeout(() => { es = createES() }, 600)
-        } else if (_es.readyState === EventSource.CLOSED) {
-          ws.readyState = 3
-          setConnected(false)
-          setContainerStatus('error')
-          term.write('\r\n\x1b[31m  [E2B]\x1b[0m Connection failed after ' + maxEsRetries + ' retries\r\n')
-        } else {
-          term.write('\r\n\x1b[31m  [E2B]\x1b[0m Connection error (readyState=' + _es.readyState + ')\r\n')
-        }
-      }
-
-      _es.onmessage = (e) => {
-        let payload: { type: string; data: string } | null = null
-        try { payload = JSON.parse(e.data) } catch (_) { return }
-        if (!payload) return
-        const raw = payload.data ?? ''
-        if (payload.type === 'ping') return
-        if (payload.type === 'connected') {
-          ws.readyState = 1
-          ws.onopen?.()
-          return
-        }
-        // Client-side Vite ready detection using the pre-computed E2B public URL.
-        // eagerPreviewUrlRef is set at session create time from POST response.
-        // Vite always prints 'ready in' or 'Local:' when the dev server is up.
-        term.write(raw)
-        if (!serverUrlDetectedRef.current && eagerPreviewUrlRef.current) {
-          if (raw.includes('ready in') || raw.includes('Local:') || raw.includes('Network:')) {
-            serverUrlDetectedRef.current = true
-            const url = eagerPreviewUrlRef.current
-            setPreviewUrl(url)
-            setContainerStatus('ready')
-            setIDETab('preview')
-            term.write('\r\n\x1b[32m  [Sparkie]\x1b[0m Preview ready \u2192 ' + url + '\r\n')
-          }
-        }
-        if (raw.includes('ERROR') || raw.includes('error TS') || raw.includes('ENOENT')) {
-          term.write('\r\n\x1b[31m  [Sparkie]\x1b[0m Build error detected \u2014 check above \u2191\r\n')
-        }
-      }
-
-      return _es
-    }
-
-    // Kick off E2B create with 60s timeout
     const abortCtrl = new AbortController()
     const fetchTimeout = setTimeout(() => {
       abortCtrl.abort()
@@ -356,23 +303,23 @@ export function Terminal() {
         }
         const data = await res.json() as { sessionId: string; wsUrl: string; previewUrl?: string | null }
         console.log('[Terminal] E2B session created:', data.sessionId, 'previewUrl:', data.previewUrl)
-        sessionId = data.sessionId
         sessionRef.current = data.sessionId
         if (data.previewUrl) eagerPreviewUrlRef.current = data.previewUrl
-        setE2bMode(true)
-        wsRef.current = ws as unknown as WebSocket
-        es = createES()
+
+        // Open the WebSocket connection — no more EventSource
+        openWebSocket(data.sessionId, cmd, term)
       })
       .catch(err => {
         clearTimeout(fetchTimeout)
-        if ((err as Error).name === 'AbortError') return  // already handled
+        if ((err as Error).name === 'AbortError') return
         console.error('[Terminal] lazy connect fetch failed:', err)
         term.write('\r\n\x1b[31m  [Terminal] E2B connect failed: ' + String(err) + '\x1b[0m\r\n')
         setContainerStatus('error')
       })
-  }, [pendingRunCommand, connected, setPendingRunCommand, setContainerStatus, setE2bMode, setConnected, setPreviewUrl, setIDETab])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingRunCommand, connected, setPendingRunCommand, setContainerStatus, setPreviewUrl, setIDETab])
 
-  // ââ ResizeObserver âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // ── ResizeObserver ────────────────────────────────────────────────────────
   useEffect(() => {
     if (!termRef.current || !fitRef.current) return
     const ro = new ResizeObserver(() => fitRef.current?.fit())
@@ -386,20 +333,22 @@ export function Terminal() {
   }
 
   function reconnect() {
-    wsRef.current?.close()
+    wsRef.current?.close(1000, 'manual reconnect')
     setConnected(false)
     setE2bMode(false)
     sessionRef.current = ''
-    const term = xtermRef.current!
+    eagerPreviewUrlRef.current = null
+    serverUrlDetectedRef.current = false
+    const term = xtermRef.current
     if (!term) return
     term.clear()
-    term.write('\r\n\x1b[33m  Reconnecting\u2026\x1b[0m\r\n')
+    term.write('\r\n\x1b[33m  Reconnecting…\x1b[0m\r\n')
+
     const currentChat = useAppStore.getState().chats.find(
       c => c.id === useAppStore.getState().currentChatId
     )
-    const projectFiles = currentChat
-      ? flattenWithPaths(currentChat.files)
-      : []
+    const projectFiles = currentChat ? flattenWithPaths(currentChat.files) : []
+
     fetch('/api/terminal', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -407,31 +356,11 @@ export function Terminal() {
     })
       .then(async res => {
         if (!res.ok) { term.write('\r\n\x1b[31m  [E2B] Reconnect failed\x1b[0m\r\n'); return }
-        const { sessionId } = await res.json() as { sessionId: string; wsUrl: string }
-        sessionRef.current = sessionId
-        setE2bMode(true)
-        const es = new EventSource(`/api/terminal?sessionId=${sessionId}`)
-        type WsShim = { readyState: number; onopen: (() => void) | null; onclose: (() => void) | null; onerror: (() => void) | null; onmessage: ((e: { data: string }) => void) | null; send: (d: string) => void; close: () => void }
-        const ws: WsShim = {
-          readyState: 0, onopen: null, onclose: null, onerror: null, onmessage: null,
-          send: (data: string) => {
-            const p = JSON.parse(data) as { type: string; data?: string; cols?: number; rows?: number }
-            fetch('/api/terminal', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ action: p.type === 'input' ? 'input' : 'resize', sessionId, ...p }) }).catch(() => {})
-          },
-          close: () => { es.close(); ws.readyState = 3 },
-        }
-        wsRef.current = ws as unknown as WebSocket
-        es.onopen = () => { ws.readyState = 1; setConnected(true); fitRef.current?.fit(); term.write('\x1b[32m  [E2B]\x1b[0m Shell ready\r\n\r\n') }
-        es.onerror = () => { if (es.readyState === EventSource.CLOSED) { ws.readyState = 3; setConnected(false); term.write('\r\n\x1b[33m  [E2B]\x1b[0m Session ended\r\n') } }
-        es.onmessage = (e) => {
-          let payload: { type: string; data: string } | null = null
-          try { payload = JSON.parse(e.data) } catch (_) { return }
-          if (!payload) return
-          if (payload.type === 'ping') return
-          if (payload.type === 'connected') { ws.readyState = 1; ws.onopen?.(); return }
-          term.write(payload.data ?? '')
-        }
+        const data = await res.json() as { sessionId: string; wsUrl: string; previewUrl?: string | null }
+        sessionRef.current = data.sessionId
+        if (data.previewUrl) eagerPreviewUrlRef.current = data.previewUrl
+        // Reconnect opens a new WS — fire empty cmd to just get shell
+        openWebSocket(data.sessionId, '', term)
       })
       .catch(() => term.write('\r\n\x1b[31m  [E2B] Reconnect error\x1b[0m\r\n'))
   }
