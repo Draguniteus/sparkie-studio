@@ -7,18 +7,12 @@
  * server.js (the custom HTTP/WS server) and the Next.js route handler
  * (compiled into .next/server) operate on the exact same Map, even though
  * they are loaded as separate modules in the same Node.js process.
- *
- * Using a module-level Map would NOT work: Next.js compiles route.ts into
- * its own module scope (with hashed chunk names), so `import { sessions }`
- * from server.js and from route.ts would resolve to two different Maps.
- * A process-level global is the only reliable way to share state between
- * the custom server and the Next.js runtime in the same process.
  */
 
 import type { Sandbox } from '@e2b/code-interpreter'
-import type WsType from 'ws'
+import type { WebSocket as WsClient } from 'ws'
 
-export type WsClient = WsType
+export type { WsClient }
 
 export interface TerminalSession {
   sbx: Sandbox
