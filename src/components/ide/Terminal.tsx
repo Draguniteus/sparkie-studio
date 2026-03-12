@@ -143,13 +143,13 @@ export function Terminal() {
   }, [terminalOutput, e2bMode])
 
   // ── Open a WebSocket to the terminal server ──────────────────────────────
-  function openWebSocket(sessionId: string, cmd: string, term: XTermInstance) {
+  function openWebSocket(sessionId: string, cmd: string, term: XTermInstance, retryCount = 0) {
     const url = buildWsUrl(`/api/terminal-ws?sessionId=${sessionId}`)
     console.log('[Terminal] Opening WebSocket:', url)
     const ws = new WebSocket(url)
     wsRef.current = ws
 
-    let wsRetries = 0
+    let wsRetries = retryCount
     const maxWsRetries = 5
 
     ws.onopen = () => {
@@ -197,7 +197,7 @@ export function Terminal() {
       if (e.code !== 1000 && e.code !== 1001 && wsRetries < maxWsRetries) {
         wsRetries++
         term.write('\r\n\x1b[33m  [E2B]\x1b[0m Reconnecting (' + wsRetries + '/' + maxWsRetries + ')...\r\n')
-        setTimeout(() => openWebSocket(sessionId, cmd, term), 600 * wsRetries)
+        setTimeout(() => openWebSocket(sessionId, cmd, term, wsRetries), 600 * wsRetries)
       } else if (wsRetries >= maxWsRetries) {
         setContainerStatus('error')
         term.write('\r\n\x1b[31m  [E2B]\x1b[0m Connection failed after ' + maxWsRetries + ' retries\r\n')
