@@ -102,15 +102,26 @@ app.prepare().then(() => {
     // Register client
     sess.clients.add(ws)
 
-    // Send connected event immediately
-    try { ws.send(encodeMessage('connected', 'Shell ready')) } catch (_) {}
+    // Defer 'connected' send by one tick — DO's reverse proxy needs a tick
+    // to fully establish the backend tunnel before we can send frames.
+    setImmediate(() => {
+      try { ws.send(encodeMessage('connected', 'Shell ready')) } catch (_) {}
+    })
 
-    // Keep-alive ping every 5s (DO proxy may close idle WS faster than 15s)
-    const pingInterval = setInterval(() => {
-      if (ws.readyState === ws.OPEN) {
-        try { ws.send(encodeMessage('ping', '')) } catch (_) {}
-      }
-    }, 5000)
+    // Keep-alive ping — start at 1s to survive DO proxy idle detection during npm install
+    let pingCount = 0
+    let pingInterval
+    function schedulePing() {
+      const delay = pingCount < 30 ? 1000 : 5000
+      pingInterval = setTimeout(() => {
+        if (ws.readyState === ws.OPEN) {
+          try { ws.send(encodeMessage('ping', '')) } catch (_) {}
+          pingCount++
+          schedulePing()
+        }
+      }, delay)
+    }
+    schedulePing()
 
     ws.on('message', (raw) => {
       let msg
@@ -130,13 +141,13 @@ app.prepare().then(() => {
 
     ws.on('close', (code, reason) => {
       console.log('[WS] close event code:', code, 'reason:', reason?.toString())
-      clearInterval(pingInterval)
+      clearTimeout(pingInterval)
       sess.clients.delete(ws)
     })
 
     ws.on('error', (err) => {
       console.error('[WS] error event:', err.message)
-      clearInterval(pingInterval)
+      clearTimeout(pingInterval)
       sess.clients.delete(ws)
     })
   })
