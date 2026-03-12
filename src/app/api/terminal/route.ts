@@ -86,10 +86,40 @@ export async function POST(req: NextRequest) {
       sessions.set(sessionId, sess)
 
       // Create PTY — output broadcasts to all subscribed SSE clients
+      // Rolling buffer for server URL detection — PTY output is chunked,
+      // the URL may arrive split across multiple onData calls.
+      let urlScanBuf = ''
+      let serverUrlBroadcast = false
+
       const pty = await sbx.pty.create({
         onData: (data: Uint8Array) => {
           const text = Buffer.from(data).toString('utf-8')
           sess.clients.forEach(c => c.send(sseEvent('output', text)))
+
+          // Detect when Vite (or any dev server) prints its local URL.
+          // Use sbx.getHost(port) to get the public E2B proxy URL.
+          if (!serverUrlBroadcast) {
+            urlScanBuf = (urlScanBuf + text).slice(-400)
+            const portMatch = urlScanBuf.match(/localhost:([0-9]{2,5})/)
+                           ?? urlScanBuf.match(/127\.0\.0\.1:([0-9]{2,5})/)
+            if (portMatch) {
+              const port = parseInt(portMatch[1], 10)
+              serverUrlBroadcast = true
+              urlScanBuf = ''
+              try {
+                const publicHost = sbx.getHost(port)
+                const publicUrl = `https://${publicHost}`
+                sess.clients.forEach(c => c.send(sseEvent('server-url', publicUrl)))
+              } catch (e) {
+                // getHost failed — fall back to a best-guess URL format
+                const sandboxId = (sbx as unknown as { sandboxId?: string }).sandboxId ?? ''
+                if (sandboxId) {
+                  const publicUrl = `https://${port}-${sandboxId}.e2b.app`
+                  sess.clients.forEach(c => c.send(sseEvent('server-url', publicUrl)))
+                }
+              }
+            }
+          }
         },
         cols: 80,
         rows: 24,
