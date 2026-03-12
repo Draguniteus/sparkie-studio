@@ -4990,10 +4990,10 @@ async function handleBuildMode(
               model: buildModel,
               messages: agentMessages,
               stream: true,
-              max_tokens: 6000,
+              max_tokens: 8000,
               temperature: 0.1,
               tools: [WRITE_FILE_TOOL],
-              tool_choice: 'required',
+              tool_choice: 'auto',
             }),
           })
 
@@ -5127,6 +5127,12 @@ async function handleBuildMode(
               break
             }
             continue
+          }
+
+          // Guard: empty response from model (no tool call, no content) = model is done
+          if (turnContent.length === 0 && tcEntries.length === 0) {
+            console.log(`[BUILD] Turn ${turn}: empty response — treating as stop`)
+            break
           }
 
           // Fallback: XML text-mode content — extract path from XML to build tool result
