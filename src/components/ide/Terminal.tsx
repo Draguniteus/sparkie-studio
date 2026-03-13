@@ -301,7 +301,7 @@ export function Terminal() {
     fetch('/api/terminal', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'create', files: projectFiles, cmd }),
+      body: JSON.stringify({ action: 'create', files: projectFiles, cmd: cmd }),
       signal: abort.signal,
     })
       .then(async res => {
@@ -359,7 +359,7 @@ export function Terminal() {
     fetch('/api/terminal', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'create', files: projectFiles, cmd }),
+      body: JSON.stringify({ action: 'create', files: projectFiles }),
     })
       .then(async res => {
         if (!res.ok) { term.write('\r\n\x1b[31m  [E2B] Reconnect failed\x1b[0m\r\n'); return }
