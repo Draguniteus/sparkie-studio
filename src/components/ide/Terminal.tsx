@@ -110,8 +110,8 @@ export function Terminal() {
         setTimeout(() => useAppStore.getState().setPendingRunCommand(alreadyPending), 0)
       }
 
-      term.write('\r\n\x1b[33m  ⚡ Sparkie Terminal\x1b[0m\r\n')
-      term.write('\x1b[2m  Ready — E2B sandbox will connect when a build completes.\x1b[0m\r\n\r\n')
+      term.write('\r\n\x1b[33m  \u26a1 Sparkie Terminal\x1b[0m\r\n')
+      term.write('\x1b[2m  Ready \u2014 E2B sandbox will connect when a build completes.\x1b[0m\r\n\r\n')
     }).catch(err => console.error('xterm load failed:', err))
 
     return () => {
@@ -138,7 +138,7 @@ export function Terminal() {
   // CRITICAL RULE (Grok + Qwen consensus):
   //   NEVER call Zustand setters or send WS frames from ws.onopen.
   //   onopen fires inside a React render cycle; any setState() there
-  //   triggers a re-render → component remount → cleanup closes ws → 1006.
+  //   triggers a re-render => component remount => cleanup closes ws => 1006.
   //
   //   ALL state updates (setConnected, setE2bMode) + initial command send
   //   happen only in ws.onmessage when server sends {type:'connected'}.
@@ -162,16 +162,14 @@ export function Terminal() {
     let retries = retryCount
     const maxRetries = 5
 
-    // ── onopen: wire xterm listeners ONLY — NO state, NO sends ──────────────
+    // wire xterm listeners ONLY on open — NO state, NO sends
     ws.onopen = () => {
       console.log('[Terminal] ws.onopen — socket open, waiting for server connected frame')
-      // Wire keyboard input → WS (safe: attaches a listener, no re-render)
       term.onData((data: string) => {
         if (wsRef.current?.readyState === WebSocket.OPEN) {
           wsRef.current.send(JSON.stringify({ type: 'input', data }))
         }
       })
-      // Wire resize → WS (safe: same reason)
       term.onResize(({ cols, rows }: { cols: number; rows: number }) => {
         if (wsRef.current?.readyState === WebSocket.OPEN) {
           wsRef.current.send(JSON.stringify({ type: 'resize', cols, rows }))
@@ -179,7 +177,7 @@ export function Terminal() {
       })
     }
 
-    // ── onmessage: ALL state updates happen here ─────────────────────────────
+    // ALL state updates happen in onmessage
     ws.onmessage = (e) => {
       let payload: { type: string; data?: string; url?: string } | null = null
       try { payload = JSON.parse(e.data) } catch (_) { return }
@@ -187,7 +185,6 @@ export function Terminal() {
 
       const { type, data, url } = payload
 
-      // ── Shell connected — safe to update React state now ──
       if (type === 'connected') {
         console.log('[Terminal] received connected — shell ready')
         if (mountedRef.current) {
@@ -196,7 +193,6 @@ export function Terminal() {
         }
         term.write('\x1b[32m  [E2B]\x1b[0m Shell ready\r\n\r\n')
         fitRef.current?.fit()
-        // Send the initial dev command
         if (cmd && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'input', data: cmd + '\r' }))
           term.write('\r\n\x1b[33m  [Sparkie]\x1b[0m Running: ' + cmd + '\r\n')
@@ -204,22 +200,24 @@ export function Terminal() {
         return
       }
 
-      // ── Vite ready — server broadcasts preview URL ──
-      // route.ts PTY onData detects 'Local:' / 'ready in' and sends this frame
+      // Vite/build server ready — broadcast preview URL
       if (type === 'preview' && url) {
         console.log('[Terminal] received preview URL:', url)
         if (mountedRef.current) {
           setPreviewUrl(url)
           setContainerStatus('ready')
-          setIDETab('preview')   // auto-switch to preview tab
+          setIDETab('preview')
         }
-        term.write('\r\n\x1b[32m  [Sparkie]\x1b[0m Preview ready ⚡ ' + url + '\r\n')
+        term.write('\r\n\x1b[32m  [Sparkie]\x1b[0m Preview ready \u26a1 ' + url + '\r\n')
+        // Broadcast so ChatInput can post the URL as a clickable link in chat
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('sparkie_preview_ready', { detail: { url } }))
+        }
         return
       }
 
-      if (type === 'ping') return  // ignore heartbeats
+      if (type === 'ping') return
 
-      // ── PTY output — write directly to xterm ──
       const raw = data ?? ''
       if (raw) term.write(raw)
     }
@@ -246,7 +244,6 @@ export function Terminal() {
   useEffect(() => {
     if (!pendingRunCommand) return
 
-    // Already connected — just send the command directly
     if (connected && wsRef.current?.readyState === WebSocket.OPEN) {
       const cmd = pendingRunCommand
       setPendingRunCommand(null)
@@ -272,7 +269,7 @@ export function Terminal() {
     )
     const projectFiles = currentChat ? flattenWithPaths(currentChat.files) : []
 
-    term.write('\r\n\x1b[2m  Connecting to E2B sandbox…\x1b[0m\r\n')
+    term.write('\r\n\x1b[2m  Connecting to E2B sandbox\u2026\x1b[0m\r\n')
 
     const abort = new AbortController()
     const fetchTimeout = setTimeout(() => {
@@ -317,7 +314,6 @@ export function Terminal() {
     return () => ro.disconnect()
   }, [])
 
-  // ─── UI helpers ──────────────────────────────────────────────────────────
   function clearTerminal() {
     xtermRef.current?.clear()
     prevOutputRef.current = ''
@@ -332,7 +328,7 @@ export function Terminal() {
     const term = xtermRef.current
     if (!term) return
     term.clear()
-    term.write('\r\n\x1b[33m  Reconnecting…\x1b[0m\r\n')
+    term.write('\r\n\x1b[33m  Reconnecting\u2026\x1b[0m\r\n')
 
     const currentChat = useAppStore.getState().chats.find(
       c => c.id === useAppStore.getState().currentChatId
