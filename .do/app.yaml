@@ -11,7 +11,14 @@ services:
     run_command: npm start
     http_port: 3000
     instance_size_slug: apps-s-1vcpu-1gb
-    instance_count: 2
+    instance_count: 1
+    health_check:
+      http_path: /api/health
+      initial_delay_seconds: 10
+      period_seconds: 30
+      timeout_seconds: 5
+      success_threshold: 1
+      failure_threshold: 3
     envs:
       - key: ACE_MUSIC_API_KEY
         value: d33f8bc6767445a98b608dbf56710d26
