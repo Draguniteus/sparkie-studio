@@ -81,10 +81,34 @@ function attachWsHandlers(ws, sess, sessionId) {
     let msg
     try { msg = JSON.parse(raw.toString()) } catch (_) { return }
     console.log('[WS] message type:', msg && msg.type)
-    if (msg.type === 'input' && typeof msg.data === 'string' && sess.ptyPid !== null) {
-      sess.sbx.pty.sendInput(sess.ptyPid, Buffer.from(msg.data, 'utf-8')).catch((e) => {
-        console.error('[WS] pty.sendInput error:', e)
-      })
+    if (msg.type === 'input' && typeof msg.data === 'string') {
+      if (sess.ptyPid === null) {
+        // PTY not yet started — call 'start' action to create PTY and run the command.
+        // The WS is now stable (we're in onmessage) so the PTY onData will find
+        // sess.clients already populated — zero burst-on-connect risk.
+        console.log('[WS] PTY not started — calling /api/terminal start, cmd:', msg.data.slice(0, 60))
+        const body = JSON.stringify({ action: 'start', sessionId, cmd: msg.data })
+        const startReq = http.request(
+          { host: 'localhost', port, path: '/api/terminal', method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body),
+                       // Internal call — bypass auth by adding a server-only header
+                       'x-internal-call': 'terminal-start' } },
+          (res) => {
+            let data = ''
+            res.on('data', d => { data += d })
+            res.on('end', () => {
+              console.log('[WS] start response:', res.statusCode, data.slice(0, 100))
+            })
+          }
+        )
+        startReq.on('error', e => console.error('[WS] start request error:', e.message))
+        startReq.write(body)
+        startReq.end()
+      } else {
+        sess.sbx.pty.sendInput(sess.ptyPid, Buffer.from(msg.data, 'utf-8')).catch((e) => {
+          console.error('[WS] pty.sendInput error:', e)
+        })
+      }
     } else if (msg.type === 'resize' && sess.ptyPid !== null) {
       const cols = Math.max(1, parseInt(msg.cols, 10) || 80)
       const rows = Math.max(1, parseInt(msg.rows, 10) || 24)

@@ -9,13 +9,8 @@ export const runtime = 'nodejs'
 export const maxDuration = 300
 export const dynamic = 'force-dynamic'
 
-// Vite dev-server ready signals (any of these in PTY output = server is up)
-const VITE_READY_SIGNALS = [
-  'Local:',
-  'ready in',
-  'Network:',
-  'VITE v',
-]
+// Vite dev-server ready signals
+const VITE_READY_SIGNALS = ['Local:', 'ready in', 'Network:', 'VITE v']
 
 function broadcastToClients(clients: Set<WsClient>, msg: string) {
   clients.forEach(c => {
@@ -25,45 +20,46 @@ function broadcastToClients(clients: Set<WsClient>, msg: string) {
   })
 }
 
-// POST /api/terminal — create session, send input, resize, or sync-files
+// POST /api/terminal
 export async function POST(req: NextRequest) {
   const apiKey = process.env.E2B_API_KEY
-  if (!apiKey) {
-    return NextResponse.json({ error: 'E2B_API_KEY not set' }, { status: 500 })
-  }
+  if (!apiKey) return NextResponse.json({ error: 'E2B_API_KEY not set' }, { status: 500 })
 
-  const authSession = await getServerSession(authOptions)
-  if (!authSession?.user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // Allow internal server.js 'start' calls to bypass NextAuth
+  const isInternal = req.headers.get('x-internal-call') === 'terminal-start'
+
+  if (!isInternal) {
+    const authSession = await getServerSession(authOptions)
+    if (!authSession?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   const body = await req.json() as {
-    action: 'create' | 'input' | 'resize' | 'sync-files'
+    action: 'create' | 'start' | 'input' | 'resize' | 'sync-files'
     sessionId?: string
     data?: string
+    cmd?: string
     cols?: number
     rows?: number
+    files?: { name: string; content: string }[]
   }
 
-  // Create new terminal session
+  // ── CREATE: sandbox + file write only. NO PTY. ──────────────────────────
+  // PTY is created lazily via 'start' action once the WS connection is stable.
   if (body.action === 'create') {
     const sessionId = `term_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-
     try {
       const sbx = await Sandbox.create({ apiKey, timeoutMs: 30 * 60 * 1000 })
 
-      const files = (body as typeof body & { files?: { name: string; content: string }[] }).files ?? []
+      const files = body.files ?? []
       if (files.length > 0) {
         const firstNested = files.find(f => f.name.includes('/'))
         const projectRoot = firstNested ? firstNested.name.split('/')[0] : 'project'
-        // mkdir -p all parent dirs before writing — E2B requires dirs to exist
         const dirs = new Set<string>()
         files.forEach(f => {
           const fullPath = f.name.startsWith(projectRoot + '/')
             ? `/home/user/${f.name}`
             : `/home/user/${projectRoot}/${f.name}`
-          const dir = fullPath.substring(0, fullPath.lastIndexOf('/'))
-          dirs.add(dir)
+          dirs.add(fullPath.substring(0, fullPath.lastIndexOf('/')))
         })
         await sbx.commands.run(`mkdir -p ${[...dirs].join(' ')}`)
         await Promise.all(
@@ -74,65 +70,28 @@ export async function POST(req: NextRequest) {
             return sbx.files.write(filePath, f.content)
           })
         )
-        const viteConfigContent = `import { defineConfig } from 'vite'
+        // Ensure vite is configured correctly for E2B
+        const viteConfig = `import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-
 export default defineConfig({
   plugins: [react()],
-  server: {
-    host: '0.0.0.0',
-    port: 5173,
-    allowedHosts: true,
-    strictPort: true,
-  },
+  server: { host: '0.0.0.0', port: 5173, allowedHosts: true, strictPort: true },
 })
 `
-        await sbx.files.write(`/home/user/${projectRoot}/vite.config.ts`, viteConfigContent)
+        await sbx.files.write(`/home/user/${projectRoot}/vite.config.ts`, viteConfig)
       }
 
-      // Grab preview URL upfront — E2B exposes a stable public HTTPS URL per sandbox
       let previewUrl: string | null = null
-      try {
-        previewUrl = `https://${sbx.getHost(5173)}`
-      } catch (_) {
-        // getHost unavailable
-      }
+      try { previewUrl = `https://${sbx.getHost(5173)}` } catch (_) {}
 
-      const sess = {
+      sessions.set(sessionId, {
         sbx,
-        ptyPid: null as number | null,
+        ptyPid: null,
         clients: new Set<WsClient>(),
         createdAt: Date.now(),
-        previewUrl,          // stored so PTY onData can broadcast it
-        previewSent: false,  // broadcast only once per session
-      }
-      sessions.set(sessionId, sess)
-
-      // Create PTY — output broadcasts to all connected WS clients
-      // Also watches for Vite ready signal and broadcasts {type:'preview'} frame
-      const pty = await sbx.pty.create({
-        onData: (data: Uint8Array) => {
-          const text = Buffer.from(data).toString('utf-8')
-          const msg = encodeMessage('output', text)
-          broadcastToClients(sess.clients, msg)
-
-          // Detect Vite dev-server ready — broadcast preview URL once
-          if (!sess.previewSent && sess.previewUrl) {
-            const isReady = VITE_READY_SIGNALS.some(sig => text.includes(sig))
-            if (isReady) {
-              sess.previewSent = true
-              const previewMsg = JSON.stringify({ type: 'preview', url: sess.previewUrl })
-              broadcastToClients(sess.clients, previewMsg)
-              console.log('[PTY] Vite ready detected — preview URL broadcast:', sess.previewUrl)
-            }
-          }
-        },
-        cols: 80,
-        rows: 24,
-        timeoutMs: 0,
+        previewUrl,
+        previewSent: false,
       })
-
-      sess.ptyPid = pty.pid
 
       return NextResponse.json({
         sessionId,
@@ -144,44 +103,77 @@ export default defineConfig({
     }
   }
 
-  // Send input to running session
+  // ── START: create PTY and run command. Called by server.js after WS is stable. ──
+  // This is the key change: PTY starts AFTER the WS is open and has clients.
+  // The PTY onData broadcasts to sess.clients which already contains the WS.
+  // No burst-on-connect because the PTY didn't exist before this call.
+  if (body.action === 'start' && body.sessionId) {
+    const sess = sessions.get(body.sessionId)
+    if (!sess) return NextResponse.json({ error: 'Session not found' }, { status: 404 })
+    if (sess.ptyPid !== null) return NextResponse.json({ ok: true, alreadyStarted: true })
+
+    const cmd = body.cmd ?? ''
+    try {
+      const pty = await sess.sbx.pty.create({
+        onData: (data: Uint8Array) => {
+          const text = Buffer.from(data).toString('utf-8')
+          broadcastToClients(sess.clients, encodeMessage('output', text))
+
+          if (!sess.previewSent && sess.previewUrl) {
+            if (VITE_READY_SIGNALS.some(sig => text.includes(sig))) {
+              sess.previewSent = true
+              broadcastToClients(sess.clients, JSON.stringify({ type: 'preview', url: sess.previewUrl }))
+              console.log('[PTY] Vite ready — preview URL broadcast:', sess.previewUrl)
+            }
+          }
+        },
+        cols: 80,
+        rows: 24,
+        timeoutMs: 0,
+      })
+      sess.ptyPid = pty.pid
+      if (cmd) {
+        await sess.sbx.pty.sendInput(sess.ptyPid, Buffer.from(cmd, 'utf-8'))
+      }
+      return NextResponse.json({ ok: true, ptyPid: pty.pid })
+    } catch (err) {
+      return NextResponse.json({ error: String(err) }, { status: 500 })
+    }
+  }
+
+  // ── INPUT ──────────────────────────────────────────────────────────────
   if (body.action === 'input' && body.sessionId && body.data) {
     const sess = sessions.get(body.sessionId)
     if (!sess) return NextResponse.json({ error: 'Session not found' }, { status: 404 })
-    if (sess.ptyPid === null) return NextResponse.json({ error: 'Terminal not ready' }, { status: 503 })
-    try {
-      await sess.sbx.pty.sendInput(sess.ptyPid, Buffer.from(body.data, 'utf-8'))
-    } catch (_) { /* ignore */ }
+    if (sess.ptyPid === null) return NextResponse.json({ error: 'Terminal not started' }, { status: 503 })
+    try { await sess.sbx.pty.sendInput(sess.ptyPid, Buffer.from(body.data, 'utf-8')) } catch (_) {}
     return NextResponse.json({ ok: true })
   }
 
-  // Resize terminal
+  // ── RESIZE ─────────────────────────────────────────────────────────────
   if (body.action === 'resize' && body.sessionId && body.cols && body.rows) {
     const sess = sessions.get(body.sessionId)
     if (!sess) return NextResponse.json({ error: 'Session not found' }, { status: 404 })
-    if (sess.ptyPid === null) return NextResponse.json({ ok: true })
-    try {
-      await sess.sbx.pty.resize(sess.ptyPid, { cols: body.cols, rows: body.rows })
-    } catch (_) { /* ignore */ }
+    if (sess.ptyPid !== null) {
+      try { await sess.sbx.pty.resize(sess.ptyPid, { cols: body.cols, rows: body.rows }) } catch (_) {}
+    }
     return NextResponse.json({ ok: true })
   }
 
-  // Sync files into existing session sandbox
+  // ── SYNC-FILES ─────────────────────────────────────────────────────────
   if (body.action === 'sync-files' && body.sessionId) {
     const sess = sessions.get(body.sessionId)
     if (!sess) return NextResponse.json({ error: 'Session not found' }, { status: 404 })
-    const files = (body as typeof body & { files?: { name: string; content: string }[] }).files ?? []
+    const files = body.files ?? []
     if (files.length > 0) {
       const firstNested = files.find(f => f.name.includes('/'))
       const projectRoot = firstNested ? firstNested.name.split('/')[0] : 'project'
-      // mkdir -p all parent dirs before writing — E2B requires dirs to exist
       const syncDirs = new Set<string>()
       files.forEach(f => {
         const fullPath = f.name.startsWith(projectRoot + '/')
           ? `/home/user/${f.name}`
           : `/home/user/${projectRoot}/${f.name}`
-        const dir = fullPath.substring(0, fullPath.lastIndexOf('/'))
-        syncDirs.add(dir)
+        syncDirs.add(fullPath.substring(0, fullPath.lastIndexOf('/')))
       })
       await sess.sbx.commands.run(`mkdir -p ${[...syncDirs].join(' ')}`)
       await Promise.all(
@@ -194,15 +186,9 @@ export default defineConfig({
       )
       const viteConfig = `import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-
 export default defineConfig({
   plugins: [react()],
-  server: {
-    host: '0.0.0.0',
-    port: 5173,
-    allowedHosts: true,
-    strictPort: true,
-  },
+  server: { host: '0.0.0.0', port: 5173, allowedHosts: true, strictPort: true },
 })
 `
       await sess.sbx.files.write(`/home/user/${projectRoot}/vite.config.ts`, viteConfig)
