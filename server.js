@@ -1,20 +1,10 @@
 /**
  * server.js — Custom Node HTTP server for Sparkie Studio
  *
- * Why this file exists:
- *   Next.js App Router Route Handlers cannot perform WebSocket upgrades.
- *   We wrap Next.js in a plain http.Server so we can intercept the WS
- *   upgrade request on /api/terminal-ws before Next.js ever sees it.
- *
  * Architecture: ATTACHED mode
- *   We create WebSocketServer({ server, path: '/api/terminal-ws' }).
- *   This integrates ws with Node's http.Server connection tracking so
- *   the DO App Platform nginx proxy keeps the socket alive through the
- *   full WS lifecycle. noServer+handleUpgrade causes the proxy to GC
- *   the raw socket after the 101 response on DO.
- *
- *   We still use server.prependListener('upgrade') to reject non-WS
- *   paths early (before ws or Next.js handle them).
+ *   WebSocketServer({ server, path: '/api/terminal-ws' }) integrates ws
+ *   with Node's http.Server connection tracking so DO's nginx proxy keeps
+ *   the socket alive through the full WS lifecycle.
  *
  * Sessions:
  *   Both this file and src/app/api/terminal/route.ts share the same
@@ -72,6 +62,9 @@ function attachWsHandlers(ws, sess, sessionId) {
     const delay = pingCount < 60 ? 1000 : 5000  // fast for first 60s
     pingTimer = setTimeout(() => {
       if (ws.readyState === ws.OPEN) {
+        // RFC 6455 protocol-level ping — keeps DO nginx proxy alive
+        try { ws.ping() } catch (_) {}
+        // Application-layer ping for client heartbeat
         try { ws.send(encodeMessage('ping', '')) } catch (_) {}
         pingCount++
         schedulePing()
@@ -79,6 +72,10 @@ function attachWsHandlers(ws, sess, sessionId) {
     }, delay)
   }
   schedulePing()
+
+  ws.on('pong', () => {
+    console.log('[WS] pong received — proxy round-trip confirmed')
+  })
 
   ws.on('message', (raw) => {
     let msg
@@ -125,7 +122,6 @@ app.prepare().then(() => {
 
     if (pathname !== '/api/terminal-ws') {
       // Not our path — destroy and let no other handler run
-      // (ws's own listener won't fire because path won't match)
       socket.destroy()
       return
     }
@@ -137,6 +133,12 @@ app.prepare().then(() => {
     const { query } = parse(req.url, true)
     const sessionId = query && query.sessionId
     console.log('[WS] connection sessionId:', sessionId)
+
+    // Diagnostic: log socket state at moment of connection
+    const sock = ws._socket
+    console.log('[WS] socket.readyState:', ws.readyState,
+      '| socket.writable:', sock ? sock.writable : 'N/A',
+      '| socket.destroyed:', sock ? sock.destroyed : 'N/A')
 
     if (!sessionId) {
       ws.close(1008, 'Missing sessionId')
@@ -153,10 +155,18 @@ app.prepare().then(() => {
 
     console.log('[WS] session ok, ptyPid:', sess.ptyPid)
 
-    // Send connected frame synchronously — first thing after handshake.
-    // This keeps the DO proxy from treating the socket as idle.
+    // Send RFC 6455 protocol-level ping FIRST — signals to DO proxy that
+    // this is an active WS connection before we send any application data.
+    try { ws.ping() } catch (_) {}
+    console.log('[WS] protocol ping sent')
+
+    // Send connected frame — first application message to client.
     try { ws.send(encodeMessage('connected', 'Shell ready')) } catch (_) {}
     console.log('[WS] connected frame sent')
+
+    // Log socket state again after sends
+    console.log('[WS] post-send readyState:', ws.readyState,
+      '| socket.writable:', sock ? sock.writable : 'N/A')
 
     attachWsHandlers(ws, sess, sessionId)
   })
