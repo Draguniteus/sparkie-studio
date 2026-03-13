@@ -130,13 +130,14 @@ export function Terminal() {
 
   // ─── sync legacy terminalOutput → xterm (WebContainer path) ─────────────
   useEffect(() => {
-    if (!xtermRef.current || e2bMode) return
+    if (!xtermRef.current || e2bModeRef.current) return
     const delta = terminalOutput.slice(prevOutputRef.current.length)
     if (delta) {
       xtermRef.current.write(delta)
       prevOutputRef.current = terminalOutput
     }
-  }, [terminalOutput, e2bMode])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [terminalOutput])
 
   // ─── core WS connection ───────────────────────────────────────────────────
   //
