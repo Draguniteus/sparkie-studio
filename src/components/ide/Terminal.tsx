@@ -1,28 +1,26 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import type { Terminal as XTermType } from '@xterm/xterm'
-import type { FitAddon as FitAddonType } from '@xterm/addon-fit'
 import { useAppStore } from '@/store/appStore'
 import type { FileNode } from '@/store/appStore'
 import { Terminal as TermIcon, Play, Trash2, ExternalLink } from 'lucide-react'
 
-async function loadXterm(): Promise<{ Terminal: typeof XTermType; FitAddon: typeof FitAddonType }> {
+// ─── lazy-load xterm so it doesn't bloat the initial bundle ──────────────────
+async function loadXterm() {
   const [{ Terminal }, { FitAddon }] = await Promise.all([
     import('@xterm/xterm'),
     import('@xterm/addon-fit'),
   ])
   if (!document.getElementById('xterm-css')) {
     const link = document.createElement('link')
-    link.id = 'xterm-css'
-    link.rel = 'stylesheet'
+    link.id   = 'xterm-css'
+    link.rel  = 'stylesheet'
     link.href = 'https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css'
     document.head.appendChild(link)
   }
   return { Terminal, FitAddon }
 }
 
-/** Build a WebSocket URL from the current page origin. */
 function buildWsUrl(path: string): string {
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${proto}//${window.location.host}${path}`
@@ -33,12 +31,13 @@ type E2BFile = { name: string; content: string }
 function flattenWithPaths(nodes: FileNode[], prefix = ''): E2BFile[] {
   return nodes.flatMap(n => {
     const p = prefix ? `${prefix}/${n.name}` : n.name
-    if (n.type === 'folder') return flattenWithPaths(n.children ?? [], p)
+    if (n.type === 'folder')  return flattenWithPaths(n.children ?? [], p)
     if (n.type === 'archive') return []
     return n.content ? [{ name: p, content: n.content }] : []
   })
 }
 
+// ─── types ───────────────────────────────────────────────────────────────────
 interface XTermInstance {
   open(el: HTMLElement): void
   write(data: string): void
@@ -49,73 +48,63 @@ interface XTermInstance {
   loadAddon(addon: unknown): void
 }
 
+// ─── component ───────────────────────────────────────────────────────────────
 export function Terminal() {
   const {
     containerStatus, previewUrl, terminalOutput,
     pendingRunCommand, setPendingRunCommand,
     setPreviewUrl, setContainerStatus, setIDETab,
   } = useAppStore()
-  const termRef     = useRef<HTMLDivElement>(null)
+
+  const termDivRef  = useRef<HTMLDivElement>(null)
   const xtermRef    = useRef<XTermInstance | null>(null)
   const fitRef      = useRef<{ fit(): void } | null>(null)
   const wsRef       = useRef<WebSocket | null>(null)
   const sessionRef  = useRef<string>('')
-  const [connected, setConnected] = useState(false)
-  const [e2bMode, setE2bMode]     = useState(false)
-  const prevOutputRef = useRef('')
+  const mountedRef  = useRef(false)
+  const prevOutputRef        = useRef('')
   const serverUrlDetectedRef = useRef(false)
-  const eagerPreviewUrlRef = useRef<string | null>(null)
-  // Track whether we're inside the initial mount — prevents cleanup from
-  // closing a WS that was opened in the same render cycle.
-  const mountedRef = useRef(false)
+  const eagerPreviewUrlRef   = useRef<string | null>(null)
 
-  // ── Load xterm + init terminal ────────────────────────────────────────────
+  const [connected, setConnected] = useState(false)
+  const [e2bMode,   setE2bMode]   = useState(false)
+
+  // ─── init xterm (once, on mount) ─────────────────────────────────────────
   useEffect(() => {
-    if (!termRef.current) return
+    if (!termDivRef.current) return
     mountedRef.current = true
 
     loadXterm().then(({ Terminal, FitAddon }) => {
-      if (!termRef.current || xtermRef.current) return
+      if (!termDivRef.current || xtermRef.current) return
 
       const term = new Terminal({
         fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", monospace',
         fontSize: 12,
         lineHeight: 1.4,
         theme: {
-          background: '#0a0a0a',
-          foreground: '#e2e8f0',
-          cursor: '#f59e0b',
+          background: '#0a0a0a', foreground: '#e2e8f0', cursor: '#f59e0b',
           cursorAccent: '#0a0a0a',
           selectionBackground: 'rgba(245,158,11,0.3)',
-          black: '#1a1a1a',
-          red: '#ef4444',
-          green: '#22c55e',
-          yellow: '#f59e0b',
-          blue: '#3b82f6',
-          magenta: '#a855f7',
-          cyan: '#06b6d4',
-          white: '#e2e8f0',
-          brightBlack: '#374151',
-          brightRed: '#f87171',
-          brightGreen: '#4ade80',
-          brightYellow: '#fbbf24',
-          brightBlue: '#60a5fa',
-          brightMagenta: '#c084fc',
-          brightCyan: '#22d3ee',
-          brightWhite: '#f9fafb',
+          black: '#1a1a1a',      red: '#ef4444',     green: '#22c55e',
+          yellow: '#f59e0b',     blue: '#3b82f6',    magenta: '#a855f7',
+          cyan: '#06b6d4',       white: '#e2e8f0',
+          brightBlack: '#374151', brightRed: '#f87171',   brightGreen: '#4ade80',
+          brightYellow: '#fbbf24', brightBlue: '#60a5fa', brightMagenta: '#c084fc',
+          brightCyan: '#22d3ee',  brightWhite: '#f9fafb',
         },
         cursorBlink: true,
         allowTransparency: true,
         scrollback: 3000,
       })
 
-      const fitAddon = new FitAddon()
-      term.loadAddon(fitAddon)
-      term.open(termRef.current)
-      fitAddon.fit()
+      const fit = new FitAddon()
+      term.loadAddon(fit)
+      term.open(termDivRef.current)
+      fit.fit()
       xtermRef.current = term
-      fitRef.current = fitAddon
+      fitRef.current   = fit
 
+      // Re-fire any command that arrived before xterm was ready
       const alreadyPending = useAppStore.getState().pendingRunCommand
       if (alreadyPending) {
         useAppStore.getState().setPendingRunCommand(null)
@@ -124,9 +113,7 @@ export function Terminal() {
 
       term.write('\r\n\x1b[33m  ⚡ Sparkie Terminal\x1b[0m\r\n')
       term.write('\x1b[2m  Ready — E2B sandbox will connect when a build completes.\x1b[0m\r\n\r\n')
-    }).catch(err => {
-      console.error('xterm load failed:', err)
-    })
+    }).catch(err => console.error('xterm load failed:', err))
 
     return () => {
       mountedRef.current = false
@@ -137,59 +124,90 @@ export function Terminal() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ── Sync legacy terminalOutput → xterm (for WebContainer builds) ─────────
+  // ─── sync legacy terminalOutput → xterm (WebContainer path) ─────────────
   useEffect(() => {
     if (!xtermRef.current || e2bMode) return
-    const newOutput = terminalOutput.slice(prevOutputRef.current.length)
-    if (newOutput) {
-      xtermRef.current?.write(newOutput)
+    const delta = terminalOutput.slice(prevOutputRef.current.length)
+    if (delta) {
+      xtermRef.current.write(delta)
       prevOutputRef.current = terminalOutput
     }
   }, [terminalOutput, e2bMode])
 
-  // ── Open a WebSocket to the terminal server ───────────────────────────────
-  function openWebSocket(sessionId: string, cmd: string, term: XTermInstance, retryCount = 0) {
+  // ─── core WS connection ───────────────────────────────────────────────────
+  //
+  // KEY RULE (Grok + Qwen consensus):
+  //   NEVER call Zustand setters or send WS frames from ws.onopen.
+  //   onopen fires inside a React render cycle; any setState() there
+  //   triggers a synchronous re-render → component remount → cleanup
+  //   calls wsRef.current.close() → immediate 1006.
+  //
+  //   All state updates + the initial command are deferred to
+  //   ws.onmessage when the server sends { type: 'connected' }.
+  //   By that point the socket is fully stable and React is idle.
+  // ─────────────────────────────────────────────────────────────────────────
+  function openWebSocket(
+    sessionId: string,
+    cmd: string,
+    term: XTermInstance,
+    retryCount = 0
+  ): WebSocket {
     const url = buildWsUrl(`/api/terminal-ws?sessionId=${sessionId}`)
     console.log('[Terminal] Opening WebSocket:', url)
+
     const ws = new WebSocket(url)
     wsRef.current = ws
 
-    let wsRetries = retryCount
-    const maxWsRetries = 5
+    let retries = retryCount
+    const maxRetries = 5
 
+    // ── onopen: init xterm wiring ONLY — NO state, NO sends ──────────────
     ws.onopen = () => {
-      console.log('[Terminal] WebSocket onopen – shell ready, firing cmd:', cmd)
-      // IMPORTANT: Do NOT call setConnected/setE2bMode synchronously here.
-      // React state updates in ws.onopen trigger a synchronous re-render which
-      // can unmount+remount the Terminal component, hitting the useEffect cleanup
-      // (wsRef.current?.close()) and producing an immediate 1006.
-      // Defer state updates to the next macrotask so onopen fully returns first.
-      setTimeout(() => {
-        setConnected(true)
-        setE2bMode(true)
-      }, 0)
-
-      term.write('\x1b[32m  [E2B]\x1b[0m Shell ready\r\n\r\n')
-
-      if (cmd) {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'input', data: cmd + '\r' }))
-          term.write('\r\n\x1b[33m  [Sparkie]\x1b[0m Running: ' + cmd + '\r\n')
+      console.log('[Terminal] ws.onopen — socket open, waiting for server connected frame')
+      // Wire up keyboard input → WS (safe: just attaches a listener, no re-render)
+      term.onData((data: string) => {
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({ type: 'input', data }))
         }
-      }
-
-      // Defer fit() — FitAddon.fit() fires term.onResize which sends a resize
-      // frame; deferring avoids racing with the WS initialization.
-      setTimeout(() => { fitRef.current?.fit() }, 0)
+      })
+      // Wire up resize → WS (safe: same reason)
+      term.onResize(({ cols, rows }: { cols: number; rows: number }) => {
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({ type: 'resize', cols, rows }))
+        }
+      })
     }
 
+    // ── onmessage: ALL state updates + initial command happen here ────────
     ws.onmessage = (e) => {
       let payload: { type: string; data: string } | null = null
       try { payload = JSON.parse(e.data) } catch (_) { return }
       if (!payload) return
-      const raw = payload.data ?? ''
-      if (payload.type === 'ping' || payload.type === 'connected') return
+
+      const { type, data } = payload
+
+      if (type === 'connected') {
+        // Socket is fully stable — safe to update Zustand state now
+        console.log('[Terminal] received connected — shell ready')
+        if (mountedRef.current) {
+          setConnected(true)
+          setE2bMode(true)
+        }
+        term.write('\x1b[32m  [E2B]\x1b[0m Shell ready\r\n\r\n')
+        fitRef.current?.fit()
+        // Send the initial command
+        if (cmd && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'input', data: cmd + '\r' }))
+          term.write('\r\n\x1b[33m  [Sparkie]\x1b[0m Running: ' + cmd + '\r\n')
+        }
+        return
+      }
+
+      if (type === 'ping') return  // ignore heartbeats
+
+      const raw = data ?? ''
       term.write(raw)
+
       if (!serverUrlDetectedRef.current && eagerPreviewUrlRef.current) {
         if (raw.includes('ready in') || raw.includes('Local:') || raw.includes('Network:')) {
           serverUrlDetectedRef.current = true
@@ -201,47 +219,33 @@ export function Terminal() {
         }
       }
       if (raw.includes('ERROR') || raw.includes('error TS') || raw.includes('ENOENT')) {
-        term.write('\r\n\x1b[31m  [Sparkie]\x1b[0m Build error detected — check above ↑\r\n')
+        term.write('\r\n\x1b[31m  [Sparkie]\x1b[0m Build error — check above ↑\r\n')
       }
     }
 
     ws.onclose = (e) => {
       console.log('[Terminal] WebSocket closed:', e.code, e.reason)
-      // Defer state update — same reasoning as onopen
-      setTimeout(() => { setConnected(false) }, 0)
-      if (e.code !== 1000 && e.code !== 1001 && wsRetries < maxWsRetries) {
-        wsRetries++
-        term.write('\r\n\x1b[33m  [E2B]\x1b[0m Reconnecting (' + wsRetries + '/' + maxWsRetries + ')...\r\n')
-        setTimeout(() => openWebSocket(sessionId, cmd, term, wsRetries), 600 * wsRetries)
-      } else if (wsRetries >= maxWsRetries) {
+      if (mountedRef.current) setConnected(false)
+      if (e.code !== 1000 && e.code !== 1001 && retries < maxRetries) {
+        retries++
+        term.write(`\r\n\x1b[33m  [E2B]\x1b[0m Reconnecting (${retries}/${maxRetries})...\r\n`)
+        setTimeout(() => openWebSocket(sessionId, cmd, term, retries), 600 * retries)
+      } else if (retries >= maxRetries) {
         setContainerStatus('error')
-        term.write('\r\n\x1b[31m  [E2B]\x1b[0m Connection failed after ' + maxWsRetries + ' retries\r\n')
+        term.write(`\r\n\x1b[31m  [E2B]\x1b[0m Connection failed after ${maxRetries} retries\r\n`)
       }
     }
 
-    ws.onerror = (err) => {
-      console.error('[Terminal] WebSocket error:', err)
-    }
-
-    term.onData((data: string) => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ type: 'input', data }))
-      }
-    })
-
-    term.onResize(({ cols, rows }: { cols: number; rows: number }) => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ type: 'resize', cols, rows }))
-      }
-    })
+    ws.onerror = (err) => console.error('[Terminal] WebSocket error:', err)
 
     return ws
   }
 
-  // ── Auto-run: execute pendingRunCommand via lazy E2B connect ──────────────
+  // ─── auto-run: fires when a build completes (pendingRunCommand set) ───────
   useEffect(() => {
     if (!pendingRunCommand) return
 
+    // Already connected — just send the command directly
     if (connected && wsRef.current?.readyState === WebSocket.OPEN) {
       const cmd = pendingRunCommand
       setPendingRunCommand(null)
@@ -269,11 +273,11 @@ export function Terminal() {
     )
     const projectFiles = currentChat ? flattenWithPaths(currentChat.files) : []
 
-    term.write('\r\n\x1b[2m  Connecting to E2B sandbox\u2026\x1b[0m\r\n')
+    term.write('\r\n\x1b[2m  Connecting to E2B sandbox…\x1b[0m\r\n')
 
-    const abortCtrl = new AbortController()
+    const abort = new AbortController()
     const fetchTimeout = setTimeout(() => {
-      abortCtrl.abort()
+      abort.abort()
       term.write('\r\n\x1b[31m  [Terminal] E2B create timed out (60s)\x1b[0m\r\n')
       setContainerStatus('error')
     }, 60000)
@@ -282,13 +286,13 @@ export function Terminal() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'create', files: projectFiles }),
-      signal: abortCtrl.signal,
+      signal: abort.signal,
     })
       .then(async res => {
         clearTimeout(fetchTimeout)
         if (!res.ok) {
           const errText = await res.text().catch(() => 'unknown')
-          term.write('\r\n\x1b[31m  [Terminal] E2B create failed (' + res.status + '): ' + errText.slice(0, 80) + '\x1b[0m\r\n')
+          term.write(`\r\n\x1b[31m  [Terminal] E2B create failed (${res.status}): ${errText.slice(0, 80)}\x1b[0m\r\n`)
           setContainerStatus('error')
           return
         }
@@ -300,20 +304,21 @@ export function Terminal() {
       .catch(err => {
         clearTimeout(fetchTimeout)
         if ((err as Error).name === 'AbortError') return
-        term.write('\r\n\x1b[31m  [Terminal] E2B connect failed: ' + String(err) + '\x1b[0m\r\n')
+        term.write(`\r\n\x1b[31m  [Terminal] E2B connect failed: ${String(err)}\x1b[0m\r\n`)
         setContainerStatus('error')
       })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingRunCommand, connected])
 
-  // ── ResizeObserver ────────────────────────────────────────────────────────
+  // ─── resize observer ──────────────────────────────────────────────────────
   useEffect(() => {
-    if (!termRef.current || !fitRef.current) return
+    if (!termDivRef.current || !fitRef.current) return
     const ro = new ResizeObserver(() => fitRef.current?.fit())
-    ro.observe(termRef.current)
+    ro.observe(termDivRef.current)
     return () => ro.disconnect()
   }, [])
 
+  // ─── UI helpers ───────────────────────────────────────────────────────────
   function clearTerminal() {
     xtermRef.current?.clear()
     prevOutputRef.current = ''
@@ -323,13 +328,13 @@ export function Terminal() {
     wsRef.current?.close(1000, 'manual reconnect')
     setConnected(false)
     setE2bMode(false)
-    sessionRef.current = ''
-    eagerPreviewUrlRef.current = null
+    sessionRef.current          = ''
+    eagerPreviewUrlRef.current  = null
     serverUrlDetectedRef.current = false
     const term = xtermRef.current
     if (!term) return
     term.clear()
-    term.write('\r\n\x1b[33m  Reconnecting\u2026\x1b[0m\r\n')
+    term.write('\r\n\x1b[33m  Reconnecting…\x1b[0m\r\n')
 
     const currentChat = useAppStore.getState().chats.find(
       c => c.id === useAppStore.getState().currentChatId
@@ -352,18 +357,18 @@ export function Terminal() {
   }
 
   const statusColor =
-    connected              ? 'text-[#22c55e]' :
-    containerStatus === 'error' ? 'text-[#ef4444]' :
-    containerStatus === 'idle'  ? 'text-[#6b7280]' :
-                                  'text-[#f59e0b]'
+    connected                    ? 'text-[#22c55e]' :
+    containerStatus === 'error'  ? 'text-[#ef4444]' :
+    containerStatus === 'idle'   ? 'text-[#6b7280]' :
+                                   'text-[#f59e0b]'
 
   const statusLabel =
-    connected          ? 'Live Shell' :
-    e2bMode            ? 'Connecting...' :
-    containerStatus === 'ready'       ? 'Dev Server' :
-    containerStatus === 'error'       ? 'Error' :
-    containerStatus === 'idle'        ? 'Idle' :
-    (containerStatus as string)       || 'Terminal'
+    connected                          ? 'Live Shell'    :
+    e2bMode                            ? 'Connecting...' :
+    containerStatus === 'ready'        ? 'Dev Server'    :
+    containerStatus === 'error'        ? 'Error'         :
+    containerStatus === 'idle'         ? 'Idle'          :
+    (containerStatus as string)        || 'Terminal'
 
   return (
     <div className="h-full flex flex-col bg-[#0a0a0a]">
@@ -376,33 +381,25 @@ export function Terminal() {
         </span>
         <div className="ml-auto flex items-center gap-1">
           {previewUrl && (
-            <a
-              href={previewUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-[#22c55e]/10 text-[#22c55e] border border-[#22c55e]/20 hover:bg-[#22c55e]/20 transition-colors"
-            >
+            <a href={previewUrl} target="_blank" rel="noreferrer"
+              className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-[#22c55e]/10 text-[#22c55e] border border-[#22c55e]/20 hover:bg-[#22c55e]/20 transition-colors">
               <ExternalLink size={9} />
               <span>Preview</span>
             </a>
           )}
-          <button
-            onClick={clearTerminal}
+          <button onClick={clearTerminal}
             className="w-6 h-6 rounded flex items-center justify-center text-text-muted hover:text-honey-400 hover:bg-hive-hover transition-colors"
-            title="Clear terminal"
-          >
+            title="Clear terminal">
             <Trash2 size={11} />
           </button>
-          <button
-            onClick={reconnect}
+          <button onClick={reconnect}
             className="w-6 h-6 rounded flex items-center justify-center text-text-muted hover:text-honey-400 hover:bg-hive-hover transition-colors"
-            title="New session"
-          >
+            title="New session">
             <Play size={11} />
           </button>
         </div>
       </div>
-      <div ref={termRef} className="flex-1 overflow-hidden p-1" style={{ minHeight: 0 }} />
+      <div ref={termDivRef} className="flex-1 overflow-hidden p-1" style={{ minHeight: 0 }} />
     </div>
   )
 }
