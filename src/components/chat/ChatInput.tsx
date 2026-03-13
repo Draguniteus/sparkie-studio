@@ -1451,6 +1451,20 @@ export function ChatInput() {
               isStreaming: false,
             })
           }
+        } else {
+          // ── Static build (no package.json) — preview is instant via srcdoc ──
+          // Switch to preview tab and post the preview URL in chat
+          setIDETab('preview')
+          setContainerStatus('ready')
+          // Post preview link in chat — user can open in new tab
+          addMessage(chatId, {
+            role: 'assistant',
+            content: `✨ Preview is live → [Open in new tab](about:blank)
+
+> **Static build** — ${fileNames} rendered directly in the preview panel. Hit the ↗ icon to open full screen.`,
+            model: selectedModel,
+            isStreaming: false,
+          })
         }
       } else {
         // No files — restore archive and show text response
@@ -1512,6 +1526,24 @@ export function ChatInput() {
     }
     window.addEventListener('sparkie_stop_stream', handler)
     return () => window.removeEventListener('sparkie_stop_stream', handler)
+  }, [])
+
+  // ── sparkie_preview_ready — fired by Terminal when E2B dev server is live ──
+  // Posts the preview URL as a clickable link in chat (MiniMax-style)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { url } = (e as CustomEvent<{ url: string }>).detail
+      if (!url) return
+      const cid = useAppStore.getState().currentChatId
+      if (!cid) return
+      useAppStore.getState().addMessage(cid, {
+        role: 'assistant',
+        content: `🚀 Dev server is live → [${url}](${url})`,
+        isStreaming: false,
+      })
+    }
+    window.addEventListener('sparkie_preview_ready', handler)
+    return () => window.removeEventListener('sparkie_preview_ready', handler)
   }, [])
 
   // ── Voice recording ───────────────────────────────────────────────────────
