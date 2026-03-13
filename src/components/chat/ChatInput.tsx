@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useCallback, useEffect } from "react"
+import { useState, memo, useRef, useCallback, useEffect } from "react"
 import { useAppStore, StepTrace } from "@/store/appStore"
 import { useShallow } from "zustand/react/shallow"
 
@@ -1632,18 +1632,23 @@ export function ChatInput() {
     })
   }, [currentChatId, createChat, addMessage, updateMessage, selectedModel])
 
+  const inputRef = useRef(input)
+  useEffect(() => { inputRef.current = input }, [input])
+
   const handleSubmit = useCallback(async () => {
-    if ((!input.trim() && !attachedFile) || isStreaming) return
+    if ((!inputRef.current.trim() && !attachedFile) || isStreaming) return
 
     // ─── Slash commands ────────────────────────────────────────────────────
-    const trimmed = input.trim()
+    const trimmed = inputRef.current.trim()
     const slashCmd = trimmed.toLowerCase().split(/\s+/)[0]
     if (slashCmd.startsWith('/')) {
       let chatId = currentChatId
       if (!chatId) chatId = createChat()
       addMessage(chatId, { role: 'user', content: trimmed })
       setInput('')
-      if (textareaRef.current) textareaRef.current.style.height = 'auto'
+      requestAnimationFrame(() => {
+        if (textareaRef.current) textareaRef.current.style.height = 'auto'
+      })
 
       if (slashCmd === '/startradio') {
         window.dispatchEvent(new CustomEvent('sparkie:startradio'))
@@ -1707,7 +1712,7 @@ export function ChatInput() {
 
     let chatId = getOrCreateSingleChat()
 
-    const userContent = input.trim()
+    const userContent = inputRef.current.trim()
     // ── Include attached file in message ────────────────────────────────────
     let messageContent = userContent
     let messageImageUrl: string | undefined
@@ -1724,7 +1729,9 @@ export function ChatInput() {
     saveMessage('user', messageContent)
     setInput("")
 
-    if (textareaRef.current) textareaRef.current.style.height = "auto"
+    requestAnimationFrame(() => {
+      if (textareaRef.current) textareaRef.current.style.height = "auto"
+    })
 
     // Natural language media detection — catches "generate me a song", "make me a beat", etc.
     // even when the user hasn't tapped the mode button
@@ -1777,7 +1784,7 @@ export function ChatInput() {
         streamAgent(chatId, userContent)
       }
     }
-  }, [input, isStreaming, currentChatId, createChat, addMessage, genMode, streamAgent, generateMedia, classifyIntent, streamReply])
+  }, [isStreaming, currentChatId, createChat, addMessage, genMode, streamAgent, generateMedia, classifyIntent, streamReply])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (slashSuggestions.length > 0) {
@@ -1799,8 +1806,10 @@ export function ChatInput() {
     const val = e.target.value
     setInput(val)
     const el = e.target
-    el.style.height = "auto"
-    el.style.height = Math.min(el.scrollHeight, 200) + "px"
+    requestAnimationFrame(() => {
+      el.style.height = "auto"
+          el.style.height = Math.min(el.scrollHeight, 200) + "px"
+    })
     // Slash command autocomplete
     const word = val.split(/\s+/)[0]
     if (word.startsWith('/') && val === word) {
@@ -1825,7 +1834,7 @@ export function ChatInput() {
     speech: "Enter the text you want to convert to speech...",
   }
 
-  const messages_count = useAppStore(useCallback((s) => s.messages.length, []))
+  const messages_count = useAppStore(useShallow((s) => s.messages.length))
   const showTemplates = messages_count === 0 && input === "" && genMode === "chat"
 
   return (

@@ -38,7 +38,7 @@ export function ChatView() {
       }
     })
     return () => cancelAnimationFrame(raf)
-  }, [chat?.messages, streamTraces.length, longTaskLabel])
+  }, [chat?.messages?.length, streamTraces.length, longTaskLabel])
 
   useEffect(() => {
     const handler = (e: Event) => {
