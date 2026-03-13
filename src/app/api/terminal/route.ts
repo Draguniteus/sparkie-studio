@@ -9,6 +9,22 @@ export const runtime = 'nodejs'
 export const maxDuration = 300
 export const dynamic = 'force-dynamic'
 
+// Vite dev-server ready signals (any of these in PTY output = server is up)
+const VITE_READY_SIGNALS = [
+  'Local:',
+  'ready in',
+  'Network:',
+  'VITE v',
+]
+
+function broadcastToClients(clients: Set<WsClient>, msg: string) {
+  clients.forEach(c => {
+    if ((c as unknown as { readyState: number }).readyState === 1 /* OPEN */) {
+      try { (c as unknown as { send(m: string): void }).send(msg) } catch (_) {}
+    }
+  })
+}
+
 // POST /api/terminal — create session, send input, resize, or sync-files
 export async function POST(req: NextRequest) {
   const apiKey = process.env.E2B_API_KEY
@@ -58,8 +74,28 @@ export async function POST(req: NextRequest) {
             return sbx.files.write(filePath, f.content)
           })
         )
-        const viteConfigContent = `import { defineConfig } from 'vite'\nimport react from '@vitejs/plugin-react'\n\nexport default defineConfig({\n  plugins: [react()],\n  server: {\n    host: '0.0.0.0',\n    port: 5173,\n    allowedHosts: true,\n    strictPort: true,\n  },\n})\n`
+        const viteConfigContent = `import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    host: '0.0.0.0',
+    port: 5173,
+    allowedHosts: true,
+    strictPort: true,
+  },
+})
+`
         await sbx.files.write(`/home/user/${projectRoot}/vite.config.ts`, viteConfigContent)
+      }
+
+      // Grab preview URL upfront — E2B exposes a stable public HTTPS URL per sandbox
+      let previewUrl: string | null = null
+      try {
+        previewUrl = `https://${sbx.getHost(5173)}`
+      } catch (_) {
+        // getHost unavailable
       }
 
       const sess = {
@@ -67,19 +103,29 @@ export async function POST(req: NextRequest) {
         ptyPid: null as number | null,
         clients: new Set<WsClient>(),
         createdAt: Date.now(),
+        previewUrl,          // stored so PTY onData can broadcast it
+        previewSent: false,  // broadcast only once per session
       }
       sessions.set(sessionId, sess)
 
       // Create PTY — output broadcasts to all connected WS clients
+      // Also watches for Vite ready signal and broadcasts {type:'preview'} frame
       const pty = await sbx.pty.create({
         onData: (data: Uint8Array) => {
           const text = Buffer.from(data).toString('utf-8')
           const msg = encodeMessage('output', text)
-          sess.clients.forEach(c => {
-            if (c.readyState === 1 /* WebSocket.OPEN */) {
-              try { c.send(msg) } catch (_) {}
+          broadcastToClients(sess.clients, msg)
+
+          // Detect Vite dev-server ready — broadcast preview URL once
+          if (!sess.previewSent && sess.previewUrl) {
+            const isReady = VITE_READY_SIGNALS.some(sig => text.includes(sig))
+            if (isReady) {
+              sess.previewSent = true
+              const previewMsg = JSON.stringify({ type: 'preview', url: sess.previewUrl })
+              broadcastToClients(sess.clients, previewMsg)
+              console.log('[PTY] Vite ready detected — preview URL broadcast:', sess.previewUrl)
             }
-          })
+          }
         },
         cols: 80,
         rows: 24,
@@ -87,13 +133,6 @@ export async function POST(req: NextRequest) {
       })
 
       sess.ptyPid = pty.pid
-
-      let previewUrl: string | null = null
-      try {
-        previewUrl = `https://${sbx.getHost(5173)}`
-      } catch (_) {
-        // getHost unavailable
-      }
 
       return NextResponse.json({
         sessionId,
@@ -153,7 +192,19 @@ export async function POST(req: NextRequest) {
           return sess.sbx.files.write(filePath, f.content)
         })
       )
-      const viteConfig = `import { defineConfig } from 'vite'\nimport react from '@vitejs/plugin-react'\n\nexport default defineConfig({\n  plugins: [react()],\n  server: {\n    host: '0.0.0.0',\n    port: 5173,\n    allowedHosts: true,\n    strictPort: true,\n  },\n})\n`
+      const viteConfig = `import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    host: '0.0.0.0',
+    port: 5173,
+    allowedHosts: true,
+    strictPort: true,
+  },
+})
+`
       await sess.sbx.files.write(`/home/user/${projectRoot}/vite.config.ts`, viteConfig)
     }
     return NextResponse.json({ ok: true, synced: files.length })

@@ -63,7 +63,6 @@ export function Terminal() {
   const sessionRef  = useRef<string>('')
   const mountedRef  = useRef(false)
   const prevOutputRef        = useRef('')
-  const serverUrlDetectedRef = useRef(false)
   const eagerPreviewUrlRef   = useRef<string | null>(null)
 
   const [connected, setConnected] = useState(false)
@@ -136,15 +135,17 @@ export function Terminal() {
 
   // ─── core WS connection ───────────────────────────────────────────────────
   //
-  // KEY RULE (Grok + Qwen consensus):
+  // CRITICAL RULE (Grok + Qwen consensus):
   //   NEVER call Zustand setters or send WS frames from ws.onopen.
   //   onopen fires inside a React render cycle; any setState() there
-  //   triggers a synchronous re-render → component remount → cleanup
-  //   calls wsRef.current.close() → immediate 1006.
+  //   triggers a re-render → component remount → cleanup closes ws → 1006.
   //
-  //   All state updates + the initial command are deferred to
-  //   ws.onmessage when the server sends { type: 'connected' }.
+  //   ALL state updates (setConnected, setE2bMode) + initial command send
+  //   happen only in ws.onmessage when server sends {type:'connected'}.
   //   By that point the socket is fully stable and React is idle.
+  //
+  //   Additionally: when server sends {type:'preview', url}, we update
+  //   previewUrl + containerStatus + switch IDE tab — all from onmessage.
   // ─────────────────────────────────────────────────────────────────────────
   function openWebSocket(
     sessionId: string,
@@ -161,16 +162,16 @@ export function Terminal() {
     let retries = retryCount
     const maxRetries = 5
 
-    // ── onopen: init xterm wiring ONLY — NO state, NO sends ──────────────
+    // ── onopen: wire xterm listeners ONLY — NO state, NO sends ──────────────
     ws.onopen = () => {
       console.log('[Terminal] ws.onopen — socket open, waiting for server connected frame')
-      // Wire up keyboard input → WS (safe: just attaches a listener, no re-render)
+      // Wire keyboard input → WS (safe: attaches a listener, no re-render)
       term.onData((data: string) => {
         if (wsRef.current?.readyState === WebSocket.OPEN) {
           wsRef.current.send(JSON.stringify({ type: 'input', data }))
         }
       })
-      // Wire up resize → WS (safe: same reason)
+      // Wire resize → WS (safe: same reason)
       term.onResize(({ cols, rows }: { cols: number; rows: number }) => {
         if (wsRef.current?.readyState === WebSocket.OPEN) {
           wsRef.current.send(JSON.stringify({ type: 'resize', cols, rows }))
@@ -178,16 +179,16 @@ export function Terminal() {
       })
     }
 
-    // ── onmessage: ALL state updates + initial command happen here ────────
+    // ── onmessage: ALL state updates happen here ─────────────────────────────
     ws.onmessage = (e) => {
-      let payload: { type: string; data: string } | null = null
+      let payload: { type: string; data?: string; url?: string } | null = null
       try { payload = JSON.parse(e.data) } catch (_) { return }
       if (!payload) return
 
-      const { type, data } = payload
+      const { type, data, url } = payload
 
+      // ── Shell connected — safe to update React state now ──
       if (type === 'connected') {
-        // Socket is fully stable — safe to update Zustand state now
         console.log('[Terminal] received connected — shell ready')
         if (mountedRef.current) {
           setConnected(true)
@@ -195,7 +196,7 @@ export function Terminal() {
         }
         term.write('\x1b[32m  [E2B]\x1b[0m Shell ready\r\n\r\n')
         fitRef.current?.fit()
-        // Send the initial command
+        // Send the initial dev command
         if (cmd && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'input', data: cmd + '\r' }))
           term.write('\r\n\x1b[33m  [Sparkie]\x1b[0m Running: ' + cmd + '\r\n')
@@ -203,24 +204,24 @@ export function Terminal() {
         return
       }
 
-      if (type === 'ping') return  // ignore heartbeats
-
-      const raw = data ?? ''
-      term.write(raw)
-
-      if (!serverUrlDetectedRef.current && eagerPreviewUrlRef.current) {
-        if (raw.includes('ready in') || raw.includes('Local:') || raw.includes('Network:')) {
-          serverUrlDetectedRef.current = true
-          const url = eagerPreviewUrlRef.current
+      // ── Vite ready — server broadcasts preview URL ──
+      // route.ts PTY onData detects 'Local:' / 'ready in' and sends this frame
+      if (type === 'preview' && url) {
+        console.log('[Terminal] received preview URL:', url)
+        if (mountedRef.current) {
           setPreviewUrl(url)
           setContainerStatus('ready')
-          setIDETab('preview')
-          term.write('\r\n\x1b[32m  [Sparkie]\x1b[0m Preview ready ⚡ ' + url + '\r\n')
+          setIDETab('preview')   // auto-switch to preview tab
         }
+        term.write('\r\n\x1b[32m  [Sparkie]\x1b[0m Preview ready ⚡ ' + url + '\r\n')
+        return
       }
-      if (raw.includes('ERROR') || raw.includes('error TS') || raw.includes('ENOENT')) {
-        term.write('\r\n\x1b[31m  [Sparkie]\x1b[0m Build error — check above ↑\r\n')
-      }
+
+      if (type === 'ping') return  // ignore heartbeats
+
+      // ── PTY output — write directly to xterm ──
+      const raw = data ?? ''
+      if (raw) term.write(raw)
     }
 
     ws.onclose = (e) => {
@@ -241,7 +242,7 @@ export function Terminal() {
     return ws
   }
 
-  // ─── auto-run: fires when a build completes (pendingRunCommand set) ───────
+  // ─── auto-run: fires when a build completes (pendingRunCommand set) ────────
   useEffect(() => {
     if (!pendingRunCommand) return
 
@@ -249,7 +250,6 @@ export function Terminal() {
     if (connected && wsRef.current?.readyState === WebSocket.OPEN) {
       const cmd = pendingRunCommand
       setPendingRunCommand(null)
-      serverUrlDetectedRef.current = false
       setContainerStatus('installing')
       setTimeout(() => {
         if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -265,7 +265,6 @@ export function Terminal() {
 
     const cmd = pendingRunCommand
     setPendingRunCommand(null)
-    serverUrlDetectedRef.current = false
     setContainerStatus('installing')
 
     const currentChat = useAppStore.getState().chats.find(
@@ -296,10 +295,10 @@ export function Terminal() {
           setContainerStatus('error')
           return
         }
-        const data = await res.json() as { sessionId: string; wsUrl: string; previewUrl?: string | null }
-        sessionRef.current = data.sessionId
-        if (data.previewUrl) eagerPreviewUrlRef.current = data.previewUrl
-        openWebSocket(data.sessionId, cmd, term)
+        const d = await res.json() as { sessionId: string; wsUrl: string; previewUrl?: string | null }
+        sessionRef.current = d.sessionId
+        if (d.previewUrl) eagerPreviewUrlRef.current = d.previewUrl
+        openWebSocket(d.sessionId, cmd, term)
       })
       .catch(err => {
         clearTimeout(fetchTimeout)
@@ -318,7 +317,7 @@ export function Terminal() {
     return () => ro.disconnect()
   }, [])
 
-  // ─── UI helpers ───────────────────────────────────────────────────────────
+  // ─── UI helpers ──────────────────────────────────────────────────────────
   function clearTerminal() {
     xtermRef.current?.clear()
     prevOutputRef.current = ''
@@ -330,7 +329,6 @@ export function Terminal() {
     setE2bMode(false)
     sessionRef.current          = ''
     eagerPreviewUrlRef.current  = null
-    serverUrlDetectedRef.current = false
     const term = xtermRef.current
     if (!term) return
     term.clear()
@@ -348,10 +346,10 @@ export function Terminal() {
     })
       .then(async res => {
         if (!res.ok) { term.write('\r\n\x1b[31m  [E2B] Reconnect failed\x1b[0m\r\n'); return }
-        const data = await res.json() as { sessionId: string; wsUrl: string; previewUrl?: string | null }
-        sessionRef.current = data.sessionId
-        if (data.previewUrl) eagerPreviewUrlRef.current = data.previewUrl
-        openWebSocket(data.sessionId, '', term)
+        const d = await res.json() as { sessionId: string; wsUrl: string; previewUrl?: string | null }
+        sessionRef.current = d.sessionId
+        if (d.previewUrl) eagerPreviewUrlRef.current = d.previewUrl
+        openWebSocket(d.sessionId, '', term)
       })
       .catch(() => term.write('\r\n\x1b[31m  [E2B] Reconnect error\x1b[0m\r\n'))
   }
