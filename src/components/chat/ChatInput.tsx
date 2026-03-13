@@ -1440,7 +1440,7 @@ export function ChatInput() {
             setContainerStatus('installing')
             const nodeWrapPhrases = [
               `Installing dependencies and building... preview will load automatically ✨`,
-              `Running \`${startCmd}\` in the cloud — preview loads when it's ready 🚀`,
+              `Running `${startCmd}` in the cloud — preview loads when it's ready 🚀`,
               `Building in E2B sandbox — hang tight, iframe preview coming up 🔥`,
             ]
             updateMessage(chatId, ackMsgId, {
@@ -1449,13 +1449,13 @@ export function ChatInput() {
             })
             // Determine build command — always use static build + npx serve
             const buildCmd = projectRoot
-              ? \`cd \${projectRoot} && npm install && npm run build 2>&1 && npx serve -s dist -l 8080 --no-clipboard 2>&1\`
+              ? `cd ${projectRoot} && npm install && npm run build 2>&1 && npx serve -s dist -l 8080 --no-clipboard 2>&1`
               : 'npm install && npm run build 2>&1 && npx serve -s dist -l 8080 --no-clipboard 2>&1'
             // Flatten files for E2B upload
             type FNode2 = import('@/store/appStore').FileNode
             function flattenWithPaths2(nodes: FNode2[], prefix = ''): { path: string; content: string }[] {
               return nodes.flatMap(n => {
-                const p = prefix ? \`\${prefix}/\${n.name}\` : n.name
+                const p = prefix ? `${prefix}/${n.name}` : n.name
                 if (n.type === 'folder' || n.type === 'archive') return flattenWithPaths2(n.children ?? [], p)
                 return n.content ? [{ path: p, content: n.content }] : []
               })
@@ -1480,7 +1480,7 @@ export function ChatInput() {
                 let attempts = 0
                 const poll = async () => {
                   try {
-                    const logRes = await fetch(\`/api/logs?sessionId=\${sessionId}\`)
+                    const logRes = await fetch(`/api/logs?sessionId=${sessionId}`)
                     if (logRes.ok) {
                       const logData = await logRes.json() as { previewUrl?: string | null; buildDone?: boolean }
                       if (logData.previewUrl) {
