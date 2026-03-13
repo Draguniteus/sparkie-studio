@@ -1482,17 +1482,28 @@ export function ChatInput() {
                   try {
                     const logRes = await fetch(`/api/logs?sessionId=${sessionId}`)
                     if (logRes.ok) {
-                      const logData = await logRes.json() as { previewUrl?: string | null; buildDone?: boolean }
+                      const logData = await logRes.json() as { previewUrl?: string | null; buildDone?: boolean; logs?: string[] }
+                      // Show live log tail so user sees build progress
+                      if (logData.logs && logData.logs.length > 0) {
+                        const tail = logData.logs.slice(-6).join('').replace(/\x1b\[[0-9;]*m/g, '').trim()
+                        if (tail) {
+                          updateMessage(chatId, ackMsgId, {
+                            content: `Building in E2B sandbox...\n\`\`\`\n${tail.slice(-300)}\n\`\`\``,
+                            isStreaming: true,
+                          })
+                        }
+                      }
                       if (logData.previewUrl) {
                         setPreviewUrl(logData.previewUrl)
                         setContainerStatus('ready')
                         setIDETab('preview')
+                        updateMessage(chatId, ackMsgId, { content: `Preview ready! 🚀`, isStreaming: false })
                         return
                       }
                     }
                   } catch { /* ignore */ }
                   attempts++
-                  if (attempts < 90) setTimeout(poll, 2000)
+                  if (attempts < 150) setTimeout(poll, 2000)
                   else setContainerStatus('error')
                 }
                 setTimeout(poll, 3000)
