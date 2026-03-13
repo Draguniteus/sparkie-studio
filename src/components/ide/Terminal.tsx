@@ -108,6 +108,19 @@ export function Terminal() {
       xtermRef.current = term
       fitRef.current   = fit
 
+      // Register onData/onResize ONCE — never inside ws.onopen (would stack on reconnects).
+      // Guard with connectedRef so we only send when WS is live.
+      term.onData((data: string) => {
+        if (connectedRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({ type: 'input', data }))
+        }
+      })
+      term.onResize(({ cols, rows }: { cols: number; rows: number }) => {
+        if (connectedRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({ type: 'resize', cols, rows }))
+        }
+      })
+
       // Re-fire any command that arrived before xterm was ready
       const alreadyPending = useAppStore.getState().pendingRunCommand
       if (alreadyPending) {
@@ -169,19 +182,12 @@ export function Terminal() {
     let retries = retryCount
     const maxRetries = 5
 
-    // wire xterm listeners ONLY on open — NO state, NO sends
+    // ws.onopen: just log — do NOT register term.onData here.
+    // term.onData stacks on every reconnect and fires during term.write() calls,
+    // sending garbage JSON to the server which closes the socket (1006).
+    // onData/onResize are registered once after xterm init (see useEffect below).
     ws.onopen = () => {
       console.log('[Terminal] ws.onopen — socket open, waiting for server connected frame')
-      term.onData((data: string) => {
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({ type: 'input', data }))
-        }
-      })
-      term.onResize(({ cols, rows }: { cols: number; rows: number }) => {
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({ type: 'resize', cols, rows }))
-        }
-      })
     }
 
     // ALL state updates happen in onmessage
