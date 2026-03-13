@@ -1426,12 +1426,142 @@ export function ChatInput() {
             }
           } catch { hasDevScript = true /* assume dev project if package.json parse fails */ }
 
-          if (hasDevScript) {
-            // ── Qwen model: direct E2B create + polling — NO WebSocket ────────
-            // The WebSocket (Terminal) had a persistent 1006 race on DO nginx.
-            // Instead: POST /api/terminal with action='create' + cmd,
-            // then poll /api/logs every second until previewUrl appears.
-            // Preview.tsx already shows the live iframe when containerStatus='ready'.
+          // ── CDN fast-path detection ───────────────────────────────────────
+          // Deps that ship on esm.sh and work with Babel standalone in-browser
+          const CDN_SAFE_DEPS = new Set([
+            'react', 'react-dom', 'three', '@react-three/fiber', '@react-three/drei',
+            'framer-motion', 'lucide-react', '@heroicons/react', 'clsx', 'classnames',
+            'zustand', 'jotai', 'date-fns', 'lodash', 'axios', 'zod',
+            'tailwind-merge', 'react-router-dom', 'react-router',
+          ])
+          let isCdnCompatible = false
+          let pkgDeps: Record<string,string> = {}
+          try {
+            if (pkgFile?.content) {
+              const pkg2 = JSON.parse(pkgFile.content) as { dependencies?: Record<string,string>; devDependencies?: Record<string,string> }
+              pkgDeps = { ...(pkg2.dependencies ?? {}), ...(pkg2.devDependencies ?? {}) }
+              const runtimeDeps = Object.keys(pkgDeps).filter(k =>
+                !k.startsWith('@types/') && k !== 'typescript' && k !== 'vite' && !k.startsWith('@vitejs/')
+              )
+              isCdnCompatible = runtimeDeps.length > 0 && runtimeDeps.every(k => CDN_SAFE_DEPS.has(k))
+            }
+          } catch { isCdnCompatible = false }
+
+          if (isCdnCompatible && hasDevScript) {
+            // ── CDN fast path — no E2B, no npm, instant iframe ───────────────
+            // Generate a single index.html with importmap + Babel standalone.
+            // All .tsx/.ts files are bundled in-browser via @babel/standalone UMD.
+            type FNodeCdn = import('@/store/appStore').FileNode
+            function flattenCdn(nodes: FNodeCdn[], prefix = ''): { path: string; content: string }[] {
+              return nodes.flatMap(n => {
+                const p = prefix ? `${prefix}/${n.name}` : n.name
+                if (n.type === 'folder' || n.type === 'archive') return flattenCdn(n.children ?? [], p)
+                return n.content ? [{ path: p, content: n.content }] : []
+              })
+            }
+            const cdnState = useAppStore.getState()
+            const cdnChat = cdnState.chats.find(c => c.id === cdnState.currentChatId)
+            const cdnFiles = cdnChat ? flattenCdn(cdnChat.files) : []
+
+            // Build importmap — map each dep to esm.sh CDN URL
+            const importMapEntries: Record<string,string> = {
+              'react': 'https://esm.sh/react@18',
+              'react/jsx-runtime': 'https://esm.sh/react@18/jsx-runtime',
+              'react-dom': 'https://esm.sh/react-dom@18',
+              'react-dom/client': 'https://esm.sh/react-dom@18/client',
+            }
+            const hasThree = Object.keys(pkgDeps).some(k => k === 'three' || k === '@react-three/fiber' || k === '@react-three/drei')
+            if (hasThree) {
+              importMapEntries['three'] = 'https://esm.sh/three@0.160'
+              importMapEntries['@react-three/fiber'] = 'https://esm.sh/@react-three/fiber@8'
+              importMapEntries['@react-three/drei'] = 'https://esm.sh/@react-three/drei@9'
+            }
+            for (const dep of Object.keys(pkgDeps)) {
+              if (dep.startsWith('@types/') || dep === 'vite' || dep.startsWith('@vitejs/') || dep === 'typescript') continue
+              if (!importMapEntries[dep]) {
+                const ver = (pkgDeps[dep] ?? 'latest').replace(/[\^~>=<]/g, '')
+                importMapEntries[dep] = `https://esm.sh/${dep}@${ver}`
+              }
+            }
+
+            // Virtual module map for all .tsx/.ts/.jsx/.js source files
+            const vmodules: Record<string,string> = {}
+            for (const f of cdnFiles) {
+              if (/\.(tsx|jsx|ts|js)$/.test(f.path) && !f.path.includes('node_modules') && !f.path.endsWith('.config.ts') && !f.path.endsWith('.config.js')) {
+                const bare = './' + f.path.replace(/^[^/]+\//, '').replace(/\.(tsx|jsx|ts)$/, '')
+                vmodules[bare] = f.content
+                vmodules[bare + '.tsx'] = f.content
+                vmodules[bare + '.jsx'] = f.content
+                vmodules[bare + '.ts'] = f.content
+                vmodules['/' + f.path] = f.content
+                vmodules[f.path] = f.content
+              }
+            }
+
+            // Find entry: App.tsx preferred, then main.tsx
+            const appFile = cdnFiles.find(f => /App\.(tsx|jsx)$/.test(f.path))
+              ?? cdnFiles.find(f => /main\.(tsx|jsx)$/.test(f.path))
+              ?? cdnFiles.find(f => /\.(tsx|jsx)$/.test(f.path) && !f.path.includes('/'))
+
+            const cssContent = cdnFiles.filter(f => f.path.endsWith('.css') && !f.path.includes('node_modules')).map(f => f.content).join('
+')
+            const importMapJson = JSON.stringify({ imports: importMapEntries }, null, 2)
+            const vmodulesJson = JSON.stringify(vmodules)
+            const appSrcJson = appFile ? JSON.stringify(appFile.content) : 'null'
+
+            const cdnHtml = `<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<script type="importmap">${importMapJson}<\/script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"><\/script>
+<style>*{box-sizing:border-box}body{margin:0;background:#0a0a0a;color:#e2e8f0;font-family:system-ui,sans-serif}${cssContent}<\/style>
+<\/head><body><div id="root"><\/div>
+<script>
+const __VM = ${vmodulesJson};
+const __CACHE = {};
+function __require(id) {
+  const norm = [id, id+'.tsx', id+'.jsx', id+'.ts', id+'.js', './'+id.replace(/^\.\//,''), './'+id.replace(/^\.\//,'')+'.tsx'];
+  for (const n of norm) { if (__VM[n]) { return __exec(n, __VM[n]); } }
+  return {};
+}
+function __exec(id, src) {
+  if (__CACHE[id]) return __CACHE[id];
+  __CACHE[id] = {};
+  try {
+    const out = Babel.transform(src, { presets: [['react',{runtime:'classic'}],['typescript',{allExtensions:true,isTSX:true}]], filename: id }).code;
+    // eslint-disable-next-line no-new-func
+    const fn = new Function('require','module','exports','React','ReactDOM', out);
+    const mod = { exports: __CACHE[id] };
+    fn(__require, mod, mod.exports, window.__R, window.__RD);
+    __CACHE[id] = mod.exports;
+  } catch(e) { console.error('[CDN]',id,e.message); }
+  return __CACHE[id];
+}
+Promise.all([
+  import('react').then(m=>{window.__R=m.default??m}),
+  import('react-dom/client').then(m=>{window.__RD=m.default??m}),
+  ${hasThree ? "import('three').then(m=>{window.THREE=m.default??m;window.__THREE=window.THREE})," : ''}
+]).then(()=>{
+  const appSrc = ${appSrcJson};
+  if (!appSrc) { document.getElementById('root').textContent='No App component found'; return; }
+  const mod = __exec('./App.tsx', appSrc);
+  const App = mod.default ?? mod.App ?? Object.values(mod).find(v=>typeof v==='function');
+  if (!App) { document.getElementById('root').textContent='No default export'; return; }
+  window.__RD.createRoot(document.getElementById('root')).render(window.__R.createElement(App));
+}).catch(e=>{
+  document.getElementById('root').innerHTML='<pre style="color:#f87171;padding:16px;white-space:pre-wrap">'+e.message+'<\/pre>';
+});
+<\/script><\/body><\/html>`
+
+            // Write synthetic index.html → Preview.tsx srcdoc path renders it instantly
+            upsertFile('index.html', cdnHtml, 'html')
+            setPreviewUrl(null)
+            setContainerStatus('ready')
+            setIDETab('preview')
+            if (buildMsgId) updateMessage(chatId, buildMsgId, { content: `✨ Built ${fileNames}`, isStreaming: false })
+            updateMessage(chatId, ackMsgId, { content: `Preview ready! ⚡`, isStreaming: false })
+
+          } else if (hasDevScript) {
+            // ── E2B cloud build (fallback for non-CDN deps) ───────────────────
             if (buildMsgId) updateMessage(chatId, buildMsgId, {
               content: `✨ Built ${fileNames} — starting dev server...`,
               isStreaming: false,
