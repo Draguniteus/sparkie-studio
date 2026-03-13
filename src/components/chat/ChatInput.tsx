@@ -1429,10 +1429,35 @@ export function ChatInput() {
           // ── CDN fast-path detection ───────────────────────────────────────
           // Deps that ship on esm.sh and work with Babel standalone in-browser
           const CDN_SAFE_DEPS = new Set([
-            'react', 'react-dom', 'three', '@react-three/fiber', '@react-three/drei',
-            'framer-motion', 'lucide-react', '@heroicons/react', 'clsx', 'classnames',
-            'zustand', 'jotai', 'date-fns', 'lodash', 'axios', 'zod',
-            'tailwind-merge', 'react-router-dom', 'react-router',
+            // Core React
+            'react', 'react-dom', 'react-router-dom', 'react-router',
+            // 3D / Graphics
+            'three', '@react-three/fiber', '@react-three/drei',
+            // Animation
+            'framer-motion', 'react-spring', '@react-spring/web', '@react-spring/three',
+            // UI component libs
+            'lucide-react', '@heroicons/react', '@radix-ui/react-dialog',
+            '@radix-ui/react-dropdown-menu', '@radix-ui/react-tooltip', '@radix-ui/react-popover',
+            '@radix-ui/react-select', '@radix-ui/react-checkbox', '@radix-ui/react-switch',
+            '@radix-ui/react-tabs', '@radix-ui/react-accordion', '@radix-ui/react-slider',
+            // Charts / data viz
+            'recharts', 'victory', 'd3', '@visx/group', '@visx/shape', '@visx/scale',
+            'chart.js', 'react-chartjs-2',
+            // Utility
+            'clsx', 'classnames', 'tailwind-merge', 'date-fns', 'lodash', 'axios',
+            'zod', 'uuid', 'nanoid', 'immer',
+            // State
+            'zustand', 'jotai', 'valtio', 'recoil',
+            // Forms
+            'react-hook-form', '@hookform/resolvers',
+            // Misc React utils
+            'react-query', '@tanstack/react-query', '@tanstack/react-table',
+            'react-icons', 'react-hot-toast', 'sonner', 'react-toastify',
+            'react-use', 'ahooks',
+            // Physics
+            '@react-three/cannon', '@react-three/rapier',
+            // Math
+            'mathjs', 'numeric',
           ])
           let isCdnCompatible = false
           let pkgDeps: Record<string,string> = {}
@@ -1476,8 +1501,9 @@ export function ChatInput() {
               importMapEntries['@react-three/fiber'] = 'https://esm.sh/@react-three/fiber@8'
               importMapEntries['@react-three/drei'] = 'https://esm.sh/@react-three/drei@9'
             }
+            const hasTailwind = Object.keys(pkgDeps).some(k => k === 'tailwindcss')
             for (const dep of Object.keys(pkgDeps)) {
-              if (dep.startsWith('@types/') || dep === 'vite' || dep.startsWith('@vitejs/') || dep === 'typescript') continue
+              if (dep.startsWith('@types/') || dep === 'vite' || dep.startsWith('@vitejs/') || dep === 'typescript' || dep === 'tailwindcss' || dep === 'autoprefixer' || dep === 'postcss') continue
               if (!importMapEntries[dep]) {
                 const ver = (pkgDeps[dep] ?? 'latest').replace(/[\^~>=<]/g, '')
                 importMapEntries[dep] = `https://esm.sh/${dep}@${ver}`
@@ -1495,6 +1521,10 @@ export function ChatInput() {
                 vmodules[bare + '.ts'] = f.content
                 vmodules['/' + f.path] = f.content
                 vmodules[f.path] = f.content
+                // @/ alias support (Vite convention: @/ = src/)
+                const srcStripped = f.path.replace(/^[^/]+\/src\//, '').replace(/^src\//, '')
+                vmodules['@/' + srcStripped.replace(/\.(tsx|jsx|ts)$/, '')] = f.content
+                vmodules['@/' + srcStripped] = f.content
               }
             }
 
@@ -1509,10 +1539,12 @@ export function ChatInput() {
             const vmodulesJson = JSON.stringify(vmodules)
             const appSrcJson = appFile ? JSON.stringify(appFile.content) : 'null'
 
+            const twScript = hasTailwind ? `<script src="https://cdn.tailwindcss.com"><\/script>` : ''
             const cdnHtml = `<!DOCTYPE html><html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <script type="importmap">${importMapJson}<\/script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"><\/script>
+${twScript}
 <style>*{box-sizing:border-box}body{margin:0;background:#0a0a0a;color:#e2e8f0;font-family:system-ui,sans-serif}${cssContent}<\/style>
 <\/head><body><div id="root"><\/div>
 <script>
@@ -1521,6 +1553,11 @@ const __CACHE = {};
 function __require(id) {
   const norm = [id, id+'.tsx', id+'.jsx', id+'.ts', id+'.js', './'+id.replace(/^\.\//,''), './'+id.replace(/^\.\//,'')+'.tsx'];
   for (const n of norm) { if (__VM[n]) { return __exec(n, __VM[n]); } }
+  // @/ alias fallback
+  if (id.startsWith('@/')) {
+    const aliasNorm = [id, id+'.tsx', id+'.jsx', id+'.ts', id+'.js'];
+    for (const n of aliasNorm) { if (__VM[n]) { return __exec(n, __VM[n]); } }
+  }
   return {};
 }
 function __exec(id, src) {
