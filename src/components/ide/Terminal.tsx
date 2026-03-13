@@ -307,7 +307,7 @@ export function Terminal() {
         setContainerStatus('error')
       })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingRunCommand, connected])
+  }, [pendingRunCommand])
 
   // ─── resize observer ──────────────────────────────────────────────────────
   useEffect(() => {
