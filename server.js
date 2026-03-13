@@ -7,10 +7,12 @@
  *   upgrade request on /api/terminal-ws before Next.js ever sees it.
  *
  * Upgrade handling:
- *   We register server.on('upgrade') BEFORE app.prepare() so our handler
- *   wins over any upgrade listener Next.js registers internally. We call
- *   wss.handleUpgrade() directly for /api/terminal-ws, then emit 'connection'.
- *   All other upgrade paths are destroyed cleanly.
+ *   We use server.prependListener('upgrade') so our handler is ALWAYS
+ *   first in the listener queue, before any listeners Next.js registers.
+ *   We call wss.handleUpgrade() directly and send the 'connected' frame
+ *   synchronously inside the callback — before emitting 'connection' —
+ *   so the DO proxy sees a data frame immediately after the handshake
+ *   and does not close the idle socket.
  *
  * Sessions sharing:
  *   Both this file and src/app/api/terminal/route.ts use the same
@@ -68,52 +70,12 @@ function startKeepalive(serverPort) {
 }
 
 /**
- * Handle a confirmed WS connection — session lookup, ping loop, message routing.
- * Called from both the upgrade handler and wss.on('connection') (belt-and-suspenders).
+ * Wire up all WS event handlers for a live socket.
+ * Called after the 'connected' frame has already been sent synchronously.
  */
-function handleWsConnection(ws, req) {
-  const { pathname, query } = parse(req.url, true)
-
-  if (pathname !== '/api/terminal-ws') {
-    console.log('[WS] unexpected path, closing:', pathname)
-    ws.close(1008, 'Not found')
-    return
-  }
-
-  const sessionId = query && query.sessionId
-  console.log('[WS] connection sessionId:', sessionId)
-  if (!sessionId) {
-    console.log('[WS] close: no sessionId')
-    try { ws.send(encodeMessage('error', 'sessionId required')) } catch (_) {}
-    ws.close(1008, 'sessionId required')
-    return
-  }
-
-  const sessions = getSessions()
-  if (!sessions) {
-    console.log('[WS] close: sessions global not ready')
-    try { ws.send(encodeMessage('error', 'Server not ready')) } catch (_) {}
-    ws.close(1011, 'Server not ready')
-    return
-  }
-
-  const sess = sessions.get(sessionId)
-  if (!sess) {
-    console.log('[WS] close: session not found. map size:', sessions.size)
-    try { ws.send(encodeMessage('error', 'Session not found')) } catch (_) {}
-    ws.close(1008, 'Session not found')
-    return
-  }
-
-  console.log('[WS] session ok, ptyPid:', sess.ptyPid)
-
+function attachWsHandlers(ws, sess, sessionId) {
   // Register client
   sess.clients.add(ws)
-
-  // Send 'connected' after one tick
-  setImmediate(() => {
-    try { ws.send(encodeMessage('connected', 'Shell ready')) } catch (_) {}
-  })
 
   // Keep-alive ping — start at 1s to survive DO proxy idle detection during npm install
   let pingCount = 0
@@ -164,30 +126,56 @@ app.prepare().then(() => {
     handle(req, res, parse(req.url, true))
   })
 
-  // Use noServer mode so we control handleUpgrade ourselves.
-  // This is critical: with { server } attached mode, Next.js may register
-  // its own 'upgrade' listener first and consume the event before ws sees it.
-  // With noServer + explicit server.on('upgrade'), we always win.
+  // noServer mode — we drive handleUpgrade ourselves so we can send the
+  // 'connected' frame synchronously before the proxy can idle-close.
   const wss = new WebSocketServer({ noServer: true })
 
-  wss.on('connection', handleWsConnection)
-
-  // Register upgrade handler BEFORE server.listen so it's first in the
-  // listener queue. Any upgrade for /api/terminal-ws is handled here;
-  // everything else is destroyed with a 400.
-  server.on('upgrade', (req, socket, head) => {
-    const { pathname } = parse(req.url, true)
+  // prependListener guarantees this runs BEFORE any listener Next.js adds.
+  server.prependListener('upgrade', (req, socket, head) => {
+    const { pathname, query } = parse(req.url, true)
     console.log('[upgrade] path:', pathname)
 
-    if (pathname === '/api/terminal-ws') {
-      console.log('[upgrade] routing to wss.handleUpgrade')
-      wss.handleUpgrade(req, socket, head, (ws) => {
-        wss.emit('connection', ws, req)
-      })
-    } else {
+    if (pathname !== '/api/terminal-ws') {
       console.log('[upgrade] unknown path, destroying socket')
       socket.destroy()
+      return
     }
+
+    const sessionId = query && query.sessionId
+    console.log('[upgrade] sessionId:', sessionId)
+
+    if (!sessionId) {
+      socket.destroy()
+      return
+    }
+
+    const sessions = getSessions()
+    if (!sessions) {
+      console.log('[upgrade] sessions global not ready')
+      socket.destroy()
+      return
+    }
+
+    const sess = sessions.get(sessionId)
+    if (!sess) {
+      console.log('[upgrade] session not found, map size:', sessions ? sessions.size : 'N/A')
+      socket.destroy()
+      return
+    }
+
+    console.log('[upgrade] session ok, ptyPid:', sess.ptyPid, '- calling handleUpgrade')
+
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      console.log('[WS] handleUpgrade complete, sending connected frame synchronously')
+
+      // Send 'connected' SYNCHRONOUSLY — before any await or setImmediate.
+      // This is the critical fix: the DO proxy sees a data frame immediately
+      // after the upgrade handshake and does not idle-close the socket.
+      try { ws.send(encodeMessage('connected', 'Shell ready')) } catch (_) {}
+
+      console.log('[WS] connected frame sent, attaching handlers for sessionId:', sessionId)
+      attachWsHandlers(ws, sess, sessionId)
+    })
   })
 
   server.listen(port, () => {

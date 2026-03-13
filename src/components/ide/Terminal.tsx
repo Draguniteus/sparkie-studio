@@ -1,4 +1,4 @@
-"use client"
+'use client'
 
 import { useEffect, useRef, useState } from 'react'
 import type { Terminal as XTermType } from '@xterm/xterm'
@@ -66,7 +66,7 @@ export function Terminal() {
   const serverUrlDetectedRef = useRef(false)
   const eagerPreviewUrlRef = useRef<string | null>(null)
 
-  // ── Load xterm + init terminal ──────────────────────────────────────────
+  // ── Load xterm + init terminal ────────────────────────────────────────────
   useEffect(() => {
     if (!termRef.current) return
 
@@ -132,7 +132,7 @@ export function Terminal() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ── Sync legacy terminalOutput → xterm (for WebContainer builds) ────────
+  // ── Sync legacy terminalOutput → xterm (for WebContainer builds) ─────────
   useEffect(() => {
     if (!xtermRef.current || e2bMode) return
     const newOutput = terminalOutput.slice(prevOutputRef.current.length)
@@ -154,18 +154,19 @@ export function Terminal() {
 
     ws.onopen = () => {
       console.log('[Terminal] WebSocket onopen – shell ready, firing cmd:', cmd)
-      // Do NOT reset wsRetries here — it's passed in via retryCount and must accumulate
+      // Do NOT reset wsRetries here – it's passed in via retryCount and must accumulate
       setConnected(true)
       setE2bMode(true)
       term.write('\x1b[32m  [E2B]\x1b[0m Shell ready\r\n\r\n')
       fitRef.current?.fit()
       if (cmd) {
-        setTimeout(() => {
-          if (wsRef.current?.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({ type: 'input', data: cmd + '\r' }))
-            term.write('\r\n\x1b[33m  [Sparkie]\x1b[0m Running: ' + cmd + '\r\n')
-          }
-        }, 300)
+        // Send immediately – do NOT delay. A 300ms gap after onopen is enough
+        // for DO App Platform's proxy to idle-close the socket before any
+        // data arrives. Fire the command as soon as the socket is OPEN.
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'input', data: cmd + '\r' }))
+          term.write('\r\n\x1b[33m  [Sparkie]\x1b[0m Running: ' + cmd + '\r\n')
+        }
       }
     }
 
@@ -183,11 +184,11 @@ export function Terminal() {
           setPreviewUrl(url)
           setContainerStatus('ready')
           setIDETab('preview')
-          term.write('\r\n\x1b[32m  [Sparkie]\x1b[0m Preview ready → ' + url + '\r\n')
+          term.write('\r\n\x1b[32m  [Sparkie]\x1b[0m Preview ready ➡ ' + url + '\r\n')
         }
       }
       if (raw.includes('ERROR') || raw.includes('error TS') || raw.includes('ENOENT')) {
-        term.write('\r\n\x1b[31m  [Sparkie]\x1b[0m Build error detected — check above ↑\r\n')
+        term.write('\r\n\x1b[31m  [Sparkie]\x1b[0m Build error detected – check above ↑\r\n')
       }
     }
 
@@ -223,7 +224,7 @@ export function Terminal() {
     return ws
   }
 
-  // ── Auto-run: execute pendingRunCommand via lazy E2B connect ────────────
+  // ── Auto-run: execute pendingRunCommand via lazy E2B connect ─────────────
   useEffect(() => {
     if (!pendingRunCommand) return
 
@@ -254,7 +255,7 @@ export function Terminal() {
     )
     const projectFiles = currentChat ? flattenWithPaths(currentChat.files) : []
 
-    term.write('\r\n\x1b[2m  Connecting to E2B sandbox…\x1b[0m\r\n')
+    term.write('\r\n\x1b[2m  Connecting to E2B sandbox\u2026\x1b[0m\r\n')
 
     const abortCtrl = new AbortController()
     const fetchTimeout = setTimeout(() => {
@@ -291,7 +292,7 @@ export function Terminal() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingRunCommand, connected])
 
-  // ── ResizeObserver ──────────────────────────────────────────────────────
+  // ── ResizeObserver ────────────────────────────────────────────────────────
   useEffect(() => {
     if (!termRef.current || !fitRef.current) return
     const ro = new ResizeObserver(() => fitRef.current?.fit())
@@ -314,7 +315,7 @@ export function Terminal() {
     const term = xtermRef.current
     if (!term) return
     term.clear()
-    term.write('\r\n\x1b[33m  Reconnecting…\x1b[0m\r\n')
+    term.write('\r\n\x1b[33m  Reconnecting\u2026\x1b[0m\r\n')
 
     const currentChat = useAppStore.getState().chats.find(
       c => c.id === useAppStore.getState().currentChatId
@@ -337,7 +338,7 @@ export function Terminal() {
   }
 
   const statusColor =
-    connected         ? 'text-[#22c55e]' :
+    connected           ? 'text-[#22c55e]' :
     containerStatus === 'error' ? 'text-[#ef4444]' :
     containerStatus === 'idle'  ? 'text-[#6b7280]' :
                                   'text-[#f59e0b]'
