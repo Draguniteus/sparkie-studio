@@ -155,6 +155,29 @@ app.prepare().then(() => {
 
     console.log('[WS] session ok, ptyPid:', sess.ptyPid)
 
+    // ── CRITICAL FIX: clear stale clients before adding new one ──────────
+    // When client reconnects (e.g. after 1006), the old WS reference is
+    // still in sess.clients. The PTY onData fires immediately (npm install
+    // output is already streaming) and broadcasts to ALL clients including
+    // the new one — before the browser WS has finished setup. This causes
+    // a burst-on-connect that silently drops the socket (1006).
+    //
+    // Solution: close + remove all existing clients first. Each session
+    // supports exactly one active client at a time (single-user IDE).
+    if (sess.clients.size > 0) {
+      console.log('[WS] clearing', sess.clients.size, 'stale client(s) before new connection')
+      for (const oldWs of sess.clients) {
+        try { oldWs.close(1000, 'Replaced by new connection') } catch (_) {}
+      }
+      sess.clients.clear()
+    }
+
+    // Disable Nagle's algorithm — ensures small frames (ping, connected)
+    // are sent immediately without buffering.
+    if (sock) {
+      try { sock.setNoDelay(true) } catch (_) {}
+    }
+
     // Send RFC 6455 protocol-level ping FIRST — signals to DO proxy that
     // this is an active WS connection before we send any application data.
     try { ws.ping() } catch (_) {}
@@ -168,7 +191,20 @@ app.prepare().then(() => {
     console.log('[WS] post-send readyState:', ws.readyState,
       '| socket.writable:', sock ? sock.writable : 'N/A')
 
-    attachWsHandlers(ws, sess, sessionId)
+    // ── Defer handler attachment by one tick ─────────────────────────────
+    // Gives the browser WS implementation time to finish its own setup
+    // after receiving the 'connected' frame before we start streaming
+    // PTY output to it. Without this, a PTY burst (e.g. npm install
+    // stdout already buffered) arrives in the same event loop tick as
+    // the connected frame and can race with browser WS state machine.
+    setImmediate(() => {
+      if (ws.readyState !== ws.OPEN) {
+        console.log('[WS] socket closed before handler attach, skipping')
+        return
+      }
+      attachWsHandlers(ws, sess, sessionId)
+      console.log('[WS] handlers attached, client added to sess.clients')
+    })
   })
 
   server.listen(port, () => {
