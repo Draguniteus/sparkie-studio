@@ -200,20 +200,18 @@ export function Terminal() {
 
       if (type === 'connected') {
         console.log('[Terminal] received connected — shell ready')
-        // Update refs immediately — no re-render triggered.
         connectedRef.current = true
         e2bModeRef.current   = true
         term.write('\x1b[32m  [E2B]\x1b[0m Shell ready\r\n\r\n')
         fitRef.current?.fit()
-        // Send the command FIRST, then update UI state.
-        // Calling setState before ws.send() would schedule a React re-render
-        // whose cleanup function closes wsRef.current — killing the socket.
-        if (cmd && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'input', data: cmd + '\r' }))
-          term.write('\r\n\x1b[33m  [Sparkie]\x1b[0m Running: ' + cmd + '\r\n')
-        }
-        // Update badge state AFTER send — re-render is now safe.
-        if (mountedRef.current) setWsStatus('live')
+        // Grok patch: delay state setters by 300ms so React re-render
+        // cannot race with WS and close the socket (1006).
+        // PTY is auto-started server-side via create POST — no client send needed.
+        setTimeout(() => {
+          if (!mountedRef.current) return
+          setWsStatus('live')
+          setContainerStatus('installing')
+        }, 300)
         return
       }
 

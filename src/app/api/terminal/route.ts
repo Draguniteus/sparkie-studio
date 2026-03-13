@@ -10,7 +10,7 @@ export const maxDuration = 300
 export const dynamic = 'force-dynamic'
 
 // Vite dev-server ready signals
-const VITE_READY_SIGNALS = ['Local:', 'ready in', 'Network:', 'VITE v']
+const VITE_READY_SIGNALS = ['Local:', 'ready in', 'Network:', 'VITE v', 'Serving!', 'Accepting connections', 'http://0.0.0.0:8080']
 
 function broadcastToClients(clients: Set<WsClient>, msg: string) {
   clients.forEach(c => {
@@ -97,7 +97,9 @@ export default defineConfig({
       // This eliminates the need for the client to send {type:'input'} over WS —
       // which DO's nginx proxy was swallowing (no [WS] pong received or message type
       // logs ever appeared, confirming client→server WS frames never reached server).
-      const createCmd = body.cmd ?? ''
+      // Grok/Qwen recommendation: static build + npx serve (no long-running dev server).
+      const rawCmd = body.cmd ?? ''
+      const createCmd = rawCmd || 'npm install && npm run build 2>&1 && npx serve -s dist -l 8080 --no-clipboard 2>&1'
       if (createCmd) {
         try {
           const pty = await sbx.pty.create({
