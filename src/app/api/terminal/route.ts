@@ -29,7 +29,8 @@ export async function POST(req: NextRequest) {
   const isInternal = req.headers.get('x-internal-call') === 'terminal-start'
 
   if (!isInternal) {
-    const authSession = await getServerSession(authOptions)
+    let authSession = null
+    try { authSession = await getServerSession(authOptions) } catch (_) {}
     if (!authSession?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -40,7 +41,7 @@ export async function POST(req: NextRequest) {
     cmd?: string
     cols?: number
     rows?: number
-    files?: { name: string; content: string }[]
+    files?: { name?: string; path?: string; content: string }[]
   }
 
   // ── CREATE: sandbox + file write only. NO PTY. ──────────────────────────
@@ -52,21 +53,21 @@ export async function POST(req: NextRequest) {
 
       const files = body.files ?? []
       if (files.length > 0) {
-        const firstNested = files.find(f => f.name.includes('/'))
+        const firstNested = files.find(f => (f.name ?? f.path ?? '').includes('/'))
         const projectRoot = firstNested ? firstNested.name.split('/')[0] : 'project'
         const dirs = new Set<string>()
         files.forEach(f => {
-          const fullPath = f.name.startsWith(projectRoot + '/')
-            ? `/home/user/${f.name}`
-            : `/home/user/${projectRoot}/${f.name}`
+          const fullPath = (f.name ?? f.path ?? '').startsWith(projectRoot + '/')
+            ? `/home/user/${(f.name ?? f.path ?? '')}`
+            : `/home/user/${projectRoot}/${(f.name ?? f.path ?? '')}`
           dirs.add(fullPath.substring(0, fullPath.lastIndexOf('/')))
         })
         await sbx.commands.run(`mkdir -p ${[...dirs].join(' ')}`)
         await Promise.all(
           files.map(f => {
-            const filePath = f.name.startsWith(projectRoot + '/')
-              ? `/home/user/${f.name}`
-              : `/home/user/${projectRoot}/${f.name}`
+            const filePath = (f.name ?? f.path ?? '').startsWith(projectRoot + '/')
+              ? `/home/user/${(f.name ?? f.path ?? '')}`
+              : `/home/user/${projectRoot}/${(f.name ?? f.path ?? '')}`
             return sbx.files.write(filePath, f.content)
           })
         )
@@ -211,21 +212,21 @@ export default defineConfig({
     if (!sess) return NextResponse.json({ error: 'Session not found' }, { status: 404 })
     const files = body.files ?? []
     if (files.length > 0) {
-      const firstNested = files.find(f => f.name.includes('/'))
+      const firstNested = files.find(f => (f.name ?? f.path ?? '').includes('/'))
       const projectRoot = firstNested ? firstNested.name.split('/')[0] : 'project'
       const syncDirs = new Set<string>()
       files.forEach(f => {
-        const fullPath = f.name.startsWith(projectRoot + '/')
-          ? `/home/user/${f.name}`
-          : `/home/user/${projectRoot}/${f.name}`
+        const fullPath = (f.name ?? f.path ?? '').startsWith(projectRoot + '/')
+          ? `/home/user/${(f.name ?? f.path ?? '')}`
+          : `/home/user/${projectRoot}/${(f.name ?? f.path ?? '')}`
         syncDirs.add(fullPath.substring(0, fullPath.lastIndexOf('/')))
       })
       await sess.sbx.commands.run(`mkdir -p ${[...syncDirs].join(' ')}`)
       await Promise.all(
         files.map(f => {
-          const filePath = f.name.startsWith(projectRoot + '/')
-            ? `/home/user/${f.name}`
-            : `/home/user/${projectRoot}/${f.name}`
+          const filePath = (f.name ?? f.path ?? '').startsWith(projectRoot + '/')
+            ? `/home/user/${(f.name ?? f.path ?? '')}`
+            : `/home/user/${projectRoot}/${(f.name ?? f.path ?? '')}`
           return sess.sbx.files.write(filePath, f.content)
         })
       )
