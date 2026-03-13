@@ -52,7 +52,10 @@ function startKeepalive(serverPort) {
 }
 
 function attachWsHandlers(ws, sess, sessionId) {
-  sess.clients.add(ws)
+  // NOTE: sess.clients.add(ws) is intentionally NOT called here.
+  // The caller adds ws to sess.clients only AFTER the connected frame
+  // is sent and the event loop has cycled — preventing the PTY onData
+  // burst from hitting a brand-new socket (the root cause of 1006).
 
   // Adaptive ping: fast (1s) during npm install window, then backs off to 5s.
   // Prevents DO proxy from closing an idle socket mid-install.
@@ -213,6 +216,17 @@ app.prepare().then(() => {
     // Send connected frame.
     try { ws.send(encodeMessage('connected', 'Shell ready')) } catch (_) {}
     console.log('[WS] connected frame sent')
+
+    // ── BURST FIX: add client to sess.clients AFTER connected frame ──────
+    // The PTY onData is already streaming (npm install running). If we add
+    // ws to sess.clients before the connected frame, the PTY burst hits the
+    // infant socket and DO nginx drops it with 1006.
+    // Delay: 100ms lets the connected frame flush and the socket settle.
+    setTimeout(() => {
+      if (ws.readyState !== ws.OPEN) return  // socket died already — skip
+      sess.clients.add(ws)
+      console.log('[WS] client added to sess.clients after 100ms delay — PTY burst window closed')
+    }, 100)
 
     // ── Auto-start PTY if cmd was pre-loaded via create action ──────────
     // DO's nginx proxy swallows client→server WS frames on first connect,
