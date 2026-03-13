@@ -202,33 +202,26 @@ app.prepare().then(() => {
       try { sock.setNoDelay(true) } catch (_) {}
     }
 
-    // Send RFC 6455 protocol-level ping FIRST — signals to DO proxy that
-    // this is an active WS connection before we send any application data.
+    // ── Attach handlers FIRST, then send connected ──────────────────────
+    // Critical ordering: ws.on('message') must be registered BEFORE we
+    // send the 'connected' frame. The client responds to 'connected' by
+    // immediately sending {type:'input', data: cmd}. If handlers aren't
+    // attached yet (e.g. deferred with setImmediate), that first message
+    // arrives with no listener → silently dropped → socket closes (1006).
+    attachWsHandlers(ws, sess, sessionId)
+    console.log('[WS] handlers attached, client added to sess.clients')
+
+    // Send RFC 6455 protocol-level ping — keeps DO proxy aware this is WS.
     try { ws.ping() } catch (_) {}
     console.log('[WS] protocol ping sent')
 
-    // Send connected frame — first application message to client.
+    // Send connected frame — client responds with {type:'input'} immediately.
+    // Handlers are already registered above, so the message will be received.
     try { ws.send(encodeMessage('connected', 'Shell ready')) } catch (_) {}
     console.log('[WS] connected frame sent')
 
-    // Log socket state again after sends
     console.log('[WS] post-send readyState:', ws.readyState,
       '| socket.writable:', sock ? sock.writable : 'N/A')
-
-    // ── Defer handler attachment by one tick ─────────────────────────────
-    // Gives the browser WS implementation time to finish its own setup
-    // after receiving the 'connected' frame before we start streaming
-    // PTY output to it. Without this, a PTY burst (e.g. npm install
-    // stdout already buffered) arrives in the same event loop tick as
-    // the connected frame and can race with browser WS state machine.
-    setImmediate(() => {
-      if (ws.readyState !== ws.OPEN) {
-        console.log('[WS] socket closed before handler attach, skipping')
-        return
-      }
-      attachWsHandlers(ws, sess, sessionId)
-      console.log('[WS] handlers attached, client added to sess.clients')
-    })
   })
 
   server.listen(port, () => {
