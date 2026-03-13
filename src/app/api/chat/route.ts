@@ -4975,6 +4975,7 @@ async function handleBuildMode(
         let thinkingEmitted = false
         let agentMessages: Array<{ role: string; content: unknown; tool_calls?: unknown; tool_call_id?: string; name?: string }> = [...apiMessages]
         const MAX_TURNS = 25
+        let emptyRetries = 0
 
         for (let turn = 0; turn < MAX_TURNS; turn++) {
           // Heartbeat: keep QUIC/HTTP connection alive during long multi-turn builds
@@ -5129,11 +5130,22 @@ async function handleBuildMode(
             continue
           }
 
-          // Guard: empty response from model (no tool call, no content) = model is done
+          // Guard: empty response from model (no tool call, no content)
+          // M2.5 sometimes returns empty on first tool-result message — nudge it up to 2 times
           if (turnContent.length === 0 && tcEntries.length === 0) {
-            console.log(`[BUILD] Turn ${turn}: empty response — treating as stop`)
+            emptyRetries++
+            if (emptyRetries <= 2) {
+              console.log(`[BUILD] Turn ${turn}: empty response — nudging (retry ${emptyRetries}/2)`)
+              agentMessages = [
+                ...agentMessages,
+                { role: 'user', content: 'Continue. Write the next file now using write_file.' },
+              ]
+              continue
+            }
+            console.log(`[BUILD] Turn ${turn}: empty response after ${emptyRetries - 1} retries — treating as stop`)
             break
           }
+          emptyRetries = 0 // reset on any non-empty turn
 
           // Fallback: XML text-mode content — extract path from XML to build tool result
           const invokeMatch = /<invoke[^>]*name=["']write_file["'][^>]*>[\s\S]*?<parameter[^>]*name=["']path["'][^>]*>([\s\S]*?)<\/parameter>/i.exec(turnContent)
