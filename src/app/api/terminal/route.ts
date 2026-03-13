@@ -93,6 +93,39 @@ export default defineConfig({
         previewSent: false,
       })
 
+      // Auto-start PTY with cmd if provided.
+      // This eliminates the need for the client to send {type:'input'} over WS —
+      // which DO's nginx proxy was swallowing (no [WS] pong received or message type
+      // logs ever appeared, confirming client→server WS frames never reached server).
+      const createCmd = body.cmd ?? ''
+      if (createCmd) {
+        try {
+          const pty = await sbx.pty.create({
+            onData: (data: Uint8Array) => {
+              const text = Buffer.from(data).toString('utf-8')
+              const sess2 = sessions.get(sessionId)
+              if (!sess2) return
+              broadcastToClients(sess2.clients, encodeMessage('output', text))
+              if (!sess2.previewSent && sess2.previewUrl) {
+                if (VITE_READY_SIGNALS.some(sig => text.includes(sig))) {
+                  sess2.previewSent = true
+                  broadcastToClients(sess2.clients, JSON.stringify({ type: 'preview', url: sess2.previewUrl }))
+                  console.log('[PTY] Vite ready — preview URL broadcast:', sess2.previewUrl)
+                }
+              }
+            },
+            cols: 80, rows: 24, timeoutMs: 0,
+          })
+          const sess2 = sessions.get(sessionId)!
+          sess2.ptyPid = pty.pid
+          await sbx.pty.sendInput(pty.pid, Buffer.from(createCmd, 'utf-8'))
+          console.log('[create] PTY started, pid:', pty.pid, 'cmd:', createCmd.slice(0, 60))
+        } catch (ptyErr) {
+          console.error('[create] PTY start failed:', ptyErr)
+          // Non-fatal — session still created, WS can still connect
+        }
+      }
+
       return NextResponse.json({
         sessionId,
         wsUrl: `/api/terminal-ws?sessionId=${sessionId}`,

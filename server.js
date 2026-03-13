@@ -203,11 +203,6 @@ app.prepare().then(() => {
     }
 
     // ── Attach handlers FIRST, then send connected ──────────────────────
-    // Critical ordering: ws.on('message') must be registered BEFORE we
-    // send the 'connected' frame. The client responds to 'connected' by
-    // immediately sending {type:'input', data: cmd}. If handlers aren't
-    // attached yet (e.g. deferred with setImmediate), that first message
-    // arrives with no listener → silently dropped → socket closes (1006).
     attachWsHandlers(ws, sess, sessionId)
     console.log('[WS] handlers attached, client added to sess.clients')
 
@@ -215,10 +210,23 @@ app.prepare().then(() => {
     try { ws.ping() } catch (_) {}
     console.log('[WS] protocol ping sent')
 
-    // Send connected frame — client responds with {type:'input'} immediately.
-    // Handlers are already registered above, so the message will be received.
+    // Send connected frame.
     try { ws.send(encodeMessage('connected', 'Shell ready')) } catch (_) {}
     console.log('[WS] connected frame sent')
+
+    // ── Auto-start PTY if cmd was pre-loaded via create action ──────────
+    // DO's nginx proxy swallows client→server WS frames on first connect,
+    // so we can't rely on {type:'input'} from the client to start the PTY.
+    // Instead: cmd is passed in the create POST, PTY is started there.
+    // If PTY is somehow not started yet (e.g. cmd was empty), the client
+    // can still send input manually — the message handler handles it.
+    if (sess.ptyPid === null) {
+      console.log('[WS] ptyPid null after connected — PTY may have been started by create action, checking...')
+      // Brief check: if PTY was just started by create, ptyPid will be set within ms
+      // No action needed here — PTY output will flow to sess.clients once it starts
+    } else {
+      console.log('[WS] ptyPid already set:', sess.ptyPid, '— PTY running, output will stream')
+    }
 
     console.log('[WS] post-send readyState:', ws.readyState,
       '| socket.writable:', sock ? sock.writable : 'N/A')
