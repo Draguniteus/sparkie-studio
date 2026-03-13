@@ -82,7 +82,7 @@ export default defineConfig({
       }
 
       let previewUrl: string | null = null
-      try { previewUrl = `https://${sbx.getHost(5173)}` } catch (_) {}
+      try { previewUrl = `https://${sbx.getHost(8080)}` } catch (_) {}  // npx serve port
 
       sessions.set(sessionId, {
         sbx,
@@ -90,6 +90,8 @@ export default defineConfig({
         clients: new Set<WsClient>(),
         createdAt: Date.now(),
         previewUrl,
+        logBuffer: [],
+        buildDone: false,
         previewSent: false,
       })
 
@@ -108,11 +110,19 @@ export default defineConfig({
               const sess2 = sessions.get(sessionId)
               if (!sess2) return
               broadcastToClients(sess2.clients, encodeMessage('output', text))
+              // Accumulate logs for /api/logs polling (Qwen model — no WS required)
+              if (sess2.logBuffer.length < 500) {
+                sess2.logBuffer.push(text)
+              } else {
+                sess2.logBuffer.shift()
+                sess2.logBuffer.push(text)
+              }
               if (!sess2.previewSent && sess2.previewUrl) {
                 if (VITE_READY_SIGNALS.some(sig => text.includes(sig))) {
                   sess2.previewSent = true
+                  sess2.buildDone = true
                   broadcastToClients(sess2.clients, JSON.stringify({ type: 'preview', url: sess2.previewUrl }))
-                  console.log('[PTY] Vite ready — preview URL broadcast:', sess2.previewUrl)
+                  console.log('[PTY] Preview ready — URL broadcast + polling available:', sess2.previewUrl)
                 }
               }
             },

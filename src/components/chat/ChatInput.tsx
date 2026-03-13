@@ -1427,29 +1427,79 @@ export function ChatInput() {
           } catch { hasDevScript = true /* assume dev project if package.json parse fails */ }
 
           if (hasDevScript) {
-            // Update the build message so user knows terminal is running
+            // ── Qwen model: direct E2B create + polling — NO WebSocket ────────
+            // The WebSocket (Terminal) had a persistent 1006 race on DO nginx.
+            // Instead: POST /api/terminal with action='create' + cmd,
+            // then poll /api/logs every second until previewUrl appears.
+            // Preview.tsx already shows the live iframe when containerStatus='ready'.
             if (buildMsgId) updateMessage(chatId, buildMsgId, {
               content: `✨ Built ${fileNames} — starting dev server...`,
               isStreaming: false,
             })
-            // Switch to terminal tab so user sees npm install progress
-            setIDETab('terminal')
-            // Set command synchronously WHILE isExecuting=true, so IDEPanelInner's
-            // WebContainer auto-run useEffect is blocked by its isExecuting guard.
-            // Terminal is always-mounted; E2B is already connected (open for the
-            // duration of the build). The useEffect [pendingRunCommand, connected]
-            // fires immediately and sends the command to the live shell.
-            setPendingRunCommand(startCmd)
-            // Update wrap message
+            setIDETab('preview')
+            setContainerStatus('installing')
             const nodeWrapPhrases = [
-              `Installing dependencies and starting the dev server — preview will load automatically once it's up!`,
-              `On it — running \`${startCmd}\` now. Preview will appear as soon as the server starts ✨`,
-              `Firing up the dev server! Give it a moment — preview loads automatically when it's ready 🔥`,
+              `Installing dependencies and building... preview will load automatically ✨`,
+              `Running \`${startCmd}\` in the cloud — preview loads when it's ready 🚀`,
+              `Building in E2B sandbox — hang tight, iframe preview coming up 🔥`,
             ]
             updateMessage(chatId, ackMsgId, {
               content: nodeWrapPhrases[Math.floor(Math.random() * nodeWrapPhrases.length)],
               isStreaming: false,
             })
+            // Determine build command — always use static build + npx serve
+            const buildCmd = projectRoot
+              ? \`cd \${projectRoot} && npm install && npm run build 2>&1 && npx serve -s dist -l 8080 --no-clipboard 2>&1\`
+              : 'npm install && npm run build 2>&1 && npx serve -s dist -l 8080 --no-clipboard 2>&1'
+            // Flatten files for E2B upload
+            type FNode2 = import('@/store/appStore').FileNode
+            function flattenWithPaths2(nodes: FNode2[], prefix = ''): { path: string; content: string }[] {
+              return nodes.flatMap(n => {
+                const p = prefix ? \`\${prefix}/\${n.name}\` : n.name
+                if (n.type === 'folder' || n.type === 'archive') return flattenWithPaths2(n.children ?? [], p)
+                return n.content ? [{ path: p, content: n.content }] : []
+              })
+            }
+            const currentChatState = useAppStore.getState()
+            const currentChatFiles = currentChatState.chats.find(c => c.id === currentChatState.currentChatId)
+            const projectFiles = currentChatFiles ? flattenWithPaths2(currentChatFiles.files) : []
+            // Fire and forget — poll for result
+            ;(async () => {
+              try {
+                const createRes = await fetch('/api/terminal', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'create', files: projectFiles, cmd: buildCmd }),
+                })
+                if (!createRes.ok) {
+                  setContainerStatus('error')
+                  return
+                }
+                const { sessionId } = await createRes.json() as { sessionId: string }
+                // Poll /api/logs every 2s until previewUrl appears (max 3 min)
+                let attempts = 0
+                const poll = async () => {
+                  try {
+                    const logRes = await fetch(\`/api/logs?sessionId=\${sessionId}\`)
+                    if (logRes.ok) {
+                      const logData = await logRes.json() as { previewUrl?: string | null; buildDone?: boolean }
+                      if (logData.previewUrl) {
+                        setPreviewUrl(logData.previewUrl)
+                        setContainerStatus('ready')
+                        setIDETab('preview')
+                        return
+                      }
+                    }
+                  } catch { /* ignore */ }
+                  attempts++
+                  if (attempts < 90) setTimeout(poll, 2000)
+                  else setContainerStatus('error')
+                }
+                setTimeout(poll, 3000)
+              } catch {
+                setContainerStatus('error')
+              }
+            })()
           }
         } else {
           // ── Static build (no package.json) — preview is instant via srcdoc ──
