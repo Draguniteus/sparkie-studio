@@ -55,20 +55,24 @@ export function Terminal() {
     pendingRunCommand, setPendingRunCommand,
     setPreviewUrl, setContainerStatus, setIDETab,
   } = useAppStore()
-  const termRef    = useRef<HTMLDivElement>(null)
-  const xtermRef   = useRef<XTermInstance | null>(null)
-  const fitRef     = useRef<{ fit(): void } | null>(null)
-  const wsRef      = useRef<WebSocket | null>(null)
-  const sessionRef = useRef<string>('')
+  const termRef     = useRef<HTMLDivElement>(null)
+  const xtermRef    = useRef<XTermInstance | null>(null)
+  const fitRef      = useRef<{ fit(): void } | null>(null)
+  const wsRef       = useRef<WebSocket | null>(null)
+  const sessionRef  = useRef<string>('')
   const [connected, setConnected] = useState(false)
-  const [e2bMode, setE2bMode]    = useState(false)
+  const [e2bMode, setE2bMode]     = useState(false)
   const prevOutputRef = useRef('')
   const serverUrlDetectedRef = useRef(false)
   const eagerPreviewUrlRef = useRef<string | null>(null)
+  // Track whether we're inside the initial mount — prevents cleanup from
+  // closing a WS that was opened in the same render cycle.
+  const mountedRef = useRef(false)
 
   // ── Load xterm + init terminal ────────────────────────────────────────────
   useEffect(() => {
     if (!termRef.current) return
+    mountedRef.current = true
 
     loadXterm().then(({ Terminal, FitAddon }) => {
       if (!termRef.current || xtermRef.current) return
@@ -119,12 +123,13 @@ export function Terminal() {
       }
 
       term.write('\r\n\x1b[33m  ⚡ Sparkie Terminal\x1b[0m\r\n')
-      term.write('\x1b[2m  Ready – E2B sandbox will connect when a build completes.\x1b[0m\r\n\r\n')
+      term.write('\x1b[2m  Ready — E2B sandbox will connect when a build completes.\x1b[0m\r\n\r\n')
     }).catch(err => {
       console.error('xterm load failed:', err)
     })
 
     return () => {
+      mountedRef.current = false
       wsRef.current?.close()
       xtermRef.current?.dispose()
       xtermRef.current = null
@@ -142,7 +147,7 @@ export function Terminal() {
     }
   }, [terminalOutput, e2bMode])
 
-  // ── Open a WebSocket to the terminal server ──────────────────────────────
+  // ── Open a WebSocket to the terminal server ───────────────────────────────
   function openWebSocket(sessionId: string, cmd: string, term: XTermInstance, retryCount = 0) {
     const url = buildWsUrl(`/api/terminal-ws?sessionId=${sessionId}`)
     console.log('[Terminal] Opening WebSocket:', url)
@@ -154,20 +159,28 @@ export function Terminal() {
 
     ws.onopen = () => {
       console.log('[Terminal] WebSocket onopen – shell ready, firing cmd:', cmd)
-      // Do NOT reset wsRetries here – it's passed in via retryCount and must accumulate
-      setConnected(true)
-      setE2bMode(true)
+      // IMPORTANT: Do NOT call setConnected/setE2bMode synchronously here.
+      // React state updates in ws.onopen trigger a synchronous re-render which
+      // can unmount+remount the Terminal component, hitting the useEffect cleanup
+      // (wsRef.current?.close()) and producing an immediate 1006.
+      // Defer state updates to the next macrotask so onopen fully returns first.
+      setTimeout(() => {
+        setConnected(true)
+        setE2bMode(true)
+      }, 0)
+
       term.write('\x1b[32m  [E2B]\x1b[0m Shell ready\r\n\r\n')
-      fitRef.current?.fit()
+
       if (cmd) {
-        // Send immediately – do NOT delay. A 300ms gap after onopen is enough
-        // for DO App Platform's proxy to idle-close the socket before any
-        // data arrives. Fire the command as soon as the socket is OPEN.
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'input', data: cmd + '\r' }))
           term.write('\r\n\x1b[33m  [Sparkie]\x1b[0m Running: ' + cmd + '\r\n')
         }
       }
+
+      // Defer fit() — FitAddon.fit() fires term.onResize which sends a resize
+      // frame; deferring avoids racing with the WS initialization.
+      setTimeout(() => { fitRef.current?.fit() }, 0)
     }
 
     ws.onmessage = (e) => {
@@ -184,17 +197,18 @@ export function Terminal() {
           setPreviewUrl(url)
           setContainerStatus('ready')
           setIDETab('preview')
-          term.write('\r\n\x1b[32m  [Sparkie]\x1b[0m Preview ready ➡ ' + url + '\r\n')
+          term.write('\r\n\x1b[32m  [Sparkie]\x1b[0m Preview ready ⚡ ' + url + '\r\n')
         }
       }
       if (raw.includes('ERROR') || raw.includes('error TS') || raw.includes('ENOENT')) {
-        term.write('\r\n\x1b[31m  [Sparkie]\x1b[0m Build error detected – check above ↑\r\n')
+        term.write('\r\n\x1b[31m  [Sparkie]\x1b[0m Build error detected — check above ↑\r\n')
       }
     }
 
     ws.onclose = (e) => {
       console.log('[Terminal] WebSocket closed:', e.code, e.reason)
-      setConnected(false)
+      // Defer state update — same reasoning as onopen
+      setTimeout(() => { setConnected(false) }, 0)
       if (e.code !== 1000 && e.code !== 1001 && wsRetries < maxWsRetries) {
         wsRetries++
         term.write('\r\n\x1b[33m  [E2B]\x1b[0m Reconnecting (' + wsRetries + '/' + maxWsRetries + ')...\r\n')
@@ -224,7 +238,7 @@ export function Terminal() {
     return ws
   }
 
-  // ── Auto-run: execute pendingRunCommand via lazy E2B connect ─────────────
+  // ── Auto-run: execute pendingRunCommand via lazy E2B connect ──────────────
   useEffect(() => {
     if (!pendingRunCommand) return
 
@@ -338,14 +352,14 @@ export function Terminal() {
   }
 
   const statusColor =
-    connected           ? 'text-[#22c55e]' :
+    connected              ? 'text-[#22c55e]' :
     containerStatus === 'error' ? 'text-[#ef4444]' :
     containerStatus === 'idle'  ? 'text-[#6b7280]' :
                                   'text-[#f59e0b]'
 
   const statusLabel =
-    connected        ? 'Live Shell' :
-    e2bMode          ? 'Connecting...' :
+    connected          ? 'Live Shell' :
+    e2bMode            ? 'Connecting...' :
     containerStatus === 'ready'       ? 'Dev Server' :
     containerStatus === 'error'       ? 'Error' :
     containerStatus === 'idle'        ? 'Idle' :
