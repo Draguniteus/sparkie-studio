@@ -1440,7 +1440,7 @@ export function ChatInput() {
             setContainerStatus('installing')
             const nodeWrapPhrases = [
               `Installing dependencies and building... preview will load automatically ✨`,
-              `Running `${startCmd}` in the cloud — preview loads when it's ready 🚀`,
+              `Running your build in the cloud — preview loads when it's ready 🚀`,
               `Building in E2B sandbox — hang tight, iframe preview coming up 🔥`,
             ]
             updateMessage(chatId, ackMsgId, {
