@@ -65,8 +65,13 @@ export function Terminal() {
   const prevOutputRef        = useRef('')
   const eagerPreviewUrlRef   = useRef<string | null>(null)
 
-  const [connected, setConnected] = useState(false)
-  const [e2bMode,   setE2bMode]   = useState(false)
+  // Use refs for WS lifecycle flags — never useState for these.
+  // useState triggers re-render → cleanup → ws.close() → 1006.
+  const connectedRef = useRef(false)
+  const e2bModeRef   = useRef(false)
+  // Minimal local state purely for the status badge re-render.
+  // Set ONLY after ws.send() completes, never during onmessage.
+  const [wsStatus, setWsStatus] = useState<'idle'|'connecting'|'live'|'error'>('idle')
 
   // ─── init xterm (once, on mount) ─────────────────────────────────────────
   useEffect(() => {
@@ -158,6 +163,7 @@ export function Terminal() {
 
     const ws = new WebSocket(url)
     wsRef.current = ws
+    if (mountedRef.current) setWsStatus('connecting')
 
     let retries = retryCount
     const maxRetries = 5
@@ -187,16 +193,20 @@ export function Terminal() {
 
       if (type === 'connected') {
         console.log('[Terminal] received connected — shell ready')
-        if (mountedRef.current) {
-          setConnected(true)
-          setE2bMode(true)
-        }
+        // Update refs immediately — no re-render triggered.
+        connectedRef.current = true
+        e2bModeRef.current   = true
         term.write('\x1b[32m  [E2B]\x1b[0m Shell ready\r\n\r\n')
         fitRef.current?.fit()
+        // Send the command FIRST, then update UI state.
+        // Calling setState before ws.send() would schedule a React re-render
+        // whose cleanup function closes wsRef.current — killing the socket.
         if (cmd && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'input', data: cmd + '\r' }))
           term.write('\r\n\x1b[33m  [Sparkie]\x1b[0m Running: ' + cmd + '\r\n')
         }
+        // Update badge state AFTER send — re-render is now safe.
+        if (mountedRef.current) setWsStatus('live')
         return
       }
 
@@ -224,13 +234,16 @@ export function Terminal() {
 
     ws.onclose = (e) => {
       console.log('[Terminal] WebSocket closed:', e.code, e.reason)
-      if (mountedRef.current) setConnected(false)
+      connectedRef.current = false
+      e2bModeRef.current   = false
+      if (mountedRef.current) setWsStatus('idle')
       if (e.code !== 1000 && e.code !== 1001 && retries < maxRetries) {
         retries++
         term.write(`\r\n\x1b[33m  [E2B]\x1b[0m Reconnecting (${retries}/${maxRetries})...\r\n`)
         setTimeout(() => openWebSocket(sessionId, cmd, term, retries), 600 * retries)
       } else if (retries >= maxRetries) {
         setContainerStatus('error')
+        if (mountedRef.current) setWsStatus('error')
         term.write(`\r\n\x1b[31m  [E2B]\x1b[0m Connection failed after ${maxRetries} retries\r\n`)
       }
     }
@@ -244,7 +257,7 @@ export function Terminal() {
   useEffect(() => {
     if (!pendingRunCommand) return
 
-    if (connected && wsRef.current?.readyState === WebSocket.OPEN) {
+    if (connectedRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
       const cmd = pendingRunCommand
       setPendingRunCommand(null)
       setContainerStatus('installing')
@@ -321,8 +334,9 @@ export function Terminal() {
 
   function reconnect() {
     wsRef.current?.close(1000, 'manual reconnect')
-    setConnected(false)
-    setE2bMode(false)
+    connectedRef.current = false
+    e2bModeRef.current   = false
+    setWsStatus('idle')
     sessionRef.current          = ''
     eagerPreviewUrlRef.current  = null
     const term = xtermRef.current
@@ -351,14 +365,15 @@ export function Terminal() {
   }
 
   const statusColor =
-    connected                    ? 'text-[#22c55e]' :
+    wsStatus === 'live'          ? 'text-[#22c55e]' :
+    wsStatus === 'error'         ? 'text-[#ef4444]' :
     containerStatus === 'error'  ? 'text-[#ef4444]' :
     containerStatus === 'idle'   ? 'text-[#6b7280]' :
                                    'text-[#f59e0b]'
 
   const statusLabel =
-    connected                          ? 'Live Shell'    :
-    e2bMode                            ? 'Connecting...' :
+    wsStatus === 'live'                ? 'Live Shell'    :
+    wsStatus === 'connecting'          ? 'Connecting...' :
     containerStatus === 'ready'        ? 'Dev Server'    :
     containerStatus === 'error'        ? 'Error'         :
     containerStatus === 'idle'         ? 'Idle'          :
@@ -370,7 +385,7 @@ export function Terminal() {
         <TermIcon size={11} className="text-text-muted" />
         <span className="text-[11px] text-text-muted font-medium">Terminal</span>
         <span className={`text-[10px] font-medium ${statusColor} flex items-center gap-1`}>
-          {connected && <span className="w-1.5 h-1.5 rounded-full bg-[#22c55e] inline-block animate-pulse" />}
+          {wsStatus === 'live' && <span className="w-1.5 h-1.5 rounded-full bg-[#22c55e] inline-block animate-pulse" />}
           {statusLabel}
         </span>
         <div className="ml-auto flex items-center gap-1">
