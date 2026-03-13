@@ -1533,8 +1533,7 @@ export function ChatInput() {
               ?? cdnFiles.find(f => /main\.(tsx|jsx)$/.test(f.path))
               ?? cdnFiles.find(f => /\.(tsx|jsx)$/.test(f.path) && !f.path.includes('/'))
 
-            const cssContent = cdnFiles.filter(f => f.path.endsWith('.css') && !f.path.includes('node_modules')).map(f => f.content).join('
-')
+            const cssContent = cdnFiles.filter(f => f.path.endsWith('.css') && !f.path.includes('node_modules')).map(f => f.content).join('\n')
             const importMapJson = JSON.stringify({ imports: importMapEntries }, null, 2)
             const vmodulesJson = JSON.stringify(vmodules)
             const appSrcJson = appFile ? JSON.stringify(appFile.content) : 'null'
