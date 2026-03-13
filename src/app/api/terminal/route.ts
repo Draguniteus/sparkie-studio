@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
       const files = body.files ?? []
       if (files.length > 0) {
         const firstNested = files.find(f => (f.name ?? f.path ?? '').includes('/'))
-        const projectRoot = firstNested ? firstNested.name.split('/')[0] : 'project'
+        const projectRoot = firstNested ? (firstNested.name ?? firstNested.path ?? '').split('/')[0] : 'project'
         const dirs = new Set<string>()
         files.forEach(f => {
           const fullPath = (f.name ?? f.path ?? '').startsWith(projectRoot + '/')
@@ -213,7 +213,7 @@ export default defineConfig({
     const files = body.files ?? []
     if (files.length > 0) {
       const firstNested = files.find(f => (f.name ?? f.path ?? '').includes('/'))
-      const projectRoot = firstNested ? firstNested.name.split('/')[0] : 'project'
+      const projectRoot = firstNested ? (firstNested.name ?? firstNested.path ?? '').split('/')[0] : 'project'
       const syncDirs = new Set<string>()
       files.forEach(f => {
         const fullPath = (f.name ?? f.path ?? '').startsWith(projectRoot + '/')
