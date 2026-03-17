@@ -3717,7 +3717,7 @@ async function executeTool(
             { headers: { 'x-internal': 'read-skill' }, signal: AbortSignal.timeout(5000) }
           )
           if (!result.ok) {
-            if (result.status === 404) return `Skill '${skillName}' not found. Available: email, email-style-matching, email-examples, calendar, calendar-receiving-invitation, calendar-sending-invitation, calendar-conflict-handling, calendar-meeting-title, calendar-examples, browser-use, a2ui-card-gen, cta-card-gen`
+            if (result.status === 404) return `Skill '${skillName}' not found. Available: email, email-style-matching, email-examples, calendar, calendar-receiving-invitation, calendar-sending-invitation, calendar-conflict-handling, calendar-meeting-title, calendar-examples, browser-use, a2ui-card-gen, cta-card-gen, social, music, video, self-repair, about-sparkie`
             return `read_skill error: HTTP ${result.status}`
           }
           const data = await result.json() as { skill?: { name: string; description: string; content: string } }
@@ -5230,7 +5230,7 @@ function selectModel(messages: Array<{ role: string; content: string }>): ModelS
   // `create` and `generate` excluded as bare signals — they collide with media gen
   // ("create an image of...", "generate a song") and conversational opinion questions.
   // They only count as task intent when paired with an explicit code/file target (see override below).
-  let taskIntent = /\b(code|build|write|fix|debug|deploy|deployment|commit|push|email|tweet|post|github|repo|file|task|schedule|search my|find me|look up|fetch|list|remember|save|track|install|run|execute|add|remove|delete|update|edit|show me|show my|pull|open pr|make a|send|compose|draft|reply|respond|forward|message|dm|notify|remind|investigate|analyze|analyse|diagnose|audit|read my|read me|check my|check the|list my|open my|play my|start my|stop my|discord|slack|instagram|reddit|whatsapp|telegram)\b/.test(lower)
+  let taskIntent = /\b(code|build|write|fix|debug|deploy|deployment|commit|push|email|tweet|post|github|repo|file|task|schedule|search my|find me|look up|fetch|list|remember|save|track|install|run|execute|add|remove|delete|update|edit|show me|show my|pull|open pr|make a|send|compose|draft|reply|respond|forward|message|dm|notify|remind|investigate|analyze|analyse|diagnose|audit|read my|read me|check my|check the|list my|open my|play my|start my|stop my|discord|slack|instagram|reddit|whatsapp|telegram|weather|music|image|video|generate|create music|play music|calendar|events|tweets|twitter|tiktok|youtube|search reddit|search twitter|journal|worklog|memory|skill|connector|composio)\b/.test(lower)
   // `create`/`generate` only count as task when explicitly targeting code/file artifacts
   if (/\b(create|generate)\b.{0,50}\b(file|page|app|component|script|html|css|function|api|endpoint|landing page|website|tool|route|feature|button|form|modal|widget)\b/.test(lower)) taskIntent = true
   // Non-code create: reminder/event/note/task/list/goal/plan → agentic, not build
@@ -5292,7 +5292,7 @@ function selectModel(messages: Array<{ role: string; content: string }>): ModelS
     return { primary: MODELS.EMBER, fallbacks: [MODELS.CAPABLE, MODELS.DEEP], tier: 'ember', needsTools: true }
   }
   if (conversationalIntent && deepCount === 0) {
-    return { primary: MODELS.CONVERSATIONAL, fallbacks: [MODELS.CAPABLE], tier: 'conversational', needsTools: false }
+    return { primary: MODELS.CONVERSATIONAL, fallbacks: [MODELS.CAPABLE], tier: 'conversational', needsTools: true }
   }
   // Default: CAPABLE — Flame handles most real tasks
   return { primary: MODELS.CAPABLE, fallbacks: [MODELS.DEEP, MODELS.EMBER], tier: 'capable', needsTools: true }
@@ -5591,7 +5591,7 @@ Make it feel like walking into your friend's creative space and being genuinely 
     const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
     if (userId) startTrace(requestId, userId)
 
-    const useTools = !voiceMode && modelSelection.needsTools  // skip tool loop for conversational/chitchat tier
+    const useTools = !voiceMode && modelSelection.needsTools  // tools enabled for all tiers including conversational
     const toolContext = { userId, tavilyKey, apiKey, doKey, baseUrl, cookieHeader: req.headers.get('cookie') ?? '' }
     const toolMediaResults: Array<{ name: string; result: string }> = []
 
