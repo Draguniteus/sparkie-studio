@@ -210,6 +210,8 @@ interface AppState {
   deleteFile: (id: string) => void
   setActiveFile: (id: string | null) => void
   setFiles: (files: FileNode[]) => void
+  buildKey: number
+  incrementBuildKey: () => void
   saveChatFiles: (chatId: string, files: FileNode[]) => void
   openIDE: () => void
   toggleIDE: () => void
@@ -363,6 +365,7 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
       ideTab: 'process',
       containerStatus: 'idle',
       previewUrl: null,
+      buildKey: 0,
     }))
     return id
   },
@@ -381,6 +384,7 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
       ideTab: 'process',
       containerStatus: 'idle',
       previewUrl: null,
+      buildKey: 0,
     })
   },
   deleteChat: (id) => set((s) => ({ chats: s.chats.filter((c) => c.id !== id), currentChatId: null, messages: [] })),
@@ -409,7 +413,13 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
   renameFile: (id, name) => set((s) => ({ files: s.files.map((f) => f.id === id ? { ...f, name } : f) })),
   deleteFile: (id) => set((s) => ({ files: s.files.filter((f) => f.id !== id) })),
   setActiveFile: (id) => set({ activeFileId: id }),
-  setFiles: (files) => set({ files }),
+  setFiles: (files) => set((s) => ({
+    files,
+    containerStatus: 'idle',
+    previewUrl: null,
+    buildKey: s.buildKey + 1,
+  })),
+  incrementBuildKey: () => set((s) => ({ buildKey: s.buildKey + 1 })),
   saveChatFiles: (chatId, files) => set((s) => ({
     chats: s.chats.map((c) => c.id === chatId ? { ...c, files } : c),
   })),
@@ -470,6 +480,7 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
     set((s) => ({ worklog: s.worklog.map((e) => e.id === id ? { ...e, ...patch } : e) })),
   clearWorklog: () => set({ worklog: [] }),
 
+  buildKey: 0,
   containerStatus: 'idle',
   previewUrl: null,
   terminalOutput: '',

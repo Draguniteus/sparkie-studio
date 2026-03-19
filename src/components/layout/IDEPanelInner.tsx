@@ -68,13 +68,13 @@ function WorklogPanel() {
 
 export function IDEPanelInner() {
   const {
-    ideOpen, ideTab, isExecuting, liveCode, files,
+    ideOpen, ideTab, isExecuting, liveCode, files, buildKey,
     setIdeTab, containerStatus, clearTerminalOutput, appendTerminalOutput, setContainerStatus,
     worklog, previewUrl,
   } = useAppStore()
   const { runProject } = useWebContainer()
   const [showExplorer, setShowExplorer] = useState(true)
-  const hasTriedWC = useRef(false)
+  const lastRunKey = useRef(-1)
 
   // Detect backend-only Node/Express projects (no frontend bundler, no index.html)
   const isBackendProject = useCallback((fileList: typeof files): boolean => {
@@ -89,12 +89,11 @@ export function IDEPanelInner() {
 
   // Auto-run when a package.json project lands
   useEffect(() => {
+    if (lastRunKey.current === buildKey) return
+    if (files.length === 0) { lastRunKey.current = -1; return }
     const hasPkg = files.some(f => f.name === 'package.json')
-    if (!hasPkg || isExecuting || containerStatus !== 'idle' || hasTriedWC.current) {
-      if (files.length === 0) hasTriedWC.current = false
-      return
-    }
-    hasTriedWC.current = true
+    if (!hasPkg || isExecuting) return
+    lastRunKey.current = buildKey
 
     if (isBackendProject(files)) {
       // Backend project — skip WebContainer, run in E2B via execute-project
@@ -146,7 +145,7 @@ export function IDEPanelInner() {
         if (launched) setIdeTab('terminal')
       })
     }
-  }, [files, isExecuting, containerStatus, runProject, setIdeTab, isBackendProject,
+  }, [files, buildKey, isExecuting, runProject, setIdeTab, isBackendProject,
       clearTerminalOutput, appendTerminalOutput, setContainerStatus])
 
   // Listen for BuildCard "Open Preview" button → switch to preview tab
