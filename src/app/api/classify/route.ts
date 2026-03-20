@@ -8,10 +8,14 @@ export async function POST(req: NextRequest) {
   try {
     const { message } = await req.json()
     const apiKey = process.env.OPENCODE_API_KEY
-    if (!apiKey) return new Response(JSON.stringify({ mode: 'build' }), { headers: { 'Content-Type': 'application/json' } })
+    if (!apiKey) return new Response(JSON.stringify({ mode: 'chat' }), { headers: { 'Content-Type': 'application/json' } })
+
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 1500)
 
     const response = await fetch(`${OPENCODE_BASE}/chat/completions`, {
       method: 'POST',
+      signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
@@ -22,21 +26,29 @@ export async function POST(req: NextRequest) {
         messages: [
           {
             role: 'system',
-            content: `You are a strict intent classifier for Sparkie Studio. Respond with ONLY one word: "build" or "chat".
+            content: `You are a message classifier. Respond with exactly one word: "build" or "chat".
 
-"build" = user wants to CREATE, GENERATE, or MODIFY CODE, FILES, or APPS. This means HTML/CSS/JS/React pages, scripts, components, APIs, landing pages, dashboards, apps, styling changes. Examples: "build a todo app", "fix the button color", "make a dark mode toggle", "write a Python script", "add a navbar", "create a landing page".
+build = user wants code written, a UI element created, or an existing project modified. Must have clear intent to produce runnable code or a visible UI component.
 
-"chat" = EVERYTHING ELSE. This includes:
-- Agentic/tool tasks: send email, compose email, draft email, post tweet, post to instagram/reddit, send message, schedule something, set reminder, search my inbox, look up, find me, remember this, save to memory
-- Questions, explanations, opinions, analysis, research
-- Conversation, feelings, status updates, greetings, thanks
-- Checking weather, time, news
-- Reading/summarizing files or emails
-Examples: "send an email to Mary", "post a tweet about this", "what's the weather?", "remind me at 3pm", "search my emails", "im tired", "what do you think?", "can you explain hooks?".
+chat = everything else. Questions, opinions, greetings, information requests, media generation, system queries, emotional messages, and ANY ambiguous message.
 
-CRITICAL: "send email", "post tweet", "compose message", "draft reply", "schedule reminder" are ALWAYS "chat" — never "build".
+Examples:
+"build me a todo app" → build
+"create a landing page" → build
+"add dark mode" → build
+"hey how are you" → chat
+"what do you think?" → chat
+"make me a song" → chat
+"generate an image of a sunset" → chat
+"what's the weather?" → chat
+"can you explain React hooks?" → chat
+"should I use TypeScript?" → chat
+"i need help" → chat
+"something is broken" → chat
 
-When in doubt, respond "build". Only respond "chat" when you are highly confident the user does NOT want code or a UI element built.`
+When in doubt → chat.
+A wrong chat costs nothing — user rephrases.
+A wrong build is jarring and breaks trust.`
           },
           { role: 'user', content: message }
         ],
@@ -44,15 +56,15 @@ When in doubt, respond "build". Only respond "chat" when you are highly confiden
         temperature: 0,
         max_tokens: 5,
       }),
-    })
+    }).finally(() => clearTimeout(timeout))
 
-    if (!response.ok) return new Response(JSON.stringify({ mode: 'build' }), { headers: { 'Content-Type': 'application/json' } })
+    if (!response.ok) return new Response(JSON.stringify({ mode: 'chat' }), { headers: { 'Content-Type': 'application/json' } })
 
     const data = await response.json()
-    const answer = data.choices?.[0]?.message?.content?.trim().toLowerCase() ?? 'build'
-    const mode = answer.startsWith('chat') ? 'chat' : 'build'
+    const answer = data.choices?.[0]?.message?.content?.trim().toLowerCase() ?? 'chat'
+    const mode = answer.startsWith('build') ? 'build' : 'chat'
     return new Response(JSON.stringify({ mode }), { headers: { 'Content-Type': 'application/json' } })
   } catch {
-    return new Response(JSON.stringify({ mode: 'build' }), { headers: { 'Content-Type': 'application/json' } })
+    return new Response(JSON.stringify({ mode: 'chat' }), { headers: { 'Content-Type': 'application/json' } })
   }
 }

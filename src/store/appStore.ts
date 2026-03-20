@@ -254,6 +254,8 @@ interface AppState {
   closeSettings: () => void
   lastMode: 'chat' | 'build'
   setLastMode: (mode: 'chat' | 'build') => void
+  activeProjectRoot: string | null
+  setActiveProjectRoot: (root: string | null) => void
   hydrateFromStorage: () => void
   // Avatar
   userAvatarUrl: string | null
@@ -335,6 +337,8 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
   setSelectedModel: (model) => set({ selectedModel: model }),
   setStreaming: (v) => set({ isStreaming: v }),
   setLastMode: (mode) => set({ lastMode: mode }),
+  activeProjectRoot: null,
+  setActiveProjectRoot: (root) => set({ activeProjectRoot: root }),
 
   createChat: () => {
     // In single-chat mode: always return the one persistent chat

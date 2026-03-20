@@ -5,7 +5,7 @@ import { useAppStore, FileNode } from "@/store/appStore"
 import { getFileSize } from "@/lib/fileParser"
 import {
   File, Folder, FolderOpen, Plus, Trash2, Download, ChevronRight, ChevronDown, Archive,
-  FileCode, FileText, FileImage, FileJson, Pencil,
+  FileCode, FileText, FileImage, FileJson, Pencil, Play,
 } from "lucide-react"
 
 function getFileIcon(name: string) {
@@ -28,10 +28,11 @@ function FileItem({ file, depth }: FileItemProps) {
   const [isRenaming, setIsRenaming] = useState(false)
   const [renameValue, setRenameValue] = useState(file.name)
   const renameInputRef = useRef<HTMLInputElement>(null)
-  const { activeFileId, setActiveFile, deleteFile, renameFile } = useAppStore()
+  const { activeFileId, setActiveFile, deleteFile, renameFile, activeProjectRoot, setActiveProjectRoot, setIdeTab } = useAppStore()
   const isActive = activeFileId === file.id
   const isFolder = file.type === "folder" || file.type === "archive"
   const isArchive = file.type === "archive"
+  const isLiveProject = file.type === "folder" && depth === 0 && activeProjectRoot === file.name
 
   useEffect(() => {
     if (isRenaming) {
@@ -64,6 +65,12 @@ function FileItem({ file, depth }: FileItemProps) {
       a.href = url; a.download = file.name; a.click()
       URL.revokeObjectURL(url)
     }
+  }
+
+  const switchToProject = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setActiveProjectRoot(file.name)
+    setIdeTab('preview')
   }
 
   return (
@@ -106,12 +113,27 @@ function FileItem({ file, depth }: FileItemProps) {
           <span className="truncate flex-1">{file.name}</span>
         )}
 
+        {/* Live badge for active project */}
+        {isLiveProject && !isRenaming && (
+          <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-[#22c55e]/10 text-[#22c55e] border border-[#22c55e]/20 font-medium">Live</span>
+        )}
+
         {!isFolder && file.content && !isRenaming && (
           <span className="text-[10px] text-text-muted shrink-0">{getFileSize(file.content)}</span>
         )}
 
         {!isRenaming && (
           <div className="opacity-0 group-hover:opacity-100 flex gap-0.5 shrink-0">
+            {/* Preview button for non-active top-level project folders */}
+            {file.type === "folder" && depth === 0 && !isLiveProject && (
+              <button
+                onClick={switchToProject}
+                className="p-0.5 rounded hover:bg-hive-hover text-text-muted hover:text-[#22c55e] flex items-center gap-0.5"
+                title={`Switch preview to ${file.name}`}
+              >
+                <Play size={9} />
+              </button>
+            )}
             {isFolder && file.children && file.children.length > 0 && (
               <button
                 onClick={(e) => {

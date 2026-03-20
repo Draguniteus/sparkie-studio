@@ -18,24 +18,87 @@ export interface ParseResult {
   folders?: string[]  // explicit ---FOLDER:--- declarations from agent
 }
 
+// Words that are "generic enough" to trigger the fallback if they're the ONLY remaining content
+const GENERIC_FALLBACK_WORDS = new Set([
+  'app', 'application', 'project', 'site', 'page', 'thing', 'it', 'this', 'that',
+  'stuff', 'code', 'test', 'demo', 'sparkie', 'build', 'new', 'my', 'the',
+  'something', 'cool', 'good', 'nice', 'awesome',
+])
+
 /**
- * Derive a safe folder name from the chat title or prompt.
- * e.g. "Build me a task manager app" → "task-manager"
- *      "New Chat" → "project"
+ * Derive a safe folder name from a raw user prompt.
+ * Strips command prefixes, filler adjectives, tech-stack clauses, then slugifies.
+ * Falls back to "project-[base36timestamp]" for generic/empty results.
+ *
+ * Examples:
+ *   "build me a todo app"                          → "todo-app"
+ *   "create a weather dashboard"                   → "weather-dashboard"
+ *   "make a snake game"                            → "snake-game"
+ *   "build a landing page for Polleneer"           → "landing-page-for-polleneer"
+ *   "create a 3D solar system simulation"          → "3d-solar-system"
+ *   "make an app" / "build me something cool"      → "project-lk3x9" (fallback)
  */
-export function deriveProjectName(chatTitle: string): string {
-  if (!chatTitle || chatTitle.trim() === '' || chatTitle.toLowerCase() === 'new chat') {
-    return 'project'
+export function deriveProjectName(prompt: string): string {
+  if (!prompt?.trim()) return 'project-' + Date.now().toString(36)
+
+  let s = prompt.toLowerCase().trim()
+
+  // Step 1 — strip command verb + optional "me/a/an" prefix
+  // Order matters: longest phrases first
+  s = s.replace(
+    /^(?:(?:can you|could you|would you|please|i want|i need|i'?d like|let'?s|can we|how about)\s+)?(?:build me|build|create me|create|make me|make|generate me|generate|write me|write|code me|code|program me|program|develop me|develop|implement me|implement|scaffold me|scaffold)\s+(?:me\s+)?(?:a\s+|an\s+|some\s+)?/,
+    '',
+  )
+
+  // Step 2 — strip trailing tech-stack / tool mentions
+  // "utilizing Vite React Three.js", "using React and Tailwind", "with websockets"
+  s = s.replace(
+    /\s+(?:utilizing|built with|powered by)\s+.+$/,
+    '',
+  )
+  // Only strip trailing "using/with" if it's followed by tech words (not a real part of the name)
+  s = s.replace(
+    /\s+(?:using|with)\s+(?:[a-z0-9@./\-,\s]+)$/,
+    (m) => {
+      // Keep if it's part of a meaningful name like "drag and drop"
+      if (/drag.{0,4}drop|pick.and.mix/i.test(m)) return m
+      return ''
+    },
+  )
+
+  // Step 3 — strip quality/style adjectives (anywhere in the string)
+  s = s.replace(
+    /\b(?:high-?quality|highly-?interactive|fully-?responsive|fully\s+functional|beautiful|stunning|gorgeous|modern|sleek|clean|minimal(?:ist)?|simple|full-?stack|full\s+stack|complete|basic|advanced|enterprise|production-?ready|responsive|animated)\b/g,
+    '',
+  )
+
+  // Step 4 — strip trailing "website" / "application" / "web app" (but keep "app" when not alone)
+  s = s.replace(/\s+(?:website|web\s+app|web-app|application|webapp)\s*$/, '')
+
+  // Step 5 — normalize common compound terms
+  s = s
+    .replace(/\be-?commerce\b/g, 'ecommerce')
+    .replace(/\breal-?time\b/g, 'realtime')
+    .replace(/\bdrag.{0,5}drop\b/g, 'drag-drop')
+    .replace(/\bai\b/g, 'ai')
+    .replace(/\b3\s*d\b/g, '3d')
+
+  // Step 6 — slugify: strip non-alphanumeric, collapse spaces/dashes
+  s = s
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 32)
+    .replace(/-+$/g, '')
+
+  // Step 7 — fallback if result is all generic words or too short
+  const parts = s.split('-').filter(Boolean)
+  if (parts.length === 0 || s.length < 3 || parts.every(p => GENERIC_FALLBACK_WORDS.has(p))) {
+    return 'project-' + Date.now().toString(36)
   }
-  return chatTitle
-    .toLowerCase()
-    .replace(/build (me )?a?n? ?/i, '')   // strip "build me a", "build a"
-    .replace(/app|application|website|site|game|tool|dashboard/gi, (m) => m) // keep meaningful keywords
-    .trim()
-    .replace(/[^a-z0-9]+/g, '-')          // non-alphanum → dash
-    .replace(/^-+|-+$/g, '')              // trim leading/trailing dashes
-    .slice(0, 32)                          // max 32 chars
-    || 'project'
+
+  return s
 }
 
 /**

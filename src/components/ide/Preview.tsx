@@ -187,7 +187,7 @@ function openPreviewInNewWindow(html: string) {
 
 
 export function Preview() {
-  const { files, containerStatus, previewUrl } = useAppStore()
+  const { files, containerStatus, previewUrl, activeProjectRoot } = useAppStore()
   // Always search the flat list of leaf files (handles folder-wrapped builds)
   const flatFiles = flattenFiles(files)
   const [refreshKey, setRefreshKey] = useState(0)
@@ -200,8 +200,8 @@ export function Preview() {
   const { previewHtml, previewType } = useMemo(() => {
     // ── CDN fast path: React/Three.js/etc with CDN-available deps ────────────
     // Skips WebContainer entirely — Babel compiles in-iframe, instant preview.
-    if (isCDNCompatible(files)) {
-      return { previewHtml: buildCDNPreviewHtml(files), previewType: 'cdn' as const }
+    if (isCDNCompatible(files, activeProjectRoot)) {
+      return { previewHtml: buildCDNPreviewHtml(files, activeProjectRoot), previewType: 'cdn' as const }
     }
 
     if (isWCActive) return { previewHtml: null, previewType: null }
@@ -274,7 +274,7 @@ export function Preview() {
     if (pyFile?.content)   return { previewHtml: buildCodeViewerHtml(pyFile.content), previewType: "code" }
     if (anyCode?.content)  return { previewHtml: buildCodeViewerHtml(anyCode.content), previewType: "code" }
     return { previewHtml: null, previewType: null }
-  }, [files, isWCActive, refreshKey])
+  }, [files, isWCActive, refreshKey, activeProjectRoot])
 
   const typeLabel: Record<string,string> = { html:"HTML",react:"React",svg:"SVG",js:"JS",markdown:"Markdown",json:"JSON",code:"Code",cdn:"CDN" }
 

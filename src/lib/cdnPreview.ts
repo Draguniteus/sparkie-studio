@@ -1,5 +1,4 @@
 import type { FileNode } from '@/store/appStore'
-import { flattenFileTree } from '@/store/appStore'
 
 // ─── CDN package → esm.sh URL map ────────────────────────────────────────────
 const CDN_MAP: Record<string, string> = {
@@ -103,38 +102,27 @@ function applyPrefix(
  * Returns true when all runtime deps declared in package.json are available
  * on esm.sh, meaning we can preview without npm install / WebContainer.
  */
-export function isCDNCompatible(files: FileNode[]): boolean {
-  // Debug: log what the function actually sees
-  console.log(
-    '[CDN] isCDNCompatible: top-level nodes =', files.length,
-    '| flattenFileTree names =', flattenFileTree(files).map(f => f.name),
-  )
-
+export function isCDNCompatible(files: FileNode[], activeProjectRoot?: string | null): boolean {
   // Walk the full tree to get all leaf files with reconstructed full paths
   const all = walkTree(files)
-  console.log('[CDN] walkTree paths =', all.map(f => f.name))
+
+  // Filter to active project only when specified
+  const scoped = activeProjectRoot
+    ? all.filter(f => f.name === activeProjectRoot + '/package.json' || f.name.startsWith(activeProjectRoot + '/'))
+    : all
 
   // Find package.json at any depth, regardless of root folder name
-  const pkg = all.find(f => f.name === 'package.json' || f.name.endsWith('/package.json'))
-  if (!pkg?.content) {
-    console.log('[CDN] no package.json found → not CDN compatible')
-    return false
-  }
-  console.log('[CDN] found package.json at:', pkg.name)
+  const pkg = scoped.find(f => f.name === 'package.json' || f.name.endsWith('/package.json'))
+  if (!pkg?.content) return false
 
   try {
     const parsed = JSON.parse(pkg.content) as { dependencies?: Record<string, string> }
     const deps = Object.keys(parsed.dependencies ?? {})
       .filter(d => !SKIP_PREFIXES.some(s => d.startsWith(s)))
-    if (deps.length === 0) {
-      console.log('[CDN] no runtime deps → not CDN compatible')
-      return false
-    }
-    const allMapped = deps.every(dep =>
+    if (deps.length === 0) return false
+    return deps.every(dep =>
       Object.keys(CDN_MAP).some(k => k === dep || k.startsWith(dep + '/'))
     )
-    console.log('[CDN] deps:', deps, '| all CDN-mapped:', allMapped)
-    return allMapped
   } catch { return false }
 }
 
@@ -155,11 +143,14 @@ export function isCDNCompatible(files: FileNode[]): boolean {
  *  - Works for both static and dynamic imports
  *  - importmap MUST be the first <script> in <head> per HTML spec
  */
-export function buildCDNPreviewHtml(files: FileNode[]): string {
-  // Walk tree for full paths, then normalize by stripping the project root prefix
-  const all    = walkTree(files)
-  const prefix = deriveRootPrefix(all)
-  const norm   = applyPrefix(all, prefix)
+export function buildCDNPreviewHtml(files: FileNode[], activeProjectRoot?: string | null): string {
+  // Walk tree for full paths, then filter to active project and normalize paths
+  const all = walkTree(files)
+  const scoped = activeProjectRoot
+    ? all.filter(f => f.name.startsWith(activeProjectRoot + '/') || f.name === activeProjectRoot + '/package.json')
+    : all
+  const prefix = deriveRootPrefix(scoped.length > 0 ? scoped : all)
+  const norm   = applyPrefix(scoped.length > 0 ? scoped : all, prefix)
 
   const srcFiles = norm
     .filter(f => /\.(tsx?|jsx?)$/.test(f.name))

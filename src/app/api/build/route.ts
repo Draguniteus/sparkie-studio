@@ -206,9 +206,10 @@ export async function POST(req: NextRequest) {
           currentFiles?: string
           model?: string
           userProfile?: { name?: string; role?: string; goals?: string }
+          projectName?: string
         }
 
-        const { messages, currentFiles, model: _clientModel, userProfile } = body
+        const { messages, currentFiles, model: _clientModel, userProfile, projectName: reqProjectName } = body
         // Use big-pickle — code specialist, 200K ctx, free on opencode.ai (no quota issues)
         const model = 'big-pickle'
 
@@ -227,11 +228,19 @@ export async function POST(req: NextRequest) {
         if (identityContext) {
           systemPrompt += `\n\n## YOUR MEMORY ABOUT THIS USER\n${identityContext}`
         }
+        if (reqProjectName) {
+          systemPrompt += `\n\n## PROJECT FOLDER — CRITICAL\nAll files MUST be placed inside the folder: ${reqProjectName}/\nEvery file path must start with: ${reqProjectName}/\nExamples: ${reqProjectName}/package.json, ${reqProjectName}/src/App.tsx, ${reqProjectName}/index.html`
+        }
         if (currentFiles) {
           systemPrompt += `\n\n## CURRENT WORKSPACE FILES\nEdit these files — output the complete updated versions:\n\n${currentFiles}`
         }
 
         send('thinking', { text: '\u26a1 Analyzing request\u2026' })
+
+        // Emit project name as first event so client knows the folder name
+        if (reqProjectName) {
+          send('project_name', { name: reqProjectName })
+        }
 
         const apiMessages = [
           { role: 'system', content: systemPrompt },

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, memo, useRef, useCallback, useEffect } from "react"
-import { useAppStore, StepTrace } from "@/store/appStore"
+import { useAppStore, StepTrace, flattenFileTree } from "@/store/appStore"
 import { useShallow } from "zustand/react/shallow"
 
 // ── Step trace + worklog card types ──────────────────────────────────────
@@ -815,78 +815,117 @@ export function ChatInput() {
     }
   }, [selectedImageModel, selectedVideoModel, selectedMusicModel, selectedLyricsModel, selectedSpeechModel, selectedVoiceId, addMessage, updateMessage, setStreaming, addWorklogEntry, updateWorklogEntry, openIDE, setIDETab, ideOpen])
 
-  // Detect conversational/non-coding messages that shouldn't trigger the IDE
-  // Fast synchronous pre-filter — catches obvious cases without a network call.
-  // Returns true (chat), false (build), or null (ambiguous → let LLM decide).
+  // Returns true if there's an active build session (files + was building)
+  const isBuildSession = useCallback((): boolean => {
+    const { files, lastMode } = useAppStore.getState()
+    const activeFiles = files.filter(f => f.type !== 'archive')
+    return activeFiles.length > 0 && lastMode === 'build'
+  }, [])
+
+  // ─── 3-Tier intent classifier ────────────────────────────────────────────────
+  // Tier 1: Instant CHAT  — return true  (never LLM)
+  // Tier 2: Instant BUILD — return false (never LLM)
+  // Tier 3: Ambiguous     — return null  (→ LLM classify)
   const quickClassify = useCallback((text: string): boolean | null => {
     const t = text.trim().toLowerCase()
     const words = t.split(/\s+/).filter(Boolean)
+    const wordCount = words.length
 
-    // Explicit mode overrides
-    if (/\b(cancel|stop building|just chat|forget it)\b/.test(t)) return true
+    // ── Tier 1: INSTANT CHAT ────────────────────────────────────────────────
+    // These ALWAYS go to chat — even if they contain build-like words
 
-    // Build/code intent — high-confidence signals
-    const BUILD_KEYWORDS = /^(build|create|make|write|generate|implement|deploy|refactor|debug|fix|install)\b/
-    const BUILD_PHRASE = /\b(build me|build a|create a|make a|make me|write a|write me|generate a|implement a|fix the|fix my|debug the|debug this|install the|deploy the|refactor the|refactor my|test the app|test it|let'?s build|let'?s make|let'?s create|i want a|i want an|i need a|i need an|i'?d like a|i'?d like an|can we build|can we make|can we create|can we have a|can you build|can you add|can you create)\b/
-    // Edit/modify commands — always build mode (user is modifying an existing project)
-    // Catches: "change the X", "can we change", "can you change", "please change", "make it X", etc.
-    const EDIT_PHRASE = /\b(edit|update|upgrade|change|switch|swap|replace|rename|remove|delete|adjust|alter|amend|convert|modify|revise|refactor|rewrite|redo|refine|restyle|recolor|resize|transform|overhaul|patch|correct|improve|fix|tweak|tune|undo|revert|rollback)\b|(?:(?:can you|can u|could you|would you|would you mind|how about)\s+(?:please\s+)?(?:edit|update|upgrade|change|switch|swap|replace|rename|remove|delete|adjust|alter|amend|convert|modify|revise|refactor|rewrite|redo|refine|restyle|recolor|resize|transform|overhaul|patch|correct|improve|fix|tweak|tune|undo|revert|rollback))|\b(make it|make the|make sure|set the|set it|turn it|turn the|flip it|flip the|let's make|let's update|let's change|let's switch|instead of|it should be|switch this|switch the|update to|change to|change it)\b|\b(cahnge|chnage|upadte|updaet|swich|swithc|fiix|tweek|edti|chnge|udpate)\b/
-    // Build/edit intent — but only if there's no overriding emotional/relational context
-  // Emotional override: "i had broken you trying to update you", "you've been updated" etc.
-  // — these contain EDIT_PHRASE words but are clearly personal conversation, not build intent.
-  const EMOTIONAL_OVERRIDE = /\b(i('m| am| was| feel)|you('re| are| were)|we('re| are)|she('s| is)|he('s| is)|broken you|proud of|upset|sorry|happy|excited|love|miss|wow|amazing|incredible|beautiful|great job|well done|thank|glad|grateful)\b/i
-  const hasBuildSignal = BUILD_KEYWORDS.test(t) || BUILD_PHRASE.test(t) || EDIT_PHRASE.test(t)
-  if (hasBuildSignal) {
-    // Comms override — email/social tasks win even if "write/create/make" prefix present
-    // e.g. "write an email", "create a tweet", "make me a message" → always chat
-    // NOTE: inline both regexes here to avoid TDZ — AGENTIC_TASK const is declared later in this scope
-    if (
-      /\b(send|compose|draft|reply to|respond to|forward|email|tweet|post|message|text|dm|notify|remind|schedule|remind me|set a reminder|search my|look up|find me|fetch|check my|read my|read me|read the|show my|show me|list my|list me|summarize my|investigate|analyze|analyse|diagnose|audit)\b/i.test(t) &&
-      /\b(email|tweet|post to|message|dm|text|reply to|forward|discord|slack|instagram|twitter|facebook|reddit|tiktok)\b/i.test(t)
-    ) return true  // → streamReply → /api/chat
-    // If message has emotional/relational override AND no explicit code target, escalate to LLM
-    const hasCodeTarget = /\b(app|page|button|color|navbar|footer|header|component|style|css|html|code|script|file|function|api|endpoint|route|database|model|feature|modal|form|input|layout|theme|icon|image|logo|animation|widget|card|sidebar|menu|dropdown|table|chart|graph|dashboard)\b/i.test(t)
-    if (EMOTIONAL_OVERRIDE.test(t) && !hasCodeTarget) return null // → LLM classifier
-    return false
-  }
+    // Explicit cancel
+    if (/\b(cancel|stop building|just chat|forget it|never mind|nevermind)\b/.test(t)) return true
 
-    // Code-paste + question → explanation request
-    if ((text.includes('```') || text.includes('<code>')) && /\?/.test(t)) return true
+    // Greetings & presence
+    if (/^(hi+|hey+|hello+|heyy+|sup|yo+|what'?s up|wsp|wyd|gm|gn|morning|night|good morning|good night|good afternoon|good evening|how are you|how'?s it going|how have you been|what'?s good|what'?s new|anything new|you good|you there|you around|miss me|missed me|i'?m back|i'?m here|just got back|just woke up|hey sparkie|hi sparkie|hello sparkie)\b/.test(t)) return true
 
-    // Very short messages (≤3 words)
-    if (words.length <= 3) return true
+    // Emotional & personal
+    if (/^(i'?m feeling|i feel|i'?ve been feeling|i'?m tired|i'?m exhausted|i'?m stressed|i'?m anxious|i'?m excited|i'?m happy|i'?m sad|i'?m frustrated|i'?m proud|i'?m nervous|i'?m overwhelmed|i'?ve been working|i'?ve been busy|i'?ve been grinding|i just wanted to|i wanted to tell|i'?m struggling|i'?m dealing with|today was|yesterday was|this week|i can'?t sleep|i can'?t focus|i need a break|just checking in|just wanted to chat|i miss you|i appreciate you|thank you sparkie|you'?re amazing|you'?re the best|i haven'?t talked|we haven'?t spoken)\b/.test(t)) return true
 
-    // Greetings
-    if (/^(hello|hi+|hey|yo|sup|howdy|good morning|good afternoon|good evening|what.?s up|how.?s it)/.test(t)) return true
+    // Conversation continuers & acknowledgements
+    if (/^(ok|okay|cool|got it|makes sense|understood|interesting|nice|awesome|great|perfect|sounds good|i see|i get it|good point|lol|lmao|haha|ha|really|seriously|no way|wow|damn|wild|same|agreed|exactly|totally|absolutely|nah|nope|not really|not sure|maybe|possibly|perhaps|thanks|thank you|ty|thx|appreciate|you'?re right|my bad|good call|fair point|wait|hold on|one sec|brb|back|oh|tell me more|go on|what else|anything else|what about)\b/.test(t)) return true
 
-    // Emoji-only or emoji-dominant
-    if (/^[\p{Emoji}\s!?.]+$/u.test(t)) return true
+    // Pure emoji/short reactions
+    if (/^[\p{Emoji}\s!?.]{1,20}$/u.test(t)) return true
 
-    // Thanks, acknowledgements
-    if (/^(thanks?|thank you|ty|thx|cheers|appreciate|got it|sounds good|makes sense|understood|noted|ok|okay|sure|perfect|copy that|roger|on it|let.?s go|yes|no|nope|yep|yup|nah|lol|haha|lmao|omg|wow|nice|cool|awesome|dope|sick|sweet)/.test(t)) return true
+    // Opinions & discussion (not build requests)
+    if (/\b(what do you think|what'?s your opinion|what would you suggest|what do you recommend|should i|should we|do you think i should|give me your thoughts|share your thoughts|is this a good idea|is this worth|what'?s missing|what am i missing|how should i approach|what'?s the best way|do you like|do you prefer|which is better|which do you prefer)\b/.test(t)) return true
 
-    // Agentic task requests — ALWAYS chat path (Sparkie's /api/chat handles these, NOT the IDE builder)
-    // Email, social, search, memory, scheduling, comms — anything that triggers Sparkie's tool loop
+    // Questions that don't imply building (how does X work, what is X, etc.)
+    if (/^(what is|what are|what was|what were|what'?s|how does|how do|how did|why does|why do|why did|why is|why are|who is|who are|who was|where is|where are|where can|when is|when was|when should|can you explain|can you tell me|can you help me understand|tell me about|talk to me about|explain|do you know|did you know|have you heard|what'?s the difference|is it possible|is it true|i was wondering|i'?m curious)\b/.test(t)) return true
+
+    // News & information
+    if (/^(what'?s happening|what'?s going on|any news|what happened|what'?s the status|give me an update|fill me in|what'?s new in|what'?s trending|catch me up)\b/.test(t)) return true
+
+    // Memory & history
+    if (/\b(what do you remember|what do you know about me|what have we built|what have we done|remind me what|do you remember when|what was the last thing we|what did we work on|what'?s in my memory|show me my memories|what have i told you)\b/.test(t)) return true
+
+    // Agentic/tool tasks — ALWAYS chat (Sparkie handles via /api/chat tools)
     const AGENTIC_TASK = /\b(send|compose|draft|reply to|respond to|forward|email|tweet|post|message|text|dm|notify|remind|schedule|remind me|set a reminder|search my|look up|find me|fetch|check my|read my|read me|read the|show my|show me|list my|list me|summarize my|check (the|my|for)|what.{0,20}(email|inbox|calendar|reminder|tweet|post|message|schedule)|remember (that|this|my|to)|save (this|that|my|to)|add to|remove from|delete from|tell me what (you|i)|what can you|what do you|investigate|analyze|analyse|diagnose|audit|review my|read (my|me|the|latest|recent|new|unread)|open my|play my|start my|stop my)\b/i
-    if (AGENTIC_TASK.test(t)) return true  // → streamReply → /api/chat
+    if (AGENTIC_TASK.test(t)) return true
 
-    // Non-code "create" — create a reminder/event/meeting/note/goal/plan are agentic, not builds
-    // Excludes "task"/"list" — too ambiguous ("task manager app", "todo list app" should be builds)
-    // BUILD_PHRASE "create a" will still correctly catch code builds downstream
+    // Non-build creates (create a reminder, event, meeting, etc.)
     if (/\bcreate\b.{0,40}\b(reminder|event|meeting|note|goal|plan|alert|notification|record|appointment)\b/i.test(t)) return true
 
-    // Media generation — "make me a song / generate an image / make a video" → ALWAYS chat
-    // These hit BUILD_PHRASE ("make a", "generate a") but must go to streamReply → Sparkie's media tools
-    // Must run BEFORE BUILD_PHRASE check below
-    // Pattern A: "generate/make/create [article/adjective] [media type]"
-    const MEDIA_GENERATE_A = /\b(make me |make |generate |write me |write |create )(?:(?:a |an |some |some )\b)?(?:[a-z]+ )?(?:[a-z]+ )?(image|photo|picture|drawing|illustration|artwork|render|portrait|wallpaper|thumbnail|visual|video|clip|animation|reel|short|movie|film|footage|song|music|track|beat|melody|audio|sound|jingle|composition|playlist)/i
-    // Pattern B: explicit standalone media intent keywords
+    // Media generation — ALWAYS chat (media tools handle these)
+    const MEDIA_GENERATE_A = /\b(make me |make |generate |write me |write |create )(?:(?:a |an |some )\b)?(?:[a-z]+ )?(?:[a-z]+ )?(image|photo|picture|drawing|illustration|artwork|render|portrait|wallpaper|thumbnail|visual|video|clip|reel|short|movie|film|footage|song|music|track|beat|melody|audio|sound|jingle|composition|playlist)/i
     const MEDIA_GENERATE_B = /\b(generate|make me|write me|compose|create).{0,30}\b(music|song|track|beat|melody|audio|image|photo|video)/i
-    if (MEDIA_GENERATE_A.test(t) || MEDIA_GENERATE_B.test(t)) return true  // → streamReply → generate_image / generate_video / generate_ace_music
+    if (MEDIA_GENERATE_A.test(t) || MEDIA_GENERATE_B.test(t)) return true
 
-    // Ambiguous — escalate to LLM classifier
+    // System/Sparkie meta questions
+    if (/\b(what can you do|what are your capabilities|what tools do you have|how do you work|how do you think|what model are you|who made you|show me your worklog|check my tasks|what tasks do i have|what'?s in my feed|show me the feed|how'?s the deploy|check the server|any errors|any issues)\b/.test(t)) return true
+
+    // Explanation/tutorial requests (chat not build)
+    if (/\b(explain how to|how do i build|how do i create|how do i make|show me how to create|show me how to build|how to build|how to create|how to make|i'?m thinking about building|what if we built|hypothetically|could you walk me through)\b/.test(t)) return true
+
+    // Deliberate non-build opinions about the project
+    if (/\b(what would make (this|it) better|what would improve|what should i add|review (this|my) code|can you review|what do you see|look at this|take a look)\b/.test(t)) return true
+
+    // ── BUILD SESSION SHORT-CIRCUIT ──────────────────────────────────────────
+    // When in an active build session, short edit follow-ups that don't match
+    // Tier 1 chat patterns above are routed directly to build.
+    if (isBuildSession() && wordCount >= 2) {
+      const SESSION_EDIT = /\b(make it|make the|make sure|set the|set it|turn it|turn the|flip it|add|remove|change|update|fix|improve|adjust|tweak|darker|lighter|bigger|smaller|faster|slower|animated|animate|smooth|round|flat|bold|italic|colored|centered|aligned|visible|hidden|responsive|mobile|desktop)\b/i
+      if (SESSION_EDIT.test(t)) return false // build
+    }
+
+    // ── Tier 2: INSTANT BUILD ────────────────────────────────────────────────
+    // Explicit build commands — high confidence
+
+    // Primary build verbs at start
+    const BUILD_START = /^(build|create|make|write|generate|implement|deploy|refactor|debug|scaffold|code|program|develop)\b/
+    if (BUILD_START.test(t)) {
+      // Guard: media overrides already handled above, so anything here is a build
+      return false
+    }
+
+    // Build phrases anywhere in message
+    const BUILD_PHRASE = /\b(build me|build a|build an|create a|create an|create me|make a|make an|make me a|write a|write an|write me|generate a|generate an|implement a|implement an|fix the|fix my|debug the|debug this|install the|deploy the|refactor the|refactor my|let'?s build|let'?s make|let'?s create|i want a|i want an|i need a|i need an|i'?d like a|i'?d like an|can you build|can you create|can you add|can you make|can we build|can we create|can we have a|can we make)\b/
+    if (BUILD_PHRASE.test(t)) {
+      // Comms override: "write an email/tweet/message" → chat
+      if (/\b(email|tweet|post to|message|dm|text|reply to|discord|slack|instagram|twitter|facebook|reddit|tiktok)\b/i.test(t)) return true
+      return false
+    }
+
+    // Explicit edit commands on existing code
+    const EDIT_PHRASE = /\b(edit|update|upgrade|change|switch|swap|replace|rename|remove|delete|adjust|alter|amend|convert|modify|revise|refactor|rewrite|redo|refine|restyle|recolor|resize|transform|overhaul|patch|correct|improve|fix|tweak|tune|undo|revert|rollback)\b/i
+    if (EDIT_PHRASE.test(t)) {
+      // Emotional override: "I had broken you trying to update you" etc.
+      const EMOTIONAL_OVERRIDE = /\b(i('m| am| was| feel)|you('re| are| were)|we('re| are)|broken you|proud of|upset|sorry|happy|excited|love|miss|wow|amazing|incredible|beautiful|great job|well done|thank|glad|grateful)\b/i
+      const hasCodeTarget = /\b(app|page|button|color|navbar|footer|header|component|style|css|html|code|script|file|function|api|endpoint|route|database|model|feature|modal|form|input|layout|theme|icon|image|logo|animation|widget|card|sidebar|menu|dropdown|table|chart|graph|dashboard)\b/i
+      if (EMOTIONAL_OVERRIDE.test(t) && !hasCodeTarget.test(t)) return null // ambiguous → LLM
+      // Comms override
+      if (/\b(send|compose|draft|email|tweet|post|message|dm|text)\b/i.test(t) && /\b(email|tweet|post|message|dm)\b/i.test(t)) return true
+      return false
+    }
+
+    // ── Tier 3: AMBIGUOUS → LLM ─────────────────────────────────────────────
+    // Short messages (< 5 words) without explicit build signal → chat
+    if (wordCount < 5) return true
+
     return null
-  }, [])
+  }, [isBuildSession])
 
   // LLM-powered intent classifier — called only for ambiguous messages
   const classifyIntent = useCallback(async (text: string): Promise<'chat' | 'build'> => {
@@ -898,12 +937,13 @@ export function ChatInput() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text }),
+        signal: AbortSignal.timeout(2000),
       })
-      if (!res.ok) return 'build'
+      if (!res.ok) return 'chat'
       const { mode } = await res.json()
-      return mode === 'chat' ? 'chat' : 'build'
+      return mode === 'build' ? 'build' : 'chat'
     } catch {
-      return 'build' // Fail safe: default to build
+      return 'chat' // Fail safe: default to chat
     }
   }, [quickClassify])
 
@@ -1119,45 +1159,42 @@ export function ChatInput() {
     // Detect edit intent — if user is modifying an existing project, skip archive
     const EDIT_INTENT_RE = /\b(edit|update|upgrade|change|switch|swap|replace|rename|remove|delete|adjust|alter|amend|convert|modify|revise|refactor|rewrite|redo|refine|restyle|recolor|resize|transform|overhaul|patch|correct|improve|fix|tweak|tune|undo|revert|rollback)\b|(?:(?:can you|can u|could you|would you|would you mind|how about)\s+(?:please\s+)?(?:edit|update|upgrade|change|switch|swap|replace|rename|remove|delete|adjust|alter|amend|convert|modify|revise|refactor|rewrite|redo|refine|restyle|recolor|resize|transform|overhaul|patch|correct|improve|fix|tweak|tune|undo|revert|rollback))|\b(make it|make the|make sure|set the|set it|turn it|turn the|flip it|flip the|let's make|let's update|let's change|let's switch|instead of|it should be|switch this|switch the|update to|change to|change it)\b|\b(cahnge|chnage|upadte|updaet|swich|swithc|fiix|tweek|edti|chnge|udpate)\b/i
     const currentFilesForCtx = useAppStore.getState().files.filter(f => f.type !== 'archive')
-    const isEditRequest = (isEdit || EDIT_INTENT_RE.test(userContent)) && currentFilesForCtx.filter(f => f.type === 'file').length > 0
+    const isEditRequest = (isEdit || EDIT_INTENT_RE.test(userContent)) && flattenFileTree(currentFilesForCtx).length > 0
 
-    if (!isEditRequest) {
-      // New build — archive existing workspace
-      const currentFiles_archive = useAppStore.getState().files
-      const isArchv = (f: import('@/store/appStore').FileNode) => f.type === 'archive'
-      const activeFiles_pre = currentFiles_archive.filter(f => !isArchv(f))
-      const existingArchives_pre = currentFiles_archive.filter(isArchv)
-
-      if (activeFiles_pre.length > 0) {
-        const allUserMsgs = (useAppStore.getState().chats.find(c => c.id === chatId)?.messages ?? []).filter(m => m.role === 'user')
-        const prevMsg = allUserMsgs.slice().reverse().find(m => m.content.trim().split(/\s+/).length > 4)
-        const nameSource = prevMsg?.content || activeFiles_pre[0]?.name || 'project'
-        const folderName = nameSource.replace(/[^a-zA-Z0-9 ]/g, '').trim().split(/\s+/).slice(0, 5).join('-').toLowerCase() || 'project'
-        const now = new Date()
-        const archiveName = `${folderName}-${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`
-        const deepClone = (node: import('@/store/appStore').FileNode): import('@/store/appStore').FileNode => ({
-          ...node, id: crypto.randomUUID(), children: node.children?.map(deepClone),
-        })
-        useAppStore.getState().setFiles([...existingArchives_pre, {
-          id: crypto.randomUUID(), name: archiveName, type: 'archive', content: '',
-          children: activeFiles_pre.map(deepClone),
-        }])
-      } else {
-        useAppStore.getState().setFiles([])
-      }
-    }
-    // For edit requests: keep files in place — agent will overwrite with updated versions
+    // For new builds: files are added under their project folder — previous projects preserved
+    // For edit requests: upsertFile updates files in place under the active project
 
     // Build API messages with file context
     const chat = useAppStore.getState().chats.find(c => c.id === chatId)
-    const projectName = deriveProjectName(chat?.title || 'New Chat')
+
+    // Derive project name from the actual user prompt (much better than chat title)
+    // Check for collisions with existing top-level project folders
+    const baseProjectName = deriveProjectName(userContent)
+    const existingRoots = new Set(
+      useAppStore.getState().files
+        .filter(f => f.type === 'folder')
+        .map(f => f.name)
+    )
+    let projectName = baseProjectName
+    if (existingRoots.has(baseProjectName) && !isEditRequest) {
+      for (let i = 2; i <= 99; i++) {
+        const candidate = `${baseProjectName}-${i}`
+        if (!existingRoots.has(candidate)) { projectName = candidate; break }
+      }
+    }
+
     const apiMessages = (chat?.messages ?? [])
       .filter(m => m.type !== 'image' && m.type !== 'video')
       .map(m => ({ role: m.role, content: m.content }))
       .slice(0, -1) // exclude last message — it's the user msg just added; appended manually below
 
-    // File context for fix requests
-    const activeForCtx = currentFilesForCtx.filter(f => f.type === 'file' && f.content)
+    // File context for fix requests — scope to active project to avoid sending all projects
+    const activeRoot = useAppStore.getState().activeProjectRoot
+    const allLeafFiles = flattenFileTree(currentFilesForCtx)
+    const activeForCtx = (activeRoot
+      ? allLeafFiles.filter(f => f.name.startsWith(activeRoot + '/'))
+      : allLeafFiles
+    ).filter(f => f.content)
     const fileContext = activeForCtx.map(f => `---FILE: ${f.name}---\n${f.content}\n---END FILE---`).join('\n\n')
     const currentFilesPayload = fileContext || undefined
 
@@ -1218,7 +1255,7 @@ export function ChatInput() {
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: [...apiMessages, { role: 'user', content: apiUserContent }], currentFiles: currentFilesPayload, model: selectedModel, userProfile: useAppStore.getState().userProfile, mode: 'build' }),
+        body: JSON.stringify({ messages: [...apiMessages, { role: 'user', content: apiUserContent }], currentFiles: currentFilesPayload, model: selectedModel, userProfile: useAppStore.getState().userProfile, mode: 'build', projectName }),
         signal: agentAbortRef.current.signal,
       })
 
@@ -1252,7 +1289,10 @@ export function ChatInput() {
           if (data === '[DONE]') continue
           try {
             const parsed = JSON.parse(data)
-            if (parsed.event === 'thinking') {
+            if (parsed.event === 'project_name' && parsed.name) {
+              // Server confirmed project name — use it (already set client-side but server may differ)
+              projectName = parsed.name as string
+            } else if (parsed.event === 'thinking') {
               lastThinkingText = parsed.text
               updateMessage(chatId, thinkingMsgId, { content: lastThinkingText, isStreaming: true })
               addWorklogEntry({ type: 'thinking', content: parsed.text, status: 'running' })
@@ -1270,10 +1310,7 @@ export function ChatInput() {
               for (const file of partialParse.files) {
                 if (!createdFileNames.has(file.name)) {
                   createdFileNames.add(file.name)
-                  if (filesCreated === 0 && !isEdit) {
-                    const oldActive = useAppStore.getState().files.filter(f => f.type !== 'archive')
-                    oldActive.forEach(f => useAppStore.getState().deleteFile(f.id))
-                  }
+                  // Files are now isolated per project folder — no clearing needed
                   const fileId = upsertFile(file.name, file.content, getLanguageFromFilename(file.name))
                   if (filesCreated === 0) setActiveFile(fileId)
                   addLiveCodeFile(file.name)
@@ -1313,10 +1350,11 @@ export function ChatInput() {
                   updateAsset(updatedFileId, file.content)
                 }
               }
+              // Set the new project as the active one for preview
+              useAppStore.getState().setActiveProjectRoot(projectName)
               triggerBuild()
               // CDN-compatible projects: all files are now present, switch to preview.
-              // Preview.tsx will render them instantly via Babel in-iframe.
-              if (isCDNCompatible(useAppStore.getState().files)) {
+              if (isCDNCompatible(useAppStore.getState().files, projectName)) {
                 setIDETab('preview')
               }
             } else if (parsed.event === 'error') {
@@ -2032,10 +2070,11 @@ Promise.all([
 
       // If workspace has active files, check for edit intent first
       // (classifier might miss "change the yellow to green" as a build command)
-      const activeFiles = useAppStore.getState().files.filter(f => f.type !== 'archive' && f.type === 'file')
+      // Check for active project files (top-level nodes are now project folders, so use flattenFileTree)
+      const activeProjectExists = !!useAppStore.getState().activeProjectRoot && flattenFileTree(useAppStore.getState().files.filter(f => f.type !== 'archive')).length > 0
       // Broad intent: catches "can we change X", "could you update", "please make the X", "it didnt update", etc.
       const EDIT_INTENT = /\b(edit|update|upgrade|change|switch|swap|replace|rename|remove|delete|adjust|alter|amend|convert|modify|revise|refactor|rewrite|redo|refine|restyle|recolor|resize|transform|overhaul|patch|correct|improve|fix|tweak|tune|undo|revert|rollback)\b|(?:(?:can you|can u|could you|would you|would you mind|how about)\s+(?:please\s+)?(?:edit|update|upgrade|change|switch|swap|replace|rename|remove|delete|adjust|alter|amend|convert|modify|revise|refactor|rewrite|redo|refine|restyle|recolor|resize|transform|overhaul|patch|correct|improve|fix|tweak|tune|undo|revert|rollback))|\b(make it|make the|make sure|set the|set it|turn it|turn the|flip it|flip the|let's make|let's update|let's change|let's switch|instead of|it should be|switch this|switch the|update to|change to|change it)\b|\b(cahnge|chnage|upadte|updaet|swich|swithc|fiix|tweek|edti|chnge|udpate)\b/i
-      if (activeFiles.length > 0 && EDIT_INTENT.test(userContent)) {
+      if (activeProjectExists && EDIT_INTENT.test(userContent)) {
         setLastMode('build')
         streamAgent(chatId, userContent, true)
         return
