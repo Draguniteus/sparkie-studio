@@ -1,4 +1,5 @@
 import type { FileNode } from '@/store/appStore'
+import { flattenFileTree } from '@/store/appStore'
 
 // ─── CDN package → esm.sh URL map ────────────────────────────────────────────
 const CDN_MAP: Record<string, string> = {
@@ -47,36 +48,53 @@ const SKIP_PREFIXES = [
   'prettier', 'autoprefixer', 'postcss', 'tailwindcss',
 ]
 
-// ─── Tree helpers ─────────────────────────────────────────────────────────────
+// ─── Tree walker ──────────────────────────────────────────────────────────────
 
-/** Walk a FileNode tree and collect all leaf files with their full relative paths. */
-function extractWithPaths(
+/**
+ * Walk a FileNode tree recursively and collect all leaf files with their
+ * FULL relative paths (e.g. "sparkie/src/App.tsx"), not just leaf names.
+ * Archive nodes are skipped.
+ */
+function walkTree(
   nodes: FileNode[],
   prefix = '',
 ): Array<{ name: string; content: string }> {
   const result: Array<{ name: string; content: string }> = []
   for (const node of nodes) {
     if (node.type === 'archive') continue
-    const fullPath = prefix ? `${prefix}/${node.name}` : node.name
+    const path = prefix ? `${prefix}/${node.name}` : node.name
     if (node.type === 'folder') {
-      result.push(...extractWithPaths(node.children ?? [], fullPath))
+      result.push(...walkTree(node.children ?? [], path))
     } else {
-      result.push({ name: fullPath, content: node.content ?? '' })
+      result.push({ name: path, content: node.content ?? '' })
     }
   }
   return result
 }
 
 /**
- * Strip a single shared project-root prefix from all paths.
- * e.g. "myapp/src/App.tsx" → "src/App.tsx" when every file shares "myapp/".
+ * Derive the project root prefix from where package.json lives.
+ * e.g. if package.json is at "sparkie/package.json", prefix = "sparkie/"
+ * Works regardless of what the root folder is named.
  */
-function stripRoot(files: Array<{ name: string; content: string }>): Array<{ name: string; content: string }> {
-  if (files.length === 0) return files
-  const roots = new Set(files.map(f => f.name.split('/')[0]))
-  if (roots.size !== 1) return files
-  const root = [...roots][0]
-  return files.map(f => ({ ...f, name: f.name.slice(root.length + 1) }))
+function deriveRootPrefix(all: Array<{ name: string }>): string {
+  const pkg = all.find(f => f.name === 'package.json' || f.name.endsWith('/package.json'))
+  if (!pkg) return ''
+  const parts = pkg.name.split('/')
+  // package.json at root → no prefix; inside a folder → strip that folder
+  return parts.length > 1 ? parts.slice(0, -1).join('/') + '/' : ''
+}
+
+/** Strip the project root prefix from all paths. */
+function applyPrefix(
+  files: Array<{ name: string; content: string }>,
+  prefix: string,
+): Array<{ name: string; content: string }> {
+  if (!prefix) return files
+  return files.map(f => ({
+    ...f,
+    name: f.name.startsWith(prefix) ? f.name.slice(prefix.length) : f.name,
+  }))
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -86,23 +104,43 @@ function stripRoot(files: Array<{ name: string; content: string }>): Array<{ nam
  * on esm.sh, meaning we can preview without npm install / WebContainer.
  */
 export function isCDNCompatible(files: FileNode[]): boolean {
-  const all = stripRoot(extractWithPaths(files))
-  const pkg = all.find(f => f.name === 'package.json')
-  if (!pkg?.content) return false
+  // Debug: log what the function actually sees
+  console.log(
+    '[CDN] isCDNCompatible: top-level nodes =', files.length,
+    '| flattenFileTree names =', flattenFileTree(files).map(f => f.name),
+  )
+
+  // Walk the full tree to get all leaf files with reconstructed full paths
+  const all = walkTree(files)
+  console.log('[CDN] walkTree paths =', all.map(f => f.name))
+
+  // Find package.json at any depth, regardless of root folder name
+  const pkg = all.find(f => f.name === 'package.json' || f.name.endsWith('/package.json'))
+  if (!pkg?.content) {
+    console.log('[CDN] no package.json found → not CDN compatible')
+    return false
+  }
+  console.log('[CDN] found package.json at:', pkg.name)
+
   try {
     const parsed = JSON.parse(pkg.content) as { dependencies?: Record<string, string> }
     const deps = Object.keys(parsed.dependencies ?? {})
       .filter(d => !SKIP_PREFIXES.some(s => d.startsWith(s)))
-    if (deps.length === 0) return false
-    return deps.every(dep =>
+    if (deps.length === 0) {
+      console.log('[CDN] no runtime deps → not CDN compatible')
+      return false
+    }
+    const allMapped = deps.every(dep =>
       Object.keys(CDN_MAP).some(k => k === dep || k.startsWith(dep + '/'))
     )
+    console.log('[CDN] deps:', deps, '| all CDN-mapped:', allMapped)
+    return allMapped
   } catch { return false }
 }
 
 /**
  * Build a self-contained srcdoc HTML string that:
- *  1. Embeds all source files as JSON
+ *  1. Embeds all source files as JSON (with normalized paths like "src/App.tsx")
  *  2. Loads @babel/standalone from unpkg
  *  3. Compiles each .tsx/.ts/.jsx/.js file in-browser with Babel
  *  4. Creates blob URLs for each compiled module, replacing imports with
@@ -110,13 +148,16 @@ export function isCDNCompatible(files: FileNode[]): boolean {
  *  5. Dynamically loads the entry point — zero npm install, zero build step
  */
 export function buildCDNPreviewHtml(files: FileNode[]): string {
-  const all = stripRoot(extractWithPaths(files))
+  // Walk tree for full paths, then normalize by stripping the project root prefix
+  const all    = walkTree(files)
+  const prefix = deriveRootPrefix(all)
+  const norm   = applyPrefix(all, prefix)
 
-  const srcFiles = all
+  const srcFiles = norm
     .filter(f => /\.(tsx?|jsx?)$/.test(f.name))
     .filter(f => !/vite\.config|tsconfig|\.test\.|\.spec\.|\.d\.ts$/.test(f.name))
 
-  const css = all
+  const css = norm
     .filter(f => f.name.endsWith('.css'))
     .map(f => f.content.replace(/@tailwind\s+\w+;?\s*/g, ''))  // strip @tailwind directives
     .join('\n')
@@ -142,7 +183,7 @@ export function buildCDNPreviewHtml(files: FileNode[]): string {
   var FILES = ${filesJson};
   var CDN   = ${cdnJson};
 
-  // Build a name→content lookup
+  // Build a name→content lookup (keys are normalized paths like "src/App.tsx")
   var srcMap = {};
   FILES.forEach(function (f) { srcMap[f.name] = f.content; });
 
@@ -172,7 +213,7 @@ export function buildCDNPreviewHtml(files: FileNode[]): string {
   var blobs = {}, busy = {};
 
   // Resolve an import specifier to a CDN URL or blob URL.
-  // baseName is the path of the file doing the importing (e.g. "src/App.tsx").
+  // baseName is the normalized path of the file doing the importing (e.g. "src/App.tsx").
   function resolveImp(imp, baseName) {
     // @/ alias → src/
     if (imp.startsWith('@/')) {
