@@ -184,7 +184,7 @@ export function buildCDNPreviewHtml(files: FileNode[]): string {
 <script type="importmap">${importmapJson}<\/script>
 <script src="https://cdn.tailwindcss.com"><\/script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"><\/script>
-<style>*{box-sizing:border-box}body{margin:0;background:#0a0a0a;color:#e2e8f0;font-family:system-ui,sans-serif}canvas{display:block}${css}<\/style>
+<style>*{box-sizing:border-box}html,body,#root{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#0a0a0a}body{color:#e2e8f0;font-family:system-ui,sans-serif}canvas{width:100%!important;height:100%!important;display:block}${css}<\/style>
 </head>
 <body>
 <div id="root"></div>

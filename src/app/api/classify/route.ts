@@ -8,7 +8,7 @@ export async function POST(req: NextRequest) {
   try {
     const { message } = await req.json()
     const apiKey = process.env.OPENCODE_API_KEY
-    if (!apiKey) return new Response(JSON.stringify({ mode: 'chat' }), { headers: { 'Content-Type': 'application/json' } })
+    if (!apiKey) return new Response(JSON.stringify({ mode: 'build' }), { headers: { 'Content-Type': 'application/json' } })
 
     const response = await fetch(`${OPENCODE_BASE}/chat/completions`, {
       method: 'POST',
@@ -36,7 +36,7 @@ Examples: "send an email to Mary", "post a tweet about this", "what's the weathe
 
 CRITICAL: "send email", "post tweet", "compose message", "draft reply", "schedule reminder" are ALWAYS "chat" — never "build".
 
-When in doubt, respond "chat". Only respond "build" when you are highly confident the user wants code or a UI element built or modified.`
+When in doubt, respond "build". Only respond "chat" when you are highly confident the user does NOT want code or a UI element built.`
           },
           { role: 'user', content: message }
         ],
@@ -46,13 +46,13 @@ When in doubt, respond "chat". Only respond "build" when you are highly confiden
       }),
     })
 
-    if (!response.ok) return new Response(JSON.stringify({ mode: 'chat' }), { headers: { 'Content-Type': 'application/json' } })
+    if (!response.ok) return new Response(JSON.stringify({ mode: 'build' }), { headers: { 'Content-Type': 'application/json' } })
 
     const data = await response.json()
-    const answer = data.choices?.[0]?.message?.content?.trim().toLowerCase() ?? 'chat'
-    const mode = answer.startsWith('build') ? 'build' : 'chat'
+    const answer = data.choices?.[0]?.message?.content?.trim().toLowerCase() ?? 'build'
+    const mode = answer.startsWith('chat') ? 'chat' : 'build'
     return new Response(JSON.stringify({ mode }), { headers: { 'Content-Type': 'application/json' } })
   } catch {
-    return new Response(JSON.stringify({ mode: 'chat' }), { headers: { 'Content-Type': 'application/json' } })
+    return new Response(JSON.stringify({ mode: 'build' }), { headers: { 'Content-Type': 'application/json' } })
   }
 }

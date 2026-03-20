@@ -827,7 +827,7 @@ export function ChatInput() {
 
     // Build/code intent — high-confidence signals
     const BUILD_KEYWORDS = /^(build|create|make|write|generate|implement|deploy|refactor|debug|fix|install)\b/
-    const BUILD_PHRASE = /\b(build me|build a|create a|make a|make me|write a|write me|generate a|implement a|fix the|fix my|debug the|debug this|install the|deploy the|refactor the|refactor my|test the app|test it)\b/
+    const BUILD_PHRASE = /\b(build me|build a|create a|make a|make me|write a|write me|generate a|implement a|fix the|fix my|debug the|debug this|install the|deploy the|refactor the|refactor my|test the app|test it|let'?s build|let'?s make|let'?s create|i want a|i want an|i need a|i need an|i'?d like a|i'?d like an|can we build|can we make|can we create|can we have a|can you build|can you add|can you create)\b/
     // Edit/modify commands — always build mode (user is modifying an existing project)
     // Catches: "change the X", "can we change", "can you change", "please change", "make it X", etc.
     const EDIT_PHRASE = /\b(edit|update|upgrade|change|switch|swap|replace|rename|remove|delete|adjust|alter|amend|convert|modify|revise|refactor|rewrite|redo|refine|restyle|recolor|resize|transform|overhaul|patch|correct|improve|fix|tweak|tune|undo|revert|rollback)\b|(?:(?:can you|can u|could you|would you|would you mind|how about)\s+(?:please\s+)?(?:edit|update|upgrade|change|switch|swap|replace|rename|remove|delete|adjust|alter|amend|convert|modify|revise|refactor|rewrite|redo|refine|restyle|recolor|resize|transform|overhaul|patch|correct|improve|fix|tweak|tune|undo|revert|rollback))|\b(make it|make the|make sure|set the|set it|turn it|turn the|flip it|flip the|let's make|let's update|let's change|let's switch|instead of|it should be|switch this|switch the|update to|change to|change it)\b|\b(cahnge|chnage|upadte|updaet|swich|swithc|fiix|tweek|edti|chnge|udpate)\b/
@@ -899,11 +899,11 @@ export function ChatInput() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text }),
       })
-      if (!res.ok) return 'chat'
+      if (!res.ok) return 'build'
       const { mode } = await res.json()
-      return mode === 'build' ? 'build' : 'chat'
+      return mode === 'chat' ? 'chat' : 'build'
     } catch {
-      return 'chat' // Fail safe: default to chat
+      return 'build' // Fail safe: default to build
     }
   }, [quickClassify])
 
