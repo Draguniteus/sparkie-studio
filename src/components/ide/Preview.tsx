@@ -116,6 +116,7 @@ const ERROR_OVERLAY_SCRIPT = `<script>
 
 // ── React Error Boundary — catches render errors in Preview ──────────────────
 import React from 'react'
+import { isCDNCompatible, buildCDNPreviewHtml } from '@/lib/cdnPreview'
 
 interface EBState { hasError: boolean; errorMsg: string }
 class PreviewErrorBoundary extends React.Component<{ children: React.ReactNode }, EBState> {
@@ -197,6 +198,12 @@ export function Preview() {
   const isWCReady  = containerStatus === 'ready' && previewUrl
 
   const { previewHtml, previewType } = useMemo(() => {
+    // ── CDN fast path: React/Three.js/etc with CDN-available deps ────────────
+    // Skips WebContainer entirely — Babel compiles in-iframe, instant preview.
+    if (isCDNCompatible(files)) {
+      return { previewHtml: buildCDNPreviewHtml(files), previewType: 'cdn' as const }
+    }
+
     if (isWCActive) return { previewHtml: null, previewType: null }
 
     const htmlFile = flatFiles.find(f => f.name.endsWith(".html"))
@@ -269,7 +276,7 @@ export function Preview() {
     return { previewHtml: null, previewType: null }
   }, [files, isWCActive, refreshKey])
 
-  const typeLabel: Record<string,string> = { html:"HTML",react:"React",svg:"SVG",js:"JS",markdown:"Markdown",json:"JSON",code:"Code" }
+  const typeLabel: Record<string,string> = { html:"HTML",react:"React",svg:"SVG",js:"JS",markdown:"Markdown",json:"JSON",code:"Code",cdn:"CDN" }
 
   // ── Loading state (WC spinning up) ────────────────────────────────────────
   if (isWCActive && !isWCReady) {

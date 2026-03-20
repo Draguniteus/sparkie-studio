@@ -1,7 +1,8 @@
 "use client"
 
 import { useState, useEffect, useRef, useCallback } from "react"
-import { useAppStore } from "@/store/appStore"
+import { useAppStore, flattenFileTree } from "@/store/appStore"
+import { isCDNCompatible } from "@/lib/cdnPreview"
 import { useWebContainer } from "@/hooks/useWebContainer"
 import { FileExplorer } from "@/components/ide/FileExplorer"
 import { CodeEditor } from "@/components/ide/CodeEditor"
@@ -91,19 +92,31 @@ export function IDEPanelInner() {
   useEffect(() => {
     if (lastRunKey.current === buildKey) return
     if (files.length === 0) { lastRunKey.current = -1; return }
-    const hasPkg = files.some(f => f.name === 'package.json')
+
+    // ── CDN fast path ─────────────────────────────────────────────────────────
+    // React/Three.js/etc projects with CDN-available deps skip WebContainer.
+    // Preview.tsx renders them instantly via Babel in-iframe. Just switch tabs.
+    if (isCDNCompatible(files)) {
+      lastRunKey.current = buildKey
+      setIdeTab('preview')
+      return
+    }
+
+    // ── WebContainer / E2B path ───────────────────────────────────────────────
+    const flatFiles = flattenFileTree(files)
+    const hasPkg = flatFiles.some(f => f.name === 'package.json')
     if (!hasPkg || isExecuting) return
     lastRunKey.current = buildKey
 
-    if (isBackendProject(files)) {
+    if (isBackendProject(flatFiles)) {
       // Backend project — skip WebContainer, run in E2B via execute-project
       setIdeTab('terminal')
       clearTerminalOutput()
       appendTerminalOutput('[Sparkie] Backend project detected — starting E2B runner…\r\n')
       setContainerStatus('booting')
 
-      const filePayload = files
-        .filter(f => f.type === 'file' && f.content)
+      const filePayload = flatFiles
+        .filter(f => f.content)
         .map(f => ({ name: f.name, content: f.content! }))
 
       fetch('/api/execute-project', {
