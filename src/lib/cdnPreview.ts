@@ -127,21 +127,15 @@ export function isCDNCompatible(files: FileNode[], activeProjectRoot?: string | 
 }
 
 /**
- * Build a self-contained srcdoc HTML string that:
- *  1. Embeds source files as JSON
- *  2. Declares a browser-native importmap (FIRST in <head>) mapping CDN packages
- *     to esm.sh URLs — the browser resolves bare specifiers automatically
- *  3. Loads @babel/standalone from unpkg (blocking script, after importmap)
- *  4. Compiles each .tsx/.ts/.jsx/.js file in-browser with Babel
- *  5. Creates blob URLs for LOCAL modules only (relative + @/ imports)
- *  6. CDN bare specifiers (react, three, etc.) are left as-is; importmap handles them
- *  7. Dynamically loads the entry point as a module — zero npm install, zero build step
+ * Build a self-contained srcdoc HTML string using a two-pass compilation approach:
+ *  1. Phase 1: Compile ALL .tsx/.ts files with Babel (JSX + TS → ES modules)
+ *  2. Phase 2: Build a dependency graph from parsed imports
+ *  3. Phase 3: Topological sort — leaf components (no local deps) processed first
+ *  4. Phase 4: Create blob URLs in topo order — by the time file N is processed,
+ *     all its local dependencies already have blob URLs in blobMap
  *
- * Why importmap vs manual URL replacement:
- *  - Browser-native: no regex needed for CDN specifiers, no edge cases
- *  - Handles subpath imports (react/jsx-runtime) and ?external= params transparently
- *  - Works for both static and dynamic imports
- *  - importmap MUST be the first <script> in <head> per HTML spec
+ * CDN bare specifiers (react, three, etc.) are handled by the importmap — never
+ * replaced with blob URLs. Only @/ and relative (./) imports get blob-ified.
  */
 export function buildCDNPreviewHtml(files: FileNode[], activeProjectRoot?: string | null): string {
   // Walk tree for full paths, then filter to active project and normalize paths
@@ -162,12 +156,9 @@ export function buildCDNPreviewHtml(files: FileNode[], activeProjectRoot?: strin
     .join('\n')
     .replace(/<\/style>/gi, '<\\/style>')
 
-  const filesJson    = JSON.stringify(srcFiles)
-  // importmap: maps bare specifiers → esm.sh URLs; browser resolves them in ES modules
+  const filesJson     = JSON.stringify(srcFiles)
   const importmapJson = JSON.stringify({ imports: CDN_MAP })
 
-  // The inline script runs inside the iframe. Double-backslashes in this TS
-  // template become single backslashes in the emitted HTML (correct regex syntax).
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -178,25 +169,23 @@ export function buildCDNPreviewHtml(files: FileNode[], activeProjectRoot?: strin
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html{width:100%;height:100%}
-body{width:100%;height:100%;overflow:hidden;background:#0a0a0a;color:#e2e8f0;font-family:system-ui,sans-serif}
+body{width:100vw;height:100vh;overflow:hidden;background:#0a0a0a;color:#e2e8f0;font-family:system-ui,sans-serif}
 #root{width:100%;height:100%;display:flex;flex-direction:column}
 canvas{width:100%!important;height:100%!important;display:block}
 .app,.App,[class*="app"],[class*="App"]{width:100%;height:100%}
 ${css}<\/style>
 </head>
-<body style="margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#0a0a0a">
-<div id="root"></div>
+<body style="margin:0;padding:0;width:100vw;height:100vh;overflow:hidden;background:#0a0a0a">
+<div id="root" style="width:100%;height:100%;display:flex;flex-direction:column"></div>
 <script>
 (function () {
   var FILES = ${filesJson};
 
-  // Build a name→content lookup (keys are normalized paths like "src/App.tsx")
+  // Build name→content map
   var srcMap = {};
-  FILES.forEach(function (f) { srcMap[f.name] = f.content; });
+  FILES.forEach(function(f) { srcMap[f.name] = f.content; });
 
-  // Try to find a source file for a bare path (tries common extensions)
-  var EXTS = ['', '.tsx', '.ts', '.jsx', '.js',
-               '/index.tsx', '/index.ts', '/index.jsx', '/index.js'];
+  var EXTS = ['', '.tsx', '.ts', '.jsx', '.js', '/index.tsx', '/index.ts', '/index.jsx', '/index.js'];
   function findSrc(path) {
     for (var i = 0; i < EXTS.length; i++) {
       if (srcMap[path + EXTS[i]] !== undefined) return path + EXTS[i];
@@ -204,106 +193,110 @@ ${css}<\/style>
     return null;
   }
 
-  var blobs = {}, busy = {};
-
-  // Resolve a LOCAL import specifier to a blob URL.
-  // CDN bare specifiers are NOT resolved here — the importmap handles them.
-  // baseName is the normalized path of the importing file (e.g. "src/App.tsx").
-  function resolveLocalImp(imp, baseName) {
-    // @/ alias → src/
-    if (imp.startsWith('@/')) {
-      var af = findSrc('src/' + imp.slice(2));
-      if (af) { var ab = getBlob(af); if (ab) return ab; }
-      return imp;
-    }
-    // Relative local import — resolve against the importing file's directory
+  // Resolve a local import specifier to a normalized file path, or null for CDN imports
+  function resolveLocalPath(imp, baseName) {
+    if (imp.startsWith('@/')) return findSrc('src/' + imp.slice(2));
     if (imp.startsWith('.')) {
-      var dir = baseName.indexOf('/') !== -1
-        ? baseName.split('/').slice(0, -1).join('/')
-        : '';
-      var joined = dir ? dir + '/' + imp : imp;
-      // Normalize: collapse . and ..
+      var dir = baseName.indexOf('/') !== -1 ? baseName.split('/').slice(0, -1).join('/') : '';
+      var raw = dir ? dir + '/' + imp : imp;
       var parts = [];
-      joined.split('/').forEach(function (p) {
-        if (p === '..') { parts.pop(); }
-        else if (p && p !== '.') { parts.push(p); }
+      raw.split('/').forEach(function(p) {
+        if (p === '..') parts.pop();
+        else if (p && p !== '.') parts.push(p);
       });
-      var rf = findSrc(parts.join('/'));
-      if (rf) { var rb = getBlob(rf); if (rb) return rb; }
+      return findSrc(parts.join('/'));
     }
-    // Not a local import — return as-is; importmap or browser will resolve
-    return imp;
+    return null;
   }
 
-  function getBlob(name) {
-    if (blobs[name] !== undefined) return blobs[name];
-    if (busy[name]) return null;   // cycle guard
-    busy[name] = true;
-
-    var src = srcMap[name];
-    if (!src) { blobs[name] = null; busy[name] = false; return null; }
-
-    // Compile with Babel (react + typescript presets, keep ESM syntax)
-    var compiled;
+  // \u2500\u2500 Phase 1: Compile ALL files with Babel \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  var compiledMap = {};
+  FILES.forEach(function(f) {
     try {
-      compiled = Babel.transform(src, {
-        filename: name,
+      var code = Babel.transform(f.content, {
+        filename: f.name,
         presets: [
           ['react', { runtime: 'automatic' }],
           ['typescript', { isTSX: true, allExtensions: true }]
         ]
       }).code;
-    } catch (e) {
-      console.error('[CDN Preview] Babel error in ' + name + ':', e.message);
-      blobs[name] = null; busy[name] = false; return null;
+      // Strip CSS side-effect imports (not loadable as ES modules)
+      code = code.replace(/\\bimport\\s+["'][^"']+\\.css["'];?\\n?/g, '');
+      compiledMap[f.name] = code;
+    } catch(e) {
+      console.error('[CDN Preview] Babel error in ' + f.name + ':', e.message);
+      compiledMap[f.name] = null;
     }
+  });
 
-    // Strip CSS side-effect imports (not loadable as ES modules)
-    compiled = compiled.replace(/\\bimport\\s+["'][^"']+\\.css["'];?\\n?/g, '');
+  // \u2500\u2500 Phase 2: Build dependency graph \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  function parseLocalDeps(code, baseName) {
+    var deps = [], seen = {};
+    var re = /\\b(?:from|import)\\s+["']([^"']+)["']/g, m;
+    while ((m = re.exec(code)) !== null) {
+      var r = resolveLocalPath(m[1], baseName);
+      if (r && !seen[r]) { seen[r] = 1; deps.push(r); }
+    }
+    return deps;
+  }
 
-    // Replace ONLY local import specifiers (@/ and ./) with blob URLs.
-    // CDN bare specifiers are left untouched — the importmap resolves them natively.
-    compiled = compiled.replace(
+  var allNames = FILES.map(function(f) { return f.name; }).filter(function(n) { return !!compiledMap[n]; });
+  var depGraph = {};
+  allNames.forEach(function(n) { depGraph[n] = parseLocalDeps(compiledMap[n], n); });
+
+  // \u2500\u2500 Phase 3: Topological sort (leaf deps first) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  // inDeg[n] = number of local deps n needs processed before it can be blobbed
+  var inDeg = {};
+  allNames.forEach(function(n) { inDeg[n] = 0; });
+  allNames.forEach(function(n) {
+    depGraph[n].forEach(function(dep) { if (inDeg.hasOwnProperty(dep)) inDeg[n]++; });
+  });
+  var queue = allNames.filter(function(n) { return inDeg[n] === 0; });
+  var ordered = [];
+  while (queue.length) {
+    var node = queue.shift();
+    ordered.push(node);
+    allNames.forEach(function(n) {
+      if (depGraph[n].indexOf(node) !== -1 && --inDeg[n] === 0) queue.push(n);
+    });
+  }
+  // Append any remaining cyclic nodes so they still get processed
+  allNames.forEach(function(n) { if (ordered.indexOf(n) === -1) ordered.push(n); });
+
+  // \u2500\u2500 Phase 4: Create blob URLs in topological order \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  // By the time we process file N, all its deps already have blob URLs
+  var blobMap = {};
+  ordered.forEach(function(name) {
+    var code = compiledMap[name];
+    if (!code) return;
+    // Replace local import specifiers with already-created blob URLs
+    code = code.replace(
       /\\b(from|import)\\s+(["'])([^"']+)(["'])/g,
-      function (m, kw, q1, imp, q2) {
-        // Skip CDN packages — importmap handles them
+      function(m, kw, q1, imp, q2) {
         if (!imp.startsWith('.') && !imp.startsWith('@/')) return m;
-        var resolved = resolveLocalImp(imp, name);
-        return resolved !== imp ? kw + ' ' + q1 + resolved + q2 : m;
+        var r = resolveLocalPath(imp, name);
+        return (r && blobMap[r]) ? kw + ' ' + q1 + blobMap[r] + q2 : m;
       }
     );
+    blobMap[name] = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
+  });
 
-    var url = URL.createObjectURL(new Blob([compiled], { type: 'text/javascript' }));
-    blobs[name] = url;
-    busy[name]  = false;
-    return url;
-  }
-
-  // Pre-build blob URLs for all source files
-  FILES.forEach(function (f) { getBlob(f.name); });
-
-  // Find the app entry point
-  var ENTRIES = [
-    'src/main.tsx', 'src/main.ts', 'src/main.jsx', 'src/main.js',
-    'main.tsx', 'main.jsx', 'main.ts', 'main.js',
-  ];
+  // \u2500\u2500 Find entry point \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  var ENTRIES = ['src/main.tsx','src/main.ts','src/main.jsx','src/main.js','main.tsx','main.jsx','main.ts','main.js'];
   var entry = null;
   for (var i = 0; i < ENTRIES.length; i++) {
-    if (blobs[ENTRIES[i]]) { entry = blobs[ENTRIES[i]]; break; }
+    if (blobMap[ENTRIES[i]]) { entry = blobMap[ENTRIES[i]]; break; }
   }
 
-  // Fallback: auto-mount an App component if no main.tsx found
-  // Uses bare specifiers — importmap resolves react-dom/client and react
+  // Fallback: auto-mount App component if no main.tsx found
   if (!entry) {
-    var APPS = ['src/App.tsx', 'src/App.jsx', 'App.tsx', 'App.jsx'];
-    for (var i = 0; i < APPS.length; i++) {
-      if (blobs[APPS[i]]) {
-        var mount = [
-          'import App from "' + blobs[APPS[i]] + '";',
-          'import { createRoot } from "react-dom/client";',
-          'import { createElement as h } from "react";',
-          'createRoot(document.getElementById("root")).render(h(App));',
-        ].join('\\n');
+    var APPS = ['src/App.tsx','src/App.jsx','App.tsx','App.jsx'];
+    for (var j = 0; j < APPS.length; j++) {
+      if (blobMap[APPS[j]]) {
+        var mount = 'import App from "' + blobMap[APPS[j]] + '";\\n'
+          + 'import { createRoot } from "react-dom/client";\\n'
+          + 'import { createElement as h } from "react";\\n'
+          + 'createRoot(document.getElementById("root")).render(h(App));';
         entry = URL.createObjectURL(new Blob([mount], { type: 'text/javascript' }));
         break;
       }
@@ -314,10 +307,9 @@ ${css}<\/style>
     var s = document.createElement('script');
     s.type = 'module';
     s.src  = entry;
-    s.onerror = function () {
-      console.error('[CDN Preview] Entry module failed to load — check browser console');
+    s.onerror = function() {
       var r = document.getElementById('root');
-      if (r) r.innerHTML = '<pre style="color:#ef4444;padding:16px;font-size:12px;font-family:monospace">Module load error — open browser console for details<\\/pre>';
+      if (r) r.innerHTML = '<pre style="color:#ef4444;padding:16px;font-size:12px;font-family:monospace">Module load error \u2014 open browser console for details<\\/pre>';
     };
     document.head.appendChild(s);
   } else {

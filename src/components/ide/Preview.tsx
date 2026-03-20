@@ -311,8 +311,8 @@ export function Preview() {
             <RefreshCw size={12} />
           </button>
         </div>
-        <div className="flex-1 overflow-hidden">
-          <iframe key={refreshKey} src={previewUrl || undefined} title="Preview" className="w-full h-full border-0 block" allow="cross-origin-isolated" />
+        <div className="flex-1 relative overflow-hidden">
+          <iframe key={refreshKey} src={previewUrl || undefined} title="Preview" className="absolute inset-0 w-full h-full border-0" allow="cross-origin-isolated" />
         </div>
       </div>
     )
@@ -351,11 +351,11 @@ export function Preview() {
           <RefreshCw size={12} />
         </button>
       </div>
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 relative overflow-hidden">
         <PreviewErrorBoundary>
           <iframe key={refreshKey} srcDoc={previewHtml} title="Preview"
             sandbox="allow-scripts allow-modals allow-forms allow-popups allow-same-origin allow-downloads"
-            className="w-full h-full border-0 block" />
+            className="absolute inset-0 w-full h-full border-0" />
         </PreviewErrorBoundary>
       </div>
     </div>
