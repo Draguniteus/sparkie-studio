@@ -279,7 +279,8 @@ export function Preview() {
   const typeLabel: Record<string,string> = { html:"HTML",react:"React",svg:"SVG",js:"JS",markdown:"Markdown",json:"JSON",code:"Code",cdn:"CDN" }
 
   // ── Loading state (WC spinning up) ────────────────────────────────────────
-  if (isWCActive && !isWCReady) {
+  // CDN projects render instantly via in-iframe Babel — never show WC spinner for them
+  if (isWCActive && !isWCReady && previewType !== 'cdn') {
     return (
       <div className="h-full flex flex-col bg-[#0a0a0a]">
         <div className="flex items-center h-7 px-3 bg-hive-700 border-b border-hive-border shrink-0 gap-2">

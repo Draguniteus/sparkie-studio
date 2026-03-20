@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react"
 import { useAppStore, flattenFileTree } from "@/store/appStore"
+import { isCDNCompatible } from "@/lib/cdnPreview"
 import { useWebContainer } from "@/hooks/useWebContainer"
 import { FileExplorer } from "@/components/ide/FileExplorer"
 import { CodeEditor } from "@/components/ide/CodeEditor"
@@ -97,6 +98,9 @@ export function IDEPanelInner() {
     const hasPkg = flatFiles.some(f => f.name === 'package.json')
     if (!hasPkg || isExecuting) return
     lastRunKey.current = buildKey
+
+    // CDN-compatible projects are previewed instantly in-iframe — skip WC entirely
+    if (isCDNCompatible(files)) return
 
     if (isBackendProject(flatFiles)) {
       // Backend project — skip WebContainer, run in E2B via execute-project
