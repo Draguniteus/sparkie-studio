@@ -175,9 +175,16 @@ export function buildCDNPreviewHtml(files: FileNode[], activeProjectRoot?: strin
 <script type="importmap">${importmapJson}<\/script>
 <script src="https://cdn.tailwindcss.com"><\/script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"><\/script>
-<style>*{box-sizing:border-box}html,body,#root{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#0a0a0a}body{color:#e2e8f0;font-family:system-ui,sans-serif}canvas{width:100%!important;height:100%!important;display:block}${css}<\/style>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{width:100%;height:100%}
+body{width:100%;height:100%;overflow:hidden;background:#0a0a0a;color:#e2e8f0;font-family:system-ui,sans-serif}
+#root{width:100%;height:100%;display:flex;flex-direction:column}
+canvas{width:100%!important;height:100%!important;display:block}
+.app,.App,[class*="app"],[class*="App"]{width:100%;height:100%}
+${css}<\/style>
 </head>
-<body>
+<body style="margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#0a0a0a">
 <div id="root"></div>
 <script>
 (function () {

@@ -71,7 +71,7 @@ export function IDEPanelInner() {
   const {
     ideOpen, ideTab, isExecuting, liveCode, files, buildKey,
     setIdeTab, containerStatus, clearTerminalOutput, appendTerminalOutput, setContainerStatus,
-    worklog, previewUrl,
+    worklog, previewUrl, activeProjectRoot,
   } = useAppStore()
   const { runProject } = useWebContainer()
   const [showExplorer, setShowExplorer] = useState(true)
@@ -100,7 +100,8 @@ export function IDEPanelInner() {
     lastRunKey.current = buildKey
 
     // CDN-compatible projects are previewed instantly in-iframe — skip WC entirely
-    if (isCDNCompatible(files)) return
+    // Must pass activeProjectRoot so multi-project stores check the RIGHT package.json
+    if (isCDNCompatible(files, activeProjectRoot)) return
 
     if (isBackendProject(flatFiles)) {
       // Backend project — skip WebContainer, run in E2B via execute-project
@@ -153,7 +154,7 @@ export function IDEPanelInner() {
       })
     }
   }, [files, buildKey, isExecuting, runProject, setIdeTab, isBackendProject,
-      clearTerminalOutput, appendTerminalOutput, setContainerStatus])
+      clearTerminalOutput, appendTerminalOutput, setContainerStatus, activeProjectRoot])
 
   // Listen for BuildCard "Open Preview" button → switch to preview tab
   useEffect(() => {
