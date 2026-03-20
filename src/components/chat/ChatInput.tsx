@@ -167,7 +167,7 @@ export function ChatInput() {
     clearLiveCode, appendLiveCode, addLiveCodeFile,
     addWorklogEntry, updateWorklogEntry, clearWorklog,
     setContainerStatus, setPreviewUrl, setPendingRunCommand, saveChatFiles, addAsset, updateAsset,
-    setLastMode,
+    setLastMode, triggerBuild,
   } = useAppStore(
     useShallow((s) => ({
       selectedModel: s.selectedModel,
@@ -197,6 +197,7 @@ export function ChatInput() {
       addAsset: s.addAsset,
       updateAsset: s.updateAsset,
       setLastMode: s.setLastMode,
+      triggerBuild: s.triggerBuild,
     }))
   )
 
@@ -1311,6 +1312,7 @@ export function ChatInput() {
                   updateAsset(updatedFileId, file.content)
                 }
               }
+              triggerBuild()
             } else if (parsed.event === 'error') {
               // Sanitize: never show raw JSON error blobs to the user
               const rawErrMsg: string = parsed.message || 'Something went wrong'

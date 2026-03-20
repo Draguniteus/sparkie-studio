@@ -113,7 +113,7 @@ export function parseAIResponse(raw: string, projectName?: string): ParseResult 
   const normalized = rawWithoutFolders.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
 
   // Primary: ---FILE: name--- ... ---END FILE---
-  const strictRegex = /---FILE:\s*([^\n-][^\n]*)\s*---\s*\n([\s\S]*?)---END FILE---/g
+  const strictRegex = /---FILE:\s*([^\n-][^\n]*)\s*---\s*\n([\s\S]*?)---END(?:\s+FILE)?---/g
   let match: RegExpExecArray | null
   while ((match = strictRegex.exec(normalized)) !== null) {
     const content = match[2].trimEnd()
@@ -122,7 +122,7 @@ export function parseAIResponse(raw: string, projectName?: string): ParseResult 
     }
   }
   if (files.length > 0) {
-    const text = normalized.replace(/---FILE:\s*[^\n-][^\n]*\s*---\s*\n[\s\S]*?---END FILE---/g, '').trim()
+    const text = normalized.replace(/---FILE:\s*[^\n-][^\n]*\s*---\s*\n[\s\S]*?---END(?:\s+FILE)?---/g, '').trim()
     return { text, files: wrapInProjectFolder(files, projectName || 'project'), folders }
   }
 
