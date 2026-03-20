@@ -212,7 +212,7 @@ interface AppState {
   setFiles: (files: FileNode[]) => void
   buildKey: number
   incrementBuildKey: () => void
-  triggerBuild: () => void
+  triggerBuild: (newProjectRoot?: string | null) => void
   saveChatFiles: (chatId: string, files: FileNode[]) => void
   openIDE: () => void
   toggleIDE: () => void
@@ -420,10 +420,13 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
   setActiveFile: (id) => set({ activeFileId: id }),
   setFiles: (files) => set({ files }),
   incrementBuildKey: () => set((s) => ({ buildKey: s.buildKey + 1 })),
-  triggerBuild: () => set((s) => ({
+  triggerBuild: (newProjectRoot) => set((s) => ({
     containerStatus: 'idle',
     previewUrl: null,
     buildKey: s.buildKey + 1,
+    // When a new project root is supplied, update it atomically with buildKey
+    // so IDEPanelInner's useEffect always sees the correct root on the same render.
+    ...(newProjectRoot !== undefined ? { activeProjectRoot: newProjectRoot } : {}),
   })),
   saveChatFiles: (chatId, files) => set((s) => ({
     chats: s.chats.map((c) => c.id === chatId ? { ...c, files } : c),

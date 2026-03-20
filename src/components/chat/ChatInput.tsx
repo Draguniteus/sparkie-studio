@@ -1350,9 +1350,10 @@ export function ChatInput() {
                   updateAsset(updatedFileId, file.content)
                 }
               }
-              // Set the new project as the active one for preview
-              useAppStore.getState().setActiveProjectRoot(projectName)
-              triggerBuild()
+              // Atomically set the active project root AND increment buildKey in one
+              // Zustand set() call — guarantees IDEPanelInner's useEffect sees the
+              // correct activeProjectRoot on the same render that triggers it.
+              triggerBuild(projectName)
               // CDN-compatible projects: all files are now present, switch to preview.
               if (isCDNCompatible(useAppStore.getState().files, projectName)) {
                 setIDETab('preview')
