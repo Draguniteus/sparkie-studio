@@ -140,12 +140,20 @@ export function isCDNCompatible(files: FileNode[]): boolean {
 
 /**
  * Build a self-contained srcdoc HTML string that:
- *  1. Embeds all source files as JSON (with normalized paths like "src/App.tsx")
- *  2. Loads @babel/standalone from unpkg
- *  3. Compiles each .tsx/.ts/.jsx/.js file in-browser with Babel
- *  4. Creates blob URLs for each compiled module, replacing imports with
- *     CDN URLs (external deps) or blob URLs (local modules)
- *  5. Dynamically loads the entry point — zero npm install, zero build step
+ *  1. Embeds source files as JSON
+ *  2. Declares a browser-native importmap (FIRST in <head>) mapping CDN packages
+ *     to esm.sh URLs — the browser resolves bare specifiers automatically
+ *  3. Loads @babel/standalone from unpkg (blocking script, after importmap)
+ *  4. Compiles each .tsx/.ts/.jsx/.js file in-browser with Babel
+ *  5. Creates blob URLs for LOCAL modules only (relative + @/ imports)
+ *  6. CDN bare specifiers (react, three, etc.) are left as-is; importmap handles them
+ *  7. Dynamically loads the entry point as a module — zero npm install, zero build step
+ *
+ * Why importmap vs manual URL replacement:
+ *  - Browser-native: no regex needed for CDN specifiers, no edge cases
+ *  - Handles subpath imports (react/jsx-runtime) and ?external= params transparently
+ *  - Works for both static and dynamic imports
+ *  - importmap MUST be the first <script> in <head> per HTML spec
  */
 export function buildCDNPreviewHtml(files: FileNode[]): string {
   // Walk tree for full paths, then normalize by stripping the project root prefix
@@ -163,8 +171,9 @@ export function buildCDNPreviewHtml(files: FileNode[]): string {
     .join('\n')
     .replace(/<\/style>/gi, '<\\/style>')
 
-  const filesJson = JSON.stringify(srcFiles)
-  const cdnJson   = JSON.stringify(CDN_MAP)
+  const filesJson    = JSON.stringify(srcFiles)
+  // importmap: maps bare specifiers → esm.sh URLs; browser resolves them in ES modules
+  const importmapJson = JSON.stringify({ imports: CDN_MAP })
 
   // The inline script runs inside the iframe. Double-backslashes in this TS
   // template become single backslashes in the emitted HTML (correct regex syntax).
@@ -172,6 +181,7 @@ export function buildCDNPreviewHtml(files: FileNode[]): string {
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<script type="importmap">${importmapJson}<\/script>
 <script src="https://cdn.tailwindcss.com"><\/script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"><\/script>
 <style>*{box-sizing:border-box}body{margin:0;background:#0a0a0a;color:#e2e8f0;font-family:system-ui,sans-serif}canvas{display:block}${css}<\/style>
@@ -181,7 +191,6 @@ export function buildCDNPreviewHtml(files: FileNode[]): string {
 <script>
 (function () {
   var FILES = ${filesJson};
-  var CDN   = ${cdnJson};
 
   // Build a name→content lookup (keys are normalized paths like "src/App.tsx")
   var srcMap = {};
@@ -197,33 +206,18 @@ export function buildCDNPreviewHtml(files: FileNode[]): string {
     return null;
   }
 
-  // Resolve a package name to its CDN URL
-  function cdnFor(imp) {
-    if (CDN[imp]) return CDN[imp];
-    var root = imp.startsWith('@')
-      ? imp.split('/').slice(0, 2).join('/')
-      : imp.split('/')[0];
-    if (CDN[root]) {
-      var sub = imp.slice(root.length);
-      return sub ? CDN[root].split('?')[0] + sub : CDN[root];
-    }
-    return null;
-  }
-
   var blobs = {}, busy = {};
 
-  // Resolve an import specifier to a CDN URL or blob URL.
-  // baseName is the normalized path of the file doing the importing (e.g. "src/App.tsx").
-  function resolveImp(imp, baseName) {
+  // Resolve a LOCAL import specifier to a blob URL.
+  // CDN bare specifiers are NOT resolved here — the importmap handles them.
+  // baseName is the normalized path of the importing file (e.g. "src/App.tsx").
+  function resolveLocalImp(imp, baseName) {
     // @/ alias → src/
     if (imp.startsWith('@/')) {
       var af = findSrc('src/' + imp.slice(2));
       if (af) { var ab = getBlob(af); if (ab) return ab; }
       return imp;
     }
-    // External CDN package
-    var cdn = cdnFor(imp);
-    if (cdn) return cdn;
     // Relative local import — resolve against the importing file's directory
     if (imp.startsWith('.')) {
       var dir = baseName.indexOf('/') !== -1
@@ -239,6 +233,7 @@ export function buildCDNPreviewHtml(files: FileNode[]): string {
       var rf = findSrc(parts.join('/'));
       if (rf) { var rb = getBlob(rf); if (rb) return rb; }
     }
+    // Not a local import — return as-is; importmap or browser will resolve
     return imp;
   }
 
@@ -250,7 +245,7 @@ export function buildCDNPreviewHtml(files: FileNode[]): string {
     var src = srcMap[name];
     if (!src) { blobs[name] = null; busy[name] = false; return null; }
 
-    // Compile with Babel (react + typescript presets)
+    // Compile with Babel (react + typescript presets, keep ESM syntax)
     var compiled;
     try {
       compiled = Babel.transform(src, {
@@ -265,16 +260,17 @@ export function buildCDNPreviewHtml(files: FileNode[]): string {
       blobs[name] = null; busy[name] = false; return null;
     }
 
-    // Strip CSS side-effect imports (not resolvable as ES modules)
+    // Strip CSS side-effect imports (not loadable as ES modules)
     compiled = compiled.replace(/\\bimport\\s+["'][^"']+\\.css["'];?\\n?/g, '');
 
-    // Replace every import/from specifier with a CDN URL or blob URL.
-    // Capture (keyword)(quote)(specifier)(quote) separately so we can
-    // reconstruct the replacement unambiguously without match.replace() tricks.
+    // Replace ONLY local import specifiers (@/ and ./) with blob URLs.
+    // CDN bare specifiers are left untouched — the importmap resolves them natively.
     compiled = compiled.replace(
       /\\b(from|import)\\s+(["'])([^"']+)(["'])/g,
       function (m, kw, q1, imp, q2) {
-        var resolved = resolveImp(imp, name);
+        // Skip CDN packages — importmap handles them
+        if (!imp.startsWith('.') && !imp.startsWith('@/')) return m;
+        var resolved = resolveLocalImp(imp, name);
         return resolved !== imp ? kw + ' ' + q1 + resolved + q2 : m;
       }
     );
@@ -298,15 +294,16 @@ export function buildCDNPreviewHtml(files: FileNode[]): string {
     if (blobs[ENTRIES[i]]) { entry = blobs[ENTRIES[i]]; break; }
   }
 
-  // Fallback: auto-mount an App component if no main found
+  // Fallback: auto-mount an App component if no main.tsx found
+  // Uses bare specifiers — importmap resolves react-dom/client and react
   if (!entry) {
     var APPS = ['src/App.tsx', 'src/App.jsx', 'App.tsx', 'App.jsx'];
     for (var i = 0; i < APPS.length; i++) {
       if (blobs[APPS[i]]) {
         var mount = [
           'import App from "' + blobs[APPS[i]] + '";',
-          'import { createRoot } from "' + CDN['react-dom/client'] + '";',
-          'import { createElement as h } from "' + CDN['react'] + '";',
+          'import { createRoot } from "react-dom/client";',
+          'import { createElement as h } from "react";',
           'createRoot(document.getElementById("root")).render(h(App));',
         ].join('\\n');
         entry = URL.createObjectURL(new Blob([mount], { type: 'text/javascript' }));
@@ -320,14 +317,14 @@ export function buildCDNPreviewHtml(files: FileNode[]): string {
     s.type = 'module';
     s.src  = entry;
     s.onerror = function () {
+      console.error('[CDN Preview] Entry module failed to load — check browser console');
       var r = document.getElementById('root');
-      if (r) r.innerHTML = '<pre style="color:#ef4444;padding:16px;font-size:12px;font-family:monospace">'
-        + 'Module load error — open browser console for details<\\/pre>';
+      if (r) r.innerHTML = '<pre style="color:#ef4444;padding:16px;font-size:12px;font-family:monospace">Module load error — open browser console for details<\\/pre>';
     };
     document.head.appendChild(s);
   } else {
     var r = document.getElementById('root');
-    if (r) r.textContent = 'No entry point found.';
+    if (r) r.textContent = 'No entry point found (expected src/main.tsx or src/App.tsx).';
   }
 })();
 <\/script>

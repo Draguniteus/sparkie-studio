@@ -3918,7 +3918,7 @@ async function executeTool(
             signal: AbortSignal.timeout(150_000),
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer \${ACE_API_KEY}`,
+              'Authorization': 'Bearer ' + ACE_API_KEY,
             },
             body: JSON.stringify({
               model: 'ace-step-v1.5',
@@ -3974,7 +3974,7 @@ async function executeTool(
           return `AUDIO_URL:${audioDataUrl}`
 
         } catch (e) {
-          return `generate_ace_music error: \${String(e)}`
+          return 'generate_ace_music error: ' + String(e)
         }
       }
 

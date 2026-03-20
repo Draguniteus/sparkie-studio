@@ -224,6 +224,37 @@ export async function PATCH(req: NextRequest) {
       )
       const task = taskRes.rows[0]
 
+      // Calendar event approval — action is stored as executeConnectorTool('GOOGLECALENDAR_CREATE_EVENT', {...})
+      if (task && task.action.startsWith("executeConnectorTool('GOOGLECALENDAR_CREATE_EVENT'")) {
+        const payload = normalizePayload(task.payload)
+        const composioKey = process.env.COMPOSIO_API_KEY
+        const entityId = `sparkie_user_${userId}`
+        if (composioKey) {
+          const createArgs: Record<string, unknown> = {}
+          if (payload.summary)        createArgs.summary = payload.summary
+          if (payload.start_datetime) createArgs.start_datetime = payload.start_datetime
+          if (payload.end_datetime)   createArgs.end_datetime = payload.end_datetime
+          if (payload.description)    createArgs.description = payload.description
+          if (payload.location)       createArgs.location = payload.location
+          if (payload.attendees)      createArgs.attendees = (payload.attendees as string).split(',').map((a: string) => a.trim())
+          try {
+            const calRes = await fetch(`${V3}/tools/execute/GOOGLECALENDAR_CREATE_EVENT`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-api-key': composioKey },
+              body: JSON.stringify({ entity_id: entityId, arguments: createArgs }),
+            })
+            const calText = await calRes.text()
+            if (!calRes.ok) {
+              console.error('[tasks PATCH] Calendar create failed:', calRes.status, calText.slice(0, 300))
+            } else {
+              console.log('[tasks PATCH] Calendar event created:', calRes.status, calText.slice(0, 200))
+            }
+          } catch (e) {
+            console.error('[tasks PATCH] Calendar create error:', e)
+          }
+        }
+      }
+
       if (task && (task.action === 'create_email_draft' || task.action === 'send_email')) {
         // Normalize payload — Postgres JSONB may come back as object or string depending on pg driver
         const payload = normalizePayload(task.payload)
