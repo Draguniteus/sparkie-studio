@@ -10,6 +10,7 @@ interface WorklogCard { tool: string; summary: string; ts: string }
 // STEP_ICON_MAP moved to ChatView
 // WORKLOG_TOOL_LABEL moved to ChatView
 import { parseAIResponse, getLanguageFromFilename, deriveProjectName } from "@/lib/fileParser"
+import { isCDNCompatible } from "@/lib/cdnPreview"
 import { Paperclip, ArrowUp, Sparkles, ChevronDown, Image as ImageIcon, Video, Music, Mic, MicOff, FileText, Headphones, Phone, Film, X, Square } from "lucide-react"
 import { VoiceChat } from "@/components/chat/VoiceChat"
 
@@ -1313,6 +1314,11 @@ export function ChatInput() {
                 }
               }
               triggerBuild()
+              // CDN-compatible projects: all files are now present, switch to preview.
+              // Preview.tsx will render them instantly via Babel in-iframe.
+              if (isCDNCompatible(useAppStore.getState().files)) {
+                setIDETab('preview')
+              }
             } else if (parsed.event === 'error') {
               // Sanitize: never show raw JSON error blobs to the user
               const rawErrMsg: string = parsed.message || 'Something went wrong'

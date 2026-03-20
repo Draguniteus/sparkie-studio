@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef, useCallback } from "react"
 import { useAppStore, flattenFileTree } from "@/store/appStore"
-import { isCDNCompatible } from "@/lib/cdnPreview"
 import { useWebContainer } from "@/hooks/useWebContainer"
 import { FileExplorer } from "@/components/ide/FileExplorer"
 import { CodeEditor } from "@/components/ide/CodeEditor"
@@ -92,15 +91,6 @@ export function IDEPanelInner() {
   useEffect(() => {
     if (lastRunKey.current === buildKey) return
     if (files.length === 0) { lastRunKey.current = -1; return }
-
-    // ── CDN fast path ─────────────────────────────────────────────────────────
-    // React/Three.js/etc projects with CDN-available deps skip WebContainer.
-    // Preview.tsx renders them instantly via Babel in-iframe. Just switch tabs.
-    if (isCDNCompatible(files)) {
-      lastRunKey.current = buildKey
-      setIdeTab('preview')
-      return
-    }
 
     // ── WebContainer / E2B path ───────────────────────────────────────────────
     const flatFiles = flattenFileTree(files)

@@ -146,16 +146,6 @@ export function buildCDNPreviewHtml(files: FileNode[]): string {
   var srcMap = {};
   FILES.forEach(function (f) { srcMap[f.name] = f.content; });
 
-  // Resolve a relative import path relative to its containing file
-  function normPath(base, rel) {
-    var parts = base.split('/').slice(0, -1);
-    rel.split('/').forEach(function (p) {
-      if (p === '..') parts.pop();
-      else if (p && p !== '.') parts.push(p);
-    });
-    return parts.join('/');
-  }
-
   // Try to find a source file for a bare path (tries common extensions)
   var EXTS = ['', '.tsx', '.ts', '.jsx', '.js',
                '/index.tsx', '/index.ts', '/index.jsx', '/index.js'];
@@ -174,13 +164,42 @@ export function buildCDNPreviewHtml(files: FileNode[]): string {
       : imp.split('/')[0];
     if (CDN[root]) {
       var sub = imp.slice(root.length);
-      // Append sub-path to base CDN URL (before the ? query string)
       return sub ? CDN[root].split('?')[0] + sub : CDN[root];
     }
     return null;
   }
 
   var blobs = {}, busy = {};
+
+  // Resolve an import specifier to a CDN URL or blob URL.
+  // baseName is the path of the file doing the importing (e.g. "src/App.tsx").
+  function resolveImp(imp, baseName) {
+    // @/ alias → src/
+    if (imp.startsWith('@/')) {
+      var af = findSrc('src/' + imp.slice(2));
+      if (af) { var ab = getBlob(af); if (ab) return ab; }
+      return imp;
+    }
+    // External CDN package
+    var cdn = cdnFor(imp);
+    if (cdn) return cdn;
+    // Relative local import — resolve against the importing file's directory
+    if (imp.startsWith('.')) {
+      var dir = baseName.indexOf('/') !== -1
+        ? baseName.split('/').slice(0, -1).join('/')
+        : '';
+      var joined = dir ? dir + '/' + imp : imp;
+      // Normalize: collapse . and ..
+      var parts = [];
+      joined.split('/').forEach(function (p) {
+        if (p === '..') { parts.pop(); }
+        else if (p && p !== '.') { parts.push(p); }
+      });
+      var rf = findSrc(parts.join('/'));
+      if (rf) { var rb = getBlob(rf); if (rb) return rb; }
+    }
+    return imp;
+  }
 
   function getBlob(name) {
     if (blobs[name] !== undefined) return blobs[name];
@@ -205,30 +224,17 @@ export function buildCDNPreviewHtml(files: FileNode[]): string {
       blobs[name] = null; busy[name] = false; return null;
     }
 
-    // Strip CSS side-effect imports (not valid ES modules in browser)
+    // Strip CSS side-effect imports (not resolvable as ES modules)
     compiled = compiled.replace(/\\bimport\\s+["'][^"']+\\.css["'];?\\n?/g, '');
 
-    // Replace every import/from specifier with a CDN URL or a blob URL
+    // Replace every import/from specifier with a CDN URL or blob URL.
+    // Capture (keyword)(quote)(specifier)(quote) separately so we can
+    // reconstruct the replacement unambiguously without match.replace() tricks.
     compiled = compiled.replace(
-      /\\b(?:from|import)\\s+["']([^"']+)["']/g,
-      function (match, imp) {
-        // @/ alias → src/
-        if (imp.startsWith('@/')) {
-          var aliased = 'src/' + imp.slice(2);
-          var found = findSrc(aliased);
-          if (found) { var b = getBlob(found); if (b) return match.replace(imp, b); }
-          return match;
-        }
-        // External CDN package
-        var cdn = cdnFor(imp);
-        if (cdn) return match.replace(imp, cdn);
-        // Relative local import
-        if (imp.startsWith('.')) {
-          var resolved = normPath(name, imp);
-          var found = findSrc(resolved);
-          if (found) { var b = getBlob(found); if (b) return match.replace(imp, b); }
-        }
-        return match;
+      /\\b(from|import)\\s+(["'])([^"']+)(["'])/g,
+      function (m, kw, q1, imp, q2) {
+        var resolved = resolveImp(imp, name);
+        return resolved !== imp ? kw + ' ' + q1 + resolved + q2 : m;
       }
     );
 
