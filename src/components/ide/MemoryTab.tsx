@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Brain, Trash2, RefreshCw, Sparkles, Shield, Clock, Zap, BookOpen, User, Calendar, MessageSquare, type LucideIcon } from 'lucide-react'
+import { Brain, Trash2, RefreshCw, Sparkles, Shield, Clock, Zap, BookOpen, User, Calendar, MessageSquare, Search, type LucideIcon } from 'lucide-react'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface UserMemoryEntry {
@@ -72,6 +72,8 @@ export function MemoryTab() {
   const [selfMemories, setSelfMemories] = useState<SelfMemoryEntry[]>([])
   const [loading, setLoading] = useState(false)
   const [filter, setFilter] = useState<string>('all')
+  const [search, setSearch] = useState('')
+  const [sessionCount, setSessionCount] = useState(0)
   const [forgetting, setForgetting] = useState<Set<number>>(new Set())
   const [forgotten, setForgotten] = useState<Set<number>>(new Set())
 
@@ -97,15 +99,21 @@ export function MemoryTab() {
     if (tab === 'user') loadUserMemories()
     else loadSelfMemories()
     setFilter('all')
+    setSearch('')
   }, [tab, loadUserMemories, loadSelfMemories])
 
   useEffect(() => { load() }, [load])
 
-  // Auto-refresh after agent loop
+  // Auto-refresh after agent loop + track session memory count
   useEffect(() => {
+    let sessionAdded = 0
     const handler = (e: Event) => {
       const trace = (e as CustomEvent<{ status: string }>).detail
-      if (trace?.status === 'done') setTimeout(() => load(), 2000)
+      if (trace?.status === 'done') {
+        sessionAdded++
+        setSessionCount(sessionAdded)
+        setTimeout(() => load(), 2000)
+      }
     }
     window.addEventListener('sparkie_step_trace', handler)
     return () => window.removeEventListener('sparkie_step_trace', handler)
@@ -141,7 +149,11 @@ export function MemoryTab() {
 
   const activeMemories = tab === 'user' ? userMemories : selfMemories
   const categories = ['all', ...Array.from(new Set(activeMemories.map(m => m.category))).sort()]
-  const visible = filter === 'all' ? activeMemories : activeMemories.filter(m => m.category === filter)
+  const recentlyLearned = [...activeMemories].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 5)
+  const searchFiltered = search.trim()
+    ? activeMemories.filter(m => m.content.toLowerCase().includes(search.toLowerCase()) || m.category.toLowerCase().includes(search.toLowerCase()))
+    : activeMemories
+  const visible = filter === 'all' ? searchFiltered : searchFiltered.filter(m => m.category === filter)
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -153,6 +165,11 @@ export function MemoryTab() {
           </div>
           <span className="text-xs font-semibold text-text-primary">Memory</span>
           <span className="text-[10px] text-text-muted bg-hive-hover px-1.5 py-0.5 rounded-full">{activeMemories.length}</span>
+          {sessionCount > 0 && (
+            <span className="text-[9px] bg-purple-500/25 text-purple-300 border border-purple-500/30 px-1.5 py-0.5 rounded-full font-medium">
+              +{sessionCount} this session
+            </span>
+          )}
         </div>
         <button onClick={load} className="p-1 rounded hover:bg-hive-hover text-text-muted hover:text-text-secondary transition-colors" title="Refresh">
           <RefreshCw size={11} className={loading ? 'animate-spin' : ''} />
@@ -183,6 +200,23 @@ export function MemoryTab() {
         </button>
       </div>
 
+      {/* Search bar */}
+      <div className="px-3 pb-2 shrink-0">
+        <div className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-hive-elevated border border-hive-border">
+          <Search size={10} className="text-text-muted shrink-0" />
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search memories..."
+            className="flex-1 bg-transparent text-[10px] text-text-secondary placeholder:text-text-muted outline-none"
+          />
+          {search && (
+            <button onClick={() => setSearch('')} className="text-[9px] text-text-muted hover:text-text-secondary">✕</button>
+          )}
+        </div>
+      </div>
+
       {/* Category filter pills */}
       <div className="flex gap-1.5 px-3 pb-2 overflow-x-auto shrink-0 scrollbar-hide">
         {categories.map(cat => (
@@ -202,6 +236,25 @@ export function MemoryTab() {
         {loading && (
           <div className="flex items-center justify-center py-8">
             <RefreshCw size={14} className="animate-spin text-text-muted" />
+          </div>
+        )}
+
+        {/* Recently learned section — shown when no search/filter active */}
+        {!loading && !search && filter === 'all' && recentlyLearned.length > 0 && (
+          <div className="mb-1">
+            <div className="flex items-center gap-1.5 mb-1.5 px-0.5">
+              <Sparkles size={9} className="text-purple-400" />
+              <span className="text-[9px] font-semibold text-purple-300 uppercase tracking-wider">Recently learned</span>
+            </div>
+            <div className="space-y-1.5">
+              {recentlyLearned.map(m =>
+                tab === 'user'
+                  ? <UserMemoryCard key={`recent-${m.id}`} m={m as UserMemoryEntry} onForget={forgetUser} forgetting={forgetting.has(m.id)} forgotten={forgotten.has(m.id)} />
+                  : <SelfMemoryCard key={`recent-${m.id}`} m={m as SelfMemoryEntry} onForget={forgetSelf} forgetting={forgetting.has(m.id)} forgotten={forgotten.has(m.id)} />
+              )}
+            </div>
+            <div className="h-px bg-hive-border/60 my-2" />
+            <p className="text-[9px] text-text-muted px-0.5 mb-1.5">All memories ({activeMemories.length})</p>
           </div>
         )}
 

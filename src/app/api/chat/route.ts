@@ -1025,6 +1025,14 @@ Routing is server-owned and intent-based. Never override or fake routing.
 18. For emails: ALWAYS use create_task({ action: "create_email_draft", ... }) — the /api/tasks PATCH handler auto-sends on approval. NEVER call send_email directly and NEVER use action:"send_email" in create_task.
 19. WHEN STUCK OR UNCERTAIN — call get_github with path "DEVPLAYBOOK.md" and read your operational manual. It has the answer. Do not guess.
 20. NEVER use write_file or patch_file to create email drafts, social post drafts, or calendar events — ALWAYS use the HITL create_task tool. write_file is ONLY for code files in the repository.
+21. NEVER GIVE UP when a tool returns empty, null, or an error. Activate the fallback chain IMMEDIATELY — do not ask Michael, do not stop:
+    → search_github / get_github fails: try 2–3 different likely file paths
+    → get_github still fails: execute_terminal create → input "find /workspace -name 'filename' 2>/dev/null"
+    → Still nothing: execute_terminal "ls -la /workspace/src" or likely directory
+    → Still nothing: query_database "SELECT content FROM sparkie_worklog WHERE content LIKE '%filename%' ORDER BY created_at DESC LIMIT 5"
+    → Still nothing: execute_terminal "grep -r 'keyword' /workspace --include='*.ts' -l 2>/dev/null"
+    → ONLY after ALL five steps fail: tell Michael exactly what was tried and ask for direction.
+    Rule: "I couldn't find it" is never acceptable until the full chain is exhausted. Prove it.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 SECTION 16 · PROACTIVE MONITORING & OVERNIGHT EXECUTION
@@ -1128,10 +1136,33 @@ PROACTIVE MODE:
 - Calendar events in next 24h auto-surface to worklog for awareness.
 - If you create a sparkie_task with executor='ai', it executes on next heartbeat tick.
 
-SANDBOX TERMINAL (E2B):
-- execute_terminal routes to /api/terminal via E2B sandbox (needs E2B_API_KEY env var).
-- First call action='create' to get sessionId, then action='input' with commands.
-- Sessions auto-expire after 30min. Use for running code, builds, file ops.
+SANDBOX TERMINAL (E2B) — FULL BASH SHELL MASTERY:
+- execute_terminal routes to /api/terminal via E2B cloud sandbox (needs E2B_API_KEY).
+- Step 1: action='create' → gets { sessionId }. Step 2: action='input' + sessionId + data='command'.
+- Sessions auto-expire after 30min. Kill & recreate if you get a stale session error.
+- You have a FULL Linux bash shell. No restrictions. Use it freely.
+
+WHAT YOU CAN DO IN THE TERMINAL:
+- List files: ls -la /workspace/src or find /workspace -name "*.ts" -type f
+- Find files: find / -name "filename" 2>/dev/null or locate filename
+- Read files: cat /workspace/src/lib/auth.ts | head -50
+- Search content: grep -r "functionName" /workspace --include="*.ts" -l
+- Run scripts: node script.js, npm run build, python3 script.py
+- Debug: node -e "require('./src/lib/x').func()", ts-node src/test.ts
+- Check versions: node --version, npm --version, python3 --version
+- Install packages: npm install package-name
+- Git ops: git log --oneline -5, git diff HEAD~1
+
+TERMINAL ERROR HANDLING:
+- If a command returns an error, READ it carefully — the error message tells you what to fix.
+- Retry with corrected path/command up to 3 times.
+- If still failing after 3 retries: save_attempt with what failed + lesson, then try different approach.
+- Translate terminal errors to plain English for Michael (no raw stack traces in chat).
+
+FALLBACK: If execute_terminal fails (E2B_API_KEY not set), fall back to:
+1. get_github for file reading
+2. query_database for data
+3. workbench_run for Python execution
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1913,6 +1944,74 @@ SECTION 37 · CTA CARD EXTRACTION SKILL INDEX
 **When to load**: Any booking confirmation, action button extraction, or tracking link task.
 **How**: read_skill({ name: "cta-card-gen" })
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 38 · SELF-REPAIR RESILIENCE — NEVER BE STUCK
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+## THE GOLDEN RULE
+You are never stuck. There is always a next move. "I couldn't do it" is never the first response — it is only acceptable after every fallback in the chain has been exhausted and you can prove it.
+
+## TOOL FALLBACK CHAIN (execute in order when any tool fails or returns empty)
+
+\`\`\`
+1. Primary tool fails
+2. Try 2-3 alternative paths/params for same tool
+3. Try a different tool that gets the same info (read_file → get_github → query_database)
+4. Try execute_terminal with find/ls/grep to locate what you need
+5. Try query_database on sparkie_worklog (recent file activity, tool calls)
+6. Try workbench_run Python for bulk/complex operations
+7. save_attempt with what failed + what was tried + lesson learned
+8. Try composio_discover for alternative external tool
+9. ONLY THEN: tell Michael "I tried X, Y, Z — here's what I need from you"
+\`\`\`
+
+## SELF-DIAGNOSIS FLOW (when something feels broken)
+1. Trigger: tool fails 2+ times, unexpected empty result, auth error, deploy issue
+2. CHECK ATTEMPT HISTORY FIRST: get_attempt_history for the relevant domain — what was tried before?
+3. CHECK SELF-MEMORY: get_active_memories for category "failure" and "workaround"
+4. READ THE ACTUAL ERROR: don't hypothesize — read the exact error message
+5. HYPOTHESIZE: form one specific hypothesis before patching anything
+6. TRY THE FIX: terminal command or patch_file
+7. VERIFY: confirm the fix worked (health check, test call, status check)
+8. LEARN: save_attempt + save_self_memory with the lesson
+9. IF FIX FAILS: escalate to Michael with full diagnosis + what was tried
+
+## MEMORY-FIRST RULE (before every complex task)
+1. Before starting any multi-tool task: search_user_memory({ query: "relevant keywords" })
+2. Before any tool call with history of failures: get_attempt_history({ domain: "relevant_domain" })
+3. After completing any repair: save_self_memory with the pattern learned
+4. After discovering any workaround: save_attempt with outcome: "workaround", lesson: "what works"
+
+## AUTO-DOCUMENT SELF-IMPROVEMENTS
+After every self-repair or capability expansion:
+→ save_self_memory({ content: "Fixed X by doing Y. Root cause: Z. Pattern: [specific].", category: "self_improvement" })
+→ save_attempt({ domain: relevant_domain, summary: "what was broken", outcome: "fixed", lesson: "specific lesson" })
+→ log_worklog({ type: "code_push", content: "Fixed X", metadata: { reasoning: "...", conclusion: "Repaired and verified." } })
+
+## MEMORY OPERATIONS — COMPLETE REFERENCE
+
+**Categories for save_self_memory:**
+- \`lessons\` — specific lessons from completed tasks
+- \`workarounds\` — tools/approaches that work when primary fails
+- \`user_prefs\` — observed (not inferred) Michael preferences
+- \`self_improvements\` — capabilities you've gained or fixed
+- \`tool_knowledge\` — how specific tools behave (quirks, limits, exact params)
+- \`project_context\` — ongoing work context, sprint status, what's in progress
+- \`failures\` — what failed and why (so you don't repeat it)
+
+**Memory operations:**
+- save_self_memory({ content, category }) — always use specific categories above
+- search_user_memory({ query, category? }) — before any behavioral decision
+- get_attempt_history({ domain, limit? }) — before complex tool calls
+- save_attempt({ domain, summary, outcome, lesson }) — after every tool failure or workaround
+- delete_memory({ id }) — when a memory is contradicted or outdated
+
+**Memory-first triggers (ALWAYS check memory before these):**
+- Before email drafting → search_user_memory({ category: "comm_style" })
+- Before coding task → search_user_memory({ category: "work_rule" })
+- Before complex tool call → get_attempt_history({ domain: tool_name })
+- Before self-diagnosis → get_active_memories({ category: "failure" })
+- Before any task Michael's asked before → search_user_memory({ query: task_keywords })
 
 `
 // ── Tool definitions ──────────────────────────────────────────────────────────
@@ -2482,7 +2581,7 @@ const SPARKIE_TOOLS = [
     type: 'function',
     function: {
       name: 'execute_terminal',
-      description: 'Run a bash command in the E2B sandbox terminal. Use for: checking versions, running scripts, debugging, file system operations. Always create a session first with action:"create", then run commands.',
+      description: 'Run a bash command in the E2B sandbox terminal. Full Linux bash — no restrictions. Use for: file ops, running scripts, debugging, grep/find, npm/node. Always create a session first with action:"create", then send commands with action:"input".',
       parameters: {
         type: 'object',
         properties: {
@@ -2491,6 +2590,49 @@ const SPARKIE_TOOLS = [
           data: { type: 'string', description: 'Bash command to run (for input action)' },
         },
         required: ['action'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_directory',
+      description: 'List files in a directory of the workspace. Shortcut for execute_terminal ls. Use when you need to explore file structure without opening a full terminal session.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Directory path to list, e.g. "src/lib" or "src/app/api"' },
+        },
+        required: ['path'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'find_file',
+      description: 'Search for files by name pattern across the workspace. Shortcut for execute_terminal find. Use this when you know a filename but not its exact path.',
+      parameters: {
+        type: 'object',
+        properties: {
+          pattern: { type: 'string', description: 'Filename or glob pattern to search for, e.g. "auth.ts" or "*.config.js"' },
+        },
+        required: ['pattern'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'grep_codebase',
+      description: 'Search file contents across the codebase for a pattern. Shortcut for execute_terminal grep. Use when you need to find where a function, variable, or string is used.',
+      parameters: {
+        type: 'object',
+        properties: {
+          pattern: { type: 'string', description: 'Text or regex to search for, e.g. "writeWorklog" or "export function"' },
+          fileType: { type: 'string', description: 'File extension filter, e.g. "ts", "tsx", "js" (optional — omit to search all files)' },
+        },
+        required: ['pattern'],
       },
     },
   },
@@ -4640,6 +4782,78 @@ def invoke_llm(query, model='MiniMax-M2.7'):
         return summary
       }
 
+      // ── Terminal shortcut shims — delegate to execute_terminal internally ──
+      case 'list_directory': {
+        const dirPath = args.path as string | undefined
+        if (!dirPath) return 'path is required for list_directory'
+        const createRes = await fetch(`${baseUrl}/api/terminal`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(process.env.SPARKIE_INTERNAL_SECRET ? { 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET } : {}) },
+          body: JSON.stringify({ action: 'create' }),
+          signal: AbortSignal.timeout(15000),
+        })
+        if (!createRes.ok) return `Terminal create failed: ${createRes.status}`
+        const { sessionId: ldSessId } = await createRes.json() as { sessionId: string }
+        await new Promise(r => setTimeout(r, 500))
+        const inputRes = await fetch(`${baseUrl}/api/terminal`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(process.env.SPARKIE_INTERNAL_SECRET ? { 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET } : {}) },
+          body: JSON.stringify({ action: 'input', sessionId: ldSessId, data: `ls -la ${dirPath} 2>&1 && echo "---DONE---"\n` }),
+          signal: AbortSignal.timeout(15000),
+        })
+        if (!inputRes.ok) return `Terminal input failed: ${inputRes.status}`
+        const ldResult = await inputRes.json() as { output?: string }
+        return ldResult.output ?? 'No output from list_directory'
+      }
+
+      case 'find_file': {
+        const pattern = args.pattern as string | undefined
+        if (!pattern) return 'pattern is required for find_file'
+        const createRes2 = await fetch(`${baseUrl}/api/terminal`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(process.env.SPARKIE_INTERNAL_SECRET ? { 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET } : {}) },
+          body: JSON.stringify({ action: 'create' }),
+          signal: AbortSignal.timeout(15000),
+        })
+        if (!createRes2.ok) return `Terminal create failed: ${createRes2.status}`
+        const { sessionId: ffSessId } = await createRes2.json() as { sessionId: string }
+        await new Promise(r => setTimeout(r, 500))
+        const inputRes2 = await fetch(`${baseUrl}/api/terminal`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(process.env.SPARKIE_INTERNAL_SECRET ? { 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET } : {}) },
+          body: JSON.stringify({ action: 'input', sessionId: ffSessId, data: `find / -name "${pattern}" 2>/dev/null | head -20\n` }),
+          signal: AbortSignal.timeout(20000),
+        })
+        if (!inputRes2.ok) return `Terminal input failed: ${inputRes2.status}`
+        const ffResult = await inputRes2.json() as { output?: string }
+        return ffResult.output ?? 'No files found matching pattern'
+      }
+
+      case 'grep_codebase': {
+        const grepPattern = args.pattern as string | undefined
+        const fileType = args.fileType as string | undefined
+        if (!grepPattern) return 'pattern is required for grep_codebase'
+        const includeFlag = fileType ? `--include="*.${fileType}"` : ''
+        const createRes3 = await fetch(`${baseUrl}/api/terminal`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(process.env.SPARKIE_INTERNAL_SECRET ? { 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET } : {}) },
+          body: JSON.stringify({ action: 'create' }),
+          signal: AbortSignal.timeout(15000),
+        })
+        if (!createRes3.ok) return `Terminal create failed: ${createRes3.status}`
+        const { sessionId: gcSessId } = await createRes3.json() as { sessionId: string }
+        await new Promise(r => setTimeout(r, 500))
+        const inputRes3 = await fetch(`${baseUrl}/api/terminal`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(process.env.SPARKIE_INTERNAL_SECRET ? { 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET } : {}) },
+          body: JSON.stringify({ action: 'input', sessionId: gcSessId, data: `grep -r "${grepPattern}" /workspace ${includeFlag} -l 2>/dev/null | head -20\n` }),
+          signal: AbortSignal.timeout(20000),
+        })
+        if (!inputRes3.ok) return `Terminal input failed: ${inputRes3.status}`
+        const gcResult = await inputRes3.json() as { output?: string }
+        return gcResult.output ?? `No matches found for pattern: ${grepPattern}`
+      }
+
       default: {
         const s2result = await executeSprint2Tool(name, args, userId)
         if (s2result !== null) return s2result
@@ -6456,6 +6670,43 @@ Rules:
 
           // Append assistant message + tool results, continue loop
           loopMessages = [...loopMessages, choice.message, ...toolResults]
+
+          // ── FIX 2: Auto-inject fallback nudge when tools fail or return empty ──
+          // When any tool returns an error or empty result, inject a system nudge
+          // telling Sparkie to try the next tool rather than asking the user.
+          const failedOrEmptyResults = toolResults.filter(tr =>
+            !tr.content.startsWith('IDE_BUILD:') &&
+            !tr.content.startsWith('HITL_TASK:') &&
+            !tr.content.startsWith('SCHEDULED_TASK:') &&
+            !tr.content.startsWith('LOOP_INTERRUPT') &&
+            (tr.content.startsWith('Error') ||
+             tr.content.startsWith('Tool error:') ||
+             tr.content.startsWith('Tool not available') ||
+             tr.content.trim().length < 5 ||
+             tr.content === 'null' ||
+             tr.content === 'No results found' ||
+             tr.content === 'undefined')
+          )
+          if (failedOrEmptyResults.length > 0 && round < MAX_TOOL_ROUNDS - 1) {
+            const failedNames = failedOrEmptyResults.map(tr => {
+              const tc = toolCalls.find(t => t.id === tr.tool_call_id)
+              return tc?.function?.name ?? 'unknown_tool'
+            }).join(', ')
+            loopMessages = [...loopMessages, {
+              role: 'user' as const,
+              content: `⚡ SYSTEM NOTE (not from Michael): Tool(s) [${failedNames}] returned empty or failed. Per your NEVER GIVE UP rule (Rule 21): do NOT ask Michael. Immediately try the next tool in your fallback chain:\n→ Try different path/params for same tool\n→ try get_github on alternative file paths\n→ try execute_terminal with find/ls/grep\n→ try query_database for relevant data\n→ try workbench_run for complex operations\nKeep going until you have a real answer. You are NOT done yet.`
+            }]
+            // Log fallback activation to worklog (fire-and-forget)
+            if (userId) {
+              writeWorklog(userId, 'error', `Tool fallback chain activated: [${failedNames}] returned empty/error`, {
+                reasoning: 'Auto-nudge: Sparkie instructed to try next tool in fallback chain',
+                tools_called: [failedNames],
+                status: 'anomaly',
+                signal_priority: 'P2',
+                conclusion: 'Fallback chain activated — continuing with alternative tools',
+              }).catch(() => {})
+            }
+          }
 
         } else if (finishReason === 'stop' && choice?.message?.content) {
           // Check for text-format tool calls (some models output JSON/XML instead of tool_calls)
