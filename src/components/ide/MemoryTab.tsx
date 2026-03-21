@@ -23,22 +23,69 @@ interface SelfMemoryEntry {
   created_at: string
 }
 
-// ── Category styles — Sparkie's purple/blue/gold theme ────────────────────
+// ── Category styles — full 20+ category coverage ─────────────────────────
 const USER_CATEGORY_STYLES: Record<string, { pill: string; card: string; dot: string; icon: LucideIcon; label: string }> = {
-  work_rule:   { pill: 'bg-purple-500/20 text-purple-300 border border-purple-500/30',  card: 'border-l-purple-500/60 bg-gradient-to-br from-purple-900/25 to-purple-950/45', dot: 'bg-purple-500',  icon: Shield,       label: 'Work Rule'   },
-  profile:     { pill: 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30',  card: 'border-l-indigo-500/60 bg-gradient-to-br from-indigo-900/25 to-indigo-950/45', dot: 'bg-indigo-400',  icon: User,         label: 'Profile'     },
-  comm_style:  { pill: 'bg-honey-500/20 text-honey-300 border border-amber-500/30',     card: 'border-l-amber-500/60 bg-gradient-to-br from-amber-900/20 to-amber-950/35',    dot: 'bg-amber-500',  icon: MessageSquare, label: 'Comm Style'  },
-  time_pref:   { pill: 'bg-blue-500/20 text-blue-300 border border-blue-500/30',        card: 'border-l-blue-500/60 bg-gradient-to-br from-blue-900/20 to-blue-950/35',       dot: 'bg-blue-400',   icon: Calendar,     label: 'Time Pref'   },
+  work_rule:       { pill: 'bg-orange-500/20 text-orange-300 border border-orange-500/30',   card: 'border-l-orange-500/60 bg-gradient-to-br from-orange-900/25 to-orange-950/40',  dot: 'bg-orange-500',  icon: Shield,        label: 'Work Rule'    },
+  profile:         { pill: 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30',   card: 'border-l-indigo-500/60 bg-gradient-to-br from-indigo-900/25 to-indigo-950/45',  dot: 'bg-indigo-400',  icon: User,          label: 'Profile'      },
+  comm_style:      { pill: 'bg-amber-500/20 text-amber-300 border border-amber-500/30',      card: 'border-l-amber-500/60 bg-gradient-to-br from-amber-900/20 to-amber-950/35',     dot: 'bg-amber-500',   icon: MessageSquare, label: 'Comm Style'   },
+  time_pref:       { pill: 'bg-sky-500/20 text-sky-300 border border-sky-500/30',            card: 'border-l-sky-500/60 bg-gradient-to-br from-sky-900/20 to-sky-950/35',           dot: 'bg-sky-400',     icon: Calendar,      label: 'Time Pref'    },
+  contact:         { pill: 'bg-pink-500/20 text-pink-300 border border-pink-500/30',         card: 'border-l-pink-500/60 bg-gradient-to-br from-pink-900/20 to-pink-950/35',        dot: 'bg-pink-400',    icon: User,          label: 'Contact'      },
+  lessons:         { pill: 'bg-green-500/20 text-green-300 border border-green-500/30',      card: 'border-l-green-500/60 bg-gradient-to-br from-green-900/20 to-green-950/35',     dot: 'bg-green-500',   icon: BookOpen,      label: 'Lessons'      },
+  history:         { pill: 'bg-slate-500/20 text-slate-300 border border-slate-500/30',      card: 'border-l-slate-500/60 bg-gradient-to-br from-slate-800/20 to-slate-900/35',     dot: 'bg-slate-400',   icon: BookOpen,      label: 'History'      },
+  user:            { pill: 'bg-sky-500/20 text-sky-300 border border-sky-500/30',            card: 'border-l-sky-500/60 bg-gradient-to-br from-sky-900/20 to-sky-950/35',           dot: 'bg-sky-400',     icon: User,          label: 'User'         },
+  user_prefs:      { pill: 'bg-blue-500/20 text-blue-300 border border-blue-500/30',         card: 'border-l-blue-500/60 bg-gradient-to-br from-blue-900/20 to-blue-950/35',        dot: 'bg-blue-400',    icon: Calendar,      label: 'Preferences'  },
 }
 
 const SELF_CATEGORY_STYLES: Record<string, { pill: string; card: string; dot: string; icon: LucideIcon }> = {
-  work_rule:       { pill: 'bg-purple-500/20 text-purple-300 border border-purple-500/30',  card: 'border-l-purple-500/60 bg-gradient-to-br from-purple-900/20 to-purple-950/40', dot: 'bg-purple-500', icon: Shield },
-  self:            { pill: 'bg-blue-500/20 text-blue-300 border border-blue-500/30',        card: 'border-l-blue-500/60 bg-gradient-to-br from-blue-900/20 to-blue-950/40',       dot: 'bg-blue-500',   icon: Brain  },
-  profile:         { pill: 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30',  card: 'border-l-indigo-500/60 bg-gradient-to-br from-indigo-900/20 to-indigo-950/40', dot: 'bg-indigo-400', icon: User   },
-  api_behavior:    { pill: 'bg-amber-500/20 text-amber-300 border border-amber-500/30',     card: 'border-l-amber-500/60 bg-gradient-to-br from-amber-900/15 to-amber-950/35',    dot: 'bg-amber-500',  icon: Zap    },
-  failure:         { pill: 'bg-red-500/20 text-red-300 border border-red-500/30',           card: 'border-l-red-500/60 bg-gradient-to-br from-red-900/15 to-red-950/35',          dot: 'bg-red-500',    icon: BookOpen },
-  workaround:      { pill: 'bg-green-500/20 text-green-300 border border-green-500/30',     card: 'border-l-green-500/60 bg-gradient-to-br from-green-900/15 to-green-950/35',    dot: 'bg-green-500',  icon: RefreshCw },
-  self_assessment: { pill: 'bg-amber-500/20 text-amber-300 border border-amber-500/30',     card: 'border-l-amber-500/60 bg-gradient-to-br from-yellow-900/15 to-yellow-950/35',  dot: 'bg-amber-500',  icon: Sparkles },
+  // Core categories
+  work_rule:        { pill: 'bg-orange-500/20 text-orange-300 border border-orange-500/30',  card: 'border-l-orange-500/60 bg-gradient-to-br from-orange-900/20 to-orange-950/35',  dot: 'bg-orange-500',  icon: Shield   },
+  self:             { pill: 'bg-violet-500/20 text-violet-300 border border-violet-500/30',  card: 'border-l-violet-500/60 bg-gradient-to-br from-violet-900/20 to-violet-950/40',  dot: 'bg-violet-500',  icon: Brain    },
+  profile:          { pill: 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30',  card: 'border-l-indigo-500/60 bg-gradient-to-br from-indigo-900/20 to-indigo-950/40',  dot: 'bg-indigo-400',  icon: User     },
+  // Behavioral
+  api_behavior:     { pill: 'bg-amber-500/20 text-amber-300 border border-amber-500/30',     card: 'border-l-amber-500/60 bg-gradient-to-br from-amber-900/15 to-amber-950/35',     dot: 'bg-amber-500',   icon: Zap      },
+  tool_knowledge:   { pill: 'bg-amber-500/20 text-amber-300 border border-amber-500/30',     card: 'border-l-amber-500/60 bg-gradient-to-br from-amber-900/15 to-amber-950/30',     dot: 'bg-amber-400',   icon: Zap      },
+  // Learning
+  lessons:          { pill: 'bg-green-500/20 text-green-300 border border-green-500/30',     card: 'border-l-green-500/60 bg-gradient-to-br from-green-900/15 to-green-950/35',     dot: 'bg-green-500',   icon: BookOpen },
+  workaround:       { pill: 'bg-teal-500/20 text-teal-300 border border-teal-500/30',        card: 'border-l-teal-500/60 bg-gradient-to-br from-teal-900/15 to-teal-950/35',        dot: 'bg-teal-500',    icon: RefreshCw },
+  workarounds:      { pill: 'bg-teal-500/20 text-teal-300 border border-teal-500/30',        card: 'border-l-teal-500/60 bg-gradient-to-br from-teal-900/15 to-teal-950/35',        dot: 'bg-teal-500',    icon: RefreshCw },
+  // Error/failure
+  failure:          { pill: 'bg-red-500/20 text-red-300 border border-red-500/30',           card: 'border-l-red-500/60 bg-gradient-to-br from-red-900/15 to-red-950/35',           dot: 'bg-red-500',     icon: BookOpen },
+  failures:         { pill: 'bg-red-500/20 text-red-300 border border-red-500/30',           card: 'border-l-red-500/60 bg-gradient-to-br from-red-900/15 to-red-950/35',           dot: 'bg-red-500',     icon: BookOpen },
+  // Assessment
+  self_assessment:  { pill: 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/30',  card: 'border-l-yellow-500/60 bg-gradient-to-br from-yellow-900/15 to-yellow-950/35',  dot: 'bg-yellow-400',  icon: Sparkles },
+  self_improvements:{ pill: 'bg-purple-500/20 text-purple-300 border border-purple-500/30',  card: 'border-l-purple-500/60 bg-gradient-to-br from-purple-900/20 to-purple-950/40',  dot: 'bg-purple-500',  icon: Sparkles },
+  // Context
+  project_context:  { pill: 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30',  card: 'border-l-indigo-500/60 bg-gradient-to-br from-indigo-900/20 to-indigo-950/40',  dot: 'bg-indigo-400',  icon: BookOpen },
+  user_prefs:       { pill: 'bg-blue-500/20 text-blue-300 border border-blue-500/30',        card: 'border-l-blue-500/60 bg-gradient-to-br from-blue-900/15 to-blue-950/35',        dot: 'bg-blue-400',    icon: User     },
+  // Technical
+  build:            { pill: 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30',        card: 'border-l-cyan-500/60 bg-gradient-to-br from-cyan-900/15 to-cyan-950/35',        dot: 'bg-cyan-500',    icon: Zap      },
+  database:         { pill: 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/30',  card: 'border-l-yellow-500/60 bg-gradient-to-br from-yellow-900/15 to-yellow-950/30',  dot: 'bg-yellow-400',  icon: Zap      },
+  design:           { pill: 'bg-rose-500/20 text-rose-300 border border-rose-500/30',        card: 'border-l-rose-500/60 bg-gradient-to-br from-rose-900/15 to-rose-950/35',        dot: 'bg-rose-400',    icon: Sparkles },
+  infrastructure:   { pill: 'bg-zinc-500/20 text-zinc-300 border border-zinc-500/30',        card: 'border-l-zinc-500/60 bg-gradient-to-br from-zinc-800/20 to-zinc-900/40',        dot: 'bg-zinc-400',    icon: Shield   },
+  providers:        { pill: 'bg-violet-500/20 text-violet-300 border border-violet-500/30',  card: 'border-l-violet-500/60 bg-gradient-to-br from-violet-900/15 to-violet-950/35',  dot: 'bg-violet-500',  icon: Zap      },
+  // People
+  contact:          { pill: 'bg-pink-500/20 text-pink-300 border border-pink-500/30',        card: 'border-l-pink-500/60 bg-gradient-to-br from-pink-900/15 to-pink-950/35',        dot: 'bg-pink-400',    icon: User     },
+  user:             { pill: 'bg-sky-500/20 text-sky-300 border border-sky-500/30',           card: 'border-l-sky-500/60 bg-gradient-to-br from-sky-900/15 to-sky-950/35',           dot: 'bg-sky-400',     icon: User     },
+  // Vision/history
+  vision:           { pill: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30',card:'border-l-emerald-500/60 bg-gradient-to-br from-emerald-900/15 to-emerald-950/35',dot: 'bg-emerald-500', icon: Sparkles },
+  history:          { pill: 'bg-slate-500/20 text-slate-300 border border-slate-500/30',     card: 'border-l-slate-500/60 bg-gradient-to-br from-slate-800/20 to-slate-900/40',     dot: 'bg-slate-400',   icon: BookOpen },
+}
+
+// Hash-based color for unknown categories — deterministic, never default
+const HASH_COLORS = [
+  { pill: 'bg-pink-500/20 text-pink-300 border border-pink-500/30',     card: 'border-l-pink-500/60 bg-gradient-to-br from-pink-900/15 to-pink-950/30',     dot: 'bg-pink-400',    icon: BookOpen as LucideIcon },
+  { pill: 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30',     card: 'border-l-cyan-500/60 bg-gradient-to-br from-cyan-900/15 to-cyan-950/30',     dot: 'bg-cyan-400',    icon: Zap as LucideIcon      },
+  { pill: 'bg-lime-500/20 text-lime-300 border border-lime-500/30',     card: 'border-l-lime-500/60 bg-gradient-to-br from-lime-900/15 to-lime-950/30',     dot: 'bg-lime-400',    icon: Sparkles as LucideIcon },
+  { pill: 'bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30', card: 'border-l-fuchsia-500/60 bg-gradient-to-br from-fuchsia-900/15 to-fuchsia-950/30', dot: 'bg-fuchsia-400', icon: Brain as LucideIcon },
+  { pill: 'bg-rose-500/20 text-rose-300 border border-rose-500/30',     card: 'border-l-rose-500/60 bg-gradient-to-br from-rose-900/15 to-rose-950/30',     dot: 'bg-rose-400',    icon: Shield as LucideIcon   },
+  { pill: 'bg-teal-500/20 text-teal-300 border border-teal-500/30',     card: 'border-l-teal-500/60 bg-gradient-to-br from-teal-900/15 to-teal-950/30',     dot: 'bg-teal-400',    icon: RefreshCw as LucideIcon },
+  { pill: 'bg-violet-500/20 text-violet-300 border border-violet-500/30',card: 'border-l-violet-500/60 bg-gradient-to-br from-violet-900/15 to-violet-950/30',dot: 'bg-violet-400', icon: Sparkles as LucideIcon },
+]
+
+function hashColor(category: string): typeof HASH_COLORS[0] {
+  let h = 0
+  for (let i = 0; i < category.length; i++) h = (h * 31 + category.charCodeAt(i)) & 0xffffff
+  return HASH_COLORS[Math.abs(h) % HASH_COLORS.length]
 }
 
 const DEFAULT_STYLE = {
@@ -48,8 +95,15 @@ const DEFAULT_STYLE = {
   icon: BookOpen as LucideIcon,
 }
 
-function getUserStyle(category: string) { return USER_CATEGORY_STYLES[category] ?? DEFAULT_STYLE }
-function getSelfStyle(category: string) { return SELF_CATEGORY_STYLES[category] ?? DEFAULT_STYLE }
+function getUserStyle(category: string) {
+  if (USER_CATEGORY_STYLES[category]) return USER_CATEGORY_STYLES[category]
+  const hc = hashColor(category)
+  return { ...hc, label: category.replace(/_/g, ' ') }
+}
+function getSelfStyle(category: string) {
+  if (SELF_CATEGORY_STYLES[category]) return SELF_CATEGORY_STYLES[category]
+  return { ...hashColor(category), ...DEFAULT_STYLE }
+}
 
 function formatDate(d: string) {
   return new Date(d).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })

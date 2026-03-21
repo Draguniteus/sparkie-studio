@@ -155,6 +155,8 @@ export function ChatInput() {
   const [attachedFile, setAttachedFile] = useState<{ name: string; dataUrl: string; mimeType: string } | null>(null)
   const agentAbortRef = useRef<AbortController | null>(null)
   const chatAbortRef = useRef<AbortController | null>(null)
+  const isPausedRef = useRef(false)         // Block 5: pause flag checked in stream loop
+  const pausedMsgIdRef = useRef<string | null>(null) // tracks which message was paused
   const [isRecording, setIsRecording] = useState(false)
   const streamFlushRef = useRef<number>(0)
   const [isTranscribing, setIsTranscribing] = useState(false)
@@ -1129,6 +1131,32 @@ export function ChatInput() {
               setStreaming(false)
               return
             }
+            // sparkie_card — inline card rendered in chat (Block 3)
+            if (parsed.sparkie_card) {
+              const cardData = parsed.sparkie_card
+              const cardMsgId = addMessage(chatId, {
+                role: 'assistant',
+                content: parsed.text as string || '',
+                type: 'sparkie_card',
+                sparkieCard: cardData,
+                isStreaming: false,
+              })
+              void cardMsgId
+              continue
+            }
+            // Block 5: check pause flag before processing further tokens
+            if (isPausedRef.current) {
+              updateMessage(chatId, assistantMsgId, {
+                content: fullContent || '⏸ *Paused* — send me what you forgot and I\'ll continue from here.',
+                isStreaming: false,
+                isPaused: true,
+              })
+              pausedMsgIdRef.current = assistantMsgId
+              isPausedRef.current = false
+              useAppStore.getState().setPaused(false)
+              setStreaming(false)
+              return
+            }
             // reasoning_chunk — animate word-by-word in the Live Activity sidebar ticker
             if (parsed.reasoning_chunk) {
               const words = (parsed.reasoning_chunk as string).split(/\s+/).filter(Boolean)
@@ -1835,11 +1863,22 @@ Promise.all([
   // ── sparkie_stop_stream — dispatched by live InMemoryPill stop button ─────
   useEffect(() => {
     const handler = () => {
+      isPausedRef.current = false
       chatAbortRef.current?.abort()
       agentAbortRef.current?.abort()
     }
     window.addEventListener('sparkie_stop_stream', handler)
     return () => window.removeEventListener('sparkie_stop_stream', handler)
+  }, [])
+
+  // ── sparkie_pause_stream — dispatched by Pause button in MessageBubble ────
+  useEffect(() => {
+    const handler = () => {
+      isPausedRef.current = true
+      useAppStore.getState().setPaused(true, 'Paused mid-response')
+    }
+    window.addEventListener('sparkie_pause_stream', handler)
+    return () => window.removeEventListener('sparkie_pause_stream', handler)
   }, [])
 
   // ── sparkie_preview_ready — fired by Terminal when E2B dev server is live ──

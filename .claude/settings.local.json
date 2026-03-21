@@ -8,7 +8,10 @@
       "Bash(git:*)",
       "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\({**d.get\\(''''dependencies'''',{}\\), **d.get\\(''''devDependencies'''',{}\\)}, indent=2\\)\\)\")",
       "Bash(find C:UsersuserDesktopsparkie-studiosrc -name *identity* -o -name *identity.ts)",
-      "Bash(node fix_scheduler.js)"
+      "Bash(node fix_scheduler.js)",
+      "Bash(ls /c/Users/user/Desktop/sparkie-studio/src/app/api/memory*)",
+      "Bash(grep -n \"case ''''sound''''\\\\|case ''''gallery''''\\\\|case ''''notebook''''\\\\|case ''''dream''''\\\\|case ''''hive''''\\\\|Sound Booth\\\\|Gallery Wall\\\\|Dream State\\\\|The Hive\\\\|SoundRoom\\\\|GalleryRoom\\\\|NotebookRoom\\\\|DreamRoom\\\\|HiveRoom\\\\|function.*Room\" src/components/SparkiesCorner.tsx)",
+      "Bash(grep -n \"query_database\\\\|case ''''query_database''''\" src/app/api/chat/route.ts)"
     ]
   }
 }

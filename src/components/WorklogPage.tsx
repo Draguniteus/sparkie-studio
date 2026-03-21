@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import {
   Brain, Zap, CheckCircle, AlertCircle, Code, Loader2,
-  Mail, MessageSquare, Sparkles, RefreshCw, Cpu
+  Mail, MessageSquare, Sparkles, RefreshCw, Cpu, BookOpen,
+  Shield, Heart, ChevronDown, ChevronUp, User,
 } from 'lucide-react'
 
 interface WorklogEntry {
@@ -11,6 +12,11 @@ interface WorklogEntry {
   type: string
   content: string
   metadata: Record<string, unknown>
+  status?: string
+  decision_type?: string
+  reasoning?: string
+  conclusion?: string
+  signal_priority?: string
   created_at: string
 }
 
@@ -24,61 +30,275 @@ function formatTime(iso: string) {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
-const TYPE_CONFIG: Record<string, { icon: typeof Brain; color: string; bg: string; label: string }> = {
-  proactive_check:  { icon: Sparkles,     color: 'text-honey-500',  bg: 'bg-honey-500/10',  label: 'Proactive check' },
-  message_batch:    { icon: MessageSquare, color: 'text-blue-400',   bg: 'bg-blue-400/10',   label: 'Messages' },
-  email_processed:  { icon: Mail,          color: 'text-green-400',  bg: 'bg-green-400/10',  label: 'Email' },
-  email_skipped:    { icon: Mail,          color: 'text-text-muted', bg: 'bg-hive-elevated', label: 'Skipped' },
-  memory_learned:   { icon: Brain,         color: 'text-purple-400', bg: 'bg-purple-400/10', label: "I've learned" },
-  memory_updated:   { icon: RefreshCw,     color: 'text-cyan-400',   bg: 'bg-cyan-400/10',   label: 'Updated' },
-  memory_forgotten: { icon: Brain,         color: 'text-orange-400', bg: 'bg-orange-400/10', label: "I've forgotten" },
-  task_executed:    { icon: Zap,           color: 'text-honey-500',  bg: 'bg-honey-500/10',  label: 'Task executed' },
-  code_push:        { icon: Code,          color: 'text-indigo-400', bg: 'bg-indigo-400/10', label: 'Code pushed' },
-  error:            { icon: AlertCircle,   color: 'text-red-400',    bg: 'bg-red-400/10',    label: 'Error' },
-  heartbeat:        { icon: Cpu,           color: 'text-text-muted', bg: 'bg-hive-elevated', label: 'Heartbeat' },
-  ai_response:      { icon: CheckCircle,   color: 'text-green-400',  bg: 'bg-green-400/10',  label: 'Response' },
+// Color palette for entry types — category → styling
+const TYPE_CONFIG: Record<string, {
+  icon: typeof Brain
+  color: string
+  bg: string
+  border: string
+  label: string
+  actionBadge?: (meta: Record<string, unknown>, content: string) => string
+}> = {
+  proactive_check:  {
+    icon: Sparkles, color: 'text-honey-500',  bg: 'bg-honey-500/8',  border: 'border-l-honey-500/50',
+    label: 'Proactive check',
+    actionBadge: () => 'Running background check',
+  },
+  message_batch:    {
+    icon: MessageSquare, color: 'text-blue-400', bg: 'bg-blue-400/8', border: 'border-l-blue-400/50',
+    label: 'Messages',
+    actionBadge: (_m, c) => c.includes('working on it') ? "I've got this" : "I've noted this",
+  },
+  email_processed:  {
+    icon: Mail, color: 'text-emerald-400', bg: 'bg-emerald-400/8', border: 'border-l-emerald-400/50',
+    label: 'Email processed',
+    actionBadge: (m) => m.tasks ? `I've created ${m.tasks} task(s) for this` : m.replied ? "I've sent you a message" : "I've noted this, no action needed",
+  },
+  email_skipped:    {
+    icon: Mail, color: 'text-slate-500', bg: 'bg-slate-500/6', border: 'border-l-slate-500/30',
+    label: 'Email skipped',
+    actionBadge: (m) => `I skipped this one — ${m.reason ?? 'looks like marketing'}`,
+  },
+  memory_learned:   {
+    icon: Brain, color: 'text-purple-400', bg: 'bg-purple-400/8', border: 'border-l-purple-400/50',
+    label: "I've learned",
+    actionBadge: () => "I've learned something new",
+  },
+  memory_updated:   {
+    icon: RefreshCw, color: 'text-violet-400', bg: 'bg-violet-400/8', border: 'border-l-violet-400/50',
+    label: 'Memory updated',
+    actionBadge: () => "I've updated my memory",
+  },
+  memory_forgotten: {
+    icon: Brain, color: 'text-orange-400', bg: 'bg-orange-400/8', border: 'border-l-orange-400/50',
+    label: 'Forgot',
+    actionBadge: () => "I've deleted that memory",
+  },
+  task_executed:    {
+    icon: Zap, color: 'text-honey-500', bg: 'bg-honey-500/8', border: 'border-l-honey-500/50',
+    label: 'Task executed',
+    actionBadge: () => "I've completed this task",
+  },
+  code_push:        {
+    icon: Code, color: 'text-indigo-400', bg: 'bg-indigo-400/8', border: 'border-l-indigo-400/50',
+    label: 'Code pushed',
+    actionBadge: (m) => m.commit ? `Committed ${String(m.commit).slice(0, 8)}` : "I've pushed code",
+  },
+  error:            {
+    icon: AlertCircle, color: 'text-red-400', bg: 'bg-red-400/8', border: 'border-l-red-400/60',
+    label: 'Error',
+    actionBadge: () => "Something went wrong",
+  },
+  heartbeat:        {
+    icon: Cpu, color: 'text-slate-500', bg: 'bg-slate-500/5', border: 'border-l-slate-500/20',
+    label: 'Heartbeat',
+    actionBadge: () => 'Heartbeat',
+  },
+  signal_skipped:   {
+    icon: Cpu, color: 'text-slate-500', bg: 'bg-slate-500/5', border: 'border-l-slate-500/20',
+    label: 'Skipped signal',
+    actionBadge: () => 'Skipped',
+  },
+  ai_response:      {
+    icon: CheckCircle, color: 'text-emerald-400', bg: 'bg-emerald-400/8', border: 'border-l-emerald-400/50',
+    label: 'Response sent',
+    actionBadge: () => "I've sent you a message",
+  },
+  decision:         {
+    icon: Brain, color: 'text-blue-400', bg: 'bg-blue-400/8', border: 'border-l-blue-400/50',
+    label: 'Decision',
+    actionBadge: () => "I made a decision",
+  },
+  self_assessment:  {
+    icon: Heart, color: 'text-rose-400', bg: 'bg-rose-400/8', border: 'border-l-rose-400/50',
+    label: 'Self-check',
+    actionBadge: () => "I reflected on my work",
+  },
+  action:           {
+    icon: Zap, color: 'text-honey-500', bg: 'bg-honey-500/8', border: 'border-l-honey-500/50',
+    label: 'Action',
+    actionBadge: () => 'In progress',
+  },
+  result:           {
+    icon: CheckCircle, color: 'text-green-400', bg: 'bg-green-400/8', border: 'border-l-green-400/50',
+    label: 'Result',
+    actionBadge: () => 'Done',
+  },
+  auth_check:       {
+    icon: Shield, color: 'text-slate-400', bg: 'bg-slate-400/6', border: 'border-l-slate-400/30',
+    label: 'Auth check',
+    actionBadge: () => 'Auth verified',
+  },
 }
 
-const DEFAULT_CONFIG = { icon: Sparkles, color: 'text-text-muted', bg: 'bg-hive-elevated', label: 'Note' }
+const DEFAULT_CONFIG = {
+  icon: Sparkles, color: 'text-text-muted', bg: 'bg-hive-elevated', border: 'border-l-hive-border',
+  label: 'Note', actionBadge: undefined,
+}
 
+type CollapsedGroup = {
+  type: 'collapsed'
+  entryType: string
+  count: number
+  lastTime: string
+}
+type SingleEntry = { type: 'single'; entry: WorklogEntry }
+type RenderItem = CollapsedGroup | SingleEntry
+
+/** Group consecutive same-type repetitive entries (heartbeat, signal_skipped) into collapsed rows */
+function groupEntries(entries: WorklogEntry[]): RenderItem[] {
+  const COLLAPSIBLE = new Set(['heartbeat', 'signal_skipped', 'auth_check'])
+  const result: RenderItem[] = []
+  let i = 0
+  while (i < entries.length) {
+    const e = entries[i]
+    if (COLLAPSIBLE.has(e.type)) {
+      let j = i + 1
+      while (j < entries.length && entries[j].type === e.type) j++
+      const count = j - i
+      if (count > 2) {
+        result.push({ type: 'collapsed', entryType: e.type, count, lastTime: e.created_at })
+        i = j
+      } else {
+        result.push({ type: 'single', entry: e })
+        i++
+      }
+    } else {
+      result.push({ type: 'single', entry: e })
+      i++
+    }
+  }
+  return result
+}
+
+/** Memory "I've learned something new" card — purple gradient */
+function MemoryCard({ entry }: { entry: WorklogEntry }) {
+  const cfg = TYPE_CONFIG[entry.type] ?? DEFAULT_CONFIG
+  const meta = entry.metadata ?? {}
+  return (
+    <div className="mx-4 my-1 rounded-xl overflow-hidden border border-purple-500/20 bg-gradient-to-br from-purple-950/60 via-indigo-950/40 to-purple-900/30 shadow-sm">
+      <div className="flex items-center gap-2 px-3 pt-3 pb-1">
+        <div className="w-5 h-5 rounded-md bg-purple-500/20 flex items-center justify-center shrink-0">
+          <Brain size={11} className="text-purple-400" />
+        </div>
+        <span className="text-[10px] font-bold text-purple-300 uppercase tracking-widest">I&apos;ve learned something new</span>
+        {!!meta.category && (
+          <span className="ml-auto text-[9px] px-2 py-0.5 rounded-full bg-purple-500/20 border border-purple-500/30 text-purple-300 font-medium capitalize">
+            {String(meta.category).replace(/_/g, ' ')}
+          </span>
+        )}
+      </div>
+      <div className="px-3 pb-3 pt-0.5">
+        <p className="text-[11px] text-purple-100/80 leading-relaxed italic">
+          &ldquo;{entry.content}&rdquo;
+        </p>
+        <div className="flex items-center gap-2 mt-1.5">
+          <span className="text-[9px] text-purple-400/60 tabular-nums">{formatTime(entry.created_at)}</span>
+          <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${cfg.bg} ${cfg.color}`}>{cfg.label}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** Collapsed repetitive entry (heartbeat ×12) */
+function CollapsedRow({ item }: { item: CollapsedGroup }) {
+  const cfg = TYPE_CONFIG[item.entryType] ?? DEFAULT_CONFIG
+  const Icon = cfg.icon
+  return (
+    <div className="flex items-center gap-3 px-4 py-1.5 opacity-40 hover:opacity-70 transition-opacity">
+      <div className="w-[52px] shrink-0 text-right">
+        <span className="text-[9px] text-text-muted tabular-nums">{formatTime(item.lastTime)}</span>
+      </div>
+      <div className={`w-5 h-5 rounded-md ${cfg.bg} flex items-center justify-center shrink-0`}>
+        <Icon size={10} className={cfg.color} />
+      </div>
+      <span className="text-[10px] text-text-muted">{cfg.label}</span>
+      <span className="text-[10px] text-text-muted/50 font-medium">×{item.count}</span>
+    </div>
+  )
+}
+
+/** Individual worklog entry */
 function EntryCard({ entry }: { entry: WorklogEntry }) {
   const cfg = TYPE_CONFIG[entry.type] ?? DEFAULT_CONFIG
   const Icon = cfg.icon
   const meta = entry.metadata ?? {}
   const isSkipped = entry.type === 'email_skipped'
+  const isMemory = entry.type === 'memory_learned' || entry.type === 'memory_updated'
+  const isEmail = entry.type === 'email_processed' || entry.type === 'email_skipped'
+  const actionBadge = cfg.actionBadge ? cfg.actionBadge(meta, entry.content) : null
+
+  if (isMemory) return <MemoryCard entry={entry} />
 
   return (
-    <div className={`flex gap-3 px-4 py-3 border-b border-hive-border/40 hover:bg-hive-hover/20 transition-colors ${isSkipped ? 'opacity-55' : ''}`}>
-      <div className="w-[52px] shrink-0 text-right pt-0.5">
-        <span className="text-[10px] text-text-muted tabular-nums leading-none">{formatTime(entry.created_at)}</span>
+    <div className={`flex gap-3 px-4 py-2.5 border-b border-hive-border/30 hover:bg-white/[0.015] transition-colors border-l-2 ${cfg.border} ${isSkipped ? 'opacity-50' : ''}`}>
+      {/* Timestamp */}
+      <div className="w-[52px] shrink-0 text-right pt-1">
+        <span className="text-[9px] text-text-muted tabular-nums leading-none">{formatTime(entry.created_at)}</span>
       </div>
+
+      {/* Icon */}
       <div className={`w-6 h-6 rounded-lg ${cfg.bg} flex items-center justify-center shrink-0 mt-0.5`}>
-        <Icon size={12} className={cfg.color} />
+        <Icon size={11} className={cfg.color} />
       </div>
+
+      {/* Body */}
       <div className="flex-1 min-w-0">
+        {/* Email subject + sender */}
+        {isEmail && !!meta.subject && (
+          <div className="mb-0.5">
+            <span className="text-[11px] font-semibold text-text-primary">{String(meta.subject)}</span>
+            {!!meta.from && (
+              <span className="ml-2 text-[9px] px-1.5 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-300 font-medium">
+                <User size={7} className="inline mr-0.5 mb-px" />{String(meta.from).replace(/<.*?>/, '').trim()}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Topic for proactive checks */}
         {entry.type === 'proactive_check' && !!meta.topic && (
           <div className="text-[11px] font-semibold text-text-secondary mb-0.5">{String(meta.topic)}</div>
         )}
+
+        {/* Message batch count */}
         {entry.type === 'message_batch' && !!meta.count && (
-          <div className="text-xs font-medium text-text-secondary mb-0.5">
-            You just sent me {String(meta.count)} message{Number(meta.count) !== 1 ? 's' : ''}
+          <div className="text-[11px] font-medium text-text-secondary mb-0.5">
+            You sent me {String(meta.count)} message{Number(meta.count) !== 1 ? 's' : ''}
           </div>
         )}
-        {(entry.type === 'email_processed' || entry.type === 'email_skipped') && !!meta.subject && (
-          <div className="mb-0.5">
-            <span className="text-xs font-medium text-text-primary">{String(meta.subject)}</span>
-            {!!meta.from && <div className="text-[10px] text-text-muted">from {String(meta.from)}</div>}
-          </div>
+
+        {/* Inner monologue — italics, Sparkie's personality */}
+        <p className="text-[11px] text-text-secondary leading-relaxed break-words italic">{entry.content}</p>
+
+        {/* Conclusion if present */}
+        {entry.conclusion && entry.conclusion !== entry.content && (
+          <p className="text-[10px] text-text-muted mt-0.5 not-italic">{entry.conclusion}</p>
         )}
-        <p className="text-xs text-text-secondary leading-relaxed whitespace-pre-wrap break-words">{entry.content}</p>
-        {(entry.type === 'memory_learned' || entry.type === 'memory_updated') && !!meta.category && (
-          <span className="inline-block mt-1 text-[10px] px-2 py-0.5 rounded-full bg-purple-400/10 text-purple-400 font-medium capitalize">
-            {String(meta.category)}
-          </span>
-        )}
-        {entry.type === 'email_skipped' && !!meta.reason && (
-          <p className="text-[10px] text-text-muted mt-0.5 italic">I skipped this one - {String(meta.reason)}</p>
-        )}
+
+        {/* Bottom row: category badge + action badge */}
+        <div className="flex items-center gap-1.5 flex-wrap mt-1">
+          {actionBadge && (
+            <span className={`text-[9px] px-2 py-0.5 rounded-full font-medium ${cfg.bg} ${cfg.color}`}>
+              {actionBadge}
+            </span>
+          )}
+          {entry.signal_priority && entry.signal_priority !== 'P3' && (
+            <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold ${
+              entry.signal_priority === 'P0' ? 'bg-red-500/20 text-red-400' :
+              entry.signal_priority === 'P1' ? 'bg-orange-500/20 text-orange-400' :
+              'bg-yellow-500/20 text-yellow-400'
+            }`}>
+              {entry.signal_priority}
+            </span>
+          )}
+          {entry.status === 'running' && (
+            <span className="flex items-center gap-1 text-[9px] text-purple-400">
+              <Loader2 size={8} className="animate-spin" />running
+            </span>
+          )}
+        </div>
       </div>
     </div>
   )
@@ -89,6 +309,7 @@ export function WorklogPage() {
   const [stats, setStats] = useState<Stats>({ emails: 0, messages: 0 })
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [expanded, setExpanded] = useState(false)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const fetchEntries = useCallback(async (silent = false) => {
@@ -111,6 +332,16 @@ export function WorklogPage() {
     intervalRef.current = setInterval(() => { void fetchEntries(true) }, 30000)
     return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
   }, [fetchEntries])
+
+  // Live append from store worklog (in-memory entries during current session)
+  useEffect(() => {
+    const handler = () => { void fetchEntries(true) }
+    window.addEventListener('sparkie:worklog-refresh', handler)
+    return () => window.removeEventListener('sparkie:worklog-refresh', handler)
+  }, [fetchEntries])
+
+  const grouped = groupEntries(entries)
+  const shown = expanded ? grouped : grouped.slice(0, 40)
 
   return (
     <div className="h-full flex flex-col bg-hive-800 overflow-hidden">
@@ -135,15 +366,21 @@ export function WorklogPage() {
           </button>
         </div>
 
+        {/* Inbox summary */}
         {(stats.emails > 0 || stats.messages > 0) ? (
           <p className="text-[10px] text-text-muted flex items-center gap-1.5 flex-wrap">
-            {stats.emails > 0 && <span>Processed {stats.emails} email{stats.emails !== 1 ? 's' : ''}</span>}
-            {stats.emails > 0 && stats.messages > 0 && <span className="opacity-40">,</span>}
-            {stats.messages > 0 && <span>{stats.messages} messages in last 24h</span>}
-            <span className="opacity-40">·</span>
+            {stats.emails > 0 && (
+              <span className="flex items-center gap-1">
+                <Mail size={9} className="text-emerald-400" />
+                Processed {stats.emails} email{stats.emails !== 1 ? 's' : ''} in last 24h
+              </span>
+            )}
+            {stats.emails > 0 && stats.messages > 0 && <span className="opacity-30">·</span>}
+            {stats.messages > 0 && <span>{stats.messages} messages</span>}
+            <span className="opacity-30">·</span>
             <span className="flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse inline-block" />
-              I&apos;m waiting for more
+              I&apos;m waiting for more...
             </span>
           </p>
         ) : !loading ? (
@@ -162,6 +399,7 @@ export function WorklogPage() {
             Loading work log...
           </div>
         )}
+
         {!loading && entries.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center px-8 gap-3 py-16">
             <div className="w-14 h-14 rounded-2xl bg-honey-500/10 flex items-center justify-center">
@@ -176,9 +414,33 @@ export function WorklogPage() {
             </div>
           </div>
         )}
-        {entries.map((entry) => (
-          <EntryCard key={entry.id} entry={entry} />
-        ))}
+
+        {shown.map((item, i) =>
+          item.type === 'collapsed'
+            ? <CollapsedRow key={`collapsed-${i}`} item={item} />
+            : <EntryCard key={item.entry.id} entry={item.entry} />
+        )}
+
+        {grouped.length > 40 && !expanded && (
+          <button
+            onClick={() => setExpanded(true)}
+            className="w-full flex items-center justify-center gap-1.5 py-3 text-[10px] text-text-muted hover:text-honey-500 transition-colors"
+          >
+            <ChevronDown size={11} />
+            Show {grouped.length - 40} more entries
+          </button>
+        )}
+
+        {expanded && grouped.length > 40 && (
+          <button
+            onClick={() => setExpanded(false)}
+            className="w-full flex items-center justify-center gap-1.5 py-3 text-[10px] text-text-muted hover:text-honey-500 transition-colors"
+          >
+            <ChevronUp size={11} />
+            Collapse
+          </button>
+        )}
+
         {entries.length > 0 && (
           <div className="flex items-center gap-2 px-4 py-4 text-[10px] text-text-muted">
             <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse inline-block" />

@@ -5,7 +5,8 @@ import { Message, PendingTask, StepTrace, AceMusicMetadata } from "@/store/appSt
 import { TaskApprovalCard } from "@/components/chat/TaskApprovalCard"
 import { useAppStore } from "@/store/appStore"
 import { useShallow } from "zustand/react/shallow"
-import { Sparkles, User, Copy, RefreshCw, ThumbsUp, ThumbsDown, Download, Check, ExternalLink, FileCode, Layers, Eye, Clock, Brain, ChevronRight, CheckCircle, AlertCircle, Loader2, Square } from "lucide-react"
+import { Sparkles, User, Copy, RefreshCw, ThumbsUp, ThumbsDown, Download, Check, ExternalLink, FileCode, Layers, Eye, Clock, Brain, ChevronRight, CheckCircle, AlertCircle, Loader2, Square, Pause } from "lucide-react"
+import { SparkieCard } from "@/components/chat/SparkieCards"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { AnimatedMarkdown } from "./AnimatedMarkdown"
@@ -285,6 +286,7 @@ function MessageBubbleInner({ message, userAvatarUrl }: Props) {
   const isAceMusic = message.type === "ace_music" && message.imageUrl && message.aceMetadata
   const isBuildCard = message.type === "build_card" && message.buildCard
   const isPendingTask = !!message.pendingTask
+  const isSparkieCard = message.type === "sparkie_card" && message.sparkieCard
   const isTimerFired = (message.type as string) === "timer_fired"
 
   if (isTimerFired) {
@@ -325,8 +327,16 @@ function MessageBubbleInner({ message, userAvatarUrl }: Props) {
             <Loader2 size={10} className="text-purple-400 animate-spin shrink-0" />
             <span className="text-[10px] text-purple-300/85 font-medium">Sparkie is thinking…</span>
             <button
+              onClick={() => window.dispatchEvent(new CustomEvent('sparkie_pause_stream'))}
+              className="flex items-center gap-1 ml-1 px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/25 text-amber-400 hover:bg-amber-500/25 transition-colors"
+              title="Pause — add more context then resume"
+            >
+              <Pause size={8} className="shrink-0" />
+              <span className="text-[9px] font-medium">Pause</span>
+            </button>
+            <button
               onClick={() => window.dispatchEvent(new CustomEvent('sparkie_stop_stream'))}
-              className="flex items-center gap-1 ml-1 px-1.5 py-0.5 rounded bg-red-500/15 border border-red-500/25 text-red-400 hover:bg-red-500/25 transition-colors"
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-500/15 border border-red-500/25 text-red-400 hover:bg-red-500/25 transition-colors"
               title="Stop generating"
             >
               <Square size={8} className="shrink-0" />
@@ -393,6 +403,11 @@ function MessageBubbleInner({ message, userAvatarUrl }: Props) {
             </div>
           ) : isBuildCard && !message.isStreaming ? (
             <BuildCard card={message.buildCard!} />
+          ) : isSparkieCard && message.sparkieCard ? (
+            <div>
+              {message.content && <p className="text-sm text-text-secondary mb-1">{message.content}</p>}
+              <SparkieCard card={message.sparkieCard} />
+            </div>
           ) : isPendingTask && message.pendingTask ? (
             <div>
               {message.content && <p className="text-sm text-text-secondary mb-2">{message.content}</p>}
@@ -430,7 +445,7 @@ function MessageBubbleInner({ message, userAvatarUrl }: Props) {
           )}
         </div>
 
-        {!isUser && !message.isStreaming && !isBuildCard && !isPendingTask && (
+        {!isUser && !message.isStreaming && !isBuildCard && !isPendingTask && !isSparkieCard && (
           <div className="flex items-center gap-1 mt-1 ml-1">
             <button onClick={copyToClipboard}
               className="p-1 rounded hover:bg-hive-hover text-text-muted hover:text-text-secondary transition-colors"

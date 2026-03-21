@@ -2950,6 +2950,13 @@ const SPARKIE_TOOLS = [
   ...SPARKIE_TOOLS_S3,
   ...SPARKIE_TOOLS_S4,
   ...SPARKIE_TOOLS_S5,
+  // ── Block 4 / 3B: New tools added in overhaul ─────────────────────────────
+  { type: 'function', function: { name: 'delete_memory', description: 'Delete a specific memory by ID. Use when a memory is contradicted by new information, outdated, or wrong. Get the ID from read_memory or list_memories first.', parameters: { type: 'object', properties: { id: { type: 'number', description: 'Memory entry ID from read_memory or list_memories' }, source: { type: 'string', description: '"self" (Sparkie self-memory, default) or "user" (user memories)' } }, required: ['id'] } } },
+  { type: 'function', function: { name: 'list_memories', description: 'List all memories in a given category or source. Use to audit what Sparkie knows before deleting or updating entries. Returns id, category, and content preview for each entry.', parameters: { type: 'object', properties: { category: { type: 'string', description: 'Filter by category name (optional). e.g. "work_rule", "api_behavior", "contact"' }, source: { type: 'string', description: '"self" (default), "user", or "all"' }, limit: { type: 'number', description: 'Max entries to return (default 20, max 50)' } }, required: [] } } },
+  { type: 'function', function: { name: 'manage_email', description: 'Archive, label, delete (trash), star, or mark as read/unread a Gmail message. Use to organize the inbox after reading. Never delete without explicit instruction.', parameters: { type: 'object', properties: { action: { type: 'string', description: '"archive" | "label" | "delete" | "star" | "unstar" | "read" | "unread"' }, message_id: { type: 'string', description: 'Gmail message ID from read_email or inbox list' }, label_name: { type: 'string', description: 'Label to apply (required for action=label)' } }, required: ['action', 'message_id'] } } },
+  { type: 'function', function: { name: 'transcribe_audio', description: 'Transcribe an audio file (MP3, WAV, M4A, OGG) to text using Deepgram nova-2 model with smart formatting. Use for voice notes, audio summaries, or any audio-to-text task. Returns the full transcript.', parameters: { type: 'object', properties: { url: { type: 'string', description: 'Direct URL to the audio file to transcribe' } }, required: ['url'] } } },
+  { type: 'function', function: { name: 'manage_calendar_event', description: 'Create, update, or cancel/delete a Google Calendar event. For create: title and start_time are required. For update/cancel: event_id is required.', parameters: { type: 'object', properties: { action: { type: 'string', description: '"create" | "update" | "cancel" | "delete"' }, event_id: { type: 'string', description: 'Event ID (for update/cancel/delete)' }, title: { type: 'string', description: 'Event title' }, description: { type: 'string', description: 'Event description' }, start_time: { type: 'string', description: 'ISO 8601 start datetime with timezone, e.g. "2026-03-26T14:00:00-05:00"' }, end_time: { type: 'string', description: 'ISO 8601 end datetime. Defaults to start_time + 1 hour.' }, attendees: { type: 'array', items: { type: 'string' }, description: 'List of attendee email addresses' } }, required: ['action'] } } },
+  { type: 'function', function: { name: 'send_card_to_user', description: 'Send a beautiful HITL card to the user in chat instead of plain text. Use for: email drafts (type=email_draft), tasks (type=task), calendar events (type=calendar_event), contacts (type=contact), memory saves (type=memory), deploy confirmations (type=deploy), reminders (type=reminder), GitHub PRs (type=github_pr), reports (type=report), media (type=media), images (type=image), permission requests (type=permission), confirmations (type=confirmation), browser actions (type=browser_action). Always prefer cards over plain text for structured content.', parameters: { type: 'object', properties: { type: { type: 'string', description: 'Card type: email_draft | calendar_event | memory | contact | task | deploy | reminder | github_pr | report | media | image | permission | confirmation | browser_action' }, title: { type: 'string', description: 'Card header title (e.g. "Email Draft", "Memory Saved")' }, subtitle: { type: 'string', description: 'Secondary header text (e.g. email subject, event name)' }, to: { type: 'string', description: 'Recipient badge (for email/contact cards)' }, body: { type: 'string', description: 'Main body text (email body, event description, memory content, etc.)' }, fields: { type: 'array', items: { type: 'object', properties: { label: { type: 'string' }, value: { type: 'string' } }, required: ['label', 'value'] }, description: 'Key-value fields to display (e.g. date, attendees, commit SHA)' }, items: { type: 'array', items: { type: 'string' }, description: 'Bullet list items (e.g. tasks to approve, permissions requested)' }, actions: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, label: { type: 'string' }, icon: { type: 'string' }, variant: { type: 'string', description: '"primary" | "secondary" | "danger"' } }, required: ['id', 'label'] }, description: 'Action buttons on the card' }, preview_url: { type: 'string', description: 'Image URL to show as preview (for image/media cards)' }, text: { type: 'string', description: 'Short text shown above the card in chat' }, metadata: { type: 'object', description: 'Any extra data to attach to the card' } }, required: ['type', 'title', 'actions'] } } },
 ]
 
 // ── One-time DDL init guard ───────────────────────────────────────────────────────
@@ -4595,6 +4602,151 @@ def invoke_llm(query, model='MiniMax-M2.7'):
         } catch (e) {
           return `delete_file error: ${String(e)}`
         }
+      }
+
+      // ── Block 4: Missing tools — manage_email, delete_memory, manage_calendar_event, send_card_to_user ──
+
+      case 'delete_memory': {
+        if (!userId) return 'Not authenticated'
+        const { id: memId, source: memSource = 'self' } = args as { id: number; source?: string }
+        if (!memId) return 'delete_memory: id is required'
+        try {
+          if (memSource === 'user') {
+            await query('DELETE FROM user_memories WHERE id = $1 AND user_id = $2', [memId, userId])
+          } else {
+            await query('DELETE FROM sparkie_self_memory WHERE id = $1 AND user_id = $2', [memId, userId])
+          }
+          return `✅ delete_memory: entry ${memId} removed from ${memSource} memories`
+        } catch (e) { return `delete_memory error: ${String(e)}` }
+      }
+
+      case 'list_memories': {
+        if (!userId) return 'Not authenticated'
+        const { category: listCat, source: listSource = 'self', limit: listLim = 20 } = args as { category?: string; source?: string; limit?: number }
+        try {
+          if (listSource === 'user' || listSource === 'all') {
+            const catFilter = listCat ? 'AND category = $2' : ''
+            const params = listCat ? [userId, listCat, Math.min(Number(listLim), 50)] : [userId, Math.min(Number(listLim), 50)]
+            const res = await query(`SELECT id, category, content, created_at FROM user_memories WHERE user_id = $1 ${catFilter} ORDER BY created_at DESC LIMIT $${params.length}`, params)
+            const rows = res.rows as Array<{ id: number; category: string; content: string }>
+            return rows.length ? rows.map(r => `[${r.id}:${r.category}] ${r.content.slice(0, 120)}`).join('\n') : 'No user memories found'
+          }
+          const catFilter = listCat ? 'AND category = $2' : ''
+          const params = listCat ? [userId, listCat, Math.min(Number(listLim), 50)] : [userId, Math.min(Number(listLim), 50)]
+          const res = await query(`SELECT id, category, content, created_at FROM sparkie_self_memory WHERE user_id = $1 ${catFilter} ORDER BY created_at DESC LIMIT $${params.length}`, params)
+          const rows = res.rows as Array<{ id: number; category: string; content: string }>
+          return rows.length ? rows.map(r => `[${r.id}:${r.category}] ${r.content.slice(0, 120)}`).join('\n') : 'No self memories found'
+        } catch (e) { return `list_memories error: ${String(e)}` }
+      }
+
+      case 'manage_email': {
+        if (!userId) return 'Not authenticated'
+        const { action: emailAction, message_id: emailMsgId, label_name } = args as {
+          action: 'archive' | 'label' | 'delete' | 'star' | 'unstar' | 'read' | 'unread'
+          message_id: string
+          label_name?: string
+        }
+        if (!emailAction || !emailMsgId) return 'manage_email: action and message_id are required'
+        try {
+          const actionMap: Record<string, { addLabels?: string[]; removeLabels?: string[] }> = {
+            archive: { removeLabels: ['INBOX'] },
+            star:    { addLabels: ['STARRED'] },
+            unstar:  { removeLabels: ['STARRED'] },
+            read:    { removeLabels: ['UNREAD'] },
+            unread:  { addLabels: ['UNREAD'] },
+            delete:  { addLabels: ['TRASH'] },
+          }
+          if (emailAction === 'label' && label_name) {
+            const modResult = await executeConnectorTool('GMAIL_MODIFY_MESSAGE', { message_id: emailMsgId, add_labels: [label_name] }, userId)
+            return `✅ manage_email: labeled "${label_name}" — ${modResult}`
+          }
+          const labelOp = actionMap[emailAction]
+          if (!labelOp) return `manage_email: unknown action "${emailAction}". Use: archive, label, delete, star, unstar, read, unread`
+          const modResult = await executeConnectorTool('GMAIL_MODIFY_MESSAGE', {
+            message_id: emailMsgId,
+            ...(labelOp.addLabels ? { add_labels: labelOp.addLabels } : {}),
+            ...(labelOp.removeLabels ? { remove_labels: labelOp.removeLabels } : {}),
+          }, userId)
+          return `✅ manage_email: ${emailAction} on ${emailMsgId} — ${modResult}`
+        } catch (e) { return `manage_email error: ${String(e)}` }
+      }
+
+      case 'transcribe_audio': {
+        const { url: audioUrl } = args as { url: string }
+        if (!audioUrl) return 'transcribe_audio: url is required'
+        const DEEPGRAM_KEY = process.env.DEEPGRAM_API_KEY ?? ''
+        if (!DEEPGRAM_KEY) return 'transcribe_audio: DEEPGRAM_API_KEY not configured'
+        try {
+          const res = await fetch('https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true', {
+            method: 'POST',
+            headers: { Authorization: `Token ${DEEPGRAM_KEY}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: audioUrl }),
+            signal: AbortSignal.timeout(30000),
+          })
+          if (!res.ok) return `transcribe_audio: Deepgram error ${res.status}`
+          const data = await res.json() as { results?: { channels?: Array<{ alternatives?: Array<{ transcript?: string }> }> } }
+          const transcript = data.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? ''
+          return transcript ? `Transcript:\n${transcript}` : 'transcribe_audio: empty transcript returned'
+        } catch (e) { return `transcribe_audio error: ${String(e)}` }
+      }
+
+      case 'manage_calendar_event': {
+        if (!userId) return 'Not authenticated'
+        const { action: calAction, event_id, title, description, start_time, end_time, attendees } = args as {
+          action: 'create' | 'update' | 'cancel' | 'delete'
+          event_id?: string
+          title?: string
+          description?: string
+          start_time?: string
+          end_time?: string
+          attendees?: string[]
+        }
+        try {
+          if (calAction === 'create') {
+            if (!title || !start_time) return 'manage_calendar_event create: title and start_time required'
+            const calArgs: Record<string, unknown> = { title, start_time, end_time: end_time ?? start_time }
+            if (description) calArgs.description = description
+            if (attendees?.length) calArgs.attendees = attendees
+            const result = await executeConnectorTool('GOOGLECALENDAR_CREATE_EVENT', calArgs, userId)
+            writeWorklog(userId, 'task_executed', `📅 Created calendar event: "${title}" at ${start_time}`, { decision_type: 'action', signal_priority: 'P2', conclusion: `Calendar event created: ${title}` }).catch(() => {})
+            return `✅ Calendar event created: "${title}"\n${result}`
+          } else if (calAction === 'cancel' || calAction === 'delete') {
+            if (!event_id) return 'manage_calendar_event cancel: event_id required'
+            const result = await executeConnectorTool('GOOGLECALENDAR_DELETE_EVENT', { event_id }, userId)
+            return `✅ Calendar event ${calAction}d: ${event_id}\n${result}`
+          } else if (calAction === 'update') {
+            if (!event_id) return 'manage_calendar_event update: event_id required'
+            const upArgs: Record<string, unknown> = { event_id }
+            if (title) upArgs.title = title
+            if (description) upArgs.description = description
+            if (start_time) upArgs.start_time = start_time
+            if (end_time) upArgs.end_time = end_time
+            const result = await executeConnectorTool('GOOGLECALENDAR_UPDATE_EVENT', upArgs, userId)
+            return `✅ Calendar event updated: ${event_id}\n${result}`
+          }
+          return `manage_calendar_event: unknown action "${calAction}". Use: create, update, cancel, delete`
+        } catch (e) { return `manage_calendar_event error: ${String(e)}` }
+      }
+
+      case 'send_card_to_user': {
+        // Block 3: Sparkie calls this to render a beautiful inline card in chat
+        // Returns SPARKIE_CARD: prefix which the agent loop detects and emits as SSE
+        const { type: cardType, title: cardTitle, subtitle: cardSubtitle, to: cardTo, body: cardBody,
+                fields: cardFields, items: cardItems, actions: cardActions, metadata: cardMeta, preview_url: cardPreview, text: cardText } =
+          args as {
+            type: string; title: string; subtitle?: string; to?: string; body?: string
+            fields?: Array<{ label: string; value: string }>; items?: string[]
+            actions?: Array<{ id: string; label: string; icon?: string; variant?: string }>
+            metadata?: Record<string, unknown>; preview_url?: string; text?: string
+          }
+        if (!cardType || !cardTitle) return 'send_card_to_user: type and title are required'
+        const cardData = {
+          type: cardType, title: cardTitle, subtitle: cardSubtitle, to: cardTo, body: cardBody,
+          fields: cardFields, items: cardItems, previewUrl: cardPreview,
+          actions: (cardActions ?? []).map(a => ({ ...a, variant: (a.variant ?? 'secondary') as 'primary' | 'secondary' | 'danger' })),
+          metadata: cardMeta,
+        }
+        return `SPARKIE_CARD:${JSON.stringify({ card: cardData, text: cardText ?? '' })}`
       }
 
       case 'send_email': {
@@ -6666,6 +6818,15 @@ Rules:
               const idx = toolResults.indexOf(tr)
               toolResults[idx] = { ...tr, content: `Scheduled: ${task.label} ${task.when}. Task ID: ${task.id}` }
             }
+            // Block 3: SPARKIE_CARD — emit card SSE event, replace result with ack, continue loop
+            if (tr.content.startsWith('SPARKIE_CARD:')) {
+              try {
+                const cardPayload = JSON.parse(tr.content.slice('SPARKIE_CARD:'.length)) as { card: unknown; text: string }
+                liveEnqueue({ sparkie_card: cardPayload.card, text: cardPayload.text })
+                const idx = toolResults.indexOf(tr)
+                toolResults[idx] = { ...tr, content: `✅ Card sent to user` }
+              } catch { /* skip malformed */ }
+            }
           }
 
           // Append assistant message + tool results, continue loop
@@ -6678,6 +6839,7 @@ Rules:
             !tr.content.startsWith('IDE_BUILD:') &&
             !tr.content.startsWith('HITL_TASK:') &&
             !tr.content.startsWith('SCHEDULED_TASK:') &&
+            !tr.content.startsWith('SPARKIE_CARD:') &&
             !tr.content.startsWith('LOOP_INTERRUPT') &&
             (tr.content.startsWith('Error') ||
              tr.content.startsWith('Tool error:') ||
@@ -6749,6 +6911,14 @@ Rules:
                   return new Response(hitlStream2, {
                     headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
                   })
+                }
+                if (tr.content.startsWith('SPARKIE_CARD:')) {
+                  try {
+                    const cardPayload = JSON.parse(tr.content.slice('SPARKIE_CARD:'.length)) as { card: unknown; text: string }
+                    liveEnqueue({ sparkie_card: cardPayload.card, text: cardPayload.text })
+                    const idx = jsonFnResults.indexOf(tr)
+                    jsonFnResults[idx] = { ...tr, content: `✅ Card sent to user` }
+                  } catch { /* skip malformed */ }
                 }
               }
               const fakeAssistantMsg = { role: 'assistant' as const, content: null, tool_calls: jsonFnCalls }

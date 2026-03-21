@@ -69,13 +69,15 @@ export interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
-  type?: 'text' | 'image' | 'video' | 'build_card' | 'music' | 'speech' | 'ace_music'
+  type?: 'text' | 'image' | 'video' | 'build_card' | 'music' | 'speech' | 'ace_music' | 'sparkie_card'
   imageUrl?: string
   imagePrompt?: string
   model?: string
   isStreaming?: boolean
+  isPaused?: boolean           // message was mid-stream when paused
   buildCard?: BuildCardData  // only present when type === 'build_card'
   pendingTask?: PendingTask  // only present for HITL approval messages
+  sparkieCard?: import('@/components/chat/SparkieCards').SparkieCardData  // only present when type === 'sparkie_card'
   chipLabel?: string            // 'In memory:...' label stamped when task_chip_clear fires
   toolTraces?: StepTrace[]     // step traces collected during this response
   aceMetadata?: AceMusicMetadata  // only present when type === 'ace_music'
@@ -180,6 +182,9 @@ interface AppState {
   currentChatId: string | null
   isLoading: boolean
   isStreaming: boolean
+  isPaused: boolean            // stream paused mid-execution (Block 5)
+  pausedContext?: string       // what Sparkie was doing when paused
+  setPaused: (paused: boolean, context?: string) => void
   selectedModel: string
   // Two overloads: (chatId, partial) for chat-scoped, or (message) for legacy
   addMessage: (chatIdOrMsg: string | Omit<Message, 'id'>, msg?: Partial<Message>) => string
@@ -269,6 +274,8 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
   currentChatId: null,
   isLoading: false,
   isStreaming: false,
+  isPaused: false,
+  pausedContext: undefined,
   selectedModel: 'MiniMax-M2.7', // default; chat route uses selectModel() server-side and overrides this
   lastMode: 'chat' as const,
 
@@ -337,6 +344,7 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
   clearMessages: () => set({ messages: [] }),
   setSelectedModel: (model) => set({ selectedModel: model }),
   setStreaming: (v) => set({ isStreaming: v }),
+  setPaused: (paused, context) => set({ isPaused: paused, pausedContext: context }),
   setLastMode: (mode) => set({ lastMode: mode }),
   activeProjectRoot: null,
   setActiveProjectRoot: (root) => set({ activeProjectRoot: root }),
