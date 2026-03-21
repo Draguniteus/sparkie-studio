@@ -102,7 +102,7 @@ async function executeDueTasks(userId: string, host: string, proto: string, cook
 
   if (dueTasks.rows.length === 0) return []
 
-  const apiKey = process.env.OPENCODE_API_KEY
+  const apiKey = process.env.MINIMAX_API_KEY ?? process.env.QWEN_API_KEY
   const executed: Array<{ id: string; label: string; result: string }> = []
 
   for (const task of dueTasks.rows) {

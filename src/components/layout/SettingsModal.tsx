@@ -23,11 +23,9 @@ const NAV: { id: SettingsTab; icon: LucideIcon; label: string; desc: string }[] 
 ]
 
 const SPARKIE_MODELS = [
-  { value: 'minimax-m2.5',  label: 'MiniMax M2.5',  badge: 'Default' },
-  { value: 'minimax-m2.1',  label: 'MiniMax M2.1',  badge: null },
-  { value: 'glm-5',         label: 'GLM-5',         badge: 'Fast' },
-  { value: 'kimi-k2.5',     label: 'Kimi K2.5',     badge: null },
-  { value: 'big-pickle',    label: 'Big Pickle',    badge: '\U0001f952' },
+  { value: 'MiniMax-M2.7',             label: 'MiniMax M2.7',       badge: '🔥 Best' },
+  { value: 'qwen3-8b',                 label: 'Qwen3 8B',           badge: 'Fast' },
+  { value: 'qwen2.5-vl-72b-instruct',  label: 'Qwen2.5 VL 72B',    badge: '👁 Vision' },
 ]
 
 const LANGUAGES = [
@@ -56,7 +54,7 @@ interface Prefs {
 }
 
 const DEFAULT_PREFS: Prefs = {
-  theme: 'dark', language: 'en', defaultModel: 'minimax-m2.5', responseStyle: 'balanced',
+  theme: 'dark', language: 'en', defaultModel: 'MiniMax-M2.7', responseStyle: 'balanced',
   notifications: { emailAlerts: true, creditWarning: true, productUpdates: false },
 }
 

@@ -477,7 +477,7 @@ async function executeUserTasks(
             },
             body: JSON.stringify({
               messages: [{ role: 'user', content: taskPrompt }],
-              model: process.env.SCHEDULER_MODEL || 'kimi-k2.5-free',
+              // model field omitted — chat/route.ts uses server-side selectModel() and ignores client model param
             }),
             signal: AbortSignal.timeout(45_000),
           })

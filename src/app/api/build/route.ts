@@ -7,7 +7,7 @@ import { loadIdentityFiles, buildIdentityBlock } from '@/lib/identity'
 export const runtime = 'nodejs'
 export const maxDuration = 120
 
-const OPENCODE_BASE = 'https://opencode.ai/zen/v1'
+const MINIMAX_CHAT_ENDPOINT = 'https://api.minimax.io/v1/text/chatcompletion_v2'
 
 // ─── VITE TEMPLATE for WebContainer ──────────────────────────────────────────
 // WebContainer runs browser-side Node. It CAN run Vite (vite dev server works).
@@ -193,9 +193,9 @@ export async function POST(req: NextRequest) {
       }
 
       try {
-        const apiKey = process.env.OPENCODE_API_KEY
+        const apiKey = process.env.MINIMAX_API_KEY
         if (!apiKey) {
-          send('error', { message: 'No API key configured' })
+          send('error', { message: 'No MINIMAX_API_KEY configured' })
           send('done', {})
           controller.close()
           return
@@ -210,8 +210,8 @@ export async function POST(req: NextRequest) {
         }
 
         const { messages, currentFiles, model: _clientModel, userProfile, projectName: reqProjectName } = body
-        // Use big-pickle — code specialist, 200K ctx, free on opencode.ai (no quota issues)
-        const model = 'big-pickle'
+        // MiniMax-M2.7 — best code/engineering model on market; 97% skill adherence on complex tasks
+        const model = 'MiniMax-M2.7'
 
         let identityContext = ''
         if (userId) {
@@ -247,7 +247,7 @@ export async function POST(req: NextRequest) {
           ...messages,
         ]
 
-        const res = await fetch(`${OPENCODE_BASE}/chat/completions`, {
+        const res = await fetch(MINIMAX_CHAT_ENDPOINT, {
           method: 'POST',
           signal: AbortSignal.timeout(110_000),
           headers: {
@@ -326,8 +326,8 @@ export async function POST(req: NextRequest) {
           console.log('[BUILD] NO MARKERS — first 500 chars:', fullBuildRaw.slice(0, 500))
         }
 
-        // Note: big-pickle sometimes outputs MiniMax XML tool-call format instead of ---FILE:--- markers.
-        // fileParser.ts handles XML tool-call format natively via parseAIResponse() on the client side.
+        // Note: MiniMax-M2.7 outputs clean ---FILE:---/---END FILE--- blocks per prompt instructions.
+        // fileParser.ts handles any format variations via parseAIResponse() on the client side.
         // Do NOT block here — pass through to 'done' and let the client parser handle it.
         send('done', {})
         controller.close()

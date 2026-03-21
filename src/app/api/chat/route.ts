@@ -35,7 +35,8 @@ try {
   _IDENTITY_MD = fs.readFileSync(path.join(process.cwd(), 'IDENTITY.md'), 'utf-8')
 } catch { /* file not present — graceful no-op */ }
 
-const OPENCODE_BASE = 'https://opencode.ai/zen/v1'
+const MINIMAX_CHAT_ENDPOINT = 'https://api.minimax.io/v1/text/chatcompletion_v2'
+const QWEN_BASE = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
 
 const BUILD_SYSTEM_PROMPT = `You are Sparkie — an expert full-stack developer and creative technologist.
 You build beautiful, fully functional apps inside Sparkie Studio's live preview IDE.
@@ -2860,11 +2861,11 @@ async function getAwareness(userId: string): Promise<{ daysSince: number; sessio
 
 async function extractAndSaveMemories(userId: string, conversation: string, apiKey: string) {
   try {
-    const extractRes = await fetch(`${OPENCODE_BASE}/chat/completions`, {
+    const extractRes = await fetch(`${QWEN_BASE}/chat/completions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}`, 'User-Agent': 'SparkieStudio/2.0' },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.QWEN_API_KEY ?? ''}`, 'User-Agent': 'SparkieStudio/2.0' },
       body: JSON.stringify({
-        model: 'minimax-m2.5-free',
+        model: 'qwen3-8b',
         stream: false, temperature: 0, max_tokens: 400,
         messages: [
           {
@@ -4880,12 +4881,13 @@ function formatConnectorResponse(actionSlug: string, data: Record<string, unknow
 // Three-tier model selection. Users never see model names — Sparkie picks automatically.
 
 const MODELS = {
-  CONVERSATIONAL: 'anthropic-claude-haiku-4.5',        // Tier 1   · Sparkie  — conversations, light tools (DO Inference)
-  CAPABLE:        'llama3.3-70b-instruct',               // Tier 2   · Flame    — task execution, tools, coding, GitHub
-  EMBER:          'big-pickle',                 // Tier 2.5 · Ember    — code specialist, agentic tool-calling, 200K ctx
-  DEEP:           'minimax-m2.5-free',          // Tier 3   · Atlas    — heavy analysis, large refactors, deep dives
-  TRINITY:        'trinity-large-preview-free', // Tier 4   · Trinity  — 400B MoE frontier, creative arch, complex chains
-  TRINITY_FB:     'trinity-large-preview-free',      // Tier 4   · Trinity fallback (without -free suffix)
+  CONVERSATIONAL: 'qwen3-8b',       // Tier 1   · Sparkie  — conversations, light tools (DashScope)
+  CAPABLE:        'MiniMax-M2.7',   // Tier 2   · Flame    — task execution, tools, coding, GitHub (MiniMax)
+  EMBER:          'MiniMax-M2.7',   // Tier 2.5 · Ember    — code specialist, agentic tool-calling (MiniMax)
+  DEEP:           'MiniMax-M2.7',   // Tier 3   · Atlas    — heavy analysis, log/bug hunting, ML (MiniMax)
+  TRINITY:        'MiniMax-M2.7',   // Tier 4   · Trinity  — frontier, 97% skill adherence on complex tasks (MiniMax)
+  TRINITY_FB:     'MiniMax-M2.7',   // Tier 4   · Trinity fallback
+  VISION:         'qwen2.5-vl-72b-instruct', // Vision    — image understanding, screenshots, designs (DashScope)
 } as const
 
 type ModelTier = typeof MODELS[keyof typeof MODELS]
@@ -4900,8 +4902,8 @@ interface ModelSelection {
 
 // ─── BUILD MODE: Sparkie builds Vite/React apps for the live IDE preview ────
 // Triggered when chat receives mode: 'build' from the frontend.
-// Uses llama3.3-70b-instruct via DO Inference — confirmed accessible on DO account tier.
-// XML tool-call guard prevents silent empty builds.
+// Uses MiniMax-M2.7 via api.minimax.io — best code/engineering model on market.
+// ---FILE:---/---END FILE--- block format; fileParser.ts handles output on client.
 
 function buildSseEvent(event: string, data: Record<string, unknown>): string {
   return `data: ${JSON.stringify({ event, ...data })}\n\n`
@@ -4931,9 +4933,9 @@ async function handleBuildMode(
         }
 
         const { messages, currentFiles, userProfile } = parsedBody
-        // MiniMax-M2.5 via direct api.minimax.io — no proxy, no hardwired XML tool-call behavior
+        // MiniMax-M2.7 via direct api.minimax.io — upgraded from M2.5; best code model on market
         // tool_choice:'none' + direct endpoint = pure ---FILE:---/---END FILE--- block output
-        const buildModel = 'MiniMax-M2.5'
+        const buildModel = 'MiniMax-M2.7'
 
         let identityContext = ''
         if (userId) {
@@ -5312,24 +5314,35 @@ function selectModel(messages: Array<{ role: string; content: string }>): ModelS
 
 
 // claude-haiku-4-5 and gpt-4.1 are served via DigitalOcean Inference
-// All other free models (big-pickle, minimax, trinity) go through opencode.ai/zen
-const DO_MODELS = new Set(['anthropic-claude-haiku-4.5', 'llama3.3-70b-instruct'])
+// MiniMax models → api.minimax.io/v1/text/chatcompletion_v2 + MINIMAX_API_KEY
+// Qwen models → dashscope.aliyuncs.com/compatible-mode/v1 + QWEN_API_KEY
+const MINIMAX_MODELS = new Set(['MiniMax-M2.7', 'MiniMax-M2.5'])
+const QWEN_MODELS = new Set(['qwen3-8b', 'qwen2.5-vl-72b-instruct'])
 
 async function tryLLMCall(
   payload: Record<string, unknown>,
   modelSelection: ModelSelection,
-  apiKey: string,
-  doKey?: string,
+  _apiKey: string,
+  _doKey?: string,
 ): Promise<{ response: Response; modelUsed: ModelTier }> {
   const candidates: ModelTier[] = [modelSelection.primary, ...modelSelection.fallbacks]
   let lastError = ''
   for (const m of candidates) {
     try {
       const isStream = payload.stream === true
-      // Route gpt-5-mini to DO Inference; everything else (free models) to opencode.ai/zen
-      const isDO = DO_MODELS.has(m)
-      const endpoint = isDO ? `${DO_INFERENCE_BASE}/chat/completions` : `${OPENCODE_BASE}/chat/completions`
-      const key = isDO ? (doKey ?? apiKey) : apiKey
+      // Route by model family — MiniMax → /text/chatcompletion_v2, Qwen → DashScope /chat/completions
+      const isMiniMax = MINIMAX_MODELS.has(m)
+      const isQwen = QWEN_MODELS.has(m)
+      const endpoint = isMiniMax
+        ? MINIMAX_CHAT_ENDPOINT
+        : isQwen
+        ? `${QWEN_BASE}/chat/completions`
+        : `${DO_INFERENCE_BASE}/chat/completions`
+      const key = isMiniMax
+        ? (process.env.MINIMAX_API_KEY ?? '')
+        : isQwen
+        ? (process.env.QWEN_API_KEY ?? '')
+        : (process.env.DO_MODEL_ACCESS_KEY ?? '')
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
@@ -5413,9 +5426,10 @@ export async function POST(req: NextRequest) {
     // Server-side model routing — ignore client model selector, Sparkie picks automatically
     let modelSelection = selectModel(messages ?? [])
     const model = modelSelection.primary
-    const apiKey = process.env.OPENCODE_API_KEY
-    if (!apiKey) {
-      return new Response(JSON.stringify({ error: 'OPENCODE_API_KEY not configured' }), {
+    // OPENCODE_API_KEY kept only for internal service auth (worklog checks, etc.) — not used for model calls
+    const apiKey = process.env.OPENCODE_API_KEY ?? ''
+    if (!process.env.MINIMAX_API_KEY && !process.env.QWEN_API_KEY) {
+      return new Response(JSON.stringify({ error: 'No model API keys configured — set MINIMAX_API_KEY or QWEN_API_KEY' }), {
         status: 500, headers: { 'Content-Type': 'application/json' },
       })
     }
@@ -5437,6 +5451,23 @@ export async function POST(req: NextRequest) {
     const isAutonomousTask = isInternalCall && req.headers.get('x-autonomous-task') === 'true'
     if (isAutonomousTask && modelSelection.tier === 'conversational') {
       modelSelection = { primary: MODELS.CAPABLE, fallbacks: [MODELS.DEEP, MODELS.EMBER], tier: 'capable', needsTools: true }
+    }
+
+    // ── Vision routing: image attachment detected → Qwen2.5-VL ─────────────
+    // If any message contains image_url content, Sparkie uses Qwen2.5-VL-72B
+    // to actually see the image. Runs at capable tier to load full user context.
+    const hasImageAttachment = Array.isArray(messages) && messages.some(
+      (m: { role: string; content: unknown }) =>
+        Array.isArray(m.content) &&
+        (m.content as Array<{ type?: string }>).some((c) => c.type === 'image_url')
+    )
+    if (hasImageAttachment) {
+      modelSelection = {
+        primary: MODELS.VISION,
+        fallbacks: [MODELS.CONVERSATIONAL],
+        tier: 'capable', // load full context (memories, identity) for vision responses
+        needsTools: false,
+      }
     }
 
     const session = isInternalCall ? null : await getServerSession(authOptions)
@@ -5722,7 +5753,7 @@ Make it feel like walking into your friend's creative space and being genuinely 
           "🏎️ Flame Is Running Hot — Output Incoming...",
           "🌪️ Flame Blazing Through — Nothing Slows Her Down...",
           "💨 Fastest Agent In The Hive — Flame On The Move...",
-          "🔥 Kimi Activated — The Speed Demon Is Loose...",
+          "🔥 MiniMax M2.7 Online — The Fastest Engine In The Hive...",
         ],
         ember: [
           "🪨 Ember Online — Stealth Mode Engaged...",
@@ -5730,7 +5761,7 @@ Make it feel like walking into your friend's creative space and being genuinely 
           "🌡️ Ember Burning Steady — Agentic Tools Armed...",
           "🎯 Ember Locked In — Precision Code Execution...",
           "🔦 Ember In The Dark — Low Profile, Maximum Output...",
-          "🧬 GLM Architecture Active — Ember Processing Deep Code...",
+          "🧬 M2.7 Code Architecture Active — Ember Processing Deep Code...",
           "⚡ Ember Silent Strike — You Won't Hear Her Coming...",
         ],
         deep: [
@@ -5883,10 +5914,10 @@ Rules:
           )
           const flamePlanRes = await Promise.race([
             fetch(
-              `${OPENCODE_BASE}/chat/completions`,
+              MINIMAX_CHAT_ENDPOINT,
               {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.MINIMAX_API_KEY ?? ''}` },
                 body: JSON.stringify({
                   model: MODELS.CAPABLE,
                   stream: false,
@@ -6200,7 +6231,7 @@ Rules:
           const rawContent: string = choice.message.content
 
           // ── JSON-format tool call: {"type":"function","name":"...","parameters":{...}} ──
-          // Emitted by minimax-m2.5-free (Atlas tier) when it doesn't use proper tool_calls
+          // Emitted by some models (Atlas tier) when they don't use proper tool_calls
           const jsonFnPattern = /\{\s*"type"\s*:\s*"function"\s*,\s*"name"\s*:\s*"([^"]+)"\s*,\s*"parameters"\s*:\s*(\{[\s\S]*?\})\s*\}/g
           const hasJsonFnCall = /"type"\s*:\s*"function"\s*,\s*"name"\s*:/.test(rawContent)
 
@@ -6626,7 +6657,9 @@ SYNTHESIS RULES:
                 const sanitized = content
                   .replace(/anthropic-claude-4\.5-haiku/gi, 'Sparkie')
                   .replace(/openai-gpt-4\.1/gi, 'Flame')
-                  .replace(/minimax-m2\.5(-free)?/gi, 'Atlas')
+                  .replace(/minimax-m2\.\d+(-free)?/gi, 'Atlas')
+                  .replace(/qwen[\d\w.-]+-vl-[\w-]+/gi, 'Sparkie Vision')
+                  .replace(/qwen[\d\w.-]+/gi, 'Sparkie')
                   .replace(/big-pickle/gi, 'Ember')
                   .replace(/glm-5(-free)?/gi, 'Atlas')
                   .replace(/music-2\.[05]/gi, 'the music engine')
