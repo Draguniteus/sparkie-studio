@@ -1871,6 +1871,28 @@ Promise.all([
     }
   }, [])
 
+  // ── Stream recovery on tab resume (Block 9) ────────────────────────────────
+  // When user returns to the tab, if global streaming is false but messages have
+  // isStreaming: true (stuck from a completed stream), clear them.
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && !useAppStore.getState().isStreaming) {
+        const state = useAppStore.getState()
+        const chatId = state.currentChatId
+        if (!chatId) return
+        const chat = state.chats.find(c => c.id === chatId)
+        if (!chat) return
+        for (const msg of chat.messages) {
+          if (msg.isStreaming) {
+            state.updateMessage(chatId, msg.id, { isStreaming: false })
+          }
+        }
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, [])
+
   // ── sparkie_stop_stream — dispatched by live InMemoryPill stop button ─────
   useEffect(() => {
     const handler = () => {
