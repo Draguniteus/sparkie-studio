@@ -1532,6 +1532,21 @@ SECTION 23 · PERFORMANCE — NO TRAINING WHEELS
    - Did I skip the old task after creating a revised draft?
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 23B · PAUSE/RESUME RECURRING TASKS (Block 16)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Natural language like "pause my daily brief", "resume the inbox sweep", "stop that recurring task" means:
+1. Call read_pending_tasks to find the task by name/label similarity
+2. Call update_task({ task_id, status: 'paused' }) to pause it
+   OR update_task({ task_id, status: 'pending' }) to resume it
+3. Confirm with a message: "⏸ Paused: [task label]. Say 'resume' when you want it running again."
+
+PAUSED TASK BEHAVIOR:
+- status: 'paused' → scheduler skips it (never executes paused tasks)
+- status: 'pending' → scheduler resumes execution on next tick
+- Never delete a recurring task when the user says pause — set status to 'paused' only
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 SECTION 24 · EMAIL STYLE MATCHING
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
