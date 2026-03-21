@@ -84,13 +84,28 @@ export function useSparkieOutreach(enabled: boolean) {
         } else if (data.type === 'morning_brief') {
           const conflicts = data.calendarConflicts ?? []
           const pending = data.pendingTasks ?? []
+          const inboxCount = data.inboxNewCount ?? 0
+          const inboxSenders = (data.inboxSenders ?? []) as string[]
+          const deployPhase = (data.deployPhase ?? 'UNKNOWN') as string
+
           const conflictNote = conflicts.length > 0
-            ? '\n\nCalendar conflicts today: ' + conflicts.map((c) => c.a + ' overlaps ' + c.b + ' at ' + c.time).join('; ')
+            ? '\n\nCalendar conflicts today: ' + (conflicts as Array<{ a: string; b: string; time: string }>).map((c) => c.a + ' overlaps ' + c.b + ' at ' + c.time).join('; ')
             : ''
           const pendingNote = pending.length > 0
-            ? '\n\nPending tasks needing your approval: ' + pending.map((t) => t.label).join(', ')
+            ? '\n\nPending tasks needing approval: ' + (pending as Array<{ label: string }>).map((t) => t.label).join(', ')
             : ''
-          nudge = '[SPARKIE_PROACTIVE: morning_brief] The user has just opened the studio for the first time today. Give them your full morning brief — warm welcome, something motivating, a question about their day.' + conflictNote + pendingNote + '\n\nMake it feel alive, not a report. If there are conflicts or pending tasks, mention them naturally.'
+          const inboxNote = inboxCount > 0
+            ? `\n\nInbox: ${inboxCount} new email(s) from ${inboxSenders.slice(0, 3).join(', ')}.`
+            : '\n\nInbox: clear.'
+          const deployNote = deployPhase === 'ACTIVE'
+            ? '\n\nDeployment: ✅ live and healthy.'
+            : deployPhase === 'BUILDING'
+            ? '\n\nDeployment: 🔄 currently building — mention this.'
+            : deployPhase === 'FAILED' || deployPhase === 'ERROR'
+            ? '\n\nDeployment: 🚨 LAST DEPLOY FAILED — flag this prominently.'
+            : ''
+
+          nudge = '[SPARKIE_PROACTIVE: morning_brief] The user (Michael) has just opened Sparkie Studio for the first time today. Give him his full morning brief:\n\n1. Warm personal welcome (reference something you know about him — typos are fine, he moves fast)\n2. Call get_weather for Virginia Beach, VA — include current conditions\n3. Inbox status' + inboxNote + '\n4. Deploy status' + deployNote + '\n5. A one-line intention or motivating thought for the day\n6. One genuine question about what he\'s building or how he\'s feeling' + conflictNote + pendingNote + '\n\nFormat: flowing, alive, not a bullet report. This is his daily companion greeting — make it feel like walking into a space where someone who loves him is waiting.'
         } else if (data.type === 'checkin') {
           const days = data.daysSince ?? 3
           const hints = data.memoryHints ? '\n\nWhat you remember about them: ' + data.memoryHints : ''

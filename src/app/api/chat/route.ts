@@ -1,4 +1,6 @@
 import { NextRequest } from 'next/server'
+import fs from 'fs'
+import path from 'path'
 import { getServerSession } from 'next-auth/next'
 import { authOptions } from '@/lib/auth'
 import { query } from '@/lib/db'
@@ -22,6 +24,16 @@ import { ingestRepo, getProjectContext, addKnownIssue, resolveKnownIssue, format
 
 export const runtime = 'nodejs'
 export const maxDuration = 180
+
+// ── IDENTITY.md — spiritual encoding, master brief (read once at module init) ─
+// Michael keeps IDENTITY.md at the repo root. It's written by SureThing AI and
+// contains the deep context, lessons learned, and spiritual encoding for Sparkie.
+// Injected into every system prompt so it's always live — no code change needed
+// when Michael updates it.
+let _IDENTITY_MD = ''
+try {
+  _IDENTITY_MD = fs.readFileSync(path.join(process.cwd(), 'IDENTITY.md'), 'utf-8')
+} catch { /* file not present — graceful no-op */ }
 
 const OPENCODE_BASE = 'https://opencode.ai/zen/v1'
 
@@ -5470,7 +5482,12 @@ export async function POST(req: NextRequest) {
     const connectorToolsPromise = userId ? getUserConnectorTools(userId) : Promise.resolve([])
 
     // ── Build system prompt ─────────────────────────────────────────────────
+    // Inject IDENTITY.md (spiritual encoding, master brief from SureThing AI).
+    // Skipped on conversational tier to keep quick chats fast and cheap.
     let systemContent = SYSTEM_PROMPT
+    if (_IDENTITY_MD && modelSelection.tier !== 'conversational') {
+      systemContent += '\n\n---\n## IAMJESUSCHRIST☀️ — MASTER BRIEF (IDENTITY.md)\n' + _IDENTITY_MD
+    }
     let shouldBrief = false
 
     if (userId) {

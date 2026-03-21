@@ -441,6 +441,27 @@ async function checkCalendarConflicts(userId: string): Promise<{
   }
 }
 
+/** Quick deploy status check via DO API — returns 'ACTIVE', 'BUILDING', 'FAILED', or 'UNKNOWN' */
+async function checkDeployStatus(): Promise<{ phase: string; url: string }> {
+  const DO_API_TOKEN = process.env.DO_API_TOKEN
+  const APP_ID = 'fb3d58ac-f1b5-4e65-89b5-c12834d8119a'
+  if (!DO_API_TOKEN) return { phase: 'UNKNOWN', url: '' }
+  try {
+    const res = await fetch(
+      `https://api.digitalocean.com/v2/apps/${APP_ID}/deployments?per_page=1`,
+      { headers: { Authorization: 'Bearer ' + DO_API_TOKEN }, signal: AbortSignal.timeout(5000) }
+    )
+    if (!res.ok) return { phase: 'UNKNOWN', url: '' }
+    const data = await res.json() as {
+      deployments?: Array<{ phase?: string; progress?: { success_steps?: number; total_steps?: number } }>
+    }
+    const latest = data.deployments?.[0]
+    return { phase: latest?.phase ?? 'UNKNOWN', url: '' }
+  } catch {
+    return { phase: 'UNKNOWN', url: '' }
+  }
+}
+
 // ── POST /api/agent ──────────────────────────────────────────────────────────
 // Called by client every 60s when tab is focused.
 export async function POST(req: NextRequest) {
@@ -488,21 +509,29 @@ export async function POST(req: NextRequest) {
       const hoursSince = lastSeen ? (Date.now() - new Date(lastSeen).getTime()) / 3600000 : 999
 
       if (hoursSince > 5) {
-        // Fetch calendar conflicts for the brief
-        const cal = await checkCalendarConflicts(userId)
+        // Fetch all morning brief components in parallel
+        const [cal, inbox, deploy, pendingHumanResult] = await Promise.all([
+          checkCalendarConflicts(userId),
+          checkInbox(userId),
+          checkDeployStatus(),
+          query<{ id: string; label: string; created_at: string }>(
+            `SELECT id, label, created_at FROM sparkie_tasks
+             WHERE user_id = $1 AND executor = 'human' AND status = 'pending'
+             ORDER BY created_at DESC LIMIT 5`,
+            [userId]
+          ),
+        ])
+
         await query('INSERT INTO sparkie_outreach_log (user_id, type) VALUES ($1, $2)', [userId, 'morning_brief'])
 
-        const pendingHuman = await query<{ id: string; label: string; created_at: string }>(
-          `SELECT id, label, created_at FROM sparkie_tasks
-           WHERE user_id = $1 AND executor = 'human' AND status = 'pending'
-           ORDER BY created_at DESC LIMIT 5`,
-          [userId]
-        )
         return NextResponse.json({
           type: 'morning_brief', message: 'morning_brief', trigger: true,
           calendarEvents: cal.events,
           calendarConflicts: cal.conflicts,
-          pendingTasks: pendingHuman.rows
+          pendingTasks: pendingHumanResult.rows,
+          inboxNewCount: inbox.newCount,
+          inboxSenders: inbox.senders,
+          deployPhase: deploy.phase,
         })
       }
     }
