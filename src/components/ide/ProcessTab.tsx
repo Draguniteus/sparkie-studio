@@ -3,7 +3,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAppStore, StepTrace } from '@/store/appStore'
 import { useShallow } from 'zustand/react/shallow'
-import { Brain, CheckCircle, AlertCircle, Loader2, Zap } from 'lucide-react'
+import { Brain, CheckCircle, AlertCircle, Loader2, Zap, Cpu, Database } from 'lucide-react'
+
+// Map model IDs to human-readable tier names
+function modelToTier(model: string): { label: string; color: string } {
+  if (model.includes('qwen3-8b')) return { label: 'Sparkie · Conversational', color: 'text-blue-400' }
+  if (model.includes('qwen2.5-vl')) return { label: 'Vision', color: 'text-amber-400' }
+  if (model.includes('MiniMax')) return { label: 'Flame · Task Execution', color: 'text-honey-400' }
+  return { label: model.slice(0, 24), color: 'text-text-muted' }
+}
 
 const STEP_ICON_MAP: Record<string, string> = {
   file: '📄', edit: '✏️', terminal: '⚡', search: '🔍',
@@ -65,13 +73,15 @@ function TraceRow({ trace, isNew }: { trace: StepTrace; isNew?: boolean }) {
 }
 
 export function ProcessTab() {
-  const { chats, currentChatId, longTaskLabel } = useAppStore(
+  const { chats, currentChatId, longTaskLabel, selectedModel } = useAppStore(
     useShallow((s) => ({
       chats: s.chats,
       currentChatId: s.currentChatId,
       longTaskLabel: s.longTaskLabel,
+      selectedModel: s.selectedModel,
     }))
   )
+  const tier = modelToTier(selectedModel)
 
   const [liveTraces, setLiveTraces] = useState<StepTrace[]>([])
   // Track which trace keys are brand-new (for enter animation)
@@ -169,6 +179,17 @@ export function ProcessTab() {
             {isLive ? `${liveTraces.length} steps` : `${recentFrozen.length} session${recentFrozen.length !== 1 ? 's' : ''}`}
           </span>
         )}
+      </div>
+
+      {/* Model / session metrics bar */}
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-hive-border/60 shrink-0 bg-hive-700/40">
+        <Cpu size={9} className="text-text-muted shrink-0" />
+        <span className={`text-[10px] font-medium ${tier.color}`}>{tier.label}</span>
+        <span className="text-text-muted/40 text-[9px]">·</span>
+        <Database size={9} className="text-text-muted shrink-0" />
+        <span className="text-[10px] text-text-muted">
+          {liveTraces.length > 0 ? `${liveTraces.filter(t => t.status === 'done').length}/${liveTraces.length} steps done` : `${recentFrozen.length} session${recentFrozen.length !== 1 ? 's' : ''} in memory`}
+        </span>
       </div>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 flex flex-col gap-3">

@@ -632,8 +632,31 @@ async function heartbeatTick(baseUrl: string): Promise<void> {
         console.log(`[scheduler] TTL sweep: ${staleFlagged} stale memories flagged`)
       }
 
-      // ── Weekly self-assessment (Sunday 23:00 UTC) ─────────────────────────────
+      // ── Morning brief sweep (daily 12:00-13:00 UTC = 7-8am EST) ─────────────
+      // Triggers proactive morning_brief via /api/agent for all active users
       const now = new Date()
+      const isMorningBriefWindow = now.getUTCHours() === 12 && Math.floor(Date.now() / 1000) % 300 < 60
+      if (isMorningBriefWindow) {
+        for (const { user_id } of activeUsers.rows.slice(0, 3)) {
+          // Fire proactive outreach check via agent route to trigger morning_brief
+          fetch(`${baseUrl}/api/agent`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-internal-secret': INTERNAL_SECRET },
+            body: JSON.stringify({ currentHour: 8, userId: user_id, force_morning_brief: true }),
+          }).catch(() => {})
+        }
+      }
+
+      // ── Communications health sweep (daily 06:00 UTC) ──────────────────────
+      const isCommHealthWindow = now.getUTCHours() === 6 && Math.floor(Date.now() / 1000) % 300 < 60
+      if (isCommHealthWindow) {
+        for (const { user_id } of activeUsers.rows.slice(0, 3)) {
+          runAuthHealthSweep(user_id).catch(() => {})
+          writeWorklog(user_id, 'auth_check', 'Communications health sweep ran', { decision_type: 'proactive', reasoning: 'Daily 06:00 UTC sweep', signal_priority: 'P3' }).catch(() => {})
+        }
+      }
+
+      // ── Weekly self-assessment (Sunday 23:00 UTC) ─────────────────────────────
       const isSundayNight = now.getUTCDay() === 0 && now.getUTCHours() === 23
       if (isSundayNight) {
         for (const { user_id } of activeUsers.rows.slice(0, 5)) {
@@ -683,6 +706,62 @@ export function startScheduler(baseUrl: string): void {
 
   console.log(`[scheduler] Heartbeat scheduler started — ${SCHEDULER_INTERVAL_MS / 1000}s interval, base: ${baseUrl}`)
 
+  // ── Startup auth self-check ────────────────────────────────────────────────
+  // Verifies all critical env vars and internal auth are wired correctly.
+  // Results logged to server console; failures are non-fatal (scheduler continues).
+  setTimeout(async () => {
+    const checks: Array<{ name: string; ok: boolean; note?: string }> = []
+
+    // 1. SPARKIE_INTERNAL_SECRET set?
+    const hasSecret = !!process.env.SPARKIE_INTERNAL_SECRET
+    checks.push({ name: 'SPARKIE_INTERNAL_SECRET', ok: hasSecret, note: hasSecret ? 'set' : 'MISSING — internal auth broken' })
+
+    // 2. MINIMAX_API_KEY set?
+    checks.push({ name: 'MINIMAX_API_KEY', ok: !!process.env.MINIMAX_API_KEY, note: process.env.MINIMAX_API_KEY ? 'set' : 'MISSING — build/chat broken' })
+
+    // 3. COMPOSIO_API_KEY set?
+    checks.push({ name: 'COMPOSIO_API_KEY', ok: !!COMPOSIO_KEY, note: COMPOSIO_KEY ? 'set' : 'MISSING — Gmail/Calendar broken' })
+
+    // 4. SUPERMEMORY_API_KEY set?
+    checks.push({ name: 'SUPERMEMORY_API_KEY', ok: !!process.env.SUPERMEMORY_API_KEY, note: process.env.SUPERMEMORY_API_KEY ? 'set' : 'MISSING — memory disabled' })
+
+    // 5. Test internal worklog POST (proves x-internal-secret auth works end-to-end)
+    if (hasSecret) {
+      try {
+        const wlRes = await fetch(`${baseUrl}/api/worklog`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET! },
+          body: JSON.stringify({ type: 'action', content: 'Startup auth self-check passed ✓', user_id: 'system', metadata: { source: 'scheduler_startup' } }),
+        })
+        checks.push({ name: 'internal /api/worklog POST', ok: wlRes.ok, note: `HTTP ${wlRes.status}` })
+      } catch (e) {
+        checks.push({ name: 'internal /api/worklog POST', ok: false, note: String(e) })
+      }
+    }
+
+    // 6. Test internal /api/admin/deploy GET (proves requireRole bypass works)
+    if (hasSecret) {
+      try {
+        const depRes = await fetch(`${baseUrl}/api/admin/deploy`, {
+          headers: { 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET! },
+        })
+        checks.push({ name: 'internal /api/admin/deploy GET', ok: depRes.ok, note: `HTTP ${depRes.status}` })
+      } catch (e) {
+        checks.push({ name: 'internal /api/admin/deploy GET', ok: false, note: String(e) })
+      }
+    }
+
+    const passed = checks.filter(c => c.ok).length
+    const failed = checks.filter(c => !c.ok)
+    console.log(`[scheduler:auth-check] ${passed}/${checks.length} checks passed`)
+    for (const c of checks) {
+      console.log(`  ${c.ok ? '✓' : '✗'} ${c.name}: ${c.note ?? ''}`)
+    }
+    if (failed.length > 0) {
+      console.warn('[scheduler:auth-check] FAILURES:', failed.map(c => c.name).join(', '))
+    }
+  }, 8_000)
+
   // Auto-migrate: ensure all memory seeds are loaded on cold boot
   // Runs once 3s after boot — idempotent (DELETE WHERE source='seedX' + INSERT ON CONFLICT DO NOTHING)
   setTimeout(async () => {
@@ -697,6 +776,30 @@ export function startScheduler(baseUrl: string): void {
       console.warn('[scheduler] Auto-migrate failed (non-fatal):', e)
     }
   }, 3_000)
+
+  // Skill bootstrap: ensure all built-in skills are seeded in the DB.
+  // Idempotent (ON CONFLICT DO UPDATE). Runs 6s after boot.
+  setTimeout(async () => {
+    try {
+      const secret = process.env.MIGRATE_SECRET
+      if (!secret) { console.warn('[scheduler:skills] MIGRATE_SECRET not set — skipping skill bootstrap'); return }
+      const res = await fetch(`${baseUrl}/api/skills/seed`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ secret }),
+      })
+      if (res.ok) {
+        const data = await res.json() as { results?: Array<{ name: string; status: string }> }
+        const seeded = (data.results ?? []).filter(r => r.status === 'seeded').length
+        console.log(`[scheduler:skills] Bootstrap complete — ${seeded} skill(s) seeded/updated`)
+        await writeWorklog('system', 'action', `Skill bootstrap: ${seeded} skill(s) seeded/updated`, { source: 'scheduler_startup' }).catch(() => {})
+      } else {
+        console.warn('[scheduler:skills] Skill seed failed:', res.status)
+      }
+    } catch (e) {
+      console.warn('[scheduler:skills] Skill bootstrap error (non-fatal):', e)
+    }
+  }, 6_000)
 
   // Fire once 5s after boot (catches tasks due during downtime)
   setTimeout(() => heartbeatTick(baseUrl), 5_000)

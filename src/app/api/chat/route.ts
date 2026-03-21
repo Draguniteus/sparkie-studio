@@ -2249,6 +2249,37 @@ const SPARKIE_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'get_scheduled_tasks',
+      description: 'Get all scheduled tasks in the DB with full detail: status, executor, trigger type, scheduled time, reason. Use at session start to know what is queued. More detailed than read_pending_tasks.',
+      parameters: {
+        type: 'object',
+        properties: {
+          status: { type: 'string', description: 'Filter by status: pending, approved, completed, failed, cancelled, all (default: pending)' },
+          limit: { type: 'number', description: 'Max tasks to return (default 20)' },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_outreach_status',
+      description: 'Check the status of Sparkie proactive outreach — recent outreach_log entries and heartbeat/proactive worklog entries. Use to verify that morning briefs, inbox checks, and task completions are firing correctly.',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'self_diagnose',
+      description: 'Run a full system health check: verifies all env vars (internal auth, API keys), skills seeded, pending tasks, REAL score, and deploy status. Returns a pass/warn/fail report. Use when asked "are you healthy?", "what\'s broken?", or at conversation start if something seems off.',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'check_deployment',
       description: 'DEPRECATED — use trigger_deploy instead. Check the status of the latest Sparkie Studio deployment.',
       parameters: { type: 'object', properties: {}, required: [] },
@@ -2460,6 +2491,20 @@ const SPARKIE_TOOLS = [
           data: { type: 'string', description: 'Bash command to run (for input action)' },
         },
         required: ['action'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'workbench_run',
+      description: 'Run Python code in an E2B cloud sandbox. Pre-loaded helpers: run_composio_tool(slug, args) for Composio tools, invoke_llm(query) for inline AI reasoning. Use for bulk data processing, looping over API results, multi-step pipelines, or anything too complex for a single tool call. Returns stdout + stderr.',
+      parameters: {
+        type: 'object',
+        properties: {
+          code: { type: 'string', description: 'Python code to execute. Can use json, requests, os modules. Use print() for output.' },
+        },
+        required: ['code'],
       },
     },
   },
@@ -3991,6 +4036,56 @@ async function executeTool(
         }
       }
 
+      case 'workbench_run': {
+        const { code } = args as { code: string }
+        const e2bKey = process.env.E2B_API_KEY
+        if (!e2bKey) return 'workbench_run unavailable — E2B_API_KEY not set'
+        try {
+          const composioKey = process.env.COMPOSIO_API_KEY ?? ''
+          const miniKey = process.env.MINIMAX_API_KEY ?? ''
+          // Inject helper functions so the code can call Composio tools + LLM inline
+          const prelude = `
+import json, os, urllib.request, urllib.error
+
+def run_composio_tool(slug, args={}):
+    """Execute a Composio tool by slug. Returns parsed JSON result."""
+    req = urllib.request.Request(
+        'https://backend.composio.dev/api/v3/tools/execute/' + slug,
+        data=json.dumps({'entity_id': 'sparkie_user_default', 'arguments': args}).encode(),
+        headers={'Content-Type': 'application/json', 'x-api-key': '${composioKey}'},
+        method='POST',
+    )
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.loads(r.read())
+
+def invoke_llm(query, model='MiniMax-M2.7'):
+    """Run an inline LLM query. Returns the text response."""
+    req = urllib.request.Request(
+        'https://api.minimax.io/v1/text/chatcompletion_v2',
+        data=json.dumps({'model': model, 'stream': False, 'max_tokens': 4000, 'messages': [{'role': 'user', 'content': query}]}).encode(),
+        headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ${miniKey}'},
+        method='POST',
+    )
+    with urllib.request.urlopen(req, timeout=30) as r:
+        d = json.loads(r.read())
+        return d.get('choices', [{}])[0].get('message', {}).get('content', '')
+`
+          const { Sandbox } = await import('@e2b/code-interpreter')
+          const sbx = await Sandbox.create({ apiKey: e2bKey, timeoutMs: 120_000 })
+          try {
+            const exec = await sbx.runCode(prelude + '\n' + code, { timeoutMs: 60_000 })
+            const stdout = exec.logs.stdout.join('\n')
+            const stderr = exec.logs.stderr.join('\n')
+            const error = exec.error ? `\nERROR: ${exec.error.name}: ${exec.error.value}` : ''
+            return (stdout + (stderr ? '\n[stderr]: ' + stderr : '') + error).slice(0, 8000) || 'No output'
+          } finally {
+            await (sbx as unknown as { kill(): Promise<boolean> }).kill().catch(() => {})
+          }
+        } catch (e) {
+          return `workbench_run error: ${String(e)}`
+        }
+      }
+
       case 'execute_terminal': {
         const { action, sessionId, data: cmdData } = args as {
           action: 'create' | 'input'; sessionId?: string; data?: string
@@ -4407,6 +4502,139 @@ async function executeTool(
           id: taskId, action: connectorAction, label: `Post to ${platform}`,
           payload: { platform, text, preview: text.slice(0, 120) }, status: 'pending'
         })}`
+      }
+
+      case 'get_scheduled_tasks': {
+        if (!userId) return 'Not authenticated'
+        const { status: taskStatusFilter = 'pending', limit: taskLimit = 20 } = args as { status?: string; limit?: number }
+        try {
+          const statusWhere = taskStatusFilter === 'all'
+            ? 'user_id = $1'
+            : "user_id = $1 AND status = $2"
+          const taskParams = taskStatusFilter === 'all' ? [userId] : [userId, taskStatusFilter]
+          const taskRes = await query(
+            `SELECT id, label, action, status, executor, trigger_type, trigger_config, scheduled_at, created_at, why_human
+             FROM sparkie_tasks WHERE ${statusWhere}
+             ORDER BY CASE status WHEN 'pending' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END, created_at DESC
+             LIMIT $${taskParams.length + 1}`,
+            [...taskParams, Math.min(Number(taskLimit), 50)]
+          )
+          if (taskRes.rows.length === 0) return `No tasks with status=${taskStatusFilter}`
+          const lines = (taskRes.rows as Array<Record<string, unknown>>).map(t => {
+            const sched = t.scheduled_at ? ` | due: ${new Date(t.scheduled_at as string).toISOString().slice(0,16)}` : ''
+            const why = t.why_human ? ` | reason: ${t.why_human}` : ''
+            return `• [${String(t.status).toUpperCase()}] ${t.label} (executor=${t.executor}, trigger=${t.trigger_type}${sched}${why})`
+          })
+          return `Scheduled tasks (${taskRes.rows.length}):\n` + lines.join('\n')
+        } catch (e) {
+          return `get_scheduled_tasks error: ${String(e)}`
+        }
+      }
+
+      case 'get_outreach_status': {
+        if (!userId) return 'Not authenticated'
+        try {
+          // Last 10 outreach log entries
+          const outreachRes = await query(
+            `SELECT type, content, created_at FROM sparkie_outreach_log WHERE user_id = $1 ORDER BY created_at DESC LIMIT 10`,
+            [userId]
+          ).catch(() => ({ rows: [] as unknown[] }))
+          // Last task_completed/inbox_check/morning_brief worklog entries
+          const wlRes = await query(
+            `SELECT type, content, created_at FROM sparkie_worklog
+             WHERE user_id = $1 AND type IN ('proactive_check','task_executed','auth_check','heartbeat')
+             ORDER BY created_at DESC LIMIT 10`,
+            [userId]
+          ).catch(() => ({ rows: [] as unknown[] }))
+          const outreachLines = (outreachRes.rows as Array<Record<string, unknown>>)
+            .map(r => `• [${r.type}] ${String(r.content).slice(0, 100)} (${new Date(r.created_at as string).toLocaleString()})`)
+          const wlLines = (wlRes.rows as Array<Record<string, unknown>>)
+            .map(r => `• [${r.type}] ${String(r.content).slice(0, 100)} (${new Date(r.created_at as string).toLocaleString()})`)
+          return [
+            `Outreach log (last 10):\n${outreachLines.join('\n') || '  (none)'}`,
+            `\nRecent proactive worklog (last 10):\n${wlLines.join('\n') || '  (none)'}`,
+          ].join('\n')
+        } catch (e) {
+          return `get_outreach_status error: ${String(e)}`
+        }
+      }
+
+      case 'self_diagnose': {
+        const checks: Array<{ name: string; status: 'ok' | 'warn' | 'fail'; detail: string }> = []
+        const internalSecret = process.env.SPARKIE_INTERNAL_SECRET
+
+        // 1. Auth
+        checks.push({ name: 'SPARKIE_INTERNAL_SECRET', status: internalSecret ? 'ok' : 'fail', detail: internalSecret ? 'set' : 'MISSING — all internal API calls will 401' })
+        checks.push({ name: 'MINIMAX_API_KEY', status: process.env.MINIMAX_API_KEY ? 'ok' : 'fail', detail: process.env.MINIMAX_API_KEY ? 'set' : 'MISSING — build/chat broken' })
+        checks.push({ name: 'COMPOSIO_API_KEY', status: process.env.COMPOSIO_API_KEY ? 'ok' : 'warn', detail: process.env.COMPOSIO_API_KEY ? 'set' : 'not set — Gmail/Calendar/tools disabled' })
+        checks.push({ name: 'SUPERMEMORY_API_KEY', status: process.env.SUPERMEMORY_API_KEY ? 'ok' : 'warn', detail: process.env.SUPERMEMORY_API_KEY ? 'set' : 'not set — Supermemory disabled' })
+        checks.push({ name: 'E2B_API_KEY', status: process.env.E2B_API_KEY ? 'ok' : 'warn', detail: process.env.E2B_API_KEY ? 'set' : 'not set — terminal/workbench disabled' })
+        checks.push({ name: 'MIGRATE_SECRET', status: process.env.MIGRATE_SECRET ? 'ok' : 'warn', detail: process.env.MIGRATE_SECRET ? 'set' : 'not set — skill bootstrap disabled' })
+
+        // 2. Skills count
+        try {
+          const skillsCount = await query(`SELECT COUNT(*) as cnt FROM sparkie_skills`).catch(() => ({ rows: [{ cnt: '0' }] }))
+          const cnt = parseInt(String((skillsCount.rows[0] as Record<string,unknown>)?.cnt ?? '0'))
+          checks.push({ name: 'skills_seeded', status: cnt >= 8 ? 'ok' : 'warn', detail: `${cnt} skills in DB (expect ≥8)` })
+        } catch (e) { checks.push({ name: 'skills_seeded', status: 'fail', detail: String(e) }) }
+
+        // 3. Tasks pending
+        if (userId) {
+          try {
+            const taskCount = await query(`SELECT COUNT(*) as cnt FROM sparkie_tasks WHERE user_id = $1 AND status = 'pending'`, [userId]).catch(() => ({ rows: [{ cnt: '0' }] }))
+            const tcnt = parseInt(String((taskCount.rows[0] as Record<string,unknown>)?.cnt ?? '0'))
+            checks.push({ name: 'pending_tasks', status: 'ok', detail: `${tcnt} task(s) pending` })
+          } catch (e) { checks.push({ name: 'pending_tasks', status: 'warn', detail: String(e) }) }
+        }
+
+        // 4. REAL score — compute from DB directly (no HTTP roundtrip needed)
+        if (userId) {
+          try {
+            const [autoR, proR, secR] = await Promise.all([
+              query<{ completed: string; failed: string }>(`SELECT COUNT(*) FILTER (WHERE status='completed') AS completed, COUNT(*) FILTER (WHERE status='failed') AS failed FROM sparkie_tasks WHERE user_id=$1 AND executor='ai' AND created_at > NOW() - INTERVAL '7 days'`, [userId]).catch(() => ({ rows: [{ completed: '0', failed: '0' }] })),
+              query<{ proactive: string; total: string }>(`SELECT COUNT(*) FILTER (WHERE decision_type='proactive') AS proactive, COUNT(*) AS total FROM sparkie_worklog WHERE user_id=$1 AND created_at > NOW() - INTERVAL '7 days'`, [userId]).catch(() => ({ rows: [{ proactive: '0', total: '0' }] })),
+              query<{ approved: string; total: string }>(`SELECT COUNT(*) FILTER (WHERE status='completed') AS approved, COUNT(*) AS total FROM sparkie_tasks WHERE user_id=$1 AND executor='human' AND created_at > NOW() - INTERVAL '30 days'`, [userId]).catch(() => ({ rows: [{ approved: '0', total: '0' }] })),
+            ])
+            const autoRow = autoR.rows[0] ?? { completed: '0', failed: '0' }
+            const autoTotal = parseInt(autoRow.completed) + parseInt(autoRow.failed)
+            const autoScore = autoTotal === 0 ? 70 : Math.round((parseInt(autoRow.completed) / autoTotal) * 100)
+            const proRow = proR.rows[0] ?? { proactive: '0', total: '0' }
+            const proTotal = parseInt(proRow.total)
+            const proScore = proTotal < 3 ? Math.min(40, proTotal * 10) : Math.min(100, Math.round((parseInt(proRow.proactive) / proTotal) * 250))
+            const secRow = secR.rows[0] ?? { approved: '0', total: '0' }
+            const secTotal = parseInt(secRow.total)
+            const secScore = secTotal === 0 ? 50 : Math.min(100, 70 + Math.round((parseInt(secRow.approved) / secTotal) * 30))
+            const realScore = Math.round(Math.pow([autoScore, proScore, secScore].reduce((p, s) => p * Math.max(s, 1), 1), 1 / 3))
+            checks.push({ name: 'REAL_score', status: realScore >= 70 ? 'ok' : realScore >= 40 ? 'warn' : 'fail', detail: `total=${realScore} autonomous=${autoScore} proactive=${proScore} security=${secScore}` })
+          } catch (e) { checks.push({ name: 'REAL_score', status: 'warn', detail: String(e) }) }
+        }
+
+        // 5. Deploy status
+        try {
+          const depRes = await fetch(`${baseUrl}/api/admin/deploy`, {
+            headers: { 'x-internal-secret': internalSecret ?? '' }
+          }).catch(() => null)
+          if (depRes?.ok) {
+            const depData = await depRes.json() as { active_deployment?: { phase?: string } }
+            const phase = depData?.active_deployment?.phase ?? 'UNKNOWN'
+            checks.push({ name: 'deployment', status: phase === 'ACTIVE' ? 'ok' : ['BUILDING','DEPLOYING','PENDING_BUILD'].includes(phase) ? 'warn' : 'fail', detail: `phase=${phase}` })
+          } else {
+            checks.push({ name: 'deployment', status: 'warn', detail: `endpoint returned ${depRes?.status ?? 'no response'}` })
+          }
+        } catch (e) { checks.push({ name: 'deployment', status: 'warn', detail: String(e) }) }
+
+        const okCount = checks.filter(c => c.status === 'ok').length
+        const warnCount = checks.filter(c => c.status === 'warn').length
+        const failCount = checks.filter(c => c.status === 'fail').length
+
+        const icons = { ok: '✅', warn: '⚠️', fail: '🚨' } as const
+        const lines = checks.map(c => `${icons[c.status]} **${c.name}**: ${c.detail}`)
+        const summary = `Self-diagnosis: ${okCount} OK, ${warnCount} warnings, ${failCount} failures\n\n${lines.join('\n')}`
+
+        if (userId) {
+          writeWorklog(userId, 'self_assessment', `Self-diagnosis: ${okCount}✅ ${warnCount}⚠️ ${failCount}🚨`, { decision_type: 'action' }).catch(() => {})
+        }
+        return summary
       }
 
       default: {

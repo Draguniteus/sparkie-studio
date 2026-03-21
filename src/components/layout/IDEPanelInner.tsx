@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { useAppStore, flattenFileTree } from "@/store/appStore"
 import { isCDNCompatible } from "@/lib/cdnPreview"
 import { useWebContainer } from "@/hooks/useWebContainer"
@@ -16,9 +16,14 @@ import { RealScorePanel } from "@/components/ide/RealScorePanel"
 import { ProcessTab } from "@/components/ide/ProcessTab"
 
 
+const WORKLOG_FILTERS = ['all', 'thinking', 'action', 'result', 'error', 'code'] as const
+type WorklogFilter = typeof WORKLOG_FILTERS[number]
+
 function WorklogPanel() {
   const { worklog } = useAppStore()
-  const entries = [...worklog].reverse()
+  const [filter, setFilter] = useState<WorklogFilter>('all')
+  const allEntries = [...worklog].reverse()
+  const entries = filter === 'all' ? allEntries : allEntries.filter(e => e.type === filter)
 
   const typeConfig: Record<string, { icon: string; color: string; bg: string }> = {
     thinking: { icon: '🧠', color: 'text-text-muted', bg: 'bg-hive-elevated/40' },
@@ -28,21 +33,46 @@ function WorklogPanel() {
     code:     { icon: '{}', color: 'text-honey-500',  bg: 'bg-honey-500/5'      },
   }
 
+  const filterCounts: Record<WorklogFilter, number> = {
+    all: allEntries.length,
+    thinking: allEntries.filter(e => e.type === 'thinking').length,
+    action: allEntries.filter(e => e.type === 'action').length,
+    result: allEntries.filter(e => e.type === 'result').length,
+    error: allEntries.filter(e => e.type === 'error').length,
+    code: allEntries.filter(e => e.type === 'code').length,
+  }
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-hive-border shrink-0">
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5"><div className="w-4 h-4 rounded bg-purple-500/20 flex items-center justify-center"><Brain size={9} className="text-purple-400" /></div><span className="text-xs font-semibold text-text-primary">Sparkie's Brain</span></div>
-          {entries.length > 0 && (
+          {allEntries.length > 0 && (
             <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
           )}
         </div>
-        <span className="text-[10px] text-text-muted">{entries.length} entries</span>
+        <span className="text-[10px] text-text-muted">{entries.length}/{allEntries.length}</span>
+      </div>
+      {/* Type filters */}
+      <div className="flex items-center gap-1 px-3 py-2 border-b border-hive-border/60 shrink-0 overflow-x-auto">
+        {WORKLOG_FILTERS.map(f => (
+          <button
+            key={f}
+            onClick={() => setFilter(f)}
+            className={`px-2 py-0.5 rounded text-[10px] font-medium whitespace-nowrap transition-colors shrink-0 ${
+              filter === f
+                ? 'bg-honey-500/20 text-honey-400 border border-honey-500/30'
+                : 'text-text-muted hover:text-text-secondary hover:bg-hive-hover border border-transparent'
+            }`}
+          >
+            {f === 'all' ? `All ${filterCounts.all}` : `${typeConfig[f]?.icon ?? f} ${filterCounts[f]}`}
+          </button>
+        ))}
       </div>
       <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-1.5 font-mono text-[11px]">
         {entries.length === 0 ? (
           <div className="flex items-center justify-center h-full text-text-muted text-xs">
-            Sparkie's activity appears here as she works
+            {allEntries.length === 0 ? "Sparkie's activity appears here as she works" : `No ${filter} entries`}
           </div>
         ) : (
           entries.map((entry) => {

@@ -32,14 +32,34 @@ async function ensureTable() {
 // POST /api/tasks — create a new pending task
 export async function POST(req: NextRequest) {
   try {
+    // Allow internal server-to-server calls (scheduler, agent, chat tools)
+    const reqInternalSecret = req.headers.get('x-internal-secret')
+    const internalSecret = process.env.SPARKIE_INTERNAL_SECRET
+    const isInternal = !!internalSecret && reqInternalSecret === internalSecret
+
     const session = await getServerSession(authOptions)
-    const userId = (session?.user as { id?: string } | undefined)?.id
-    if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const sessionUserId = (session?.user as { id?: string } | undefined)?.id
+
+    let userId: string
+    if (isInternal) {
+      // Internal calls must supply user_id in body — we'll extract after parsing
+      userId = '' // resolved after body parse below
+    } else if (sessionUserId) {
+      userId = sessionUserId
+    } else {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
 
     await ensureTable()
-    const { id, action, label, payload, executor, why_human } = await req.json() as {
+    const body = await req.json() as {
       id: string; action: string; label: string; payload: Record<string, unknown>
-      executor?: string; why_human?: string
+      executor?: string; why_human?: string; user_id?: string
+    }
+    const { id, action, label, payload, executor, why_human } = body
+    // Resolve userId for internal calls from body.user_id
+    if (isInternal && !userId) {
+      userId = body.user_id ?? ''
+      if (!userId) return NextResponse.json({ error: 'user_id required for internal calls' }, { status: 400 })
     }
     if (!id || !action || !label) return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
 

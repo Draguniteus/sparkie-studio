@@ -61,8 +61,11 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const apiKey = req.headers.get('x-internal-key')
-  const isInternal = apiKey === process.env.OPENCODE_API_KEY
+  const internalKey = req.headers.get('x-internal-key')
+  const internalSecret = req.headers.get('x-internal-secret')
+  const isInternal =
+    (!!internalSecret && !!process.env.SPARKIE_INTERNAL_SECRET && internalSecret === process.env.SPARKIE_INTERNAL_SECRET) ||
+    (!!internalKey && !!process.env.OPENCODE_API_KEY && internalKey === process.env.OPENCODE_API_KEY)
 
   let userId: string
   let body: { type: string; content: string; metadata?: Record<string, unknown>; user_id?: string }
