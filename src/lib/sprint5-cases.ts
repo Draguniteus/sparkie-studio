@@ -337,6 +337,140 @@ export async function executeSprint5Tool(
       }
     }
 
+    // ── github_push_commit ───────────────────────────────────────────────────
+    case 'github_push_commit': {
+      const { branch, message, files: filesToCommit } = args as {
+        branch: string
+        message: string
+        files: Array<{ path: string; content: string }>
+      }
+      if (!branch || !message || !filesToCommit?.length) {
+        return 'github_push_commit: branch, message, and at least one file are required'
+      }
+
+      const ghToken = process.env.GITHUB_TOKEN
+      if (!ghToken) return 'github_push_commit: GITHUB_TOKEN not configured'
+
+      const REPO_OWNER = 'Draguniteus'
+      const REPO_NAME  = 'sparkie-studio'
+      const apiBase    = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}`
+      const headers    = {
+        Authorization: `Bearer ${ghToken}`,
+        Accept: 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+        'X-GitHub-Api-Version': '2022-11-28',
+      }
+
+      try {
+        // 1. Get current branch HEAD commit SHA
+        const refRes = await fetch(`${apiBase}/git/ref/heads/${branch}`, { headers })
+        if (!refRes.ok) return `github_push_commit: branch "${branch}" not found (${refRes.status}) — use git_ops(create_branch) first`
+        const refData = await refRes.json() as { object?: { sha?: string } }
+        const headSha = refData.object?.sha
+        if (!headSha) return 'github_push_commit: could not resolve HEAD SHA'
+
+        // 2. Get the tree SHA from HEAD commit
+        const commitRes = await fetch(`${apiBase}/git/commits/${headSha}`, { headers })
+        if (!commitRes.ok) return `github_push_commit: could not fetch HEAD commit (${commitRes.status})`
+        const commitData = await commitRes.json() as { tree?: { sha?: string } }
+        const baseTreeSha = commitData.tree?.sha
+        if (!baseTreeSha) return 'github_push_commit: could not resolve base tree SHA'
+
+        // 3. Create blobs for each file
+        const treeEntries: Array<{ path: string; mode: string; type: string; sha: string }> = []
+        for (const file of filesToCommit) {
+          const blobRes = await fetch(`${apiBase}/git/blobs`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ content: file.content, encoding: 'utf-8' }),
+          })
+          if (!blobRes.ok) return `github_push_commit: failed to create blob for ${file.path} (${blobRes.status})`
+          const blobData = await blobRes.json() as { sha?: string }
+          if (!blobData.sha) return `github_push_commit: no SHA returned for blob ${file.path}`
+          treeEntries.push({ path: file.path, mode: '100644', type: 'blob', sha: blobData.sha })
+        }
+
+        // 4. Create a new tree on top of base tree
+        const treeRes = await fetch(`${apiBase}/git/trees`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ base_tree: baseTreeSha, tree: treeEntries }),
+        })
+        if (!treeRes.ok) return `github_push_commit: failed to create tree (${treeRes.status}): ${await treeRes.text()}`
+        const treeData = await treeRes.json() as { sha?: string }
+        if (!treeData.sha) return 'github_push_commit: no SHA returned for new tree'
+
+        // 5. Create commit
+        const newCommitRes = await fetch(`${apiBase}/git/commits`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            message,
+            tree: treeData.sha,
+            parents: [headSha],
+            author: { name: 'Sparkie', email: 'sparkie@surething.io', date: new Date().toISOString() },
+          }),
+        })
+        if (!newCommitRes.ok) return `github_push_commit: failed to create commit (${newCommitRes.status}): ${await newCommitRes.text()}`
+        const newCommitData = await newCommitRes.json() as { sha?: string }
+        if (!newCommitData.sha) return 'github_push_commit: no SHA returned for new commit'
+
+        // 6. Update branch reference to new commit
+        const updateRefRes = await fetch(`${apiBase}/git/refs/heads/${branch}`, {
+          method: 'PATCH',
+          headers,
+          body: JSON.stringify({ sha: newCommitData.sha }),
+        })
+        if (!updateRefRes.ok) return `github_push_commit: failed to update ref (${updateRefRes.status}): ${await updateRefRes.text()}`
+
+        const shortSha = newCommitData.sha.slice(0, 8)
+        const fileList = filesToCommit.map(f => `  • ${f.path}`).join('\n')
+        return `✅ Committed ${filesToCommit.length} file(s) to "${branch}" @ ${shortSha}\n${fileList}\n\nCommit: https://github.com/${REPO_OWNER}/${REPO_NAME}/commit/${newCommitData.sha}`
+      } catch (e) {
+        return `github_push_commit error: ${(e as Error).message}`
+      }
+    }
+
+    // ── github_open_pr ───────────────────────────────────────────────────────
+    case 'github_open_pr': {
+      const { head, base = 'master', title, body = '', draft = true } = args as {
+        head: string
+        base?: string
+        title: string
+        body?: string
+        draft?: boolean
+      }
+      if (!head || !title) return 'github_open_pr: head branch and title are required'
+
+      const ghToken = process.env.GITHUB_TOKEN
+      if (!ghToken) return 'github_open_pr: GITHUB_TOKEN not configured'
+
+      const REPO_OWNER = 'Draguniteus'
+      const REPO_NAME  = 'sparkie-studio'
+      const headers    = {
+        Authorization: `Bearer ${ghToken}`,
+        Accept: 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+        'X-GitHub-Api-Version': '2022-11-28',
+      }
+
+      try {
+        const res = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/pulls`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ title, head, base, body, draft }),
+        })
+        if (!res.ok) {
+          const errText = await res.text()
+          return `github_open_pr: failed (${res.status}): ${errText.slice(0, 400)}`
+        }
+        const pr = await res.json() as { number?: number; html_url?: string; state?: string }
+        return `✅ PR #${pr.number} opened${draft ? ' (draft)' : ''}: ${pr.html_url}\n"${title}" — ${head} → ${base}`
+      } catch (e) {
+        return `github_open_pr error: ${(e as Error).message}`
+      }
+    }
+
     default:
       return null
   }

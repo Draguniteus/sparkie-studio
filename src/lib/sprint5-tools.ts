@@ -142,4 +142,50 @@ export const SPARKIE_TOOLS_S5 = [
       },
     },
   },
+  // ── GitHub Actions ────────────────────────────────────────────────────────
+  {
+    type: 'function',
+    function: {
+      name: 'github_push_commit',
+      description: 'Push one or more file changes as a single atomic commit to a GitHub branch. Creates or updates multiple files in one commit using the Git Data API. Use git_ops(create_branch) first if pushing to a new branch. This is how Sparkie writes code fixes directly to the repo — branch → commit → PR.',
+      parameters: {
+        type: 'object',
+        properties: {
+          branch: { type: 'string', description: 'Target branch to push to, e.g. "sparkie/fix-inbox-sweep". Must already exist — use git_ops(create_branch) first.' },
+          message: { type: 'string', description: 'Commit message, e.g. "fix: resolve inbox sweep timing issue\\n\\nRoot cause: ..."' },
+          files: {
+            type: 'array',
+            description: 'Files to create or update in this commit.',
+            items: {
+              type: 'object',
+              properties: {
+                path: { type: 'string', description: 'Repo-relative file path, e.g. "src/lib/scheduler.ts"' },
+                content: { type: 'string', description: 'Complete file content (UTF-8). Replaces the entire file.' },
+              },
+              required: ['path', 'content'],
+            },
+          },
+        },
+        required: ['branch', 'message', 'files'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'github_open_pr',
+      description: 'Open a Pull Request on GitHub from a feature branch into the base branch. Use after github_push_commit. The head branch must have commits ahead of base. Returns the PR URL and number.',
+      parameters: {
+        type: 'object',
+        properties: {
+          head: { type: 'string', description: 'Source branch with your changes, e.g. "sparkie/fix-inbox-sweep"' },
+          base: { type: 'string', description: 'Target branch to merge into. Defaults to "master".' },
+          title: { type: 'string', description: 'PR title, e.g. "fix: resolve inbox sweep timing issue"' },
+          body: { type: 'string', description: 'PR description — what changed, why, and how it was tested.' },
+          draft: { type: 'boolean', description: 'Open as draft PR so Michael can review before merging (default: true for Sparkie-authored PRs).' },
+        },
+        required: ['head', 'title'],
+      },
+    },
+  },
 ]
