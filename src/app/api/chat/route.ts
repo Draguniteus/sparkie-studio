@@ -6875,6 +6875,8 @@ Rules:
                   controller.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ hive_status: msg })}\n\n`))
                 }
               }
+              // Emit reasoning_chunk so the Live Activity sidebar ticker can animate word-by-word
+              controller.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ reasoning_chunk: finalContent })}\n\n`))
               // Send as single chunk — chunking at 80 chars breaks markdown code fences (e.g. ```image blocks)
               // Client-side AnimatedMarkdown handles the char-by-char animation effect independently
               controller.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: finalContent } }] })}\n\n`))
@@ -7151,8 +7153,13 @@ SYNTHESIS RULES:
                 if (sanitized !== content) {
                   parsed.choices[0].delta.content = sanitized
                   controller.enqueue(encoder2.encode('data: ' + JSON.stringify(parsed) + '\n'))
+                  controller.enqueue(encoder2.encode(`data: ${JSON.stringify({ reasoning_chunk: sanitized })}\n\n`))
                   continue
                 }
+              }
+              // Emit reasoning_chunk alongside each content delta for the Live Activity ticker
+              if (content) {
+                controller.enqueue(encoder2.encode(`data: ${JSON.stringify({ reasoning_chunk: content })}\n\n`))
               }
               controller.enqueue(encoder2.encode(line + '\n'))
             } catch {

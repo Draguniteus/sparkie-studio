@@ -1129,6 +1129,15 @@ export function ChatInput() {
               setStreaming(false)
               return
             }
+            // reasoning_chunk — animate word-by-word in the Live Activity sidebar ticker
+            if (parsed.reasoning_chunk) {
+              const words = (parsed.reasoning_chunk as string).split(/\s+/).filter(Boolean)
+              words.forEach((word, i) => {
+                setTimeout(() => {
+                  window.dispatchEvent(new CustomEvent('sparkie:live-chunk', { detail: (i === 0 ? '' : ' ') + word }))
+                }, i * 25)
+              })
+            }
             const delta = parsed.choices?.[0]?.delta
             if (delta?.content) {
               if (!fullContent) {
@@ -1136,7 +1145,6 @@ export function ChatInput() {
                 addWorklogEntry({ type: 'result', content: 'Analyzed', status: 'done' })
               }
               fullContent += delta.content
-              window.dispatchEvent(new CustomEvent('sparkie:live-chunk', { detail: delta.content }))
               clearTimeout(streamFlushRef.current)
               streamFlushRef.current = setTimeout(() => {
                 updateMessage(chatId, assistantMsgId, { content: fullContent })

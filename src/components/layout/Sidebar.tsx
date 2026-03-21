@@ -42,7 +42,7 @@ export function Sidebar() {
   useEffect(() => {
     const onChunk = (e: Event) => {
       const chunk = (e as CustomEvent<string>).detail ?? ''
-      setStreamText(prev => (prev + chunk).slice(-200))
+      setStreamText(prev => (prev + chunk).slice(-300))
       setStreamActive(true)
       if (streamClearRef.current) clearTimeout(streamClearRef.current)
     }
@@ -292,7 +292,7 @@ export function Sidebar() {
                 <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse shrink-0" />
                 <span className="text-[9px] font-semibold text-purple-300 uppercase tracking-wider">Sparkie thinking</span>
               </div>
-              <p className="text-[10px] text-purple-200/80 leading-relaxed break-words line-clamp-3">{streamText}</p>
+              <p className="text-[10px] text-purple-200/80 leading-relaxed break-words">{streamText}</p>
             </div>
           )}
 
