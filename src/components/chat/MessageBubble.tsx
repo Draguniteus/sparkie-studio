@@ -5,7 +5,7 @@ import { Message, PendingTask, StepTrace, AceMusicMetadata } from "@/store/appSt
 import { TaskApprovalCard } from "@/components/chat/TaskApprovalCard"
 import { useAppStore } from "@/store/appStore"
 import { useShallow } from "zustand/react/shallow"
-import { Sparkles, User, Copy, RefreshCw, ThumbsUp, ThumbsDown, Download, Check, ExternalLink, FileCode, Layers, Eye, Clock, Brain, ChevronRight, CheckCircle, AlertCircle, Loader2, Square, Pause } from "lucide-react"
+import { Sparkles, User, Copy, RefreshCw, ThumbsUp, ThumbsDown, Download, Check, ExternalLink, FileCode, Layers, Eye, Clock, Brain, ChevronRight, CheckCircle, AlertCircle, Loader2, Square, Pause, Paperclip, FileText, FileImage, FileSpreadsheet } from "lucide-react"
 import { SparkieCard } from "@/components/chat/SparkieCards"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
@@ -25,6 +25,36 @@ function fileIconColor(name: string): string {
   if (['json'].includes(ext)) return 'text-purple-400'
   if (['md'].includes(ext)) return 'text-gray-400'
   return 'text-text-muted'
+}
+
+// Pattern: [Uploaded file: name (mime, XKB) — call read_uploaded_file('id') ...]
+const UPLOADED_FILE_RE = /\[Uploaded file: (.+?) \(([^,]+), (\d+)KB\) — call read_uploaded_file\('([^']+)'\)[^\]]*\]/
+
+function parseUploadedFile(content: string) {
+  const m = content.match(UPLOADED_FILE_RE)
+  if (!m) return null
+  return { name: m[1], mime: m[2], sizeKB: parseInt(m[3]), fileId: m[4] }
+}
+
+function FileAttachmentCard({ name, mime, sizeKB }: { name: string; mime: string; sizeKB: number }) {
+  const isImage = mime.startsWith('image/')
+  const isPdf = mime === 'application/pdf'
+  const isSpreadsheet = mime.includes('spreadsheet') || mime.includes('excel') || name.endsWith('.csv')
+  const Icon = isImage ? FileImage : isPdf || isSpreadsheet ? FileSpreadsheet : FileText
+  const ext = name.split('.').pop()?.toUpperCase() ?? 'FILE'
+  return (
+    <div className="flex items-center gap-2.5 mb-2 px-3 py-2.5 rounded-xl bg-hive-elevated border border-hive-border max-w-xs">
+      <div className="w-9 h-9 rounded-lg bg-honey-500/10 border border-honey-500/20 flex items-center justify-center shrink-0 flex-col gap-0.5">
+        <Icon size={14} className="text-honey-500" />
+        <span className="text-[8px] font-bold text-honey-500/70 leading-none">{ext}</span>
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-xs font-medium text-text-primary truncate">{name}</p>
+        <p className="text-[10px] text-text-muted">{sizeKB}KB · {mime}</p>
+      </div>
+      <Paperclip size={11} className="text-text-muted shrink-0" />
+    </div>
+  )
 }
 
 function BuildCard({ card }: { card: NonNullable<Message["buildCard"]> }) {
@@ -432,9 +462,20 @@ function MessageBubbleInner({ message, userAvatarUrl }: Props) {
             </div>
           ) : (
             <div className="prose prose-invert prose-sm max-w-none overflow-hidden [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_pre]:bg-hive-elevated [&_pre]:border [&_pre]:border-hive-border [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:overflow-x-auto [&_code]:text-honey-400 [&_code]:break-all [&_a]:text-honey-500 [&_a:hover]:text-honey-400 [&_a]:break-all [&_strong]:text-text-primary [&_h1]:text-text-primary [&_h2]:text-text-primary [&_h3]:text-text-primary [&_ul]:text-text-secondary [&_ol]:text-text-secondary [&_li]:text-text-secondary [&_p]:text-text-secondary [&_p]:break-words [&_blockquote]:border-honey-500/30 [&_blockquote]:text-text-muted [&_hr]:border-hive-border [&_table]:border-hive-border [&_th]:border-hive-border [&_td]:border-hive-border [&_th]:px-3 [&_th]:py-1.5 [&_td]:px-3 [&_td]:py-1.5 [&_thead]:bg-hive-elevated">
-              {isUser ? (
-                <div className="whitespace-pre-wrap break-words">{message.content}</div>
-              ) : (
+              {isUser ? (() => {
+                const fileAttach = parseUploadedFile(message.content)
+                const displayText = fileAttach
+                  ? message.content.replace(UPLOADED_FILE_RE, '').trim()
+                  : message.content
+                return (
+                  <div>
+                    {fileAttach && (
+                      <FileAttachmentCard name={fileAttach.name} mime={fileAttach.mime} sizeKB={fileAttach.sizeKB} />
+                    )}
+                    {displayText && <div className="whitespace-pre-wrap break-words">{displayText}</div>}
+                  </div>
+                )
+              })() : (
                 <AnimatedMarkdown
                   content={sanitizeContent(message.content) || " "}
                   isStreaming={message.isStreaming ?? false}
