@@ -5399,7 +5399,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json()
     const { messages, model: _clientModel, userProfile, voiceMode, mode } = body
     // Server-side model routing — ignore client model selector, Sparkie picks automatically
-    const modelSelection = selectModel(messages ?? [])
+    let modelSelection = selectModel(messages ?? [])
     const model = modelSelection.primary
     const apiKey = process.env.OPENCODE_API_KEY
     if (!apiKey) {
@@ -5418,6 +5418,14 @@ export async function POST(req: NextRequest) {
       !!internalSecret &&
       !!internalUserId &&
       internalReqSecret === internalSecret
+
+    // Autonomous task calls (from cron orchestrator) must always run on CAPABLE tier.
+    // They have real tool work to do — CONVERSATIONAL tier would skip identity files,
+    // env context, and may have weaker tool-calling. Override if routing picked conversational.
+    const isAutonomousTask = isInternalCall && req.headers.get('x-autonomous-task') === 'true'
+    if (isAutonomousTask && modelSelection.tier === 'conversational') {
+      modelSelection = { primary: MODELS.CAPABLE, fallbacks: [MODELS.DEEP, MODELS.EMBER], tier: 'capable', needsTools: true }
+    }
 
     const session = isInternalCall ? null : await getServerSession(authOptions)
     const userId = isInternalCall

@@ -121,33 +121,66 @@ async function executeDueTasks(userId: string, host: string, proto: string, cook
         const PASS_TIMEOUT_MS = 50_000
         const internalSecret = process.env.SPARKIE_INTERNAL_SECRET ?? ''
 
-        // ── read_skill prefix resolution ──────────────────────────────────
-        // If task.action begins with read_skill({name:"..."}), load that skill's
-        // content from the DB and inject it into the prompt as expert context.
-        // The prefix is stripped from the action before passing to the model.
+        // ── Skill auto-trigger ────────────────────────────────────────────
+        // 1. Manual prefix: if action starts with read_skill({name:"..."}), strip it
+        //    and add that skill name to the load set.
+        // 2. Auto-detect: scan action text for known skill keywords and load those too.
+        // All matched skills are deduplicated and loaded in one parallel query batch.
         let skillContext = ''
         let actionRunbook = task.action
+
+        const detectedSkillNames = new Set<string>()
+
+        // Manual read_skill({name:'...'}) prefix (backwards compat)
         const skillMatch = task.action.match(/^\s*read_skill\(\{\s*name:\s*["']([^"']+)["']\s*\}\)\s*;?\s*\n?/)
         if (skillMatch) {
-          const skillName = skillMatch[1]
+          detectedSkillNames.add(skillMatch[1])
           actionRunbook = task.action.slice(skillMatch[0].length).trimStart()
-          try {
-            const skillRow = await query<{ content: string }>(
-              `SELECT content FROM sparkie_skills WHERE name = $1 LIMIT 1`,
-              [skillName]
-            )
-            if (skillRow.rows[0]?.content) {
-              skillContext = '\n\n--- SKILL CONTEXT: ' + skillName + ' ---\n' + skillRow.rows[0].content + '\n--- END SKILL CONTEXT ---'
-              console.log('[orchestrator] Loaded skill:', skillName, '(' + skillRow.rows[0].content.length + ' chars)')
-            } else {
-              console.warn('[orchestrator] Skill not found:', skillName)
-            }
-          } catch (skillErr) {
-            console.error('[orchestrator] Skill load error:', skillErr)
+        }
+
+        // Auto-detect skills from action content
+        const SKILL_TRIGGERS: Array<{ keywords: RegExp; skillName: string }> = [
+          { keywords: /\b(email|gmail|inbox|reply|send.*mail|draft.*email|read.*email)\b/i, skillName: 'email_handling' },
+          { keywords: /\b(github|push|commit|pull.?request|\bpr\b|branch|repo|git push|git ops)\b/i, skillName: 'github_ops' },
+          { keywords: /\b(tweet|twitter|post.*social|instagram|tiktok|social.*media)\b/i, skillName: 'social_posting' },
+          { keywords: /\b(morning.?brief|daily.?brief|daily.?digest)\b/i, skillName: 'morning_brief' },
+          { keywords: /\b(calendar|schedule|event|meeting|google.?calendar)\b/i, skillName: 'calendar_ops' },
+          { keywords: /\b(worklog|work.?log|journal|log.*activity|write.*log)\b/i, skillName: 'worklog' },
+        ]
+        for (const trigger of SKILL_TRIGGERS) {
+          if (trigger.keywords.test(task.action)) {
+            detectedSkillNames.add(trigger.skillName)
           }
         }
 
-        const taskPrompt = '[AUTONOMOUS TASK EXECUTION]\nTask: ' + task.label + skillContext + '\n\nRunbook: ' + actionRunbook + '\n\nExecute this task now. Be thorough. Use all tools available. When fully done, output a concise summary of what was accomplished.'
+        // Load all detected skills in parallel
+        if (detectedSkillNames.size > 0) {
+          const skillLoads = await Promise.all(
+            [...detectedSkillNames].map(async (name) => {
+              try {
+                const row = await query<{ content: string }>(
+                  `SELECT content FROM sparkie_skills WHERE name = $1 LIMIT 1`,
+                  [name]
+                )
+                if (row.rows[0]?.content) {
+                  console.log('[orchestrator] Loaded skill:', name, '(' + row.rows[0].content.length + ' chars)')
+                  return '\n\n--- SKILL CONTEXT: ' + name + ' ---\n' + row.rows[0].content + '\n--- END SKILL CONTEXT ---'
+                } else {
+                  console.warn('[orchestrator] Skill not found:', name)
+                  return ''
+                }
+              } catch (err) {
+                console.error('[orchestrator] Skill load error for', name, ':', err)
+                return ''
+              }
+            })
+          )
+          skillContext = skillLoads.join('')
+        }
+
+        const hitlRules = '\n\n⚠️ AUTONOMOUS EXECUTION RULES (always apply):\n- HITL required: NEVER send emails, calendar invites, or social posts without create_task → send_card_to_user approval first.\n- Read before write: Always get_github to read file content before patching or committing.\n- Checkpoint: Use workspace_write to save progress between steps on multi-step tasks.\n- On completion: Output a concise summary of exactly what was accomplished.'
+
+        const taskPrompt = '[AUTONOMOUS TASK EXECUTION]\nTask: ' + task.label + skillContext + hitlRules + '\n\nRunbook: ' + actionRunbook + '\n\nExecute this task now. Be thorough. Use all tools available. When fully done, output a concise summary of what was accomplished.'
 
         // Conversation history accumulates across passes
         const conversation: Array<{ role: string; content: string }> = [
@@ -169,6 +202,7 @@ async function executeDueTasks(userId: string, host: string, proto: string, cook
                 'Content-Type': 'application/json',
                 'x-internal-user-id': userId,
                 'x-internal-secret': internalSecret,
+                'x-autonomous-task': 'true',
               },
               body: JSON.stringify({
                 messages: conversation,
