@@ -3515,8 +3515,28 @@ async function executeTool(
         if (!userId) return 'Cannot save memory — user not logged in'
         const category = args.category as string
         const content = args.content as string
-        const existing = await query('SELECT id FROM user_memories WHERE user_id = $1 AND content ILIKE $2', [userId, `%${content.slice(0, 40)}%`])
-        if (existing.rows.length > 0) return `Already remembered: "${content}"`
+        // Block 17: dedup — check for similar existing memories in same category
+        const catMems = await query<{ id: number; content: string }>(
+          'SELECT id, content FROM user_memories WHERE user_id = $1 AND category = $2 ORDER BY created_at DESC LIMIT 20',
+          [userId, category]
+        )
+        const newWords = new Set(content.toLowerCase().split(/\s+/).filter(w => w.length > 3))
+        const isCorrectionIntent = /\b(actually|correction|update|changed|new|revised|no longer|instead)\b/i.test(content)
+        for (const row of catMems.rows) {
+          const existWords = new Set(row.content.toLowerCase().split(/\s+/).filter(w => w.length > 3))
+          const overlap = newWords.size > 0 && existWords.size > 0
+            ? [...newWords].filter(w => existWords.has(w)).length / Math.max(newWords.size, existWords.size)
+            : 0
+          if (overlap > 0.6) {
+            if (isCorrectionIntent) {
+              // Correction — UPDATE existing memory
+              await query('UPDATE user_memories SET content = $1, updated_at = NOW() WHERE id = $2', [content, row.id])
+              pushToSupermemory(userId, `[${category}] ${content}`)
+              return `✅ Memory updated (corrected): [${category}] ${content}`
+            }
+            return `Already remembered (similar): "${row.content.slice(0, 80)}"`
+          }
+        }
         await query('INSERT INTO user_memories (user_id, category, content) VALUES ($1, $2, $3)', [userId, category, content])
         pushToSupermemory(userId, `[${category}] ${content}`)
         return `Saved to memory: [${category}] ${content}`

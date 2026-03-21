@@ -61,11 +61,33 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'content required' }, { status: 400 })
     }
     await ensureTable()
+
+    // Block 17: dedup — check for similar existing memories in same category
+    const catMems = await query<{ id: number; content: string }>(
+      'SELECT id, content FROM sparkie_self_memory WHERE category = $1 ORDER BY created_at DESC LIMIT 20',
+      [category]
+    )
+    const newWords = new Set(content.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3))
+    const isCorrectionIntent = /\b(actually|correction|update|changed|new|revised|no longer|instead)\b/i.test(content)
+    for (const row of catMems.rows) {
+      const existWords = new Set(row.content.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3))
+      const overlap = newWords.size > 0 && existWords.size > 0
+        ? [...newWords].filter(w => existWords.has(w)).length / Math.max(newWords.size, existWords.size)
+        : 0
+      if (overlap > 0.6) {
+        if (isCorrectionIntent) {
+          await query('UPDATE sparkie_self_memory SET content = $1 WHERE id = $2', [content, row.id])
+          return NextResponse.json({ ok: true, action: 'updated' })
+        }
+        return NextResponse.json({ ok: true, action: 'deduplicated', existingId: row.id })
+      }
+    }
+
     await query(
       'INSERT INTO sparkie_self_memory (category, content, source) VALUES ($1, $2, $3)',
       [category, content, source]
     )
-    return NextResponse.json({ ok: true })
+    return NextResponse.json({ ok: true, action: 'inserted' })
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 })
   }
