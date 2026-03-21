@@ -127,20 +127,40 @@ async function proactiveInboxSweep(userId: string): Promise<void> {
   let messages: Array<{ subject: string; from: string; snippet: string; id: string }> = []
   try {
     const entityId = `sparkie_user_${userId}`
+    // Exclude trash, spam, and promotions from sweep — Block 10 inbox scoring
     const emailRes = await fetch(`${COMPOSIO_BASE}/actions/execute`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': COMPOSIO_KEY },
       body: JSON.stringify({
         actionName: 'GMAIL_FETCH_EMAILS',
-        input: { query: 'is:unread', max_results: 5 },
+        input: { query: 'is:unread -in:trash -in:spam -in:promotions -label:SPAM -label:TRASH -label:DELETED', max_results: 10 },
         entityId,
       }),
       signal: AbortSignal.timeout(10000),
     })
     if (!emailRes.ok) return
-    const emailData = await emailRes.json() as { data?: { messages?: Array<{ subject: string; from: string; snippet: string; id: string }> } }
-    messages = emailData?.data?.messages ?? []
-    emailsJson = JSON.stringify(messages.slice(0, 3))
+    const emailData = await emailRes.json() as { data?: { messages?: Array<{ subject: string; from: string; snippet: string; id: string; labelIds?: string[] }> } }
+    const rawMessages = emailData?.data?.messages ?? []
+
+    // ── Inbox scoring — skip obvious marketing/newsletters ────────────────────
+    const SKIP_PATTERNS = [
+      /unsubscribe/i, /newsletter/i, /no[_-]?reply@/i, /noreply@/i,
+      /marketing@/i, /promo@/i, /offers@/i, /deals@/i, /weekly digest/i,
+      /daily digest/i, /monthly update/i, /account notification/i,
+      /your (weekly|monthly|daily) (summary|report|update)/i,
+      /don't want these emails/i, /manage (your )?preferences/i,
+    ]
+    const SKIP_LABELS = new Set(['CATEGORY_PROMOTIONS', 'CATEGORY_UPDATES', 'CATEGORY_SOCIAL', 'SPAM', 'TRASH'])
+
+    messages = rawMessages.filter(m => {
+      // Skip emails in promotional/social/spam label categories
+      if (m.labelIds?.some(l => SKIP_LABELS.has(l))) return false
+      const text = `${m.subject ?? ''} ${m.from ?? ''} ${m.snippet ?? ''}`
+      if (SKIP_PATTERNS.some(p => p.test(text))) return false
+      return true
+    }).slice(0, 5)
+
+    emailsJson = JSON.stringify(messages)
     // Write a proactive entry even when inbox is empty — the act of checking IS proactive
     if (messages.length === 0) {
       await writeWorklog(userId, 'proactive_signal', '📬 Inbox checked — no unread emails', {
@@ -174,7 +194,7 @@ async function proactiveInboxSweep(userId: string): Promise<void> {
       `INSERT INTO sparkie_tasks (id, user_id, action, label, payload, status, executor, trigger_type, scheduled_at)
        VALUES ($1, $2, $3, $4, $5, 'pending', 'ai', 'manual', NOW())`,
       [taskId, userId,
-        `Review these unread emails and take appropriate action: ${emailsJson}. For each: (1) if urgent, draft a reply using the user's email account via GMAIL_CREATE_EMAIL_DRAFT. (2) if informational, just log a worklog summary. (3) if low-priority newsletter, skip. Report what you did.`,
+        `Review these unread emails and take appropriate action: ${emailsJson}. For each email, first share your inner monologue: "I'm looking at [subject] from [sender]. This feels [urgent/routine/informational] because [reason]. My plan: [action]." Then: (1) if urgent or requires response, draft a reply using GMAIL_CREATE_EMAIL_DRAFT and use update_worklog to log with signal_priority P1. (2) if informational/important, log a worklog summary with decision_type=proactive. (3) if low-priority or promotional, skip and log a brief note. Always log each email you process.`,
         'Inbox sweep — autonomous email review',
         JSON.stringify({ email_count: JSON.parse(emailsJson).length, source: 'proactive_scheduler' })
       ]

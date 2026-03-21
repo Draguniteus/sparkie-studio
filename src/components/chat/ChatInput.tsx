@@ -520,8 +520,13 @@ export function ChatInput() {
         saveMessage('assistant', finalText)
       }
     } catch (error) {
-      console.error("Stream error:", error)
-      updateMessage(chatId, assistantMsgId, { content: "Connection error. Please try again.", isStreaming: false })
+      if (error instanceof Error && error.name === 'AbortError') {
+        // User stopped — clear streaming state without overwriting content
+        updateMessage(chatId, assistantMsgId, { isStreaming: false })
+      } else {
+        console.error("Stream error:", error)
+        updateMessage(chatId, assistantMsgId, { content: "Connection error. Please try again.", isStreaming: false })
+      }
     } finally {
       // Stop executing — IDEPanel will swap from LiveCodeView to Preview
       setStreaming(false)
@@ -1843,8 +1848,12 @@ Promise.all([
       }
 
     } catch (err: unknown) {
-      // Ignore abort errors (user navigated away or sent a new message)
-      if (err instanceof Error && err.name === 'AbortError') return
+      if (err instanceof Error && err.name === 'AbortError') {
+        // User stopped — clear streaming state without overwriting content
+        updateMessage(chatId, ackMsgId, { isStreaming: false })
+        if (buildMsgId) updateMessage(chatId, buildMsgId, { content: '', isStreaming: false })
+        return
+      }
       updateMessage(chatId, ackMsgId, { content: '❌ Connection error', isStreaming: false })
       if (buildMsgId) updateMessage(chatId, buildMsgId, { content: 'Try again.', isStreaming: false })
     } finally {
