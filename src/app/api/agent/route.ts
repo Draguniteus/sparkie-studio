@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth/next'
 import { authOptions } from '@/lib/auth'
 import { query } from '@/lib/db'
+import { proactiveInboxSweep, proactiveCalendarSweep, deploymentHealthSweep } from '@/lib/scheduler'
+import { runTTLDecaySweep } from '@/lib/knowledgeTTL'
+import { writeWorklog } from '@/lib/worklog'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -512,8 +515,9 @@ export async function POST(req: NextRequest) {
 }
 
 // ── GET /api/agent?secret=X ──────────────────────────────────────────────────
-// System-wide cron endpoint — executes due AI tasks for ALL users.
-// Can be triggered by DO App Platform cron job or any external scheduler.
+// External cron endpoint (cron-job.org every 15 min).
+// Runs ALL proactive sweeps for every active user — inbox, calendar, deployment,
+// TTL decay, and any due AI tasks. Does NOT require a logged-in session.
 // Protected by AGENT_CRON_SECRET env var.
 export async function GET(req: NextRequest) {
   try {
@@ -524,20 +528,51 @@ export async function GET(req: NextRequest) {
 
     await ensureTables()
 
-    // Get all users with due AI tasks
-    const dueUsers = await query<{ user_id: string }>(
-      `SELECT DISTINCT user_id FROM sparkie_tasks
-       WHERE executor = 'ai' AND status = 'pending'
-       AND scheduled_at IS NOT NULL AND scheduled_at <= NOW()`,
-    )
-
-    const host = req.headers.get('host') ?? 'localhost:3000'
+    const host  = req.headers.get('host') ?? 'localhost:3000'
     const proto = req.headers.get('x-forwarded-proto') ?? 'https'
 
-    const results: Array<{ userId: string; executed: number }> = []
+    // ── Recover stuck in_progress tasks before anything else ─────────────────
+    await query(
+      `UPDATE sparkie_tasks SET status = 'pending'
+       WHERE status = 'in_progress' AND created_at < NOW() - INTERVAL '5 minutes'`
+    ).catch(() => {})
 
-    // ── Proactive deploy monitor check ──────────────────────────────────────────
-    // On every cron tick, check if the latest DO deployment failed
+    // ── Get ALL active users (seen within 30 days) ────────────────────────────
+    // This is the primary fix: we must process EVERY active user, not just those
+    // who happen to have due AI tasks in sparkie_tasks.
+    let userIds: string[] = []
+
+    const sessionUsers = await query<{ user_id: string }>(
+      `SELECT DISTINCT user_id FROM user_sessions
+       WHERE last_seen_at > NOW() - INTERVAL '30 days'`
+    ).catch(() => ({ rows: [] as { user_id: string }[] }))
+
+    userIds = sessionUsers.rows.map(r => r.user_id)
+
+    // Fallback: derive user IDs from sparkie tables if user_sessions is empty
+    // (handles case where user_sessions hasn't been written yet)
+    if (userIds.length === 0) {
+      const fallback = await query<{ user_id: string }>(
+        `SELECT DISTINCT user_id FROM (
+           SELECT user_id FROM sparkie_tasks
+           UNION
+           SELECT user_id FROM sparkie_outreach_log
+           UNION
+           SELECT user_id FROM user_identity_files
+         ) u LIMIT 20`
+      ).catch(() => ({ rows: [] as { user_id: string }[] }))
+      userIds = fallback.rows.map(r => r.user_id)
+    }
+
+    console.log(`[agent-cron] Processing ${userIds.length} active user(s)`)
+
+    // ── Global: TTL decay sweep (once per cron tick, not per-user) ────────────
+    const staleFlagged = await runTTLDecaySweep().catch(() => 0)
+    if (staleFlagged > 0) {
+      console.log(`[agent-cron] TTL sweep: ${staleFlagged} stale memories flagged`)
+    }
+
+    // ── Global: deploy monitor check ──────────────────────────────────────────
     let deployAlert: string | null = null
     try {
       const deployRes = await fetch(
@@ -546,36 +581,67 @@ export async function GET(req: NextRequest) {
       )
       if (deployRes.ok) {
         const deployData = await deployRes.json() as {
-          status: string
           failed: boolean
-          diagnosis: { errorType: string; details: string; suggestedFix: string } | null
-          latest: { phase: string; updatedAt: string; cause: string }
+          diagnosis: { errorType: string; suggestedFix: string } | null
         }
         if (deployData.failed && deployData.diagnosis) {
           deployAlert = `🚨 BUILD FAILED: ${deployData.diagnosis.errorType} — ${deployData.diagnosis.suggestedFix}`
           console.log('[agent-cron] Deploy failure detected:', deployAlert)
-          // Log to worklog (append to a known user — Michael's account)
-          // This will be visible in Sparkie's work log
         }
       }
     } catch (err) {
       console.error('[agent-cron] Deploy monitor error:', err)
     }
-    // ── End deploy monitor check ─────────────────────────────────────────────────
 
-    for (const { user_id } of dueUsers.rows) {
-      const executed = await executeDueTasks(user_id, host, proto, '')
-      if (executed.length > 0) {
-        results.push({ userId: user_id, executed: executed.length })
+    // ── Per-user sweeps ───────────────────────────────────────────────────────
+    const results: Array<{ userId: string; tasksExecuted: number; sweeps: string[] }> = []
+
+    for (const userId of userIds) {
+      const sweepsRun: string[] = []
+      try {
+        // 1. Inbox sweep — checks Gmail via Composio, queues autonomous review tasks
+        await proactiveInboxSweep(userId).catch(() => {})
+        sweepsRun.push('inbox')
+
+        // 2. Calendar sweep — surfaces upcoming events to worklog
+        await proactiveCalendarSweep(userId).catch(() => {})
+        sweepsRun.push('calendar')
+
+        // 3. Deployment health sweep — detects DO build failures, auto-retries transients
+        await deploymentHealthSweep(userId).catch(() => {})
+        sweepsRun.push('deployment')
+
+        // 4. Execute any due AI tasks for this user
+        const executed = await executeDueTasks(userId, host, proto, '')
+        if (executed.length > 0) sweepsRun.push(`${executed.length}_tasks`)
+
+        // 5. Log the cron sweep to worklog so it's visible in Sparkie's brain
+        await writeWorklog(
+          userId,
+          'cron_sweep',
+          `🕐 Cron sweep complete — inbox ✓ calendar ✓ deployment ✓${executed.length > 0 ? ` · ${executed.length} task(s) executed` : ''}${staleFlagged > 0 ? ` · ${staleFlagged} stale memories flagged` : ''}`,
+          {
+            status: 'done',
+            decision_type: 'proactive',
+            reasoning: 'External cron tick (cron-job.org, every 15 min) — running all proactive sweeps server-side',
+            signal_priority: 'P3',
+          }
+        ).catch(() => {})
+
+        results.push({ userId, tasksExecuted: executed.length, sweeps: sweepsRun })
+        console.log(`[agent-cron] User ${userId}: sweeps=${sweepsRun.join(',')}`)
+      } catch (userErr) {
+        console.error(`[agent-cron] Error processing user ${userId}:`, userErr)
       }
     }
 
     return NextResponse.json({
       ok: true,
-      processedUsers: results.length,
+      processedUsers: userIds.length,
       results,
       deployAlert,
-      timestamp: new Date().toISOString()
+      staleFlagged,
+      timestamp: new Date().toISOString(),
     })
   } catch (e) {
     console.error('agent GET error:', e)

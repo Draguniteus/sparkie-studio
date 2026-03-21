@@ -669,6 +669,11 @@ async function heartbeatTick(baseUrl: string): Promise<void> {
   })
 }
 
+// ── Exports for external cron handler ─────────────────────────────────────────
+// The GET /api/agent cron endpoint calls these directly so it can run all sweeps
+// for every active user without needing the in-process scheduler to be running.
+export { proactiveInboxSweep, proactiveCalendarSweep, deploymentHealthSweep }
+
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 let _started = false
 
