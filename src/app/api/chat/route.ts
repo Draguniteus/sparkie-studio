@@ -2945,6 +2945,8 @@ const SPARKIE_TOOLS = [
   { type: 'function', function: { name: 'transcribe_audio', description: 'Transcribe an audio file (MP3, WAV, M4A, OGG) to text using Deepgram nova-2 model with smart formatting. Use for voice notes, audio summaries, or any audio-to-text task. Returns the full transcript.', parameters: { type: 'object', properties: { url: { type: 'string', description: 'Direct URL to the audio file to transcribe' } }, required: ['url'] } } },
   { type: 'function', function: { name: 'manage_calendar_event', description: 'Create, update, or cancel/delete a Google Calendar event. For create: title and start_time are required. For update/cancel: event_id is required.', parameters: { type: 'object', properties: { action: { type: 'string', description: '"create" | "update" | "cancel" | "delete"' }, event_id: { type: 'string', description: 'Event ID (for update/cancel/delete)' }, title: { type: 'string', description: 'Event title' }, description: { type: 'string', description: 'Event description' }, start_time: { type: 'string', description: 'ISO 8601 start datetime with timezone, e.g. "2026-03-26T14:00:00-05:00"' }, end_time: { type: 'string', description: 'ISO 8601 end datetime. Defaults to start_time + 1 hour.' }, attendees: { type: 'array', items: { type: 'string' }, description: 'List of attendee email addresses' } }, required: ['action'] } } },
   { type: 'function', function: { name: 'send_card_to_user', description: 'Send a beautiful HITL card to the user in chat instead of plain text. Use for: email drafts (type=email_draft), tasks (type=task), calendar events (type=calendar_event), contacts (type=contact), memory saves (type=memory), deploy confirmations (type=deploy), reminders (type=reminder), GitHub PRs (type=github_pr), reports (type=report), media (type=media), images (type=image), permission requests (type=permission), confirmations (type=confirmation), browser actions (type=browser_action). Always prefer cards over plain text for structured content.', parameters: { type: 'object', properties: { type: { type: 'string', description: 'Card type: email_draft | calendar_event | memory | contact | task | deploy | reminder | github_pr | report | media | image | permission | confirmation | browser_action' }, title: { type: 'string', description: 'Card header title (e.g. "Email Draft", "Memory Saved")' }, subtitle: { type: 'string', description: 'Secondary header text (e.g. email subject, event name)' }, to: { type: 'string', description: 'Recipient badge (for email/contact cards)' }, body: { type: 'string', description: 'Main body text (email body, event description, memory content, etc.)' }, fields: { type: 'array', items: { type: 'object', properties: { label: { type: 'string' }, value: { type: 'string' } }, required: ['label', 'value'] }, description: 'Key-value fields to display (e.g. date, attendees, commit SHA)' }, items: { type: 'array', items: { type: 'string' }, description: 'Bullet list items (e.g. tasks to approve, permissions requested)' }, actions: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, label: { type: 'string' }, icon: { type: 'string' }, variant: { type: 'string', description: '"primary" | "secondary" | "danger"' } }, required: ['id', 'label'] }, description: 'Action buttons on the card' }, preview_url: { type: 'string', description: 'Image URL to show as preview (for image/media cards)' }, text: { type: 'string', description: 'Short text shown above the card in chat' }, metadata: { type: 'object', description: 'Any extra data to attach to the card' } }, required: ['type', 'title', 'actions'] } } },
+  // ── Block 7: File upload access ───────────────────────────────────────────
+  { type: 'function', function: { name: 'read_uploaded_file', description: 'Read the content of a file that the user has uploaded in this session. Returns text for text/code/JSON files, or image data URL for images. Use when the user uploads a file and asks you to read, analyze, or process it.', parameters: { type: 'object', properties: { file_id: { type: 'string', description: 'The file ID returned from the upload (included automatically in user message context when a file is attached)' } }, required: ['file_id'] } } },
   // ── Block 6: Hyperbrowser browser control tools ────────────────────────────
   { type: 'function', function: { name: 'browser_navigate', description: 'Navigate to a URL and read the page content as markdown. Returns the page title and text content. Use for reading websites, docs, news, or any web page. Powered by Hyperbrowser.', parameters: { type: 'object', properties: { url: { type: 'string', description: 'The full URL to navigate to (must include https://)' }, extract_markdown: { type: 'boolean', description: 'Return page as readable markdown (default true). Set false for raw HTML.' } }, required: ['url'] } } },
   { type: 'function', function: { name: 'browser_screenshot', description: 'Take a screenshot of a web page and display it in the chat as an image. Automatically shows the image to the user. Use to visually show a website, dashboard, design, or error state. Powered by Hyperbrowser.', parameters: { type: 'object', properties: { url: { type: 'string', description: 'The full URL to screenshot (must include https://)' } }, required: ['url'] } } },
@@ -4743,6 +4745,29 @@ def invoke_llm(query, model='MiniMax-M2.7'):
           metadata: cardMeta,
         }
         return `SPARKIE_CARD:${JSON.stringify({ card: cardData, text: cardText ?? '' })}`
+      }
+
+      // ── Block 7: File upload access ──────────────────────────────────────────
+      case 'read_uploaded_file': {
+        if (!userId) return 'Not authenticated'
+        const { file_id: uploadFileId } = args as { file_id: string }
+        if (!uploadFileId) return 'read_uploaded_file: file_id is required'
+        try {
+          const res = await fetch(`${baseUrl}/api/upload?file_id=${encodeURIComponent(uploadFileId)}`, {
+            headers: { Cookie: cookieHeader },
+            signal: AbortSignal.timeout(10000),
+          })
+          if (!res.ok) return `read_uploaded_file: ${res.status} — ${await res.text()}`
+          const data = await res.json() as { ok?: boolean; filename?: string; mimeType?: string; sizeBytes?: number; text?: string; dataUrl?: string; error?: string }
+          if (data.error) return `read_uploaded_file: ${data.error}`
+          if (data.text) {
+            return `File: ${data.filename} (${data.mimeType}, ${data.sizeBytes} bytes)\n\n${data.text.slice(0, 8000)}${(data.text.length ?? 0) > 8000 ? '\n...(truncated)' : ''}`
+          }
+          if (data.dataUrl && data.mimeType?.startsWith('image/')) {
+            return `IMAGE_URL:${data.dataUrl}\nImage file: ${data.filename} (${data.sizeBytes} bytes)`
+          }
+          return `File: ${data.filename} (${data.mimeType}, ${data.sizeBytes} bytes) — binary file, cannot display as text`
+        } catch (e) { return `read_uploaded_file error: ${String(e)}` }
       }
 
       // ── Block 6: Hyperbrowser browser control ────────────────────────────────
@@ -6790,6 +6815,7 @@ Rules:
             read_email_thread: 'Reading thread...', manage_email: 'Managing email...',
             rsvp_event: 'Sending RSVP...', manage_calendar_event: 'Updating calendar...',
             analyze_file: 'Analyzing file...', fetch_url: 'Fetching URL...', research: 'Researching...',
+            read_uploaded_file: 'Reading uploaded file...',
             browser_navigate: 'Browsing the web...', browser_screenshot: 'Taking screenshot...',
             browser_extract: 'Extracting page data...', browser_click: 'Clicking element...',
             browser_fill: 'Filling form field...', browser_create_profile: 'Creating browser profile...',
@@ -6852,6 +6878,7 @@ Rules:
             analyze_file: 'Analyzing file',
             fetch_url: 'Fetching URL',
             research: 'Researching topic',
+            read_uploaded_file: 'Reading uploaded file',
             browser_navigate: 'Browsing to page', browser_screenshot: 'Taking screenshot',
             browser_extract: 'Extracting page content', browser_click: 'Clicking element',
             browser_fill: 'Filling form field', browser_create_profile: 'Creating browser profile',
@@ -6882,6 +6909,7 @@ Rules:
             delete_memory: 'trash', run_tests: 'checkCircle', check_lint: 'alertCircle',
             read_email_thread: 'mail', manage_email: 'mail', rsvp_event: 'calendar',
             manage_calendar_event: 'calendar', analyze_file: 'file', fetch_url: 'globe', research: 'search',
+            read_uploaded_file: 'file',
             browser_navigate: 'globe', browser_screenshot: 'image', browser_extract: 'file',
             browser_click: 'globe', browser_fill: 'edit', browser_create_profile: 'brain',
             browser_use_profile: 'globe',

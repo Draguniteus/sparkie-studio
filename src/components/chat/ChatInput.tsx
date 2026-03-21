@@ -152,7 +152,9 @@ export function ChatInput() {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const videoFileRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const [attachedFile, setAttachedFile] = useState<{ name: string; dataUrl: string; mimeType: string } | null>(null)
+  const [uploadedFile, setUploadedFile] = useState<{
+    name: string; fileId: string; mimeType: string; sizeBytes: number; dataUrl?: string; uploading?: boolean
+  } | null>(null)
   const agentAbortRef = useRef<AbortController | null>(null)
   const chatAbortRef = useRef<AbortController | null>(null)
   const isPausedRef = useRef(false)         // Block 5: pause flag checked in stream loop
@@ -2021,7 +2023,7 @@ Promise.all([
   useEffect(() => { inputRef.current = input }, [input])
 
   const handleSubmit = useCallback(async () => {
-    if ((!inputRef.current.trim() && !attachedFile) || isStreaming) return
+    if ((!inputRef.current.trim() && !uploadedFile) || isStreaming) return
 
     // ─── Slash commands ────────────────────────────────────────────────────
     const trimmed = inputRef.current.trim()
@@ -2101,14 +2103,18 @@ Promise.all([
     // ── Include attached file in message ────────────────────────────────────
     let messageContent = userContent
     let messageImageUrl: string | undefined
-    if (attachedFile) {
-      if (attachedFile.mimeType.startsWith('image/')) {
-        messageContent = userContent ? userContent + '\n[Image: ' + attachedFile.name + ']' : '[Image: ' + attachedFile.name + ']'
-        messageImageUrl = attachedFile.dataUrl
+    if (uploadedFile && !uploadedFile.uploading && uploadedFile.fileId) {
+      if (uploadedFile.mimeType.startsWith('image/')) {
+        messageContent = userContent
+          ? `${userContent}\n[Image: ${uploadedFile.name} — file_id: ${uploadedFile.fileId}]`
+          : `[Image: ${uploadedFile.name} — file_id: ${uploadedFile.fileId}]`
+        messageImageUrl = uploadedFile.dataUrl
       } else {
-        messageContent = userContent ? userContent + '\n[Attached: ' + attachedFile.name + ']' : '[Attached: ' + attachedFile.name + ']'
+        messageContent = userContent
+          ? `${userContent}\n[Uploaded file: ${uploadedFile.name} (${uploadedFile.mimeType}, ${Math.round(uploadedFile.sizeBytes / 1024)}KB) — call read_uploaded_file('${uploadedFile.fileId}') to read its contents]`
+          : `[Uploaded file: ${uploadedFile.name} (${uploadedFile.mimeType}, ${Math.round(uploadedFile.sizeBytes / 1024)}KB) — call read_uploaded_file('${uploadedFile.fileId}') to read its contents]`
       }
-      setAttachedFile(null)
+      setUploadedFile(null)
     }
     addMessage(chatId, { role: "user", content: messageContent, ...(messageImageUrl ? { imageUrl: messageImageUrl } : {}) })
     saveMessage('user', messageContent)
@@ -2250,13 +2256,22 @@ Promise.all([
           <span className="truncate font-medium">{hiveStatus}</span>
         </div>
       )}
-      {/* ── Attached file chip ──────────────────────────────────────── */}
-      {attachedFile && (
+      {/* ── Uploaded file pill ──────────────────────────────────────── */}
+      {uploadedFile && (
         <div className="flex items-center gap-2 px-3 pt-2 pb-0">
-          <div className="flex items-center gap-1.5 bg-hive-hover text-text-secondary text-xs px-2.5 py-1 rounded-full max-w-[240px]">
-            <Paperclip size={11} className="shrink-0 text-honey-500" />
-            <span className="truncate">{attachedFile.name}</span>
-            <button onClick={() => setAttachedFile(null)} className="ml-0.5 hover:text-text-primary shrink-0">
+          <div className="flex items-center gap-1.5 bg-hive-hover text-text-secondary text-xs px-2.5 py-1 rounded-full max-w-[280px]">
+            {uploadedFile.uploading ? (
+              <div className="w-3 h-3 border border-t-transparent border-honey-500 rounded-full animate-spin shrink-0" />
+            ) : uploadedFile.mimeType.startsWith('image/') ? (
+              <ImageIcon size={11} className="shrink-0 text-honey-500" />
+            ) : (
+              <Paperclip size={11} className="shrink-0 text-honey-500" />
+            )}
+            <span className="truncate">{uploadedFile.name}</span>
+            {!uploadedFile.uploading && (
+              <span className="text-[10px] text-text-muted shrink-0">({Math.round(uploadedFile.sizeBytes / 1024)}KB)</span>
+            )}
+            <button onClick={() => setUploadedFile(null)} className="ml-0.5 hover:text-text-primary shrink-0">
               <X size={11} />
             </button>
           </div>
@@ -2276,19 +2291,38 @@ Promise.all([
               type="file"
               accept="image/*,video/*,audio/*,.pdf,.txt,.doc,.docx,.csv,.json,.md"
               className="hidden"
-              onChange={(e) => {
+              onChange={async (e) => {
                 const file = e.target.files?.[0]
                 if (!file) return
-                const reader = new FileReader()
-                reader.onload = (ev) => {
-                  setAttachedFile({ name: file.name, dataUrl: ev.target?.result as string, mimeType: file.type })
-                }
-                reader.readAsDataURL(file)
                 e.target.value = ""
+                // Show pill immediately with uploading spinner
+                setUploadedFile({ name: file.name, fileId: '', mimeType: file.type, sizeBytes: file.size, uploading: true })
+                // For images, also read as dataUrl for preview
+                let dataUrl: string | undefined
+                if (file.type.startsWith('image/')) {
+                  dataUrl = await new Promise<string>(resolve => {
+                    const reader = new FileReader()
+                    reader.onload = (ev) => resolve(ev.target?.result as string)
+                    reader.readAsDataURL(file)
+                  })
+                }
+                try {
+                  const formData = new FormData()
+                  formData.append('file', file)
+                  const res = await fetch('/api/upload', { method: 'POST', body: formData })
+                  const data = await res.json() as { ok?: boolean; fileId?: string; error?: string }
+                  if (data.ok && data.fileId) {
+                    setUploadedFile({ name: file.name, fileId: data.fileId, mimeType: file.type, sizeBytes: file.size, dataUrl, uploading: false })
+                  } else {
+                    setUploadedFile(null)
+                  }
+                } catch {
+                  setUploadedFile(null)
+                }
               }}
             />
             <button
-              className={`p-1.5 rounded-md transition-colors ${attachedFile ? 'bg-honey-500/20 text-honey-500' : 'hover:bg-hive-hover text-text-muted hover:text-text-secondary'}`}
+              className={`p-1.5 rounded-md transition-colors ${uploadedFile ? 'bg-honey-500/20 text-honey-500' : 'hover:bg-hive-hover text-text-muted hover:text-text-secondary'}`}
               title="Attach file"
               onClick={() => fileInputRef.current?.click()}
             >
@@ -2473,9 +2507,9 @@ Promise.all([
 
             {/* Send button — Stop is in the InMemoryPill above chat only */}
             <button
-              onClick={handleSubmit} disabled={!input.trim() && !attachedFile}
+              onClick={handleSubmit} disabled={!input.trim() && !uploadedFile}
               className={`p-2 rounded-xl transition-all duration-200 active:scale-95 ${
-                input.trim() || attachedFile
+                input.trim() || uploadedFile
                   ? "bg-honey-500 text-hive-900 hover:bg-honey-400 shadow-lg shadow-honey-500/25 hover:shadow-honey-500/40 hover:scale-105"
                   : "bg-hive-hover text-text-muted cursor-not-allowed opacity-50"
               }`}
