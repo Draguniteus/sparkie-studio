@@ -14,6 +14,7 @@ import { TaskQueuePanel } from "@/components/ide/TaskQueuePanel"
 import { MemoryTab } from "@/components/ide/MemoryTab"
 import { RealScorePanel } from "@/components/ide/RealScorePanel"
 import { ProcessTab } from "@/components/ide/ProcessTab"
+import { TopicsPanel } from "@/components/ide/TopicsPanel"
 
 
 const WORKLOG_FILTERS = ['all', 'thinking', 'action', 'result', 'error', 'code'] as const
@@ -223,6 +224,7 @@ export function IDEPanelInner() {
     { id: 'memory',   label: 'Memory'   },
     { id: 'real',     label: 'REAL'     },
     { id: 'tasks',    label: 'Tasks'    },
+    { id: 'topics',   label: 'Topics'   },
     { id: 'files',    label: 'Files'    },
     { id: 'terminal', label: 'Terminal' },
   ] as const
@@ -275,6 +277,9 @@ export function IDEPanelInner() {
         )}
         {ideTab === 'tasks' && (
           <TaskQueuePanel />
+        )}
+        {ideTab === 'topics' && (
+          <TopicsPanel />
         )}
         {ideTab === 'preview' && (
           <div className="h-full">

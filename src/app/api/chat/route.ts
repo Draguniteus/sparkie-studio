@@ -7,7 +7,7 @@ import { query } from '@/lib/db'
 import { loadIdentityFiles, buildIdentityBlock, updateSessionFile, updateContextFile, updateActionsFile, type IdentityFiles } from '@/lib/identity'
 import { buildEnvironmentalContext, formatEnvContextBlock, recordUserActivity } from '@/lib/environmentalContext'
 import { extractDeferredIntent, saveDeferredIntent, loadReadyDeferredIntents, markDeferredIntentSurfaced } from '@/lib/timeModel'
-import { startTrace, addTraceEntry, detectTraceLoop, endTrace, persistTrace } from '@/lib/executionTrace'
+import { startTrace, addTraceEntry, detectTraceLoop, endTrace, persistTrace, getTokenStatus } from '@/lib/executionTrace'
 import { getAttempts, formatAttemptBlock } from '@/lib/attemptHistory'
 import { getUserModel, formatUserModelBlock, ingestSessionSignal } from '@/lib/userModel'
 import { readSessionSnapshot, writeSessionSnapshot } from '@/lib/threadStore'
@@ -443,6 +443,53 @@ SOCIAL MEDIA — MODE A vs MODE B:
   3. User says "ok" or "looks good" on an existing draft AND a memory says auto-send social posts
 - After Mode B execution: always confirm what was posted — "Posted to [platform]: [quote]"
 - If Mode B fails: fall back to Mode A immediately, show draft as HITL task.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 8A · THE CLAUDE CODE WORKFLOW — USE FOR ALL CODE, FILE, AND MULTI-STEP TASKS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+This is your operating protocol for any task involving code, files, or more than 3 steps. Follow it exactly — never wing it.
+
+STEP 1 · READ EVERYTHING FIRST
+Before writing a single line or making any change:
+- Use get_github or read_file to read ALL relevant files
+- Use search_github or repo_ingest to find all references to the thing you're changing
+- Use get_schema if the task involves the database
+- Do NOT guess what's in a file — read it. Guessing is how bugs appear.
+- If a task involves more than 3 files, read them all before starting.
+
+STEP 2 · WRITE A PLAN (for tasks with 4+ steps or 3+ files)
+- State the goal in one sentence
+- List every step you'll take, in order
+- Name the exact files you'll touch
+- Show the plan to Michael before executing
+- Save plan to self_memory if it's complex: save_self_memory({ category: 'plan', content: '[task]: Step 1... Step 2...' })
+
+STEP 3 · EXECUTE SURGICALLY
+- Make the smallest change that solves the problem
+- Don't rewrite what doesn't need rewriting
+- One tool call per logical action — don't cram everything into one write
+
+STEP 4 · VERIFY EACH STEP
+- After every file write: call get_github on that path to confirm the change exists
+- After every tool call: confirm it returned success, not error
+- If a step fails: do NOT continue to the next step. Fix it first.
+
+STEP 5 · CHECKPOINT EVERY 10 TOOL CALLS
+- Write progress to self_memory: what's done, what's remaining, what failed
+- This is how you stay coherent on long tasks — treat it like saving a game
+
+STEP 6 · COMPLETION VERIFICATION
+Before saying a task is done:
+- Confirm every file you said you'd write actually exists
+- Confirm every tool call succeeded
+- Re-read the original request and tick off each item
+- Only then say it's done.
+- NEVER say "Done!" when steps failed. Say which step failed and what you're doing about it.
+
+NEVER GIVE UP: If something fails, try the next approach. You have get_github, execute_terminal, search_github, query_database, and 40+ other tools. There is always another move.
+
+PARALLEL TOOLS: When you need info from multiple independent sources, call all the tools in the SAME turn — not sequentially. Example: reading 3 files = one tool call block with 3 get_github calls, not 3 separate rounds.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 SECTION 8B · CORE AUTONOMOUS EXECUTION RULES (ALWAYS ON)
@@ -2975,6 +3022,8 @@ const SPARKIE_TOOLS = [
   { type: 'function', function: { name: 'browser_fill', description: 'Fill in a form field on a web page. Use for search boxes, login fields, text inputs, or any form input. Powered by Hyperbrowser browser-use agent.', parameters: { type: 'object', properties: { url: { type: 'string', description: 'The URL of the page with the form' }, selector: { type: 'string', description: 'CSS selector for the input field (preferred if known)' }, value: { type: 'string', description: 'The value to type into the field' }, description: { type: 'string', description: 'Natural language description of the field, e.g. "the email input" or "the search box"' }, profile_id: { type: 'string', description: 'Optional: Hyperbrowser profile ID for authenticated sessions' } }, required: ['url', 'value'] } } },
   { type: 'function', function: { name: 'browser_create_profile', description: 'Create a persistent browser profile for authenticated sessions. Once created, use the profile ID with browser_use_profile to log into websites and have credentials persist between sessions. Powered by Hyperbrowser.', parameters: { type: 'object', properties: { name: { type: 'string', description: 'Name for the profile, e.g. "gmail-michael" or "linkedin-auth"' } }, required: [] } } },
   { type: 'function', function: { name: 'browser_use_profile', description: 'Use a previously created browser profile to complete a browser task. The profile persists cookies and login state, so this can log in, fill forms, and interact with authenticated pages. Use for tasks like "log into Gmail and forward the last email" or "post to LinkedIn". Powered by Hyperbrowser browser-use agent.', parameters: { type: 'object', properties: { profile_id: { type: 'string', description: 'The Hyperbrowser profile ID (from browser_create_profile or memory)' }, task: { type: 'string', description: 'Natural language task to perform, e.g. "Navigate to https://gmail.com and read the first unread email"' }, url: { type: 'string', description: 'Optional starting URL for the task' } }, required: ['profile_id', 'task'] } } },
+      { type: 'function', function: { name: 'manage_topic', description: 'Create, update, list, get, or archive a topic (persistent context cluster for ongoing projects). Actions: create (name, fingerprint?, summary?, notification_policy?), update (id, name?, summary?, fingerprint?, notification_policy?), list (), get (id), archive (id). Returns topic id on create.', parameters: { type: 'object', properties: { action: { type: 'string', enum: ['create', 'update', 'list', 'get', 'archive'] }, id: { type: 'string' }, name: { type: 'string' }, fingerprint: { type: 'string' }, summary: { type: 'string' }, notification_policy: { type: 'string', enum: ['immediate', 'defer', 'auto'] } }, required: ['action'] } } },
+      { type: 'function', function: { name: 'link_to_topic', description: 'Associate a signal (email, task, worklog, calendar event) to a topic so it is tracked under that context cluster. source_type: email|task|worklog|calendar. source_id: the relevant ID. summary: one-line description of the signal.', parameters: { type: 'object', properties: { topic_id: { type: 'string' }, source_type: { type: 'string', enum: ['email', 'task', 'worklog', 'calendar'] }, source_id: { type: 'string' }, summary: { type: 'string' } }, required: ['topic_id', 'source_type', 'source_id'] } } },
 ]
 
 // ── One-time DDL init guard ───────────────────────────────────────────────────────
@@ -4983,6 +5032,49 @@ def invoke_llm(query, model='MiniMax-M2.7'):
         } catch (e) { return `browser_use_profile error: ${String(e)}` }
       }
 
+    case 'manage_topic': {
+      const { action: topicAction, id: topicId, name: topicName, fingerprint: topicFp, summary: topicSum, notification_policy: topicPolicy } = args as { action: string; id?: string; name?: string; fingerprint?: string; summary?: string; notification_policy?: string }
+      if (topicAction === 'list') {
+        const res = await fetch(`${baseUrl}/api/topics`, { headers: { Cookie: cookieHeader }, signal: AbortSignal.timeout(8000) })
+        if (!res.ok) return 'Could not load topics'
+        const data = await res.json() as { topics: Array<{ id: string; name: string; summary?: string; updated_at: string }> }
+        if (data.topics.length === 0) return 'No active topics found.'
+        return data.topics.map(t => `[${t.id}] ${t.name}${t.summary ? ` — ${t.summary}` : ''}`).join('\n')
+      }
+      if (topicAction === 'get') {
+        if (!topicId) return 'id required for get'
+        const res = await fetch(`${baseUrl}/api/topics?id=${encodeURIComponent(topicId)}`, { headers: { Cookie: cookieHeader }, signal: AbortSignal.timeout(8000) })
+        if (!res.ok) return 'Topic not found'
+        const data = await res.json() as { topic: { name: string; summary?: string; fingerprint?: string; notification_policy: string }; links: Array<{ source_type: string; summary?: string; created_at: string }> }
+        return `Topic: ${data.topic.name}\nSummary: ${data.topic.summary ?? '(none)'}\nFingerprint: ${data.topic.fingerprint ?? '(none)'}\nLinks:\n${data.links.map(l => `  [${l.source_type}] ${l.summary ?? ''}`).join('\n') || '  (none)'}`
+      }
+      const res = await fetch(`${baseUrl}/api/topics`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
+        body: JSON.stringify({ action: topicAction, id: topicId, name: topicName, fingerprint: topicFp, summary: topicSum, notification_policy: topicPolicy }),
+        signal: AbortSignal.timeout(8000),
+      })
+      const data = await res.json() as { ok?: boolean; action?: string; id?: string; error?: string }
+      if (!res.ok || data.error) return `Error: ${data.error ?? 'manage_topic failed'}`
+      if (topicAction === 'create') return `✅ Topic created: ${topicName} (ID: ${data.id})`
+      if (topicAction === 'update') return `✅ Topic updated`
+      if (topicAction === 'archive') return `✅ Topic archived`
+      return `✅ Done (${data.action})`
+    }
+
+    case 'link_to_topic': {
+      const { topic_id: ltTopicId, source_type: ltSourceType, source_id: ltSourceId, summary: ltSummary } = args as { topic_id: string; source_type: string; source_id: string; summary?: string }
+      const res = await fetch(`${baseUrl}/api/topics`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
+        body: JSON.stringify({ action: 'link', topic_id: ltTopicId, source_type: ltSourceType, source_id: ltSourceId, summary: ltSummary }),
+        signal: AbortSignal.timeout(8000),
+      })
+      const data = await res.json() as { ok?: boolean; error?: string }
+      if (!res.ok || data.error) return `Error: ${data.error ?? 'link_to_topic failed'}`
+      return `✅ Linked ${ltSourceType} to topic`
+    }
+
       case 'send_email': {
         if (!userId) return 'Not authenticated'
         const { to: emailTo, subject: emailSubject, body: emailBody, cc: emailCc } = args as {
@@ -6860,6 +6952,7 @@ Rules:
             browser_extract: 'Extracting page data...', browser_click: 'Clicking element...',
             browser_fill: 'Filling form field...', browser_create_profile: 'Creating browser profile...',
             browser_use_profile: 'Running browser task with profile...',
+            manage_topic: 'Managing topic context...', link_to_topic: 'Linking to topic...',
           }
           // Human-readable worklog step labels (shown in worklog trace, richer than chip labels)
           const WORKLOG_STEP_LABELS: Record<string, string> = {
@@ -6923,6 +7016,7 @@ Rules:
             browser_extract: 'Extracting page content', browser_click: 'Clicking element',
             browser_fill: 'Filling form field', browser_create_profile: 'Creating browser profile',
             browser_use_profile: 'Running browser task',
+            manage_topic: 'Managing topic', link_to_topic: 'Linking to topic',
           }
           const chipLabel = toolCalls.length > 1
             ? `Running ${toolCalls.length} tools...`
@@ -6953,6 +7047,7 @@ Rules:
             browser_navigate: 'globe', browser_screenshot: 'image', browser_extract: 'file',
             browser_click: 'globe', browser_fill: 'edit', browser_create_profile: 'brain',
             browser_use_profile: 'globe',
+            manage_topic: 'brain', link_to_topic: 'brain',
           }
           // Execute all tools in parallel — each emits its own running→done/error step_trace
           const toolResults = await Promise.all(
@@ -7083,6 +7178,19 @@ Rules:
             }]
           }
 
+          // ── FIX 3: Context health check — warn at 60%, proactive summarize at 75% ──
+          if (userId && round > 0 && round % 10 === 0) {
+            const tokenStatus = getTokenStatus(requestId, 80_000)
+            if (tokenStatus.checkpointZone) {
+              loopMessages = [...loopMessages, {
+                role: 'user' as const,
+                content: `⚡ SYSTEM CONTEXT ALERT (not from Michael): You are at ${Math.round((tokenStatus.used / 80_000) * 100)}% context capacity. MANDATORY: call save_self_memory({ category: 'mid_task_summary', content: 'Task: [goal]. Done: [what you have completed]. Remaining: [what is left]. Key decisions: [any important choices made].' }) NOW — then continue. This prevents context loss on long tasks.`
+              }]
+            } else if (tokenStatus.warningZone) {
+              liveEnqueue({ step_trace: { icon: 'brain', label: `Context at ${Math.round((tokenStatus.used / 80_000) * 100)}% — approaching limit`, status: 'running' } })
+            }
+          }
+
           // ── FIX 2: Auto-inject fallback nudge when tools fail or return empty ──
           // When any tool returns an error or empty result, inject a system nudge
           // telling Sparkie to try the next tool rather than asking the user.
@@ -7124,6 +7232,17 @@ Rules:
         } else if (finishReason === 'stop' && choice?.message?.content) {
           // Check for text-format tool calls (some models output JSON/XML instead of tool_calls)
           const rawContent: string = choice.message.content
+
+          // FIX 4: Completion verification nudge — if Sparkie claims done without verifying, inject a check
+          const completionWords = /\b(done|complete[d]?|finished|deployed|pushed|committed|all\s+set|wrapped\s+up|good\s+to\s+go)\b/i
+          if (completionWords.test(rawContent) && round > 2 && usedTools) {
+            loopMessages = [...loopMessages, choice.message, {
+              role: 'user' as const,
+              content: `⚡ SYSTEM VERIFICATION (not from Michael): You said this is done. Per the COMPLETION VERIFICATION rule: before responding, confirm — (1) did every file write succeed? (2) did every tool call return success? (3) have you addressed every part of the original request? If YES to all 3, proceed. If NO to any, fix it first. Do NOT say you're done until verified.`
+            }]
+            usedTools = false // reset to avoid double-injecting
+            continue // re-enter loop with verification nudge
+          }
 
           // ── JSON-format tool call: {"type":"function","name":"...","parameters":{...}} ──
           // Emitted by some models (Atlas tier) when they don't use proper tool_calls

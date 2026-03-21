@@ -165,7 +165,7 @@ export type WorklogEntry = {
   confidence?: number
 }
 
-export type IDETab = 'process' | 'preview' | 'files' | 'terminal' | 'worklog' | 'tasks' | 'memory' | 'real'
+export type IDETab = 'process' | 'preview' | 'files' | 'terminal' | 'worklog' | 'tasks' | 'memory' | 'real' | 'topics'
 
 export type ContainerStatus =
   | 'idle'

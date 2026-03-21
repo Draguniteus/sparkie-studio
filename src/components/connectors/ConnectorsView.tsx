@@ -396,8 +396,10 @@ export function ConnectorsView() {
       }
 
       if (data.status === "ACTIVE") {
-        showToast(`${app.displayName || appName} connected!`)
+        setConnections(prev => [...prev, { id: `optimistic_${appName}`, appName, status: 'ACTIVE', createdAt: new Date().toISOString() }])
+        window.dispatchEvent(new CustomEvent('sparkie:integration-changed', { detail: { app: appName, connected: true } }))
         await loadConnections()
+        showToast(`${app.displayName || appName} connected!`)
         setConnecting(null)
         return
       }
@@ -412,8 +414,9 @@ export function ConnectorsView() {
           if (popup?.closed) {
             clearInterval(poll)
             await loadConnections()
-            setConnecting(null)
+            window.dispatchEvent(new CustomEvent('sparkie:integration-changed', { detail: { app: appName, connected: true } }))
             showToast(`${app.displayName || appName} connected!`)
+            setConnecting(null)
           }
         }, 1000)
       } else {
@@ -443,6 +446,7 @@ export function ConnectorsView() {
       } else {
         showToast(`${app.displayName || appName} connected!`)
         await loadConnections()
+        window.dispatchEvent(new CustomEvent('sparkie:integration-changed', { detail: { app: appName, connected: true } }))
       }
     } catch {
       showToast("Connection failed", "error")
@@ -467,6 +471,7 @@ export function ConnectorsView() {
       if (data.success) {
         showToast(`${appName} disconnected`)
         setConnections(prev => prev.filter(c => c.id !== conn.id))
+        window.dispatchEvent(new CustomEvent('sparkie:integration-changed', { detail: { app: appName, connected: false } }))
       } else {
         showToast(data.error ?? "Disconnect failed", "error")
       }
