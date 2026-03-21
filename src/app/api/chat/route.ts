@@ -2947,9 +2947,10 @@ const SPARKIE_TOOLS = [
         properties: {
           type: { type: 'string', description: 'Entry type: "code_push", "task_executed", "memory_learned", "tool_call", "ai_response", "decision"' },
           message: { type: 'string', description: 'Human-readable summary of what happened' },
+          conclusion: { type: 'string', description: 'One-sentence inner-monologue outcome: what you observed, decided, or learned. E.g. "Patched auth bug — deploy is live" or "User wants dark mode — saved preference". Always include.' },
           metadata: { type: 'object', additionalProperties: true, description: 'Optional structured metadata: commit, files_read, tools_called, reasoning, confidence, outcome' },
         },
-        required: ['type', 'message'],
+        required: ['type', 'message', 'conclusion'],
       },
     },
   },
@@ -4598,12 +4599,15 @@ def invoke_llm(query, model='MiniMax-M2.7'):
 
       case 'update_worklog': {
         if (!userId) return 'Not authenticated'
-        const { type: wlType, message: wlMessage, metadata: wlMeta } = args as {
-          type: string; message: string; metadata?: Record<string, unknown>
+        const { type: wlType, message: wlMessage, conclusion: wlConclusion, metadata: wlMeta } = args as {
+          type: string; message: string; conclusion?: string; metadata?: Record<string, unknown>
         }
         if (!wlType || !wlMessage) return 'update_worklog: type and message are required'
         try {
-          await writeWorklog(userId, wlType, wlMessage, wlMeta ?? {})
+          await writeWorklog(userId, wlType, wlMessage, {
+            ...wlMeta ?? {},
+            conclusion: wlConclusion ?? wlMessage.slice(0, 120),
+          })
           return `✅ Worklog entry saved: [${wlType}] ${wlMessage.slice(0, 80)}${wlMessage.length > 80 ? '...' : ''}`
         } catch (e) {
           return `update_worklog error: ${String(e)}`

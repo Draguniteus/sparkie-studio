@@ -287,11 +287,18 @@ export function IDEPanelInner() {
           </div>
         )}
 
-        {ideTab === 'process' && (
+        {/* LiveCodeView shown during active builds */}
+        {ideTab === 'process' && isExecuting && (
           <div className="h-full">
-            {isExecuting ? <LiveCodeView /> : <ProcessTab />}
+            <LiveCodeView />
           </div>
         )}
+        {/* ProcessTab always mounted (like Terminal) so its sparkie_step_trace
+            listener is always active — even when the user is on the worklog tab
+            or Sparkie switches tabs during a response. Hidden via CSS only. */}
+        <div className={`h-full ${ideTab === 'process' && !isExecuting ? '' : 'hidden'}`}>
+          <ProcessTab />
+        </div>
 
         {ideTab === 'files' && (
           <div className="h-full flex overflow-hidden">

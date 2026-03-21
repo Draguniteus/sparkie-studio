@@ -596,6 +596,16 @@ function PostCard({
 }
 
 // ─── Live Activity Ticker ─────────────────────────────────────────────────────
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '$1')   // **bold**
+    .replace(/\*(.+?)\*/g, '$1')        // *italic*
+    .replace(/#{1,6}\s*/g, '')          // ### headings
+    .replace(/^\s*---+\s*$/gm, '')      // --- dividers
+    .replace(/`{1,3}[^`]*`{1,3}/g, '') // `code` / ```blocks```
+    .replace(/\|[^\n]*/g, '')           // | table | syntax
+}
+
 function LiveActivityTicker() {
   const [chunks, setChunks] = useState<string[]>([])
   const [active, setActive] = useState(false)
@@ -606,11 +616,13 @@ function LiveActivityTicker() {
     const onChunk = (e: Event) => {
       const text = (e as CustomEvent<string>).detail
       if (!text) return
+      const clean = stripMarkdown(text)
+      if (!clean) return
       if (clearTimerRef.current) clearTimeout(clearTimerRef.current)
       setActive(true)
       setChunks(prev => {
-        // Keep last 200 chars visible
-        const joined = (prev.join('') + text).slice(-400)
+        // Keep last 200 chars of clean text visible
+        const joined = (prev.join('') + clean).slice(-200)
         return [joined]
       })
     }

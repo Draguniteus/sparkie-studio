@@ -1026,8 +1026,13 @@ export function ChatInput() {
       if (!reader) { setStreaming(false); return }
       let buffer = "", fullContent = ""
       const convStreamStart = Date.now()
-      // Ensure ProcessTab always has something to show — even for conversational responses
-      window.dispatchEvent(new CustomEvent('sparkie_step_trace', { detail: { icon: 'brain', label: 'Sparkie thinking…', status: 'running' } as StepTrace }))
+      // Seed the initial "thinking" trace into both the ref (for frozen cards) and the
+      // custom event (for the live ProcessTab listener). Without seeding the ref here,
+      // pure conversational responses with no tools would have zero traces in toolTraces.
+      const initialTrace: StepTrace = { icon: 'brain', label: 'Sparkie thinking…', status: 'running' }
+      _setStepTraces([initialTrace])
+      _stepTracesRef.current = [initialTrace]
+      window.dispatchEvent(new CustomEvent('sparkie_step_trace', { detail: initialTrace }))
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
@@ -1090,12 +1095,15 @@ export function ChatInput() {
             }
             // Phase 5: task_chip_clear — hide chip when response arrives
             if (parsed.task_chip_clear) {
-              // Stamp the chip label + step traces onto the completed message
+              // Stamp step traces onto the completed message.
+              // Previously guarded by `chipLabelNow &&` which meant responses without
+              // tool calls (no task_chip sent) never got their traces stamped → Process
+              // tab frozen cards were always empty. Now always stamp when traces exist.
               const chipLabelNow = useAppStore.getState().longTaskLabel
-              if (chipLabelNow && assistantMsgId) {
+              if (assistantMsgId && _stepTracesRef.current.length > 0) {
                 useAppStore.getState().updateMessage(chatId, assistantMsgId, {
-                  chipLabel: chipLabelNow,
-                  toolTraces: _stepTracesRef.current.length > 0 ? [..._stepTracesRef.current] : undefined,
+                  chipLabel: chipLabelNow ?? 'Sparkie',
+                  toolTraces: [..._stepTracesRef.current],
                 })
               }
               _setStepTraces([])
@@ -1203,13 +1211,17 @@ export function ChatInput() {
         return
       }
       const finalContent = fullContent || "👋"
-      // For conversational responses (no tools), stamp a minimal trace so ProcessTab is never empty
-      if (_stepTracesRef.current.length === 0) {
+      // Check if toolTraces were already stamped by the task_chip_clear handler.
+      // If yes, just finalize content — don't overwrite the real traces with a placeholder.
+      // If no (pure conversational response, no tools called), stamp a minimal trace.
+      const alreadyStamped = (useAppStore.getState().chats.find(c => c.id === chatId)
+        ?.messages.find(m => m.id === assistantMsgId)?.toolTraces?.length ?? 0) > 0
+      if (alreadyStamped) {
+        updateMessage(chatId, assistantMsgId, { content: finalContent, isStreaming: false })
+      } else {
         const convTrace: StepTrace = { icon: 'brain', label: 'Response ready', status: 'done', duration: Date.now() - convStreamStart }
         window.dispatchEvent(new CustomEvent('sparkie_step_trace', { detail: convTrace }))
         updateMessage(chatId, assistantMsgId, { content: finalContent, isStreaming: false, toolTraces: [convTrace] })
-      } else {
-        updateMessage(chatId, assistantMsgId, { content: finalContent, isStreaming: false })
       }
       saveMessage('assistant', finalContent)
       // ── Worklog framing: log response sent ──
