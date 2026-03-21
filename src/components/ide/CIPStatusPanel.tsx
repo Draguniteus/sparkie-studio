@@ -46,6 +46,7 @@ export function CIPStatusPanel() {
   const [goals, setGoals] = useState<Goal[]>([])
   const [rules, setRules] = useState<BehaviorRule[]>([])
   const [loading, setLoading] = useState(true)
+  const [seeding, setSeeding] = useState(false)
   const [expandedLayer, setExpandedLayer] = useState<string | null>(null)
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date())
 
@@ -69,15 +70,28 @@ export function CIPStatusPanel() {
     return () => clearInterval(interval)
   }, [loadData])
 
+  const seedDefaults = useCallback(async () => {
+    setSeeding(true)
+    try {
+      await fetch('/api/cip-seed', { method: 'POST' })
+      await loadData()
+    } catch { /* non-fatal */ } finally {
+      setSeeding(false)
+    }
+  }, [loadData])
+
+  // Completeness: each layer contributes based on actual live data — no artificial base
   const cipCompleteness = stats
     ? Math.min(100, Math.round(
-        (stats.goalCount > 0 ? 15 : 0) +
-        (stats.ruleCount >= 3 ? 15 : stats.ruleCount * 5) +
-        (stats.causalEdges >= 10 ? 15 : stats.causalEdges * 1.5) +
-        (stats.reflectionCount >= 1 ? 20 : 0) +
-        35 // base for having the engine running
+        5 +  // L1: perception scaffold always running
+        (stats.ruleCount >= 5 ? 20 : stats.ruleCount * 4) +       // L2: behavior rules (max 20)
+        (stats.causalEdges >= 10 ? 15 : stats.causalEdges * 1.5) + // L3: causal graph (max 15)
+        5 +  // L4: emotional detection always active
+        (stats.goalCount >= 1 ? 20 : 0) +                          // L5: goals (max 20)
+        (stats.parallelExecutionsToday >= 1 ? 10 : 5) +            // L6: parallel exec
+        (stats.reflectionCount >= 1 ? 25 : 0)                      // L7: self-reflection (max 25)
       ))
-    : 35
+    : 5
 
   return (
     <div className="flex flex-col h-full overflow-y-auto bg-hive-600">
@@ -113,6 +127,15 @@ export function CIPStatusPanel() {
                 style={{ width: `${cipCompleteness}%` }}
               />
             </div>
+            {stats && stats.goalCount === 0 && stats.ruleCount === 0 && (
+              <button
+                onClick={seedDefaults}
+                disabled={seeding}
+                className="mt-2 w-full text-[10px] font-medium py-1 px-2 rounded bg-honey-500/15 border border-honey-500/30 text-honey-400 hover:bg-honey-500/25 transition-colors disabled:opacity-50"
+              >
+                {seeding ? 'Bootstrapping…' : '⚡ Bootstrap CIP defaults'}
+              </button>
+            )}
           </div>
 
           {/* Stats grid */}

@@ -1193,6 +1193,8 @@ export function ChatInput() {
                 addWorklogEntry({ type: 'result', content: 'Analyzed', status: 'done' })
               }
               fullContent += delta.content
+              // Feed each token to the Live Activity ticker (strips markdown client-side)
+              window.dispatchEvent(new CustomEvent('sparkie:live-chunk', { detail: delta.content }))
               clearTimeout(streamFlushRef.current)
               streamFlushRef.current = setTimeout(() => {
                 updateMessage(chatId, assistantMsgId, { content: fullContent })
