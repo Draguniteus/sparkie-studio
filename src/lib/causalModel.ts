@@ -6,6 +6,7 @@
  */
 import { query } from '@/lib/db'
 import { createBehaviorRule } from '@/lib/behaviorRules'
+import { createGoal } from '@/lib/goalEngine'
 
 export interface CausalLink {
   id: string
@@ -73,6 +74,19 @@ export async function observeEventPair(
       `anticipate ${effectEvent} — take preemptive action`,
       `Causal model: ${causeEvent} → ${effectEvent} observed ${link.occurrence_count}x with ${Math.round(link.confidence * 100)}% confidence`,
       link.confidence
+    ).catch(() => {})
+  }
+
+  // Auto-create P1 goal for recurring failure patterns (spec: 3+ occurrences)
+  const isFailureEffect = /fail|error|broken|crash|timeout|rejected/i.test(effectEvent)
+  if (isFailureEffect && link.occurrence_count >= 3) {
+    await createGoal(
+      `Fix recurring pattern: ${causeEvent} → ${effectEvent}`,
+      `Causal model detected: ${causeEvent} leads to ${effectEvent} ${link.occurrence_count}x. Root cause investigation and fix needed.`,
+      'fix',
+      'P1',
+      `${effectEvent} no longer occurs when ${causeEvent} happens — causal link confidence drops below 0.3`,
+      1
     ).catch(() => {})
   }
 }

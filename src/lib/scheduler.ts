@@ -893,6 +893,8 @@ export function startScheduler(baseUrl: string): void {
 // ── L1: Ambient Perception — what Sparkie notices between cron ticks ──────────
 let _perceptionTickCount = 0
 const _perceptionPatterns: Record<string, number> = {}
+// Track last known deploy phase per user to detect ACTIVE→BUILDING/FAILED transitions
+const _lastDeployPhase: Record<string, string> = {}
 
 async function ambientPerceptionTick(): Promise<void> {
   _perceptionTickCount++
@@ -904,6 +906,7 @@ async function ambientPerceptionTick(): Promise<void> {
 
   for (const { user_id } of activeUsers.rows) {
     const findings: string[] = []
+    const opinions: Array<{ signal: string; opinion: string; action_recommended: string }> = []
 
     // 1. Check for error rate spike in last 30 min
     const errorCheck = await query<{ count: string }>(
@@ -913,8 +916,16 @@ async function ambientPerceptionTick(): Promise<void> {
     ).catch(() => ({ rows: [{ count: '0' }] }))
     const errorCount = parseInt(errorCheck.rows[0]?.count ?? '0')
     if (errorCount >= 3) {
-      findings.push(`Error spike detected: ${errorCount} errors in last 30 minutes`)
+      const signal = `Error spike: ${errorCount} errors in last 30 minutes`
+      findings.push(signal)
       _perceptionPatterns[`error_spike_${user_id}`] = (_perceptionPatterns[`error_spike_${user_id}`] ?? 0) + 1
+      opinions.push({
+        signal,
+        opinion: errorCount >= 5
+          ? 'This is a P0 situation — something systemic is breaking repeatedly'
+          : 'Elevated error rate suggests a recurring issue, not a one-off. Worth investigating causes.',
+        action_recommended: 'Query causal graph for these error types and consider creating a P1 goal to address root cause',
+      })
     }
 
     // 2. Check for expiring TTL memories in next hour
@@ -925,10 +936,85 @@ async function ambientPerceptionTick(): Promise<void> {
     ).catch(() => ({ rows: [{ count: '0' }] }))
     const expiringCount = parseInt(ttlCheck.rows[0]?.count ?? '0')
     if (expiringCount > 0) {
-      findings.push(`${expiringCount} memory TTL entry(s) expiring within 1 hour`)
+      const signal = `${expiringCount} memory TTL entry(s) expiring within 1 hour`
+      findings.push(signal)
+      opinions.push({
+        signal,
+        opinion: 'These memories were intentionally time-limited — their expiry is expected. Verify the content is no longer relevant before letting them expire.',
+        action_recommended: 'Review expiring memories and either renew important ones or let them expire naturally',
+      })
     }
 
-    // 3. Only write perception_tick worklog if findings were detected
+    // 3. Deploy status transition monitoring — detect ACTIVE→BUILDING/FAILED
+    if (DO_TOKEN) {
+      try {
+        const depRes = await fetch(
+          `https://api.digitalocean.com/v2/apps/${DO_APP_ID_DEPLOY}/deployments?page=1&per_page=1`,
+          { headers: { Authorization: `Bearer ${DO_TOKEN}` }, signal: AbortSignal.timeout(5000) }
+        )
+        if (depRes.ok) {
+          const depData = await depRes.json() as { deployments?: Array<{ phase: string }> }
+          const currentPhase = depData.deployments?.[0]?.phase ?? ''
+          const lastPhase = _lastDeployPhase[user_id]
+          if (lastPhase && lastPhase !== currentPhase) {
+            // Phase changed — noteworthy transition
+            if (currentPhase === 'BUILDING' || currentPhase === 'DEPLOYING') {
+              const signal = `Deploy phase transition: ${lastPhase} → ${currentPhase}`
+              findings.push(signal)
+              opinions.push({
+                signal,
+                opinion: 'A new deployment is underway. This is expected after a code push. Monitor for completion.',
+                action_recommended: 'Watch for ACTIVE or ERROR/FAILED outcome — auto-retry on failure is already handled by deploymentHealthSweep',
+              })
+            } else if ((currentPhase === 'ERROR' || currentPhase === 'FAILED') && lastPhase === 'BUILDING') {
+              const signal = `Deploy FAILED: ${lastPhase} → ${currentPhase}`
+              findings.push(signal)
+              opinions.push({
+                signal,
+                opinion: 'The build just failed. This is urgent — the new version is not live.',
+                action_recommended: 'Immediately check build logs via trigger_deploy(action=logs), diagnose root cause, push a fix',
+              })
+            }
+          }
+          if (currentPhase) _lastDeployPhase[user_id] = currentPhase
+        }
+      } catch { /* non-fatal */ }
+    }
+
+    // 4. Calendar events starting within 45 minutes (spec requirement)
+    if (COMPOSIO_KEY) {
+      try {
+        const now = new Date()
+        const in45min = new Date(now.getTime() + 45 * 60 * 1000)
+        const entityId = `sparkie_user_${user_id}`
+        const calRes = await fetch(`${COMPOSIO_BASE}/actions/execute`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-api-key': COMPOSIO_KEY },
+          body: JSON.stringify({
+            actionName: 'GOOGLECALENDAR_LIST_EVENTS',
+            input: { timeMin: now.toISOString(), timeMax: in45min.toISOString(), maxResults: 3 },
+            entityId,
+          }),
+          signal: AbortSignal.timeout(8000),
+        })
+        if (calRes.ok) {
+          const calData = await calRes.json() as { data?: { items?: Array<{ summary: string; start?: { dateTime?: string } }> } }
+          const upcoming = calData?.data?.items ?? []
+          for (const evt of upcoming) {
+            const startStr = evt.start?.dateTime ? new Date(evt.start.dateTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'soon'
+            const signal = `Calendar: "${evt.summary}" starts at ${startStr} (within 45 min)`
+            findings.push(signal)
+            opinions.push({
+              signal,
+              opinion: 'An event is imminent. If Michael is in a deep work flow, this is a natural transition point.',
+              action_recommended: 'Surface this awareness in the next conversational response — mention the upcoming event naturally',
+            })
+          }
+        }
+      } catch { /* calendar check is best-effort */ }
+    }
+
+    // 5. Write perception_tick worklog if findings were detected
     if (findings.length > 0) {
       await writeWorklog(user_id, 'proactive_signal',
         `⚡ Ambient perception: ${findings.join(' | ')}`,
@@ -940,6 +1026,16 @@ async function ambientPerceptionTick(): Promise<void> {
           conclusion: findings[0].slice(0, 120),
         }
       ).catch(() => {})
+
+      // Save signal opinions to sparkie_self_memory — L1 opinion formation
+      for (const op of opinions) {
+        const opContent = JSON.stringify({ signal: op.signal, opinion: op.opinion, action_recommended: op.action_recommended })
+        await query(
+          `INSERT INTO sparkie_self_memory (category, content, source, created_at)
+           VALUES ('signal_opinions', $1, $2, NOW())`,
+          [opContent, user_id]
+        ).catch(() => {})
+      }
     }
   }
 

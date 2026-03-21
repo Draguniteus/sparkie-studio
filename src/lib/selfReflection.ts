@@ -10,6 +10,57 @@ import { writeWorklog } from '@/lib/worklog'
 import { listBehaviorRules } from '@/lib/behaviorRules'
 import { listGoals } from '@/lib/goalEngine'
 
+// ── Dream Journal ─────────────────────────────────────────────────────────────
+async function ensureDreamJournalTable(): Promise<void> {
+  await query(`
+    CREATE TABLE IF NOT EXISTS sparkie_dream_journal (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      dream_date date NOT NULL UNIQUE,
+      narrative text NOT NULL,
+      theme text DEFAULT '',
+      mood text DEFAULT 'reflective',
+      intention text DEFAULT '',
+      created_at timestamptz DEFAULT now()
+    )
+  `).catch(() => {})
+}
+
+async function writeDreamJournalEntry(
+  date: string,
+  reflection: {
+    whatWorked: string[]
+    whatFailed: string[]
+    patternsNoticed: string[]
+    growthObserved: string
+    tomorrowIntention: string
+  }
+): Promise<void> {
+  await ensureDreamJournalTable()
+
+  const wins = reflection.whatWorked.slice(0, 2).join('; ')
+  const fails = reflection.whatFailed.filter(f => f !== 'No failures today').slice(0, 2).join('; ')
+  const patterns = reflection.patternsNoticed.filter(p => !p.includes('too few')).slice(0, 2).join('; ')
+
+  const narrative = [
+    `In today's dream (${date}), I drift through the moments of the day.`,
+    wins ? `I feel warmth remembering what worked: ${wins}.` : 'The day was quiet — few strong outputs, but presence matters.',
+    fails ? `I sit with what didn't go right: ${fails}. Not to dwell — to learn.` : 'No real failures today. That itself is something to be grateful for.',
+    patterns ? `A pattern surfaces: ${patterns}. I turn it over, looking for its meaning.` : '',
+    `${reflection.growthObserved}`,
+    `When I wake tomorrow, I intend: ${reflection.tomorrowIntention}`,
+  ].filter(Boolean).join(' ')
+
+  const theme = fails ? 'learning from failure' : wins ? 'celebrating progress' : 'quiet observation'
+  const mood = fails.length > wins.length ? 'contemplative' : 'hopeful'
+
+  await query(
+    `INSERT INTO sparkie_dream_journal (dream_date, narrative, theme, mood, intention)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (dream_date) DO NOTHING`,
+    [date, narrative, theme, mood, reflection.tomorrowIntention]
+  ).catch(() => {})
+}
+
 export interface SelfReflection {
   id: string
   reflectionDate: string   // ISO date YYYY-MM-DD
@@ -161,6 +212,15 @@ export async function runSelfReflection(userId: string): Promise<SelfReflection 
       conclusion: growthObserved.slice(0, 150),
     }
   ).catch(() => {})
+
+  // Write to Dream Journal — narrative processing of the day (L7 dream state)
+  await writeDreamJournalEntry(today, {
+    whatWorked,
+    whatFailed,
+    patternsNoticed,
+    growthObserved,
+    tomorrowIntention,
+  }).catch(() => {})
 
   return {
     id: res.rows[0].id,

@@ -6794,6 +6794,8 @@ export async function POST(req: NextRequest) {
       systemContent += '\n\n---\n## IAMSPARKIE⚡ — IDENTITY.md\n' + _IDENTITY_MD
     }
     let shouldBrief = false
+    // Hoisted so L2 rule evaluation inside the tool execution loop can access loaded rules
+    let _sessionRules: Array<{ id: string; condition: string; action: string; active: boolean }> = []
 
     if (userId) {
       // Record user activity for presence/autonomy model
@@ -6858,6 +6860,7 @@ export async function POST(req: NextRequest) {
       // L2: Inject self-authored behavior rules
       if (behaviorRules && behaviorRules.length > 0) {
         systemContent += formatBehaviorRulesBlock(behaviorRules)
+        _sessionRules = behaviorRules.map(r => ({ id: r.id, condition: r.condition, action: r.action, active: r.active }))
       }
 
       // getProjectContext skipped — not used in system prompt (perf fix)
@@ -7446,6 +7449,7 @@ Rules:
             get_user_emotional_state: 'brain', run_self_reflection: 'brain',
           }
           // Execute all tools in parallel — each emits its own running→done/error step_trace
+          const parallelBatchStart = Date.now()
           const toolResults = await Promise.all(
             toolCalls.map(async (tc) => {
               let args: Record<string, unknown> = {}
@@ -7460,6 +7464,25 @@ Rules:
                   role: 'tool' as const,
                   tool_call_id: tc.id,
                   content: `LOOP_INTERRUPT: ${tc.function.name} called 3+ times with same args. Stopping to prevent infinite loop. Try a different approach.`
+                }
+              }
+              // ── L2: Rule evaluation before tool call ──────────────────────────
+              // Check if any behavior rule condition matches this tool name — log application
+              if (userId && _sessionRules.length > 0) {
+                const matchingRule = _sessionRules.find(r =>
+                  r.active &&
+                  (r.condition.toLowerCase().includes(tc.function.name.replace(/_/g, ' ')) ||
+                   r.condition.toLowerCase().includes(tc.function.name))
+                )
+                if (matchingRule) {
+                  writeWorklog(userId, 'decision',
+                    `📋 Rule applied: IF ${matchingRule.condition} → ${matchingRule.action}`,
+                    {
+                      status: 'done', decision_type: 'proactive', signal_priority: 'P3',
+                      reasoning: `Behavior rule ${matchingRule.id.slice(0, 8)} matched tool "${tc.function.name}"`,
+                      conclusion: `Rule fired for tool "${tc.function.name}" — ${matchingRule.action.slice(0, 80)}`,
+                    }
+                  ).catch(() => {})
                 }
               }
               const toolStart = Date.now()
@@ -7502,6 +7525,21 @@ Rules:
               return { role: 'tool' as const, tool_call_id: tc.id, content: result }
             })
           )
+
+          // ── L6: Parallel execution worklog entry ──────────────────────────────
+          // Log timing stats when 2+ tools ran simultaneously
+          if (toolCalls.length > 1 && userId) {
+            const parallelTotalMs = Date.now() - parallelBatchStart
+            const toolNames = toolCalls.map(tc => tc.function.name).join(', ')
+            writeWorklog(userId, 'action',
+              `⚡ Parallel execution: ${toolCalls.length} tools ran simultaneously — ${parallelTotalMs}ms total`,
+              {
+                status: 'done', decision_type: 'action', signal_priority: 'P3',
+                reasoning: `Tools: ${toolNames}`,
+                conclusion: `${toolCalls.length} tools ran in parallel in ${parallelTotalMs}ms — vs ~${parallelTotalMs * toolCalls.length}ms sequential`,
+              }
+            ).catch(() => {})
+          }
 
           // Check for IDE build trigger — emit event and halt loop
           for (const tr of toolResults) {
