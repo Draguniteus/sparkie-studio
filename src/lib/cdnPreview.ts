@@ -47,6 +47,23 @@ const SKIP_PREFIXES = [
   'prettier', 'autoprefixer', 'postcss', 'tailwindcss',
 ]
 
+// Backend-only packages — if present, project needs WC/E2B, not CDN
+const BACKEND_DEPS = new Set([
+  'express', 'fastify', 'koa', 'hapi', '@nestjs/core', '@nestjs/common',
+  'http-server', 'http', 'https', 'net', 'fs', 'child_process', 'worker_threads',
+  'pg', 'pg-pool', 'mysql', 'mysql2', 'mongoose', 'mongodb', 'prisma', '@prisma/client',
+  'sequelize', 'typeorm', 'knex', 'redis', 'ioredis',
+  'socket.io', 'ws', 'node-fetch', 'nodemailer', 'sharp',
+])
+
+// Signals that a package.json is for a frontend/browser project
+const FRONTEND_SIGNALS = [
+  'react', 'react-dom', 'vue', 'svelte', 'solid-js', '@solidjs/core',
+  'preact', 'lit', 'three', 'p5', 'pixi.js', 'd3', 'gsap',
+  'framer-motion', 'react-spring', '@react-spring/web',
+  'lucide-react', '@heroicons/react', 'recharts', 'chart.js',
+]
+
 // ─── Tree walker ──────────────────────────────────────────────────────────────
 
 /**
@@ -99,8 +116,11 @@ function applyPrefix(
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
- * Returns true when all runtime deps declared in package.json are available
- * on esm.sh, meaning we can preview without npm install / WebContainer.
+ * Returns true when the project is a browser/frontend app that can be previewed
+ * via CDN (esm.sh + Babel standalone), skipping npm install / WebContainer entirely.
+ *
+ * Strategy: allow any project that has at least one frontend signal and NO backend-only
+ * packages. Unknown frontend deps are auto-resolved via esm.sh in buildCDNPreviewHtml.
  */
 export function isCDNCompatible(files: FileNode[], activeProjectRoot?: string | null): boolean {
   // Walk the full tree to get all leaf files with reconstructed full paths
@@ -116,13 +136,24 @@ export function isCDNCompatible(files: FileNode[], activeProjectRoot?: string | 
   if (!pkg?.content) return false
 
   try {
-    const parsed = JSON.parse(pkg.content) as { dependencies?: Record<string, string> }
-    const deps = Object.keys(parsed.dependencies ?? {})
-      .filter(d => !SKIP_PREFIXES.some(s => d.startsWith(s)))
-    if (deps.length === 0) return false
-    return deps.every(dep =>
-      Object.keys(CDN_MAP).some(k => k === dep || k.startsWith(dep + '/'))
+    const parsed = JSON.parse(pkg.content) as {
+      dependencies?: Record<string, string>
+      devDependencies?: Record<string, string>
+    }
+    // Check all deps (runtime + dev) for backend-only packages
+    const allDeps = { ...(parsed.dependencies ?? {}), ...(parsed.devDependencies ?? {}) }
+    const depKeys = Object.keys(allDeps).filter(d => !SKIP_PREFIXES.some(s => d.startsWith(s)))
+    if (depKeys.length === 0) return false
+
+    // If any dep is a known backend package, this project needs WC/E2B
+    const hasBackend = depKeys.some(d => BACKEND_DEPS.has(d))
+    if (hasBackend) return false
+
+    // Must have at least one recognizable frontend signal
+    const hasFrontend = depKeys.some(d =>
+      FRONTEND_SIGNALS.some(sig => d === sig || d.startsWith(sig + '/') || d.startsWith('@' + sig.replace(/^@/, '')))
     )
+    return hasFrontend
   } catch { return false }
 }
 
@@ -156,8 +187,23 @@ export function buildCDNPreviewHtml(files: FileNode[], activeProjectRoot?: strin
     .join('\n')
     .replace(/<\/style>/gi, '<\\/style>')
 
+  // Auto-resolve any runtime dep not in CDN_MAP via esm.sh
+  const extraImports: Record<string, string> = {}
+  const pkgFile = norm.find(f => f.name === 'package.json' || f.name.endsWith('/package.json'))
+  if (pkgFile?.content) {
+    try {
+      const parsed = JSON.parse(pkgFile.content) as { dependencies?: Record<string, string> }
+      for (const [dep, ver] of Object.entries(parsed.dependencies ?? {})) {
+        if (!CDN_MAP[dep] && !SKIP_PREFIXES.some(s => dep.startsWith(s))) {
+          const cleanVer = ver.replace(/[\^~>=<*]/g, '').split('.')[0] || 'latest'
+          extraImports[dep] = `https://esm.sh/${dep}@${cleanVer}`
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
   const filesJson     = JSON.stringify(srcFiles)
-  const importmapJson = JSON.stringify({ imports: CDN_MAP })
+  const importmapJson = JSON.stringify({ imports: { ...CDN_MAP, ...extraImports } })
 
   return `<!DOCTYPE html>
 <html lang="en">

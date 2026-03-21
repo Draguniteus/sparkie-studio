@@ -1381,13 +1381,13 @@ export function ChatInput() {
         if (buildMsgId) updateMessage(chatId, buildMsgId, { content: description, isStreaming: false })
         addWorklogEntry({ type: 'result', content: `Built ${filesCreated} file${filesCreated > 1 ? 's' : ''}: ${fileNames}`, status: 'done' })
 
-        // Natural post-build wrap-up message (like competitors do)
+        // Natural post-build wrap-up message — preview-specific text added per path below
         const WRAP_PHRASES = [
-          `There you go! Check the preview on the right. Let me know if you want any changes 🙌`,
-          `All done! Take a look at the preview — happy to tweak anything you'd like ✨`,
+          `There you go! Let me know if you want any changes 🙌`,
+          `All done! Happy to tweak anything you'd like ✨`,
           `Built and ready! Let me know what you think or if you want to adjust anything 🔥`,
-          `Done! Preview is live on the right. What should we change or add next?`,
-          `There it is! Let me know how it looks and what you'd like to change 🐝`,
+          `Done! What should we change or add next?`,
+          `There it is! Let me know what you'd like to change 🐝`,
         ]
         const wrapText = WRAP_PHRASES[Math.floor(Math.random() * WRAP_PHRASES.length)]
         updateMessage(chatId, ackMsgId, { content: wrapText, isStreaming: false })
@@ -1643,6 +1643,14 @@ Promise.all([
             if (buildMsgId) updateMessage(chatId, buildMsgId, { content: `✨ Built ${fileNames}`, isStreaming: false })
             updateMessage(chatId, ackMsgId, { content: `Preview ready! ⚡`, isStreaming: false })
 
+          } else if (!hasDevScript) {
+            // ── package.json present but no recognized dev/start script ───────
+            // Preview won't auto-trigger — tell user to check the Files tab
+            if (buildMsgId) updateMessage(chatId, buildMsgId, { content: `✨ Built ${fileNames}`, isStreaming: false })
+            updateMessage(chatId, ackMsgId, {
+              content: `Build complete — check the **Files** tab to explore your project.`,
+              isStreaming: false,
+            })
           } else if (hasDevScript) {
             // ── E2B cloud build (fallback for non-CDN deps) ───────────────────
             if (buildMsgId) updateMessage(chatId, buildMsgId, {

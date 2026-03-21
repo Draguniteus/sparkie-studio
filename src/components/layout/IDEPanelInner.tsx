@@ -95,7 +95,7 @@ export function IDEPanelInner() {
 
     // ── WebContainer / E2B path ───────────────────────────────────────────────
     const flatFiles = flattenFileTree(files)
-    const hasPkg = flatFiles.some(f => f.name === 'package.json')
+    const hasPkg = flatFiles.some(f => f.name === 'package.json' || f.name.endsWith('/package.json'))
     if (!hasPkg || isExecuting) return
     lastRunKey.current = buildKey
 

@@ -247,83 +247,106 @@ export async function POST(req: NextRequest) {
           ...messages,
         ]
 
-        const res = await fetch(MINIMAX_CHAT_ENDPOINT, {
-          method: 'POST',
-          signal: AbortSignal.timeout(110_000),
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model,
-            messages: apiMessages,
-            stream: true,
-            max_tokens: 16000,
-            temperature: 0.2,
-          }),
-        })
+        // Retry up to 3 attempts when MiniMax returns an empty response (common on first turn)
+        let fullBuildRaw = ''
+        let hasMarkers = false
+        const MAX_ATTEMPTS = 3
 
-        if (!res.ok || !res.body) {
-          const errText = await res.text().catch(() => res.statusText)
-          send('error', { message: `Model error: ${errText}` })
+        for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+          if (attempt > 0) {
+            send('thinking', { text: `\u26a1 Empty response — retrying (${attempt}/${MAX_ATTEMPTS - 1})\u2026` })
+            await new Promise<void>(r => setTimeout(r, 1500))
+          }
+
+          const res = await fetch(MINIMAX_CHAT_ENDPOINT, {
+            method: 'POST',
+            signal: AbortSignal.timeout(110_000),
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+              model,
+              messages: apiMessages,
+              stream: true,
+              max_tokens: 16000,
+              temperature: 0.2,
+            }),
+          })
+
+          if (!res.ok || !res.body) {
+            const errText = await res.text().catch(() => res.statusText)
+            if (attempt < MAX_ATTEMPTS - 1) continue // retry on API error too
+            send('error', { message: `Model error: ${errText}` })
+            send('done', {})
+            controller.close()
+            return
+          }
+
+          const reader = res.body.getReader()
+          const decoder = new TextDecoder()
+          let buffer = ''
+          let thinkingEmitted = false
+          let thinkingBuffer = ''
+          let attemptRaw = ''
+
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+
+            buffer += decoder.decode(value, { stream: true })
+            const lines = buffer.split('\n')
+            buffer = lines.pop() ?? ''
+
+            for (const line of lines) {
+              const trimmed = line.trim()
+              if (!trimmed.startsWith('data: ')) continue
+              const data = trimmed.slice(6)
+              if (data === '[DONE]') continue
+
+              try {
+                const parsed = JSON.parse(data) as { choices?: Array<{ delta?: { content?: string } }> }
+                const chunk: string = parsed.choices?.[0]?.delta?.content ?? ''
+                if (!chunk) continue
+                attemptRaw += chunk
+
+                if (!thinkingEmitted) {
+                  thinkingBuffer += chunk
+                  const thinkMatch = thinkingBuffer.match(/^\[THINKING\]\s*([^\n]+)/)
+                  if (thinkMatch) {
+                    send('thinking', { text: `\uD83D\uDCAD ${thinkMatch[1].trim()}` })
+                    thinkingEmitted = true
+                    const afterThinking = thinkingBuffer.replace(/^\[THINKING\][^\n]*\n?/, '')
+                    if (afterThinking) send('delta', { content: afterThinking })
+                  } else if (thinkingBuffer.length > 120 || thinkingBuffer.includes('---FILE:')) {
+                    thinkingEmitted = true
+                    send('thinking', { text: '\u26a1 Writing code\u2026' })
+                    send('delta', { content: thinkingBuffer })
+                  }
+                  continue
+                }
+
+                send('delta', { content: chunk })
+              } catch {}
+            }
+          }
+
+          fullBuildRaw = attemptRaw
+          hasMarkers = fullBuildRaw.includes('---FILE:')
+          console.log(`[BUILD] attempt=${attempt + 1} length=${fullBuildRaw.length} hasFileMarkers=${hasMarkers} model=${model}`)
+          if (!hasMarkers && fullBuildRaw.length > 0) {
+            console.log('[BUILD] NO MARKERS — first 500 chars:', fullBuildRaw.slice(0, 500))
+          }
+
+          // Got content — stop retrying
+          if (fullBuildRaw.length > 0) break
+        }
+
+        if (fullBuildRaw.length === 0) {
+          send('error', { message: 'Model returned an empty response after retries. Please try again.' })
           send('done', {})
           controller.close()
           return
-        }
-
-        const reader = res.body.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ''
-        let thinkingEmitted = false
-        let thinkingBuffer = ''
-        let fullBuildRaw = '' // diagnostic logging
-
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split('\n')
-          buffer = lines.pop() ?? ''
-
-          for (const line of lines) {
-            const trimmed = line.trim()
-            if (!trimmed.startsWith('data: ')) continue
-            const data = trimmed.slice(6)
-            if (data === '[DONE]') continue
-
-            try {
-              const parsed = JSON.parse(data) as { choices?: Array<{ delta?: { content?: string } }> }
-              const chunk: string = parsed.choices?.[0]?.delta?.content ?? ''
-              if (!chunk) continue
-              fullBuildRaw += chunk
-
-              if (!thinkingEmitted) {
-                thinkingBuffer += chunk
-                const thinkMatch = thinkingBuffer.match(/^\[THINKING\]\s*([^\n]+)/)
-                if (thinkMatch) {
-                  send('thinking', { text: `\uD83D\uDCAD ${thinkMatch[1].trim()}` })
-                  thinkingEmitted = true
-                  const afterThinking = thinkingBuffer.replace(/^\[THINKING\][^\n]*\n?/, '')
-                  if (afterThinking) send('delta', { content: afterThinking })
-                } else if (thinkingBuffer.length > 120 || thinkingBuffer.includes('---FILE:')) {
-                  thinkingEmitted = true
-                  send('thinking', { text: '\u26a1 Writing code\u2026' })
-                  send('delta', { content: thinkingBuffer })
-                }
-                continue
-              }
-
-              send('delta', { content: chunk })
-            } catch {}
-          }
-        }
-
-        // Diagnostic: log whether ---FILE: markers appeared in raw output
-        const hasMarkers = fullBuildRaw.includes('---FILE:')
-        console.log(`[BUILD] raw output length=${fullBuildRaw.length} hasFileMarkers=${hasMarkers} model=${model}`)
-        if (!hasMarkers && fullBuildRaw.length > 0) {
-          console.log('[BUILD] NO MARKERS — first 500 chars:', fullBuildRaw.slice(0, 500))
         }
 
         // Note: MiniMax-M2.7 outputs clean ---FILE:---/---END FILE--- blocks per prompt instructions.
