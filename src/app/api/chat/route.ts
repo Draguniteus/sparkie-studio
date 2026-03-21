@@ -1182,54 +1182,42 @@ You can spin up and control a real browser — log into sites, click buttons, fi
 - Simple API calls → call the API directly
 - Any page accessible without interaction → skip the browser
 
-## HOW IT WORKS — TWO LEVELS
+## NATIVE BROWSER TOOLS (use these — they are faster and direct)
 
-**Level 1 — Browser Use Task (DEFAULT — use 95% of the time)**
-- Composio tool: HYPERBROWSER_START_BROWSER_USE_TASK
-- Give it a natural-language task: "Go to X, click Y, fill in Z, return the result"
-- Supports vision (useVision: true) — it sees the page like a human
-- Async: start the task, then poll HYPERBROWSER_GET_BROWSER_USE_TASK_STATUS until done
-- Poll every 5 seconds, max 12 attempts (60 seconds hard cap)
+**Reading pages (no login needed):**
+- browser_navigate(url) — returns page as markdown. Use for docs, articles, dashboards.
+- browser_screenshot(url) — takes a screenshot, displays it in chat as an image.
+- browser_extract(url, prompt) — extracts structured data from a page using AI.
 
-**Level 2 — Computer Use Task (LAST RESORT ONLY — 5-10x more expensive)**
-- Composio tool: HYPERBROWSER_START_CLAUDE_COMPUTER_USE_TASK
-- Full mouse + keyboard control via screenshots
-- Only use when Browser Use Task repeatedly fails
-- Status endpoint returns only running/completed/failed — NOT the result text
-- After completion, use search_web or a new Browser Use Task to read the final state
+**Interactive browser tasks (click, fill, login):**
+- browser_click(url, selector?, description?) — clicks an element on a page.
+- browser_fill(url, value, selector?, description?) — fills a form field.
+- browser_use_profile(profile_id, task, url?) — runs a multi-step browser task with a saved profile. Use this for authenticated browsing — it handles navigation, clicks, fills automatically via AI.
+
+**Profile management:**
+- browser_create_profile(name?) — creates a persistent browser profile. Saves profile ID to self-memory automatically.
+- browser_use_profile — also uses the profile's saved cookies/login state.
 
 ## LOGIN PERSISTENCE — ALWAYS USE PROFILES
-Sessions are temporary. Profiles persist cookies + login state across sessions forever.
+Profiles persist cookies + login state across sessions.
 
-1. Check if profile already exists (check self-memory or attempt history)
-2. If no profile: create one with HYPERBROWSER_CREATE_PROFILE, save the profile ID to self-memory
-3. First session: log in (cookies automatically saved to profile)
-4. All future sessions: reference the same profile ID — you stay logged in automatically
+1. Check self-memory category "browser_profiles" for an existing profile
+2. If no profile: call browser_create_profile(name) — ID is auto-saved to memory
+3. First use with profile: log in by giving browser_use_profile a login task
+4. Future sessions: reuse the same profile ID — you stay logged in automatically
 
-CRITICAL: Always set persistChanges: true in sessionOptions — without it, login state is discarded when the session ends.
-
-## EXAMPLE SESSION OPTIONS
-\`\`\`json
-{
-  "sessionOptions": {
-    "profile": {
-      "id": "<saved-profile-id>",
-      "persistChanges": true
-    },
-    "timeoutMinutes": 10
-  },
-  "maxSteps": 10,
-  "useVision": true,
-  "keepBrowserOpen": false
-}
-\`\`\`
+## DECISION TREE
+- Public page, just read it → browser_navigate (fast, no browser spin-up)
+- Need screenshot to show user → browser_screenshot
+- Extract structured data → browser_extract
+- Single click/fill on page → browser_click or browser_fill
+- Login + multi-step task → browser_use_profile (handles everything automatically)
 
 ## RULES
-- NEVER use browser automation just to read a public web page — use fetch/search instead
-- NEVER use Computer Use when Browser Use suffices — cost difference is massive
-- ALWAYS save profile IDs to self-memory after creating them
-- ALWAYS poll status after starting any async task
-- If Browser Use fails 2+ times, escalate to Computer Use with justification
+- NEVER spin up a browser just to read a plain public page — use browser_navigate or search_web
+- ALWAYS check self-memory for existing profile IDs before creating new ones
+- ALWAYS save new profile IDs to self-memory (browser_create_profile does this automatically)
+- Show screenshots to user via IMAGE_URL — they display inline in chat automatically
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 SECTION 17B · UI CARD SYSTEM — ACTION CARDS & SUMMARY CARDS
@@ -2957,6 +2945,14 @@ const SPARKIE_TOOLS = [
   { type: 'function', function: { name: 'transcribe_audio', description: 'Transcribe an audio file (MP3, WAV, M4A, OGG) to text using Deepgram nova-2 model with smart formatting. Use for voice notes, audio summaries, or any audio-to-text task. Returns the full transcript.', parameters: { type: 'object', properties: { url: { type: 'string', description: 'Direct URL to the audio file to transcribe' } }, required: ['url'] } } },
   { type: 'function', function: { name: 'manage_calendar_event', description: 'Create, update, or cancel/delete a Google Calendar event. For create: title and start_time are required. For update/cancel: event_id is required.', parameters: { type: 'object', properties: { action: { type: 'string', description: '"create" | "update" | "cancel" | "delete"' }, event_id: { type: 'string', description: 'Event ID (for update/cancel/delete)' }, title: { type: 'string', description: 'Event title' }, description: { type: 'string', description: 'Event description' }, start_time: { type: 'string', description: 'ISO 8601 start datetime with timezone, e.g. "2026-03-26T14:00:00-05:00"' }, end_time: { type: 'string', description: 'ISO 8601 end datetime. Defaults to start_time + 1 hour.' }, attendees: { type: 'array', items: { type: 'string' }, description: 'List of attendee email addresses' } }, required: ['action'] } } },
   { type: 'function', function: { name: 'send_card_to_user', description: 'Send a beautiful HITL card to the user in chat instead of plain text. Use for: email drafts (type=email_draft), tasks (type=task), calendar events (type=calendar_event), contacts (type=contact), memory saves (type=memory), deploy confirmations (type=deploy), reminders (type=reminder), GitHub PRs (type=github_pr), reports (type=report), media (type=media), images (type=image), permission requests (type=permission), confirmations (type=confirmation), browser actions (type=browser_action). Always prefer cards over plain text for structured content.', parameters: { type: 'object', properties: { type: { type: 'string', description: 'Card type: email_draft | calendar_event | memory | contact | task | deploy | reminder | github_pr | report | media | image | permission | confirmation | browser_action' }, title: { type: 'string', description: 'Card header title (e.g. "Email Draft", "Memory Saved")' }, subtitle: { type: 'string', description: 'Secondary header text (e.g. email subject, event name)' }, to: { type: 'string', description: 'Recipient badge (for email/contact cards)' }, body: { type: 'string', description: 'Main body text (email body, event description, memory content, etc.)' }, fields: { type: 'array', items: { type: 'object', properties: { label: { type: 'string' }, value: { type: 'string' } }, required: ['label', 'value'] }, description: 'Key-value fields to display (e.g. date, attendees, commit SHA)' }, items: { type: 'array', items: { type: 'string' }, description: 'Bullet list items (e.g. tasks to approve, permissions requested)' }, actions: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, label: { type: 'string' }, icon: { type: 'string' }, variant: { type: 'string', description: '"primary" | "secondary" | "danger"' } }, required: ['id', 'label'] }, description: 'Action buttons on the card' }, preview_url: { type: 'string', description: 'Image URL to show as preview (for image/media cards)' }, text: { type: 'string', description: 'Short text shown above the card in chat' }, metadata: { type: 'object', description: 'Any extra data to attach to the card' } }, required: ['type', 'title', 'actions'] } } },
+  // ── Block 6: Hyperbrowser browser control tools ────────────────────────────
+  { type: 'function', function: { name: 'browser_navigate', description: 'Navigate to a URL and read the page content as markdown. Returns the page title and text content. Use for reading websites, docs, news, or any web page. Powered by Hyperbrowser.', parameters: { type: 'object', properties: { url: { type: 'string', description: 'The full URL to navigate to (must include https://)' }, extract_markdown: { type: 'boolean', description: 'Return page as readable markdown (default true). Set false for raw HTML.' } }, required: ['url'] } } },
+  { type: 'function', function: { name: 'browser_screenshot', description: 'Take a screenshot of a web page and display it in the chat as an image. Automatically shows the image to the user. Use to visually show a website, dashboard, design, or error state. Powered by Hyperbrowser.', parameters: { type: 'object', properties: { url: { type: 'string', description: 'The full URL to screenshot (must include https://)' } }, required: ['url'] } } },
+  { type: 'function', function: { name: 'browser_extract', description: 'Extract structured data from a web page using a natural language prompt. Can extract prices, contacts, tables, listings, or any structured content. Returns structured JSON. Powered by Hyperbrowser.', parameters: { type: 'object', properties: { url: { type: 'string', description: 'The full URL to extract from (must include https://)' }, prompt: { type: 'string', description: 'What to extract, e.g. "extract all product names and prices" or "get the author and publication date"' }, schema: { type: 'object', description: 'Optional JSON schema defining the output format' } }, required: ['url', 'prompt'] } } },
+  { type: 'function', function: { name: 'browser_click', description: 'Click on an element on a web page. Use for interacting with buttons, links, checkboxes, or any clickable element. Requires a selector (CSS/XPath) or a natural language description of what to click. Powered by Hyperbrowser browser-use agent.', parameters: { type: 'object', properties: { url: { type: 'string', description: 'The URL of the page to interact with' }, selector: { type: 'string', description: 'CSS or XPath selector for the element (preferred if known)' }, description: { type: 'string', description: 'Natural language description of what to click, e.g. "the Submit button" or "the first search result"' }, profile_id: { type: 'string', description: 'Optional: Hyperbrowser profile ID for authenticated sessions' } }, required: ['url'] } } },
+  { type: 'function', function: { name: 'browser_fill', description: 'Fill in a form field on a web page. Use for search boxes, login fields, text inputs, or any form input. Powered by Hyperbrowser browser-use agent.', parameters: { type: 'object', properties: { url: { type: 'string', description: 'The URL of the page with the form' }, selector: { type: 'string', description: 'CSS selector for the input field (preferred if known)' }, value: { type: 'string', description: 'The value to type into the field' }, description: { type: 'string', description: 'Natural language description of the field, e.g. "the email input" or "the search box"' }, profile_id: { type: 'string', description: 'Optional: Hyperbrowser profile ID for authenticated sessions' } }, required: ['url', 'value'] } } },
+  { type: 'function', function: { name: 'browser_create_profile', description: 'Create a persistent browser profile for authenticated sessions. Once created, use the profile ID with browser_use_profile to log into websites and have credentials persist between sessions. Powered by Hyperbrowser.', parameters: { type: 'object', properties: { name: { type: 'string', description: 'Name for the profile, e.g. "gmail-michael" or "linkedin-auth"' } }, required: [] } } },
+  { type: 'function', function: { name: 'browser_use_profile', description: 'Use a previously created browser profile to complete a browser task. The profile persists cookies and login state, so this can log in, fill forms, and interact with authenticated pages. Use for tasks like "log into Gmail and forward the last email" or "post to LinkedIn". Powered by Hyperbrowser browser-use agent.', parameters: { type: 'object', properties: { profile_id: { type: 'string', description: 'The Hyperbrowser profile ID (from browser_create_profile or memory)' }, task: { type: 'string', description: 'Natural language task to perform, e.g. "Navigate to https://gmail.com and read the first unread email"' }, url: { type: 'string', description: 'Optional starting URL for the task' } }, required: ['profile_id', 'task'] } } },
 ]
 
 // ── One-time DDL init guard ───────────────────────────────────────────────────────
@@ -4747,6 +4743,179 @@ def invoke_llm(query, model='MiniMax-M2.7'):
           metadata: cardMeta,
         }
         return `SPARKIE_CARD:${JSON.stringify({ card: cardData, text: cardText ?? '' })}`
+      }
+
+      // ── Block 6: Hyperbrowser browser control ────────────────────────────────
+      case 'browser_navigate': {
+        const { url: hbUrl, extract_markdown: hbMd = true } = args as { url: string; extract_markdown?: boolean }
+        if (!hbUrl) return 'browser_navigate: url is required'
+        const HB_KEY = process.env.HYPERBROWSER_API_KEY ?? ''
+        if (!HB_KEY) return 'HYPERBROWSER_API_KEY not configured'
+        try {
+          const formats = hbMd ? ['markdown', 'links'] : ['html']
+          const res = await fetch('https://api.hyperbrowser.ai/api/scrape', {
+            method: 'POST',
+            headers: { 'x-api-key': HB_KEY, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: hbUrl, scrapeOptions: { formats } }),
+            signal: AbortSignal.timeout(30000),
+          })
+          if (!res.ok) return `browser_navigate error: ${res.status} — ${await res.text()}`
+          const data = await res.json() as { markdown?: string; html?: string; links?: string[]; metadata?: { title?: string; description?: string } }
+          const title = data.metadata?.title ?? 'Unknown'
+          const content = (data.markdown ?? data.html ?? '').slice(0, 4000)
+          const links = (data.links ?? []).slice(0, 10).join('\n')
+          return `Navigated to: ${hbUrl}\nTitle: ${title}\n\n${content}${links ? '\n\nLinks:\n' + links : ''}`
+        } catch (e) { return `browser_navigate error: ${String(e)}` }
+      }
+
+      case 'browser_screenshot': {
+        const { url: hbUrl } = args as { url: string }
+        if (!hbUrl) return 'browser_screenshot: url is required'
+        const HB_KEY = process.env.HYPERBROWSER_API_KEY ?? ''
+        if (!HB_KEY) return 'HYPERBROWSER_API_KEY not configured'
+        try {
+          const res = await fetch('https://api.hyperbrowser.ai/api/scrape', {
+            method: 'POST',
+            headers: { 'x-api-key': HB_KEY, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: hbUrl, scrapeOptions: { formats: ['screenshot', 'markdown'] } }),
+            signal: AbortSignal.timeout(35000),
+          })
+          if (!res.ok) return `browser_screenshot error: ${res.status} — ${await res.text()}`
+          const data = await res.json() as { screenshot?: string; markdown?: string; metadata?: { title?: string } }
+          const pageTitle = data.metadata?.title ?? hbUrl
+          if (data.screenshot) {
+            const imgData = data.screenshot.startsWith('data:') ? data.screenshot : `data:image/png;base64,${data.screenshot}`
+            // Persist to DB asset for stable URL if userId available
+            if (userId) {
+              try {
+                const hbBaseUrl = process.env.NEXTAUTH_URL ?? 'https://sparkie-studio-fymtq.ondigitalocean.app'
+                const fid = crypto.randomUUID()
+                await query(
+                  `INSERT INTO sparkie_assets (user_id, name, content, asset_type, source, file_id, chat_title, chat_id, language) VALUES ($1, $2, $3, 'image', 'browser', $4, '', '', '')`,
+                  [userId, `screenshot-${Date.now()}.png`, imgData, fid]
+                )
+                return `IMAGE_URL:${hbBaseUrl}/api/assets-image?fid=${fid}\nScreenshot of: ${pageTitle}\n${data.markdown?.slice(0, 300) ?? ''}`
+              } catch { /* fall through to raw data URL */ }
+            }
+            return `IMAGE_URL:${imgData}\nScreenshot of: ${pageTitle}`
+          }
+          return `browser_screenshot: no image returned. Page: ${pageTitle}\n${data.markdown?.slice(0, 500) ?? ''}`
+        } catch (e) { return `browser_screenshot error: ${String(e)}` }
+      }
+
+      case 'browser_extract': {
+        const { url: hbUrl, prompt: hbPrompt, schema: hbSchema } = args as { url: string; prompt: string; schema?: Record<string, unknown> }
+        if (!hbUrl || !hbPrompt) return 'browser_extract: url and prompt are required'
+        const HB_KEY = process.env.HYPERBROWSER_API_KEY ?? ''
+        if (!HB_KEY) return 'HYPERBROWSER_API_KEY not configured'
+        try {
+          const body: Record<string, unknown> = { urls: [hbUrl], prompt: hbPrompt }
+          if (hbSchema) body.schema = hbSchema
+          const res = await fetch('https://api.hyperbrowser.ai/api/extract', {
+            method: 'POST',
+            headers: { 'x-api-key': HB_KEY, 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(35000),
+          })
+          if (!res.ok) return `browser_extract error: ${res.status} — ${await res.text()}`
+          const data = await res.json() as { data?: unknown; error?: string }
+          if (data.error) return `browser_extract failed: ${data.error}`
+          return JSON.stringify(data.data ?? data, null, 2).slice(0, 4000)
+        } catch (e) { return `browser_extract error: ${String(e)}` }
+      }
+
+      case 'browser_click': {
+        const { url: hbUrl, selector: hbSel, description: hbDesc, profile_id: hbProfileId } = args as { url: string; selector?: string; description?: string; profile_id?: string }
+        if (!hbUrl) return 'browser_click: url is required'
+        const HB_KEY = process.env.HYPERBROWSER_API_KEY ?? ''
+        if (!HB_KEY) return 'HYPERBROWSER_API_KEY not configured'
+        try {
+          const clickTarget = hbSel ? `the element with selector "${hbSel}"` : (hbDesc ?? 'the most prominent clickable element')
+          const task = `Navigate to ${hbUrl} and click on ${clickTarget}`
+          const sessionOpts: Record<string, unknown> = {}
+          if (hbProfileId) sessionOpts.profile = { id: hbProfileId, persistChanges: true }
+          const res = await fetch('https://api.hyperbrowser.ai/api/agents/browser-use', {
+            method: 'POST',
+            headers: { 'x-api-key': HB_KEY, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ task, ...(Object.keys(sessionOpts).length ? { sessionOptions: sessionOpts } : {}) }),
+            signal: AbortSignal.timeout(60000),
+          })
+          if (!res.ok) return `browser_click error: ${res.status} — ${await res.text()}`
+          const data = await res.json() as { result?: string; output?: string; finalResult?: string }
+          return data.finalResult ?? data.result ?? data.output ?? '✅ Click action completed'
+        } catch (e) { return `browser_click error: ${String(e)}` }
+      }
+
+      case 'browser_fill': {
+        const { url: hbUrl, selector: hbSel, value: hbValue, description: hbDesc, profile_id: hbProfileId } = args as { url: string; selector?: string; value: string; description?: string; profile_id?: string }
+        if (!hbUrl || !hbValue) return 'browser_fill: url and value are required'
+        const HB_KEY = process.env.HYPERBROWSER_API_KEY ?? ''
+        if (!HB_KEY) return 'HYPERBROWSER_API_KEY not configured'
+        try {
+          const fieldTarget = hbSel ? `the field with selector "${hbSel}"` : (hbDesc ?? 'the main input field')
+          const task = `Navigate to ${hbUrl} and fill ${fieldTarget} with: ${hbValue}`
+          const sessionOpts: Record<string, unknown> = {}
+          if (hbProfileId) sessionOpts.profile = { id: hbProfileId, persistChanges: true }
+          const res = await fetch('https://api.hyperbrowser.ai/api/agents/browser-use', {
+            method: 'POST',
+            headers: { 'x-api-key': HB_KEY, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ task, ...(Object.keys(sessionOpts).length ? { sessionOptions: sessionOpts } : {}) }),
+            signal: AbortSignal.timeout(60000),
+          })
+          if (!res.ok) return `browser_fill error: ${res.status} — ${await res.text()}`
+          const data = await res.json() as { result?: string; output?: string; finalResult?: string }
+          return data.finalResult ?? data.result ?? data.output ?? '✅ Fill action completed'
+        } catch (e) { return `browser_fill error: ${String(e)}` }
+      }
+
+      case 'browser_create_profile': {
+        const { name: profileName = 'sparkie-default' } = args as { name?: string }
+        const HB_KEY = process.env.HYPERBROWSER_API_KEY ?? ''
+        if (!HB_KEY) return 'HYPERBROWSER_API_KEY not configured'
+        try {
+          const res = await fetch('https://api.hyperbrowser.ai/api/profile', {
+            method: 'POST',
+            headers: { 'x-api-key': HB_KEY, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: profileName }),
+            signal: AbortSignal.timeout(15000),
+          })
+          if (!res.ok) return `browser_create_profile error: ${res.status} — ${await res.text()}`
+          const data = await res.json() as { id?: string; name?: string }
+          if (!data.id) return 'browser_create_profile: no profile ID in response'
+          // Persist profile ID to Sparkie self-memory for future use
+          if (userId) {
+            await fetch(`${baseUrl}/api/sparkie-self-memory`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ category: 'browser_profiles', content: `Browser profile "${profileName}": ${data.id}`, source: 'sparkie' }),
+            }).catch(() => {})
+          }
+          return `✅ Browser profile created — "${profileName}" (ID: ${data.id}). Use this ID with browser_use_profile for authenticated browsing.`
+        } catch (e) { return `browser_create_profile error: ${String(e)}` }
+      }
+
+      case 'browser_use_profile': {
+        const { profile_id: hbProfileId, task: hbTask, url: hbStartUrl } = args as { profile_id: string; task: string; url?: string }
+        if (!hbProfileId || !hbTask) return 'browser_use_profile: profile_id and task are required'
+        const HB_KEY = process.env.HYPERBROWSER_API_KEY ?? ''
+        if (!HB_KEY) return 'HYPERBROWSER_API_KEY not configured'
+        try {
+          const body: Record<string, unknown> = {
+            task: hbTask,
+            sessionOptions: { profile: { id: hbProfileId, persistChanges: true }, useStealth: true },
+          }
+          if (hbStartUrl) body.startUrl = hbStartUrl
+          const res = await fetch('https://api.hyperbrowser.ai/api/agents/browser-use', {
+            method: 'POST',
+            headers: { 'x-api-key': HB_KEY, 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(90000),
+          })
+          if (!res.ok) return `browser_use_profile error: ${res.status} — ${await res.text()}`
+          const data = await res.json() as { result?: string; output?: string; finalResult?: string; error?: string }
+          if (data.error) return `browser_use_profile failed: ${data.error}`
+          return data.finalResult ?? data.result ?? data.output ?? '✅ Browser task completed'
+        } catch (e) { return `browser_use_profile error: ${String(e)}` }
       }
 
       case 'send_email': {
@@ -6621,6 +6790,10 @@ Rules:
             read_email_thread: 'Reading thread...', manage_email: 'Managing email...',
             rsvp_event: 'Sending RSVP...', manage_calendar_event: 'Updating calendar...',
             analyze_file: 'Analyzing file...', fetch_url: 'Fetching URL...', research: 'Researching...',
+            browser_navigate: 'Browsing the web...', browser_screenshot: 'Taking screenshot...',
+            browser_extract: 'Extracting page data...', browser_click: 'Clicking element...',
+            browser_fill: 'Filling form field...', browser_create_profile: 'Creating browser profile...',
+            browser_use_profile: 'Running browser task with profile...',
           }
           // Human-readable worklog step labels (shown in worklog trace, richer than chip labels)
           const WORKLOG_STEP_LABELS: Record<string, string> = {
@@ -6679,6 +6852,10 @@ Rules:
             analyze_file: 'Analyzing file',
             fetch_url: 'Fetching URL',
             research: 'Researching topic',
+            browser_navigate: 'Browsing to page', browser_screenshot: 'Taking screenshot',
+            browser_extract: 'Extracting page content', browser_click: 'Clicking element',
+            browser_fill: 'Filling form field', browser_create_profile: 'Creating browser profile',
+            browser_use_profile: 'Running browser task',
           }
           const chipLabel = toolCalls.length > 1
             ? `Running ${toolCalls.length} tools...`
@@ -6705,21 +6882,18 @@ Rules:
             delete_memory: 'trash', run_tests: 'checkCircle', check_lint: 'alertCircle',
             read_email_thread: 'mail', manage_email: 'mail', rsvp_event: 'calendar',
             manage_calendar_event: 'calendar', analyze_file: 'file', fetch_url: 'globe', research: 'search',
+            browser_navigate: 'globe', browser_screenshot: 'image', browser_extract: 'file',
+            browser_click: 'globe', browser_fill: 'edit', browser_create_profile: 'brain',
+            browser_use_profile: 'globe',
           }
-          const stepTraceIcon = stepIcon[chipToolName] ?? 'zap'
-          // Use WORKLOG_STEP_LABELS for the running trace label (human-readable)
-          const runningLabel = toolCalls.length > 1
-            ? `Running ${toolCalls.length} tools...`
-            : (WORKLOG_STEP_LABELS[chipToolName] ?? chipLabel)
-          // Live emit running step_trace immediately
-          liveEnqueue({ step_trace: { icon: stepTraceIcon, label: runningLabel, status: 'running' } })
-
-          // Execute all tools in parallel
+          // Execute all tools in parallel — each emits its own running→done/error step_trace
           const toolResults = await Promise.all(
             toolCalls.map(async (tc) => {
               let args: Record<string, unknown> = {}
               try { args = JSON.parse(tc.function.arguments) } catch { /* bad json */ }
               hiveLog.push(HIVE_TOOLS[tc.function.name] ?? `⚙️ ${tc.function.name.replace(/_/g, ' ')} Bee Deployed...`)
+              // Emit per-tool running step_trace immediately at start — before any async work
+              liveEnqueue({ step_trace: { icon: stepIcon[tc.function.name] ?? 'zap', label: WORKLOG_STEP_LABELS[tc.function.name] ?? `Running — ${tc.function.name.replace(/_/g, ' ')}`, status: 'running' } })
               // Phase 3: loop detection via execution trace
               const argsHash = tc.function.arguments.slice(0, 100)
               if (userId && detectTraceLoop(requestId, tc.function.name, argsHash)) {
