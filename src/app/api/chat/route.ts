@@ -6890,6 +6890,10 @@ Rules:
         if (!loopRes.ok) break
 
         const loopData = await loopRes.json()
+        // Wire real token counts so context health check functions correctly
+        if (requestId && loopData.usage?.total_tokens) {
+          updateTokenEstimate(requestId, loopData.usage.total_tokens)
+        }
         const choice = loopData.choices?.[0]
         const finishReason = choice?.finish_reason
 
@@ -7067,7 +7071,11 @@ Rules:
                 }
               }
               const toolStart = Date.now()
-              const result = await executeTool(tc.function.name, args, toolContext)
+              const TOOL_TIMEOUT_MS = 30_000
+              const result = await Promise.race([
+                executeTool(tc.function.name, args, toolContext),
+                new Promise<string>((resolve) => setTimeout(() => resolve(`Error: ${tc.function.name} timed out after 30s`), TOOL_TIMEOUT_MS)),
+              ])
               if (userId) {
                 addTraceEntry(requestId, {
                   tool: tc.function.name,

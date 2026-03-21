@@ -150,19 +150,19 @@ export async function compressOldestBatch(
     const ids = res.rows.map((r) => r.id)
     if (ids.length === 0) return
 
-    // Mark them as compressed (content replaced by summary marker)
-    await query(
-      `UPDATE sparkie_threads SET is_compressed = TRUE, content = '[compressed]' WHERE id = ANY($1)`,
-      [ids]
-    )
-
-    // Write the summary as a new compressed entry
+    // Write the summary FIRST — if this fails, original messages are still intact
     await query(
       `INSERT INTO sparkie_threads (user_id, role, content, is_compressed, token_estimate)
        VALUES ($1, 'assistant', $2, TRUE, $3)`,
       [userId, summaryText, Math.ceil(summaryText.length * ROUGH_TOKENS_PER_CHAR)]
     )
-  } catch { /* non-fatal */ }
+
+    // Only mark as compressed after summary is safely written
+    await query(
+      `UPDATE sparkie_threads SET is_compressed = TRUE, content = '[compressed]' WHERE id = ANY($1)`,
+      [ids]
+    )
+  } catch (e) { console.error('[threadStore] compressOldestBatch error:', e) }
 }
 
 export { MAX_THREAD_TOKENS }

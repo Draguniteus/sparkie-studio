@@ -20,6 +20,15 @@ export interface ExecutionTrace {
 // In-memory trace store — keyed by requestId (lives for one request lifecycle)
 const activeTraces = new Map<string, ExecutionTrace>()
 
+// Auto-clean stale traces older than 1 hour to prevent memory leak
+const TRACE_TTL_MS = 60 * 60 * 1000
+setInterval(() => {
+  const cutoff = Date.now() - TRACE_TTL_MS
+  for (const [id, trace] of activeTraces) {
+    if (trace.startedAt < cutoff) activeTraces.delete(id)
+  }
+}, 15 * 60 * 1000) // run every 15 minutes
+
 export function startTrace(requestId: string, userId: string): ExecutionTrace {
   const trace: ExecutionTrace = {
     requestId,

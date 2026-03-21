@@ -134,7 +134,12 @@ export function ChatInput() {
   }, [])  // stable — no deps, fetch is global
   // ─────────────────────────────────────────────────────────────────────────
 
-  const [input, setInput] = useState("")
+  // ── Uncontrolled textarea for lag-free typing ────────────────────────────
+  // `input` state caused a full re-render of this 2500-line component on EVERY
+  // keystroke. Replaced with `isEmpty` (only changes on empty↔non-empty transition)
+  // so the component re-renders at most twice per message typed.
+  // The actual value is always read from textareaRef.current.value.
+  const [isEmpty, setIsEmpty] = useState(true)
   const [showModels, setShowModels] = useState(false)
   const [hiveStatus, setHiveStatus] = useState<string | null>(null)
   const [_stepTraces, _setStepTraces] = useState<StepTrace[]>([])
@@ -1961,7 +1966,12 @@ Promise.all([
             })
             if (res.ok) {
               const { transcript } = await res.json()
-              if (transcript?.trim()) setInput(prev => prev ? prev + ' ' + transcript : transcript)
+              if (transcript?.trim() && textareaRef.current) {
+                textareaRef.current.value = textareaRef.current.value
+                  ? textareaRef.current.value + ' ' + transcript
+                  : transcript
+                setIsEmpty(false)
+              }
             }
           } catch { /* silent fail */ } finally {
             setIsTranscribing(false)
@@ -2050,23 +2060,28 @@ Promise.all([
     })
   }, [currentChatId, createChat, addMessage, updateMessage, selectedModel])
 
-  const inputRef = useRef(input)
-  useEffect(() => { inputRef.current = input }, [input])
+  // inputRef removed — read live value from textareaRef.current.value instead
+
+  const clearTextarea = useCallback(() => {
+    if (textareaRef.current) {
+      textareaRef.current.value = ''
+      textareaRef.current.style.height = 'auto'
+    }
+    setIsEmpty(true)
+  }, [])
 
   const handleSubmit = useCallback(async () => {
-    if ((!inputRef.current.trim() && !uploadedFile) || isStreaming) return
+    const currentValue = textareaRef.current?.value ?? ''
+    if ((!currentValue.trim() && !uploadedFile) || isStreaming) return
 
     // ─── Slash commands ────────────────────────────────────────────────────
-    const trimmed = inputRef.current.trim()
+    const trimmed = currentValue.trim()
     const slashCmd = trimmed.toLowerCase().split(/\s+/)[0]
     if (slashCmd.startsWith('/')) {
       let chatId = currentChatId
       if (!chatId) chatId = createChat()
       addMessage(chatId, { role: 'user', content: trimmed })
-      setInput('')
-      requestAnimationFrame(() => {
-        if (textareaRef.current) textareaRef.current.style.height = 'auto'
-      })
+      clearTextarea()
 
       if (slashCmd === '/startradio') {
         window.dispatchEvent(new CustomEvent('sparkie:startradio'))
@@ -2130,7 +2145,7 @@ Promise.all([
 
     let chatId = getOrCreateSingleChat()
 
-    const userContent = inputRef.current.trim()
+    const userContent = (textareaRef.current?.value ?? '').trim()
     // ── Include attached file in message ────────────────────────────────────
     let messageContent = userContent
     let messageImageUrl: string | undefined
@@ -2149,11 +2164,7 @@ Promise.all([
     }
     addMessage(chatId, { role: "user", content: messageContent, ...(messageImageUrl ? { imageUrl: messageImageUrl } : {}) })
     saveMessage('user', messageContent)
-    setInput("")
-
-    requestAnimationFrame(() => {
-      if (textareaRef.current) textareaRef.current.style.height = "auto"
-    })
+    clearTextarea()
 
     // Natural language media detection — catches "generate me a song", "make me a beat", etc.
     // even when the user hasn't tapped the mode button
@@ -2207,13 +2218,16 @@ Promise.all([
         streamAgent(chatId, userContent)
       }
     }
-  }, [isStreaming, currentChatId, createChat, addMessage, genMode, streamAgent, generateMedia, classifyIntent, streamReply])
+  }, [isStreaming, currentChatId, createChat, addMessage, genMode, streamAgent, generateMedia, classifyIntent, streamReply, clearTextarea])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (slashSuggestions.length > 0) {
       if (e.key === "Tab" || e.key === "ArrowRight") {
         e.preventDefault()
-        setInput(slashSuggestions[0].cmd + " ")
+        if (textareaRef.current) {
+          textareaRef.current.value = slashSuggestions[0].cmd + " "
+          setIsEmpty(false)
+        }
         setSlashSuggestions([])
         return
       }
@@ -2227,19 +2241,22 @@ Promise.all([
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value
-    setInput(val)
+    // ── No setInput — textarea is uncontrolled. Only track empty↔non-empty
+    // transition (rare) so the send button and template toggle stay reactive.
+    const nowEmpty = val.trim().length === 0
+    if (nowEmpty !== isEmpty) setIsEmpty(nowEmpty)
+
+    // Height auto-resize
     const el = e.target
     requestAnimationFrame(() => {
       el.style.height = "auto"
-          el.style.height = Math.min(el.scrollHeight, 200) + "px"
+      el.style.height = Math.min(el.scrollHeight, 200) + "px"
     })
-    // Slash command autocomplete
+    // Slash command autocomplete — only update state when actually needed
     const word = val.split(/\s+/)[0]
     if (word.startsWith('/') && val === word) {
-      setSlashSuggestions(
-        SLASH_COMMANDS.filter(s => s.cmd.startsWith(word.toLowerCase()))
-      )
-    } else {
+      setSlashSuggestions(SLASH_COMMANDS.filter(s => s.cmd.startsWith(word.toLowerCase())))
+    } else if (slashSuggestions.length > 0) {
       setSlashSuggestions([])
     }
   }
@@ -2258,7 +2275,7 @@ Promise.all([
   }
 
   const messages_count = useAppStore(useShallow((s) => s.messages.length))
-  const showTemplates = messages_count === 0 && input === "" && genMode === "chat"
+  const showTemplates = messages_count === 0 && isEmpty && genMode === "chat"
 
   return (
     <>
@@ -2270,7 +2287,7 @@ Promise.all([
           {slashSuggestions.map((s) => (
             <button
               key={s.cmd}
-              onMouseDown={(e) => { e.preventDefault(); setInput(s.cmd + " "); setSlashSuggestions([]) }}
+              onMouseDown={(e) => { e.preventDefault(); if (textareaRef.current) { textareaRef.current.value = s.cmd + " "; setIsEmpty(false) } setSlashSuggestions([]) }}
               className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-hive-hover text-left transition-colors"
             >
               <span className="text-honey-500 font-mono text-sm font-semibold">{s.cmd}</span>
@@ -2310,7 +2327,7 @@ Promise.all([
       )}
       <div className="rounded-2xl bg-hive-surface border border-hive-border focus-within:border-honey-500/40 transition-colors">
         <textarea
-          ref={textareaRef} value={input} onChange={handleInput} onKeyDown={handleKeyDown}
+          ref={textareaRef} onChange={handleInput} onKeyDown={handleKeyDown}
           placeholder={placeholders[genMode]} rows={1}
           className="w-full px-4 pt-3 pb-2 bg-transparent text-sm text-text-primary placeholder:text-text-muted resize-none focus:outline-none min-h-[44px] max-h-[200px]"
         />
@@ -2538,9 +2555,9 @@ Promise.all([
 
             {/* Send button — Stop is in the InMemoryPill above chat only */}
             <button
-              onClick={handleSubmit} disabled={!input.trim() && !uploadedFile}
+              onClick={handleSubmit} disabled={isEmpty && !uploadedFile}
               className={`p-2 rounded-xl transition-all duration-200 active:scale-95 ${
-                input.trim() || uploadedFile
+                !isEmpty || uploadedFile
                   ? "bg-honey-500 text-hive-900 hover:bg-honey-400 shadow-lg shadow-honey-500/25 hover:shadow-honey-500/40 hover:scale-105"
                   : "bg-hive-hover text-text-muted cursor-not-allowed opacity-50"
               }`}

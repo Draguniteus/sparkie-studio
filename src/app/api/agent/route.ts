@@ -485,6 +485,13 @@ export async function POST(req: NextRequest) {
     const proto = req.headers.get('x-forwarded-proto') ?? 'https'
     const cookieHeader = req.headers.get('cookie') ?? ''
 
+    // ── 0. Recover stuck in_progress tasks (same as GET cron) ──────────────
+    await query(
+      `UPDATE sparkie_tasks SET status = 'pending'
+       WHERE user_id = $1 AND status = 'in_progress' AND created_at < NOW() - INTERVAL '5 minutes'`,
+      [userId]
+    ).catch((e) => console.error('[agent POST] stuck task recovery error:', e))
+
     // ── 1. Execute due AI tasks ─────────────────────────────────────────────
     const executed = await executeDueTasks(userId, host, proto, cookieHeader)
     if (executed.length > 0) {

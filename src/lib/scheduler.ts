@@ -171,7 +171,7 @@ async function proactiveInboxSweep(userId: string): Promise<void> {
       }).catch(() => {})
       return
     }
-  } catch { return }
+  } catch (e) { console.error('[scheduler] proactiveInboxSweep fetch error:', e); return }
 
   // Phase 4: Route each email to matching topic
   for (const msg of messages.slice(0, 5)) {
@@ -207,7 +207,7 @@ async function proactiveInboxSweep(userId: string): Promise<void> {
       signal_priority: 'P2',
       conclusion: `Found ${JSON.parse(emailsJson).length} unread email(s) — autonomous review task queued`,
     })
-  } catch { /* non-critical */ }
+  } catch (e) { console.error('[scheduler] proactiveInboxSweep task error:', e) }
 }
 
 async function proactiveCalendarSweep(userId: string): Promise<void> {
@@ -249,7 +249,7 @@ async function proactiveCalendarSweep(userId: string): Promise<void> {
       signal_priority: 'P3',
       conclusion: `Calendar sweep surfaced ${events.length} upcoming event${events.length > 1 ? 's' : ''} in the next 24 hours`,
     })
-  } catch { /* non-critical */ }
+  } catch (e) { console.error('[scheduler] proactiveCalendarSweep error:', e) }
 }
 
 
@@ -342,7 +342,7 @@ async function deploymentHealthSweep(userId: string): Promise<void> {
         }
       }
     }
-  } catch { /* non-critical */ }
+  } catch (e) { console.error('[scheduler] deploymentHealthSweep error:', e) }
 }
 
 

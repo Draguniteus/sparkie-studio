@@ -40,6 +40,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'File too large (max 10 MB)' }, { status: 413 })
     }
 
+    // MIME type whitelist — reject executables and scripts
+    const ALLOWED_MIME_PREFIXES = ['image/', 'text/', 'application/json', 'application/xml', 'application/pdf',
+      'application/msword', 'application/vnd.', 'audio/', 'video/']
+    const BLOCKED_EXTENSIONS = /\.(exe|sh|bat|cmd|ps1|msi|dll|so|dmg|app|bin|run|jar|py|rb|pl)$/i
+    const mimeType = file.type || 'application/octet-stream'
+    const allowed = ALLOWED_MIME_PREFIXES.some(p => mimeType.startsWith(p))
+    const blocked = BLOCKED_EXTENSIONS.test(file.name)
+    if (!allowed || blocked) {
+      return NextResponse.json({ error: 'File type not allowed' }, { status: 415 })
+    }
+
     const bytes = await file.arrayBuffer()
     const b64 = Buffer.from(bytes).toString('base64')
     const dataUrl = `data:${file.type || 'application/octet-stream'};base64,${b64}`
@@ -57,7 +68,7 @@ export async function POST(req: NextRequest) {
        VALUES ($1, $2, $3, $4, 'upload', $5, '', '', '')
        ON CONFLICT DO NOTHING`,
       [userId, file.name, dataUrl, file.type.startsWith('image/') ? 'image' : 'document', fileId]
-    ).catch(() => {})
+    ).catch((e) => console.error('[upload] asset insert error:', e))
 
     return NextResponse.json({
       ok: true,

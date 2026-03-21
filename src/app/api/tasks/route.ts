@@ -245,7 +245,7 @@ export async function PATCH(req: NextRequest) {
       const task = taskRes.rows[0]
 
       // Calendar event approval — action is stored as executeConnectorTool('GOOGLECALENDAR_CREATE_EVENT', {...})
-      if (task && task.action.startsWith("executeConnectorTool('GOOGLECALENDAR_CREATE_EVENT'")) {
+      if (task && task.action?.startsWith("executeConnectorTool('GOOGLECALENDAR_CREATE_EVENT'")) {
         const payload = normalizePayload(task.payload)
         const composioKey = process.env.COMPOSIO_API_KEY
         const entityId = `sparkie_user_${userId}`
@@ -275,7 +275,7 @@ export async function PATCH(req: NextRequest) {
         }
       }
 
-      if (task && (task.action === 'create_email_draft' || task.action === 'send_email')) {
+      if (task && (task.action?.includes('create_email_draft') || task.action?.includes('send_email'))) {
         // Normalize payload — Postgres JSONB may come back as object or string depending on pg driver
         const payload = normalizePayload(task.payload)
         const composioKey = process.env.COMPOSIO_API_KEY
