@@ -71,6 +71,50 @@ export async function runAuthHealthSweep(userId: string): Promise<AuthStatus[]> 
   results.push({ service: 'groq_stt', healthy: groqHealthy, checked_at: new Date().toISOString() })
   results.push({ service: 'deepgram_stt', healthy: deepgramHealthy, checked_at: new Date().toISOString() })
 
+  // ── Social pipeline checks — Composio-connected social accounts ─────────────
+  const socialSlugs = ['twitter', 'discord', 'slack', 'instagram', 'reddit', 'tiktok']
+  for (const slug of socialSlugs) {
+    try {
+      const socRes = await fetch(
+        `https://backend.composio.dev/api/v3/connected_accounts?user_id=sparkie_user_${userId}&status=ACTIVE&toolkit_slug=${slug}&limit=1`,
+        { headers: { 'x-api-key': COMPOSIO_API_KEY }, signal: AbortSignal.timeout(4000) }
+      )
+      if (!socRes.ok) {
+        results.push({ service: slug, healthy: false, checked_at: new Date().toISOString(), error: `HTTP ${socRes.status}`, reconnect_url: '/connectors' })
+        continue
+      }
+      const socData = await socRes.json() as { items?: Array<{ status: string }> }
+      const healthy = !!socData.items?.length && socData.items[0].status === 'ACTIVE'
+      results.push({ service: slug, healthy, checked_at: new Date().toISOString(), error: healthy ? undefined : 'No active connection', reconnect_url: healthy ? undefined : '/connectors' })
+    } catch (e) {
+      results.push({ service: slug, healthy: false, checked_at: new Date().toISOString(), error: String(e), reconnect_url: '/connectors' })
+    }
+  }
+
+  // ── Email pipeline — Resend API key check ──────────────────────────────────
+  const resendHealthy = !!process.env.RESEND_API_KEY
+  results.push({
+    service: 'resend_email',
+    healthy: resendHealthy,
+    checked_at: new Date().toISOString(),
+    error: resendHealthy ? undefined : 'RESEND_API_KEY not set — Resend email disabled',
+    reconnect_url: resendHealthy ? undefined : '/settings',
+  })
+
+  // Log a social_health_check worklog entry with summary
+  const socialResults = results.filter(r => [...socialSlugs, 'resend_email'].includes(r.service))
+  const socialHealthy = socialResults.filter(r => r.healthy).map(r => r.service)
+  const socialFailed = socialResults.filter(r => !r.healthy).map(r => r.service)
+  await writeWorklog(userId, 'auth_check',
+    `Communications health sweep: ${socialHealthy.length} connected (${socialHealthy.join(', ') || 'none'})${socialFailed.length > 0 ? ` | ${socialFailed.length} not connected: ${socialFailed.join(', ')}` : ''}`,
+    {
+      decision_type: 'proactive',
+      status: socialFailed.length > 3 ? 'anomaly' : 'done',
+      signal_priority: socialFailed.includes('gmail') || socialFailed.includes('resend_email') ? 'P1' : 'P3',
+      source: 'communications_health_sweep',
+    } as Record<string, unknown>
+  ).catch(() => {})
+
   // Store auth health state
   try {
     const stateRow = await query(

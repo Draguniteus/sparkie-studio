@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAppStore, StepTrace } from '@/store/appStore'
 import { useShallow } from 'zustand/react/shallow'
-import { Brain, CheckCircle, AlertCircle, Loader2, Zap, Cpu, Database } from 'lucide-react'
+import { Brain, CheckCircle, AlertCircle, Loader2, Zap, Cpu, Database, ChevronRight } from 'lucide-react'
 
 // Map model IDs to human-readable tier names
 function modelToTier(model: string): { label: string; color: string } {
@@ -67,6 +67,47 @@ function TraceRow({ trace, isNew }: { trace: StepTrace; isNew?: boolean }) {
         <span className="text-[9px] tabular-nums shrink-0 text-text-muted/60 mt-0.5">
           {trace.duration < 1000 ? `${trace.duration}ms` : `${(trace.duration / 1000).toFixed(1)}s`}
         </span>
+      )}
+    </div>
+  )
+}
+
+function FrozenCard({ group, index, hasLive }: { group: { chipLabel: string; traces: StepTrace[] }; index: number; hasLive: boolean }) {
+  const [open, setOpen] = useState(index === 0 && !hasLive)
+  const doneTraces = group.traces.filter(t => t.status === 'done')
+  const errorTraces = group.traces.filter(t => t.status === 'error')
+  const totalMs = group.traces.reduce((sum, t) => sum + (t.duration ?? 0), 0)
+
+  const label = index === 0 && !hasLive ? 'Last response' : `${index + 1} response${index > 0 ? 's' : ''} ago`
+
+  return (
+    <div className="rounded-lg border border-hive-border/60 overflow-hidden">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center gap-2 px-3 py-2 bg-hive-elevated/30 hover:bg-hive-elevated/50 transition-colors text-left"
+      >
+        <ChevronRight size={10} className={`shrink-0 text-text-muted transition-transform ${open ? 'rotate-90' : ''}`} />
+        <span className="text-[10px] text-text-muted flex-1 truncate">{label}</span>
+        <div className="flex items-center gap-2 shrink-0">
+          {errorTraces.length > 0 && (
+            <span className="text-[9px] text-red-400">{errorTraces.length} err</span>
+          )}
+          <span className="text-[9px] text-text-muted/60 tabular-nums">
+            {doneTraces.length}/{group.traces.length} steps
+          </span>
+          {totalMs > 0 && (
+            <span className="text-[9px] text-text-muted/60 tabular-nums">
+              {totalMs < 1000 ? `${totalMs}ms` : `${(totalMs / 1000).toFixed(1)}s`}
+            </span>
+          )}
+        </div>
+      </button>
+      {open && (
+        <div className="p-2 flex flex-col gap-1 bg-hive-600/20">
+          {group.traces.map((trace, ti) => (
+            <TraceRow key={ti} trace={trace} />
+          ))}
+        </div>
       )}
     </div>
   )
@@ -206,16 +247,9 @@ export function ProcessTab() {
           </div>
         )}
 
-        {/* Frozen traces from recent messages */}
+        {/* Frozen traces from recent messages — collapsible cards */}
         {recentFrozen.map((group, gi) => (
-          <div key={gi} className="flex flex-col gap-1">
-            <p className="text-[10px] text-text-muted px-1 mb-0.5 truncate">
-              {gi === 0 && liveTraces.length === 0 ? '↑ Last response' : `↑ ${gi + 1} response${gi > 0 ? 's' : ''} ago`}
-            </p>
-            {group.traces.map((trace, ti) => (
-              <TraceRow key={ti} trace={trace} />
-            ))}
-          </div>
+          <FrozenCard key={gi} group={group} index={gi} hasLive={liveTraces.length > 0} />
         ))}
 
         {/* Empty state */}

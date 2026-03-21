@@ -5,7 +5,7 @@ import { Message, PendingTask, StepTrace, AceMusicMetadata } from "@/store/appSt
 import { TaskApprovalCard } from "@/components/chat/TaskApprovalCard"
 import { useAppStore } from "@/store/appStore"
 import { useShallow } from "zustand/react/shallow"
-import { Sparkles, User, Copy, RefreshCw, ThumbsUp, ThumbsDown, Download, Check, ExternalLink, FileCode, Layers, Eye, Clock, Brain, ChevronRight, CheckCircle, AlertCircle, Loader2 } from "lucide-react"
+import { Sparkles, User, Copy, RefreshCw, ThumbsUp, ThumbsDown, Download, Check, ExternalLink, FileCode, Layers, Eye, Clock, Brain, ChevronRight, CheckCircle, AlertCircle, Loader2, Square } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { AnimatedMarkdown } from "./AnimatedMarkdown"
@@ -320,8 +320,24 @@ function MessageBubbleInner({ message, userAvatarUrl }: Props) {
       )}
 
       <div className={`max-w-[90%] md:max-w-[80%] min-w-0 overflow-hidden ${isUser ? "order-first" : ""}`}>
-        {!isUser && !message.isStreaming && message.toolTraces && message.toolTraces.length > 0 && (
-          <InMemoryPill traces={message.toolTraces} />
+        {!isUser && message.isStreaming && (
+          <div className="mb-1.5 flex items-center gap-2 px-2.5 py-1 rounded-lg bg-gradient-to-r from-purple-600/10 via-blue-600/6 to-purple-500/6 border border-purple-500/20 w-fit">
+            <Loader2 size={10} className="text-purple-400 animate-spin shrink-0" />
+            <span className="text-[10px] text-purple-300/85 font-medium">Sparkie is thinking…</span>
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent('sparkie_stop_stream'))}
+              className="flex items-center gap-1 ml-1 px-1.5 py-0.5 rounded bg-red-500/15 border border-red-500/25 text-red-400 hover:bg-red-500/25 transition-colors"
+              title="Stop generating"
+            >
+              <Square size={8} className="shrink-0" />
+              <span className="text-[9px] font-medium">Stop</span>
+            </button>
+          </div>
+        )}
+        {!isUser && !message.isStreaming && (
+          <InMemoryPill traces={message.toolTraces && message.toolTraces.length > 0
+            ? message.toolTraces
+            : [{ icon: 'brain', label: 'Response generated', status: 'done' as const }]} />
         )}
         <div className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
           isUser

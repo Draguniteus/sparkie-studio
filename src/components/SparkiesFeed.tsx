@@ -595,6 +595,61 @@ function PostCard({
   )
 }
 
+// ─── Live Activity Ticker ─────────────────────────────────────────────────────
+function LiveActivityTicker() {
+  const [chunks, setChunks] = useState<string[]>([])
+  const [active, setActive] = useState(false)
+  const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const onChunk = (e: Event) => {
+      const text = (e as CustomEvent<string>).detail
+      if (!text) return
+      if (clearTimerRef.current) clearTimeout(clearTimerRef.current)
+      setActive(true)
+      setChunks(prev => {
+        // Keep last 200 chars visible
+        const joined = (prev.join('') + text).slice(-400)
+        return [joined]
+      })
+    }
+    const onDone = () => {
+      clearTimerRef.current = setTimeout(() => {
+        setChunks([])
+        setActive(false)
+      }, 3000)
+    }
+    window.addEventListener('sparkie:live-chunk', onChunk)
+    window.addEventListener('sparkie:live-done', onDone)
+    return () => {
+      window.removeEventListener('sparkie:live-chunk', onChunk)
+      window.removeEventListener('sparkie:live-done', onDone)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+  }, [chunks])
+
+  if (!active && chunks.length === 0) return null
+
+  return (
+    <div className="mx-3 md:mx-4 mt-3 rounded-xl border border-purple-500/25 bg-purple-500/5 overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-purple-500/15">
+        <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse shrink-0" />
+        <span className="text-[10px] font-semibold text-purple-300/80 uppercase tracking-wide">Sparkie is thinking</span>
+      </div>
+      <div ref={scrollRef} className="px-3 py-2 max-h-24 overflow-y-auto">
+        <p className="text-[11px] text-text-secondary leading-relaxed whitespace-pre-wrap break-words font-mono">
+          {chunks.join('')}
+          {active && <span className="inline-block w-1 h-3 bg-purple-400/70 animate-pulse ml-0.5 rounded-sm align-middle" />}
+        </p>
+      </div>
+    </div>
+  )
+}
+
 // ─── Main Feed ─────────────────────────────────────────────────────────────────
 export function SparkiesFeed() {
   const { data: session } = useSession()
@@ -679,6 +734,8 @@ export function SparkiesFeed() {
             <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
           </button>
         </div>
+
+        <LiveActivityTicker />
 
         <div className="flex-1 overflow-y-auto p-3 md:p-4">
           <div className="flex flex-col gap-3 md:gap-4 max-w-2xl mx-auto w-full">

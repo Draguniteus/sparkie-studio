@@ -1121,6 +1121,7 @@ export function ChatInput() {
                 addWorklogEntry({ type: 'result', content: 'Analyzed', status: 'done' })
               }
               fullContent += delta.content
+              window.dispatchEvent(new CustomEvent('sparkie:live-chunk', { detail: delta.content }))
               clearTimeout(streamFlushRef.current)
               streamFlushRef.current = setTimeout(() => {
                 updateMessage(chatId, assistantMsgId, { content: fullContent })
@@ -1150,6 +1151,7 @@ export function ChatInput() {
       setHiveStatus(null)
       setStreaming(false)
       useAppStore.getState().setLongTaskLabel(null)  // always clear chip on completion/error
+      window.dispatchEvent(new CustomEvent('sparkie:live-done'))
     }
   }, [selectedModel, addMessage, updateMessage, setStreaming, setHiveStatus, saveMessage, clearWorklog, openIDE, ideOpen, setIDETab, addWorklogEntry])
   // eslint-disable-next-line react-hooks/exhaustive-deps -- streamAgent is stable at runtime (defined after, useCallback ref)
