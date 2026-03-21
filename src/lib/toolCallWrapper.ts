@@ -137,7 +137,8 @@ async function checkToolFailureRate(tool: string): Promise<void> {
           tool,
           status: 'anomaly',
           decision_type: 'escalate',
-          reasoning: `Failure threshold exceeded: ${failures}/${total} calls failed in 24h`
+          reasoning: `Failure threshold exceeded: ${failures}/${total} calls failed in 24h`,
+          conclusion: `Tool "${tool}" flagged with ${Math.round(failures/total*100)}% failure rate over ${total} calls in the last 24 hours`,
         })
       }
     }

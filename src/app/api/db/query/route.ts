@@ -25,9 +25,14 @@ function isSelectOnly(sql: string): boolean {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions)
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // Allow server-to-server calls via internal secret (e.g. from query_database tool in chat route)
+  const internalSecret = req.headers.get('x-internal-secret')
+  const isInternalCall = internalSecret && internalSecret === process.env.SPARKIE_INTERNAL_SECRET
+  if (!isInternalCall) {
+    const session = await getServerSession(authOptions)
+    if (!session?.user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
   }
 
   let rawSql: string

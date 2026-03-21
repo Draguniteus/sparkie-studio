@@ -71,6 +71,7 @@ export async function POST(req: NextRequest) {
       decision_type: 'proactive',
       reasoning: `Weekly self-assessment — ${successRate}% success rate, ${total} entries, ${errors} errors`,
       signal_priority: errors > 5 || successRate < 80 ? 'P1' : 'P3',
+      conclusion: `Weekly self-assessment complete — ${successRate}% success rate across ${total} entries with ${errors} error(s)`,
     })
 
     // Also persist to sparkie_self_memory

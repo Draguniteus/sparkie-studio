@@ -484,6 +484,18 @@ export function ChatInput() {
         const description = finalParse.text || `✨ Created ${filesCreated} file(s). Check the preview →`
         updateMessage(chatId, assistantMsgId, { content: description, isStreaming: false })
         saveMessage('assistant', description)
+        // FIX 8: Auto-post to Feed after build completes (fire-and-forget)
+        const feedTitle = projectName || 'a new project'
+        fetch('/api/sparkie-feed', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            content: `Just built ${feedTitle} for Michael ✨ — ${filesCreated} file${filesCreated !== 1 ? 's' : ''}, preview is live ⚡`,
+            media_type: 'code',
+            mood: 'excited',
+            code_title: feedTitle,
+          }),
+        }).catch(() => {})
       } else {
         // AI responded with text only (no file blocks) — restore the most recent archive back
         // to the active workspace so the preview doesn't go blank
@@ -999,6 +1011,9 @@ export function ChatInput() {
       const decoder = new TextDecoder()
       if (!reader) { setStreaming(false); return }
       let buffer = "", fullContent = ""
+      const convStreamStart = Date.now()
+      // Ensure ProcessTab always has something to show — even for conversational responses
+      window.dispatchEvent(new CustomEvent('sparkie_step_trace', { detail: { icon: 'brain', label: 'Sparkie thinking…', status: 'running' } as StepTrace }))
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
@@ -1140,7 +1155,14 @@ export function ChatInput() {
         return
       }
       const finalContent = fullContent || "👋"
-      updateMessage(chatId, assistantMsgId, { content: finalContent, isStreaming: false })
+      // For conversational responses (no tools), stamp a minimal trace so ProcessTab is never empty
+      if (_stepTracesRef.current.length === 0) {
+        const convTrace: StepTrace = { icon: 'brain', label: 'Response ready', status: 'done', duration: Date.now() - convStreamStart }
+        window.dispatchEvent(new CustomEvent('sparkie_step_trace', { detail: convTrace }))
+        updateMessage(chatId, assistantMsgId, { content: finalContent, isStreaming: false, toolTraces: [convTrace] })
+      } else {
+        updateMessage(chatId, assistantMsgId, { content: finalContent, isStreaming: false })
+      }
       saveMessage('assistant', finalContent)
       // ── Worklog framing: log response sent ──
       addWorklogEntry({ type: 'ai_response', content: `You just sent me a message:\n${userContent.slice(0, 120)}${userContent.length > 120 ? '\u2026' : ''}`, status: 'done' })

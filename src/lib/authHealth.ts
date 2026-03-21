@@ -112,6 +112,9 @@ export async function runAuthHealthSweep(userId: string): Promise<AuthStatus[]> 
       status: socialFailed.length > 3 ? 'anomaly' : 'done',
       signal_priority: socialFailed.includes('gmail') || socialFailed.includes('resend_email') ? 'P1' : 'P3',
       source: 'communications_health_sweep',
+      conclusion: socialFailed.length === 0
+        ? `Auth health check passed — all ${socialHealthy.length} communication service(s) connected`
+        : `Auth health check complete — ${socialHealthy.length} connected, ${socialFailed.length} not connected (${socialFailed.join(', ')})`,
     } as Record<string, unknown>
   ).catch(() => {})
 
@@ -142,7 +145,8 @@ export async function runAuthHealthSweep(userId: string): Promise<AuthStatus[]> 
       status: 'anomaly',
       decision_type: 'escalate',
       reasoning: `Pre-flight auth sweep detected ${f.service} is not connected. Tasks requiring this service will fail until reconnected.`,
-      signal_priority: 'P0'
+      signal_priority: 'P0',
+      conclusion: `${f.service} connection is broken — reconnection required at /connectors to restore functionality`,
     })
   }
 

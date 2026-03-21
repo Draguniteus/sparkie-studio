@@ -155,6 +155,7 @@ export type WorklogEntry = {
   status?: 'running' | 'done' | 'blocked' | 'anomaly' | 'skipped' | 'error'
   decision_type?: 'action' | 'skip' | 'hold' | 'escalate' | 'proactive'
   reasoning?: string
+  conclusion?: string
   estimated_duration_ms?: number
   actual_duration_ms?: number
   signal_priority?: 'P0' | 'P1' | 'P2' | 'P3'

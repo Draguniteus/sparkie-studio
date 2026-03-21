@@ -1,16 +1,22 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useAppStore } from '@/store/appStore'
 import { useShallow } from 'zustand/react/shallow'
 import {
   Search, FolderOpen, Image, MessageSquare,
-  Settings, ChevronLeft, Sparkles, Radio, Plug, Zap, Lock, Rss, BookOpen, Brain
+  Settings, ChevronLeft, Sparkles, Radio, Plug, Zap, Lock, Rss, BookOpen, Brain,
+  Play, Pause, Music,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 
 export function Sidebar() {
   const [connectorHealth, setConnectorHealth] = useState<'ok' | 'warn' | 'error' | null>(null)
+  const [radioState, setRadioState] = useState<{ playing: boolean; title: string | null; artist: string | null } | null>(null)
+  const [streamText, setStreamText] = useState<string>('')
+  const [streamActive, setStreamActive] = useState(false)
+  const streamClearRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   useEffect(() => {
     const check = () => {
       fetch('/api/health', { signal: AbortSignal.timeout(5000) })
@@ -20,6 +26,38 @@ export function Sidebar() {
     check()
     const t = setInterval(check, 60_000)
     return () => clearInterval(t)
+  }, [])
+
+  // Radio state sync from RadioPlayer
+  useEffect(() => {
+    const onState = (e: Event) => {
+      const d = (e as CustomEvent<{ playing: boolean; title: string | null; artist: string | null }>).detail
+      if (d) setRadioState(d)
+    }
+    window.addEventListener('sparkie:radio-state', onState)
+    return () => window.removeEventListener('sparkie:radio-state', onState)
+  }, [])
+
+  // Streaming ticker — Block 10a/10c
+  useEffect(() => {
+    const onChunk = (e: Event) => {
+      const chunk = (e as CustomEvent<string>).detail ?? ''
+      setStreamText(prev => (prev + chunk).slice(-200))
+      setStreamActive(true)
+      if (streamClearRef.current) clearTimeout(streamClearRef.current)
+    }
+    const onDone = () => {
+      streamClearRef.current = setTimeout(() => {
+        setStreamText('')
+        setStreamActive(false)
+      }, 4000)
+    }
+    window.addEventListener('sparkie:live-chunk', onChunk)
+    window.addEventListener('sparkie:live-done', onDone)
+    return () => {
+      window.removeEventListener('sparkie:live-chunk', onChunk)
+      window.removeEventListener('sparkie:live-done', onDone)
+    }
   }, [])
 
   const {
@@ -242,11 +280,23 @@ export function Sidebar() {
         <div className="flex-1 overflow-y-auto mt-3 flex flex-col min-h-0 px-3">
           <div className="text-[10px] font-semibold text-text-muted uppercase tracking-wider mb-2 px-1 flex items-center gap-1.5">
             <span>Live Activity</span>
-            {recentActivity.length > 0 && (
+            {(recentActivity.length > 0 || streamActive) && (
               <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
             )}
           </div>
-          {recentActivity.length === 0 ? (
+
+          {/* Streaming cognitive ticker — Block 10a/10c */}
+          {streamActive && streamText && (
+            <div className="mb-2 px-2 py-2 rounded-lg bg-purple-500/8 border border-purple-500/20">
+              <div className="flex items-center gap-1.5 mb-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse shrink-0" />
+                <span className="text-[9px] font-semibold text-purple-300 uppercase tracking-wider">Sparkie thinking</span>
+              </div>
+              <p className="text-[10px] text-purple-200/80 leading-relaxed break-words line-clamp-3">{streamText}</p>
+            </div>
+          )}
+
+          {recentActivity.length === 0 && !streamActive ? (
             <div className="px-1 py-4 text-center text-text-muted text-xs">
               Sparkie's activity will appear here as she works.
             </div>
@@ -272,6 +322,27 @@ export function Sidebar() {
             </div>
           )}
         </div>
+
+        {/* Radio mini-player — FIX 9: always visible when a track is loaded */}
+        {radioState && (radioState.playing || radioState.title) && (
+          <div className="px-3 pb-2 shrink-0">
+            <div className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-hive-elevated border border-hive-border">
+              <Music size={11} className="text-honey-500 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] font-medium text-text-primary truncate">{radioState.title ?? 'Radio'}</p>
+                {radioState.artist && <p className="text-[9px] text-text-muted truncate">{radioState.artist}</p>}
+              </div>
+              <button
+                onClick={() => window.dispatchEvent(new CustomEvent(radioState.playing ? 'sparkie:stopradio' : 'sparkie:startradio'))}
+                className="w-6 h-6 rounded-full bg-honey-500/20 flex items-center justify-center hover:bg-honey-500/30 transition-colors shrink-0"
+              >
+                {radioState.playing
+                  ? <Pause size={9} className="text-honey-500" />
+                  : <Play size={9} className="text-honey-500" />}
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* User Profile */}
         <div className="p-3 border-t border-hive-border shrink-0">

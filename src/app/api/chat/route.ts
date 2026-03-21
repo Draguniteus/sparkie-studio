@@ -2944,7 +2944,7 @@ Rules: Only USER facts + Sparkie execution procedures. Only NEW, specific, worth
         if (existing.rows.length === 0) {
           await query('INSERT INTO user_memories (user_id, category, content) VALUES ($1, $2, $3)', [userId, m.category, m.content])
           // Write to persistent worklog
-          writeWorklog(userId, 'memory_learned', m.content, { category: m.category }).catch(() => {})
+          writeWorklog(userId, 'memory_learned', m.content, { category: m.category, conclusion: `New memory saved in category "${m.category}": "${m.content.slice(0, 80)}"` }).catch(() => {})
         }
       }
     }
@@ -3599,7 +3599,7 @@ async function executeTool(
             const r = await fetch(base, { method: 'POST', headers })
             if (!r.ok) { const t = await r.text(); return `trigger_deploy deploy: HTTP ${r.status} — ${t.slice(0,200)}` }
             const d = await r.json() as { deployment: { id: string; phase: string } }
-            writeWorklog(userId ?? 'system', 'task_executed', `🚀 Triggered new deployment`, { status: 'running', decision_type: 'action', deployment_id: d.deployment?.id, reasoning: 'Manual deploy triggered via trigger_deploy tool', signal_priority: 'P2' }).catch(() => {})
+            writeWorklog(userId ?? 'system', 'task_executed', `🚀 Triggered new deployment`, { status: 'running', decision_type: 'action', deployment_id: d.deployment?.id, reasoning: 'Manual deploy triggered via trigger_deploy tool', signal_priority: 'P2', conclusion: `New deployment triggered — deployment ID ${d.deployment?.id?.slice(0, 8) ?? 'unknown'} is now building` }).catch(() => {})
             return `🚀 Deploy triggered! Deployment ID: ${d.deployment?.id?.slice(0,8)}. Phase: ${d.deployment?.phase}. Call trigger_deploy({action:'status'}) in ~3 min to confirm it went ACTIVE.`
           }
 
@@ -3608,7 +3608,7 @@ async function executeTool(
             const r = await fetch(base, { method: 'PUT', headers, body: JSON.stringify({ deployment_id: depId }) })
             if (!r.ok) { const t = await r.text(); return `trigger_deploy rollback: HTTP ${r.status} — ${t.slice(0,200)}` }
             const d = await r.json() as { deployment: { id: string; phase: string } }
-            writeWorklog(userId ?? 'system', 'task_executed', `⏪ Rolled back to deployment ${depId.slice(0,8)}`, { status: 'running', decision_type: 'action', deployment_id: d.deployment?.id, reasoning: `Rollback to ${depId}`, signal_priority: 'P1' }).catch(() => {})
+            writeWorklog(userId ?? 'system', 'task_executed', `⏪ Rolled back to deployment ${depId.slice(0,8)}`, { status: 'running', decision_type: 'action', deployment_id: d.deployment?.id, reasoning: `Rollback to ${depId}`, signal_priority: 'P1', conclusion: `Rollback initiated to deployment ${depId.slice(0, 8)} — new deployment in progress` }).catch(() => {})
             return `⏪ Rollback initiated. New deployment ID: ${d.deployment?.id?.slice(0,8)}`
           }
 
@@ -3642,7 +3642,7 @@ async function executeTool(
             const r = await fetch(`${base}/env`, { method: 'POST', headers, body: JSON.stringify({ envs: envVars }) })
             if (!r.ok) { const t = await r.text(); return `trigger_deploy set_env: HTTP ${r.status} — ${t.slice(0,200)}` }
             const d = await r.json() as { updated_keys: string[] }
-            writeWorklog(userId ?? 'system', 'task_executed', `🔑 Updated env vars: ${envVars.map(e=>e.key).join(', ')}`, { status: 'done', decision_type: 'action', reasoning: 'Env var update via trigger_deploy', signal_priority: 'P2' }).catch(() => {})
+            writeWorklog(userId ?? 'system', 'task_executed', `🔑 Updated env vars: ${envVars.map(e=>e.key).join(', ')}`, { status: 'done', decision_type: 'action', reasoning: 'Env var update via trigger_deploy', signal_priority: 'P2', conclusion: `Environment variable(s) updated: ${envVars.map(e=>e.key).join(', ')} — a new deployment has started automatically` }).catch(() => {})
             return `✅ Env vars updated: ${(d.updated_keys ?? envVars.map(e=>e.key)).join(', ')}. A new deployment will start automatically.`
           }
 
@@ -4115,7 +4115,10 @@ def invoke_llm(query, model='MiniMax-M2.7'):
         try {
           const dbRes = await fetch(`${baseUrl}/api/db/query`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              ...(process.env.SPARKIE_INTERNAL_SECRET ? { 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET } : {}),
+            },
             body: JSON.stringify({ sql: safeSQL }),
           })
           if (!dbRes.ok) return `DB error: ${dbRes.status} — ${await dbRes.text()}`
@@ -4297,7 +4300,7 @@ def invoke_llm(query, model='MiniMax-M2.7'):
             resolveKnownIssue('Draguniteus/sparkie-studio', patchPath).catch(() => {})
           }
 
-          writeWorklog(userId ?? 'system', 'code_push', `patch_file: ${patchPath} — ${patchMsg}`, { commit: commitSha, path: patchPath }).catch(() => {})
+          writeWorklog(userId ?? 'system', 'code_push', `patch_file: ${patchPath} — ${patchMsg}`, { commit: commitSha, path: patchPath, conclusion: `File patched and committed: ${patchPath} (commit ${commitSha})` }).catch(() => {})
           return `✅ Patched and committed: ${patchPath}\nCommit: ${commitSha}\nMessage: ${patchMsg}\nDeploy started automatically.`
         } catch (e) {
           return `patch_file error: ${String(e)}`
@@ -4445,7 +4448,7 @@ def invoke_llm(query, model='MiniMax-M2.7'):
           }
           const deleteData = await deleteRes.json() as { commit?: { sha?: string } }
           const commitSha = deleteData.commit?.sha?.slice(0, 12) ?? '?'
-          writeWorklog(userId ?? 'system', 'code_push', `delete_file: ${delPath} — ${delMsg}`, { commit: commitSha, path: delPath }).catch(() => {})
+          writeWorklog(userId ?? 'system', 'code_push', `delete_file: ${delPath} — ${delMsg}`, { commit: commitSha, path: delPath, conclusion: `File deleted and committed: ${delPath} (commit ${commitSha})` }).catch(() => {})
           return `✅ Deleted: ${delPath}\nCommit: ${commitSha}\nMessage: ${delMsg}`
         } catch (e) {
           return `delete_file error: ${String(e)}`
@@ -4462,7 +4465,7 @@ def invoke_llm(query, model='MiniMax-M2.7'):
           const sendArgs: Record<string, string> = { to: emailTo, subject: emailSubject, body: emailBody }
           if (emailCc) sendArgs.cc = emailCc
           const sendResult = await executeConnectorTool('GMAIL_SEND_EMAIL', sendArgs, userId)
-          writeWorklog(userId, 'task_executed', `📧 Sent email to ${emailTo}: "${emailSubject}"`, { decision_type: 'action', signal_priority: 'P2' }).catch(() => {})
+          writeWorklog(userId, 'task_executed', `📧 Sent email to ${emailTo}: "${emailSubject}"`, { decision_type: 'action', signal_priority: 'P2', conclusion: `Email sent to ${emailTo} with subject "${emailSubject}"` }).catch(() => {})
           return sendResult
         } catch (e) {
           return `send_email error: ${String(e)}`
@@ -4632,7 +4635,7 @@ def invoke_llm(query, model='MiniMax-M2.7'):
         const summary = `Self-diagnosis: ${okCount} OK, ${warnCount} warnings, ${failCount} failures\n\n${lines.join('\n')}`
 
         if (userId) {
-          writeWorklog(userId, 'self_assessment', `Self-diagnosis: ${okCount}✅ ${warnCount}⚠️ ${failCount}🚨`, { decision_type: 'action' }).catch(() => {})
+          writeWorklog(userId, 'self_assessment', `Self-diagnosis: ${okCount}✅ ${warnCount}⚠️ ${failCount}🚨`, { decision_type: 'action', conclusion: `Self-diagnosis complete — ${okCount} checks passed, ${warnCount} warnings, ${failCount} failure(s)` }).catch(() => {})
         }
         return summary
       }
@@ -6588,7 +6591,7 @@ Rules:
             if (content) {
               writeWorklog(userId, 'ai_response',
                 `You just sent me a message:\n${lastUser.slice(0, 120)}${lastUser.length > 120 ? '…' : ''}`,
-                { status: 'done', decision_type: 'action', signal_priority: 'P2' }
+                { status: 'done', decision_type: 'action', signal_priority: 'P2', conclusion: 'AI response delivered to user' }
               ).catch(() => {})
             }
           }
@@ -6700,7 +6703,7 @@ SYNTHESIS RULES:
             if (userId) {
               writeWorklog(userId, 'tool_call',
                 `Tool session: ${toolNames.slice(0,3).join(', ')}${toolNames.length > 3 ? ` +${toolNames.length-3} more` : ''}`,
-                { decision_type: 'proactive', reasoning: 'Agent autonomously executed tool calls to fulfill user request', signal_priority: 'P1' }
+                { decision_type: 'proactive', reasoning: 'Agent autonomously executed tool calls to fulfill user request', signal_priority: 'P1', conclusion: `Tool session complete — ${toolNames.length} tool call(s) executed: ${toolNames.slice(0, 3).join(', ')}${toolNames.length > 3 ? ` +${toolNames.length-3} more` : ''}` }
               ).catch(() => {})
             }
           }
@@ -6810,7 +6813,7 @@ SYNTHESIS RULES:
       if (lastSparkieMsg) {
         writeWorklog(userId, 'ai_response',
           `You just sent me a message:\n${lastUserMsg.slice(0, 120)}${lastUserMsg.length > 120 ? '…' : ''}`,
-          { status: 'done', decision_type: 'action', signal_priority: 'P2' }
+          { status: 'done', decision_type: 'action', signal_priority: 'P2', conclusion: 'AI response delivered to user' }
         ).catch(() => {})
       }
     }

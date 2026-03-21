@@ -688,6 +688,7 @@ export async function GET(req: NextRequest) {
             decision_type: 'proactive',
             reasoning: 'External cron tick (cron-job.org, every 15 min) — running all proactive sweeps server-side',
             signal_priority: 'P3',
+            conclusion: `Cron sweep finished — inbox, calendar, and deployment checked${executed.length > 0 ? `; ${executed.length} task(s) executed` : ''}`,
           }
         ).catch(() => {})
 

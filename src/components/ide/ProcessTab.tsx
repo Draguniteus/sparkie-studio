@@ -229,7 +229,7 @@ export function ProcessTab() {
         <span className="text-text-muted/40 text-[9px]">·</span>
         <Database size={9} className="text-text-muted shrink-0" />
         <span className="text-[10px] text-text-muted">
-          {liveTraces.length > 0 ? `${liveTraces.filter(t => t.status === 'done').length}/${liveTraces.length} steps done` : `${recentFrozen.length} session${recentFrozen.length !== 1 ? 's' : ''} in memory`}
+          {liveTraces.length > 0 ? `${liveTraces.filter(t => t.status === 'done').length}/${liveTraces.length} steps done` : recentFrozen.length === 0 ? 'No sessions yet' : `${recentFrozen.length} session${recentFrozen.length !== 1 ? 's' : ''} in memory`}
         </span>
       </div>
 

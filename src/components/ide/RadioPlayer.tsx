@@ -178,6 +178,13 @@ export function RadioPlayer() {
     return () => { window.removeEventListener('sparkie:startradio', handleStart); window.removeEventListener('sparkie:stopradio', handleStop) }
   }, [isPlaying, allTracks, currentIndex, playTrack, clearProgressInterval])
 
+  // Broadcast radio state so the sidebar mini-player stays in sync
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('sparkie:radio-state', {
+      detail: { playing: isPlaying, title: currentTrack?.title ?? null, artist: currentTrack?.artist ?? null },
+    }))
+  }, [isPlaying, currentTrack])
+
   const togglePlay = useCallback(() => {
     const audio = audioRef.current
     if (!audio) return

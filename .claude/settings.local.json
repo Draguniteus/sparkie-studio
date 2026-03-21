@@ -5,7 +5,10 @@
       "Bash(npx tsc:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git:*)"
+      "Bash(git:*)",
+      "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\({**d.get\\(''''dependencies'''',{}\\), **d.get\\(''''devDependencies'''',{}\\)}, indent=2\\)\\)\")",
+      "Bash(find C:UsersuserDesktopsparkie-studiosrc -name *identity* -o -name *identity.ts)",
+      "Bash(node fix_scheduler.js)"
     ]
   }
 }

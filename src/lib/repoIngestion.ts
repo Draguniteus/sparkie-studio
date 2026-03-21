@@ -117,7 +117,7 @@ export async function ingestRepo(userId: string, owner: string, repo: string): P
     [ctx.id, userId, ctx.repo, ctx.summary, JSON.stringify(techStack), JSON.stringify(keyFiles), JSON.stringify([]), JSON.stringify([])]
   )
 
-  writeWorklog(userId, 'proactive_check', `Repo ingested: ${ctx.repo} — ${tsFiles.length} files, ${apiRoutes.length} routes`, { project: ctx.id }).catch(() => {})
+  writeWorklog(userId, 'proactive_check', `Repo ingested: ${ctx.repo} — ${tsFiles.length} files, ${apiRoutes.length} routes`, { project: ctx.id, conclusion: `Repository ${ctx.repo} ingested successfully — ${tsFiles.length} TypeScript files and ${apiRoutes.length} API routes indexed` }).catch(() => {})
   return ctx
 }
 

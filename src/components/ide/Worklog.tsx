@@ -210,6 +210,11 @@ function StandardEntry({ entry }: { entry: WorklogEntry }) {
               &ldquo;{entry.reasoning}&rdquo;
             </p>
           )}
+          {entry.conclusion && (
+            <p className="text-[10px] text-emerald-400/80 mt-1 font-medium leading-relaxed">
+              ✓ {entry.conclusion}
+            </p>
+          )}
         </div>
       </div>
     </div>
@@ -240,7 +245,7 @@ export function Worklog({ compact = false }: WorklogProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   // Merge DB worklog entries (newest first from API, oldest first in store for timeline)
-  const mergeDbEntries = (entries: { type: string; content: string; status: string; created_at: string; decision_type?: string; reasoning?: string; metadata?: Record<string,unknown> }[]) => {
+  const mergeDbEntries = (entries: { type: string; content: string; status: string; created_at: string; decision_type?: string; reasoning?: string; conclusion?: string; metadata?: Record<string,unknown> }[]) => {
     const store = useAppStore.getState()
     const existingContents = new Set(store.worklog.map(w => w.content + String(w.created_at ?? w.timestamp)))
     // entries come newest-first from API; reverse so oldest go in first (timeline order)
@@ -253,6 +258,7 @@ export function Worklog({ compact = false }: WorklogProps) {
           status: (e.status as unknown as WorklogEntry["status"]) ?? "done",
           decision_type: (e.decision_type as unknown as WorklogEntry["decision_type"]),
           reasoning: e.reasoning,
+          conclusion: e.conclusion,
           metadata: e.metadata,
           created_at: e.created_at,
         })
@@ -266,7 +272,7 @@ export function Worklog({ compact = false }: WorklogProps) {
     if (dbLoaded) return
     fetch("/api/worklog?limit=30")
       .then(r => r.json())
-      .then((d: { entries?: { type: string; content: string; status: string; created_at: string; decision_type?: string; reasoning?: string; metadata?: Record<string,unknown> }[] }) => {
+      .then((d: { entries?: { type: string; content: string; status: string; created_at: string; decision_type?: string; reasoning?: string; conclusion?: string; metadata?: Record<string,unknown> }[] }) => {
         if (d.entries && d.entries.length > 0) mergeDbEntries(d.entries)
         setDbLoaded(true)
       })
@@ -279,7 +285,7 @@ export function Worklog({ compact = false }: WorklogProps) {
     const t = setInterval(() => {
       fetch("/api/worklog?limit=10")
         .then(r => r.json())
-        .then((d: { entries?: { type: string; content: string; status: string; created_at: string; decision_type?: string; reasoning?: string; metadata?: Record<string,unknown> }[] }) => {
+        .then((d: { entries?: { type: string; content: string; status: string; created_at: string; decision_type?: string; reasoning?: string; conclusion?: string; metadata?: Record<string,unknown> }[] }) => {
           if (d.entries && d.entries.length > 0) mergeDbEntries(d.entries)
         })
         .catch(() => {})
@@ -295,7 +301,7 @@ export function Worklog({ compact = false }: WorklogProps) {
         setTimeout(() => {
           fetch("/api/worklog?limit=10")
             .then(r => r.json())
-            .then((d: { entries?: { type: string; content: string; status: string; created_at: string; decision_type?: string; reasoning?: string; metadata?: Record<string,unknown> }[] }) => {
+            .then((d: { entries?: { type: string; content: string; status: string; created_at: string; decision_type?: string; reasoning?: string; conclusion?: string; metadata?: Record<string,unknown> }[] }) => {
               if (d.entries && d.entries.length > 0) mergeDbEntries(d.entries)
             })
             .catch(() => {})

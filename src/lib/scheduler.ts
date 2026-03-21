@@ -108,6 +108,7 @@ async function routeEmailToTopic(
       topic_id: bestMatch.id,
       email_id: emailId,
       status: 'done',
+      conclusion: `Email automatically linked to topic "${bestMatch.name}" with match score ${bestMatch.score}`,
     })
 
     return bestMatch.id
@@ -146,6 +147,7 @@ async function proactiveInboxSweep(userId: string): Promise<void> {
         status: 'done', decision_type: 'proactive',
         reasoning: 'Proactive inbox sweep ran: inbox clear',
         signal_priority: 'P3',
+        conclusion: 'Inbox sweep complete — no unread emails found',
       }).catch(() => {})
       return
     }
@@ -183,6 +185,7 @@ async function proactiveInboxSweep(userId: string): Promise<void> {
       decision_type: 'proactive',
       reasoning: 'Proactive inbox sweep found unread messages; autonomous draft task created',
       signal_priority: 'P2',
+      conclusion: `Found ${JSON.parse(emailsJson).length} unread email(s) — autonomous review task queued`,
     })
   } catch { /* non-critical */ }
 }
@@ -212,6 +215,7 @@ async function proactiveCalendarSweep(userId: string): Promise<void> {
         status: 'done', decision_type: 'proactive',
         reasoning: 'Proactive calendar sweep ran: no upcoming events',
         signal_priority: 'P3',
+        conclusion: 'Calendar sweep complete — schedule is clear for the next 24 hours',
       }).catch(() => {})
       return
     }
@@ -223,6 +227,7 @@ async function proactiveCalendarSweep(userId: string): Promise<void> {
       decision_type: 'proactive',
       reasoning: 'Proactive calendar sweep surfaced upcoming events',
       signal_priority: 'P3',
+      conclusion: `Calendar sweep surfaced ${events.length} upcoming event${events.length > 1 ? 's' : ''} in the next 24 hours`,
     })
   } catch { /* non-critical */ }
 }
@@ -273,6 +278,7 @@ async function deploymentHealthSweep(userId: string): Promise<void> {
         deployment_id: latest.id,
         reasoning: `DO deployment phase=${latest.phase} cause=${latest.cause}`,
         signal_priority: 'P1',
+        conclusion: `Deployment ${latest.id.slice(0, 8)} failed — reason: ${failReason.slice(0, 80)}`,
       })
 
       // Auto-retry only if previous deployment was healthy (transient failure heuristic)
@@ -293,6 +299,7 @@ async function deploymentHealthSweep(userId: string): Promise<void> {
           deployment_id: latest.id,
           reasoning: 'Previous deployment healthy — auto-redeploy triggered for transient failure',
           signal_priority: 'P1',
+          conclusion: 'Auto-retry deployment triggered after detecting a transient build failure',
         })
       }
     } else if (latest.phase === 'ACTIVE') {
@@ -310,6 +317,7 @@ async function deploymentHealthSweep(userId: string): Promise<void> {
             deployment_id: latest.id,
             reasoning: 'Deployment phase transitioned from ERROR/FAILED to ACTIVE',
             signal_priority: 'P2',
+            conclusion: `Deployment ${latest.id.slice(0, 8)} recovered and is now ACTIVE after a previous failure`,
           })
         }
       }
@@ -447,7 +455,8 @@ async function executeUserTasks(
         taskId: task.id,
         status: 'blocked',
         decision_type: 'hold',
-        reasoning: 'Same task attempted 3+ times in quick succession — pausing to prevent infinite loop'
+        reasoning: 'Same task attempted 3+ times in quick succession — pausing to prevent infinite loop',
+        conclusion: `Task "${task.label.slice(0, 60)}" blocked — infinite loop detected after 3+ retries`,
       })
       await query(`UPDATE sparkie_tasks SET status = 'failed' WHERE id = $1`, [task.id])
       return undefined
@@ -526,6 +535,7 @@ async function executeUserTasks(
         status: 'done',
         decision_type: 'action',
         signal_priority: priority,
+        conclusion: `Task "${task.label.slice(0, 60)}" executed successfully via ${task.trigger_type} trigger`,
       })
 
       return { id: task.id, label: task.label, result }
@@ -535,7 +545,8 @@ async function executeUserTasks(
         taskLabel: task.label, taskId: task.id,
         status: 'anomaly',
         decision_type: 'escalate',
-        reasoning: e instanceof Error ? e.message : String(e)
+        reasoning: e instanceof Error ? e.message : String(e),
+        conclusion: `Task "${task.label.slice(0, 60)}" failed with error — marked as failed and requires attention`,
       })
       console.error(`[scheduler] Task ${task.id} failed:`, e)
     }
@@ -621,6 +632,7 @@ async function heartbeatTick(baseUrl: string): Promise<void> {
             decision_type: 'proactive',
             reasoning: `Deferred intent from ${intent.createdAt.toLocaleDateString()}: "${intent.sourceMsg.slice(0, 80)}"`,
             signal_priority: intent.dueAt && intent.dueAt < new Date() ? 'P1' : 'P2',
+            conclusion: `Deferred intent surfaced and ready for action: "${intent.intent.slice(0, 80)}"`,
           })
           await markDeferredIntentSurfaced(intent.id)
         }
@@ -638,6 +650,11 @@ async function heartbeatTick(baseUrl: string): Promise<void> {
       const isMorningBriefWindow = now.getUTCHours() === 12 && Math.floor(Date.now() / 1000) % 300 < 60
       if (isMorningBriefWindow) {
         for (const { user_id } of activeUsers.rows.slice(0, 3)) {
+          writeWorklog(user_id, 'proactive_signal', '☀️ Morning brief fired — preparing your daily summary', {
+            decision_type: 'proactive', signal_priority: 'P1',
+            reasoning: 'Daily 12:00 UTC morning brief window',
+            conclusion: 'Morning brief dispatched to agent for delivery',
+          }).catch(() => {})
           // Fire proactive outreach check via agent route to trigger morning_brief
           fetch(`${baseUrl}/api/agent`, {
             method: 'POST',
@@ -652,7 +669,7 @@ async function heartbeatTick(baseUrl: string): Promise<void> {
       if (isCommHealthWindow) {
         for (const { user_id } of activeUsers.rows.slice(0, 3)) {
           runAuthHealthSweep(user_id).catch(() => {})
-          writeWorklog(user_id, 'auth_check', 'Communications health sweep ran', { decision_type: 'proactive', reasoning: 'Daily 06:00 UTC sweep', signal_priority: 'P3' }).catch(() => {})
+          writeWorklog(user_id, 'auth_check', 'Communications health sweep ran', { decision_type: 'proactive', reasoning: 'Daily 06:00 UTC sweep', signal_priority: 'P3', conclusion: 'Daily 06:00 UTC communications health sweep completed' }).catch(() => {})
         }
       }
 
@@ -792,7 +809,7 @@ export function startScheduler(baseUrl: string): void {
         const data = await res.json() as { results?: Array<{ name: string; status: string }> }
         const seeded = (data.results ?? []).filter(r => r.status === 'seeded').length
         console.log(`[scheduler:skills] Bootstrap complete — ${seeded} skill(s) seeded/updated`)
-        await writeWorklog('system', 'action', `Skill bootstrap: ${seeded} skill(s) seeded/updated`, { source: 'scheduler_startup' }).catch(() => {})
+        await writeWorklog('system', 'action', `Skill bootstrap: ${seeded} skill(s) seeded/updated`, { source: 'scheduler_startup', conclusion: `Startup skill bootstrap complete — ${seeded} skill(s) seeded or updated in the database` }).catch(() => {})
       } else {
         console.warn('[scheduler:skills] Skill seed failed:', res.status)
       }

@@ -139,7 +139,7 @@ export async function executeSprint2Tool(
         const transcript = d.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? ''
         const confidence = d.results?.channels?.[0]?.alternatives?.[0]?.confidence ?? 0
         if (!transcript) return 'transcribe_audio: No transcript returned'
-        writeWorklog(userId, 'task_executed', `Transcribed audio (${Math.round(confidence * 100)}% confidence)`, { decision_type: 'action', signal_priority: 'P2' }).catch(() => {})
+        writeWorklog(userId, 'task_executed', `Transcribed audio (${Math.round(confidence * 100)}% confidence)`, { decision_type: 'action', signal_priority: 'P2', conclusion: `Audio transcribed at ${Math.round(confidence * 100)}% confidence` }).catch(() => {})
         return `**Transcript** (${Math.round(confidence * 100)}% confidence):\n\n${transcript}`
       } catch (e) {
         return `transcribe_audio error: ${String(e)}`
@@ -168,7 +168,7 @@ export async function executeSprint2Tool(
         if (!r.ok) return `text_to_speech: MiniMax error ${r.status}`
         const d = await r.json() as { audio_file?: string; base_resp?: { status_code?: number; status_msg?: string } }
         if (!d.audio_file) return `text_to_speech: No audio returned${d.base_resp?.status_msg ? ' — ' + d.base_resp.status_msg : ''}`
-        writeWorklog(userId, 'task_executed', `TTS synthesized: "${ttsText.slice(0, 60)}${ttsText.length > 60 ? '...' : ''}"`, { decision_type: 'action', signal_priority: 'P3' }).catch(() => {})
+        writeWorklog(userId, 'task_executed', `TTS synthesized: "${ttsText.slice(0, 60)}${ttsText.length > 60 ? '...' : ''}"`, { decision_type: 'action', signal_priority: 'P3', conclusion: `Text-to-speech audio generated successfully using voice ${voice_id}` }).catch(() => {})
         return `AUDIO_URL:data:audio/mp3;base64,${d.audio_file}`
       } catch (e) {
         return `text_to_speech error: ${String(e)}`
