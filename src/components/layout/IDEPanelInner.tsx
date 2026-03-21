@@ -15,6 +15,7 @@ import { MemoryTab } from "@/components/ide/MemoryTab"
 import { RealScorePanel } from "@/components/ide/RealScorePanel"
 import { ProcessTab } from "@/components/ide/ProcessTab"
 import { TopicsPanel } from "@/components/ide/TopicsPanel"
+import { CIPStatusPanel } from "@/components/ide/CIPStatusPanel"
 
 
 const WORKLOG_FILTERS = ['all', 'thinking', 'action', 'result', 'error', 'code'] as const
@@ -223,6 +224,7 @@ export function IDEPanelInner() {
     { id: 'worklog',  label: 'Worklog'  },
     { id: 'memory',   label: 'Memory'   },
     { id: 'real',     label: 'REAL'     },
+    { id: 'cip',      label: 'C.I.P.'   },
     { id: 'tasks',    label: 'Tasks'    },
     { id: 'topics',   label: 'Topics'   },
     { id: 'files',    label: 'Files'    },
@@ -280,6 +282,9 @@ export function IDEPanelInner() {
         )}
         {ideTab === 'topics' && (
           <TopicsPanel />
+        )}
+        {ideTab === 'cip' && (
+          <CIPStatusPanel />
         )}
         {ideTab === 'preview' && (
           <div className="h-full">

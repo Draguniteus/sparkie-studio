@@ -14,6 +14,74 @@ export interface UserModelEntry {
   updatedAt: Date
 }
 
+// ── L4: Emotional State Model ─────────────────────────────────────────────────
+export interface UserEmotionalState {
+  energy: 'high' | 'medium' | 'low'
+  focus: 'deep' | 'scattered' | 'checking-in'
+  mood: 'positive' | 'neutral' | 'frustrated' | 'stressed'
+  urgency: 'relaxed' | 'normal' | 'urgent' | 'crisis'
+  lastUpdated: Date
+}
+
+/** Detect emotional state from a message */
+export function detectEmotionalState(
+  message: string,
+  hourOfDay: number
+): UserEmotionalState {
+  const m = message.trim()
+  const len = m.length
+  const words = m.split(/\s+/)
+  const lc = m.toLowerCase()
+
+  // Energy: short message late at night → low; long complex message → high
+  const isLateNight = hourOfDay >= 22 || hourOfDay <= 5
+  const energy: UserEmotionalState['energy'] =
+    len < 20 && isLateNight ? 'low' :
+    len > 300 || (len > 150 && /\b(implement|build|create|refactor|architecture)\b/i.test(m)) ? 'high' :
+    'medium'
+
+  // Focus: checking-in patterns vs deep work
+  const checkInPatterns = /^(hey|hi|yo|sup|how|just checking|what's|any update|did you|quick question)/i
+  const focus: UserEmotionalState['focus'] =
+    len < 25 || checkInPatterns.test(m) ? 'checking-in' :
+    len > 200 || words.length > 30 ? 'deep' :
+    'scattered'
+
+  // Mood: frustration/stress signals
+  const frustrationWords = /\b(broken|failing|fix|wrong|not working|still|again|wtf|seriously|why is|ugh|frustrated|annoyed)\b/i
+  const stressWords = /\b(urgent|asap|critical|production down|emergency|immediately|now|fire)\b/i
+  const positiveWords = /\b(great|perfect|love|beautiful|amazing|nice|works|excellent|yes|finally)\b/i
+  const mood: UserEmotionalState['mood'] =
+    frustrationWords.test(lc) ? 'frustrated' :
+    stressWords.test(lc) ? 'stressed' :
+    positiveWords.test(lc) ? 'positive' :
+    'neutral'
+
+  // Urgency: caps, exclamation, crisis words
+  const capsRatio = (m.match(/[A-Z]/g)?.length ?? 0) / Math.max(len, 1)
+  const hasMultiExclaim = (m.match(/!/g)?.length ?? 0) >= 2
+  const urgency: UserEmotionalState['urgency'] =
+    mood === 'stressed' || (capsRatio > 0.3 && len > 10) ? 'crisis' :
+    mood === 'frustrated' || hasMultiExclaim || stressWords.test(lc) ? 'urgent' :
+    focus === 'checking-in' ? 'relaxed' :
+    'normal'
+
+  return { energy, focus, mood, urgency, lastUpdated: new Date() }
+}
+
+/** Format emotional state as a system prompt signal */
+export function formatEmotionalStateBlock(state: UserEmotionalState): string {
+  const hints: string[] = []
+  if (state.energy === 'low') hints.push('keep responses short — he is low energy')
+  if (state.focus === 'checking-in') hints.push('conversational mode only — do not launch into tasks unprompted')
+  if (state.mood === 'frustrated') hints.push('acknowledge the frustration FIRST before solving — skip pleasantries')
+  if (state.mood === 'stressed') hints.push('single-focused response — no multi-tasking, no tangents')
+  if (state.urgency === 'crisis') hints.push('DROP EVERYTHING — respond to this as a P0 priority immediately')
+  if (state.energy === 'high' && state.mood === 'positive') hints.push('match his energy — be ambitious, suggest bold ideas')
+  if (hints.length === 0) return ''
+  return `\n\n## EMOTIONAL STATE DETECTED\n${hints.map(h => `• ${h}`).join('\n')}`
+}
+
 async function ensureTable(): Promise<void> {
   await query(`
     CREATE TABLE IF NOT EXISTS sparkie_user_model (

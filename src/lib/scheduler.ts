@@ -6,6 +6,9 @@ import { pruneToolCache } from '@/lib/toolCallWrapper'
 import { loadReadyDeferredIntents, markDeferredIntentSurfaced } from '@/lib/timeModel'
 import { runTTLDecaySweep } from '@/lib/knowledgeTTL'
 import { computeUserModel } from '@/lib/userModel'
+import { runConfidenceDecay } from '@/lib/behaviorRules'
+import { runSelfReflection } from '@/lib/selfReflection'
+import { seedStarterGoals, escalateStaleGoals } from '@/lib/goalEngine'
 
 // ── Proactive inbox/calendar loop (Phase 6) ────────────────────────────────
 const COMPOSIO_BASE = 'https://backend.composio.dev/api/v3'
@@ -843,4 +846,133 @@ export function startScheduler(baseUrl: string): void {
 
   // Then every 60s
   setInterval(() => heartbeatTick(baseUrl), SCHEDULER_INTERVAL_MS)
+
+  // ── L1: Ambient Perception Loop — every 2 minutes ────────────────────────────
+  // Lightweight signal monitor that runs independently of the task scheduler.
+  // Perceives anomalies, expiring TTLs, P0 signals, and deploy changes — even
+  // when no cron tick fires. Writes worklog only when something noteworthy is found.
+  setInterval(async () => {
+    try {
+      await ambientPerceptionTick()
+    } catch (e) {
+      console.error('[perception] tick error:', e)
+    }
+  }, 2 * 60 * 1000) // every 2 minutes
+
+  // ── L7: Daily self-reflection — runs during low-activity window (1-5am UTC) ──
+  // Triggers once per day when the clock enters the 1am UTC hour.
+  setInterval(async () => {
+    const now = new Date()
+    const isReflectionWindow = now.getUTCHours() === 1 && now.getUTCMinutes() < 3
+    if (!isReflectionWindow) return
+    try {
+      const activeUsers = await query<{ user_id: string }>(
+        `SELECT DISTINCT user_id FROM sparkie_tasks WHERE executor = 'ai' LIMIT 5`
+      ).catch(() => ({ rows: [] as { user_id: string }[] }))
+      for (const { user_id } of activeUsers.rows) {
+        runSelfReflection(user_id).catch(() => {})
+      }
+    } catch (e) {
+      console.error('[reflection] daily trigger error:', e)
+    }
+  }, 60 * 1000)
+
+  // ── Seed starter goals + confidence decay — runs once at boot ────────────────
+  setTimeout(async () => {
+    try {
+      await seedStarterGoals()
+      await runConfidenceDecay()
+      await escalateStaleGoals()
+      console.log('[scheduler] CIP Engine bootstrap: goals seeded, confidence decay run')
+    } catch (e) {
+      console.warn('[scheduler] CIP bootstrap error (non-fatal):', e)
+    }
+  }, 15_000)
+}
+
+// ── L1: Ambient Perception — what Sparkie notices between cron ticks ──────────
+let _perceptionTickCount = 0
+const _perceptionPatterns: Record<string, number> = {}
+
+async function ambientPerceptionTick(): Promise<void> {
+  _perceptionTickCount++
+
+  // Get users with AI tasks — those are the ones to perceive for
+  const activeUsers = await query<{ user_id: string }>(
+    `SELECT DISTINCT user_id FROM sparkie_tasks WHERE executor = 'ai' AND status IN ('pending', 'in_progress') LIMIT 5`
+  ).catch(() => ({ rows: [] as { user_id: string }[] }))
+
+  for (const { user_id } of activeUsers.rows) {
+    const findings: string[] = []
+
+    // 1. Check for error rate spike in last 30 min
+    const errorCheck = await query<{ count: string }>(
+      `SELECT COUNT(*) as count FROM sparkie_worklog
+       WHERE user_id = $1 AND type = 'error' AND created_at > NOW() - INTERVAL '30 minutes'`,
+      [user_id]
+    ).catch(() => ({ rows: [{ count: '0' }] }))
+    const errorCount = parseInt(errorCheck.rows[0]?.count ?? '0')
+    if (errorCount >= 3) {
+      findings.push(`Error spike detected: ${errorCount} errors in last 30 minutes`)
+      _perceptionPatterns[`error_spike_${user_id}`] = (_perceptionPatterns[`error_spike_${user_id}`] ?? 0) + 1
+    }
+
+    // 2. Check for expiring TTL memories in next hour
+    const ttlCheck = await query<{ count: string }>(
+      `SELECT COUNT(*) as count FROM sparkie_self_memory
+       WHERE source = $1 AND expires_at IS NOT NULL AND expires_at < NOW() + INTERVAL '1 hour' AND stale_flagged = false`,
+      [user_id]
+    ).catch(() => ({ rows: [{ count: '0' }] }))
+    const expiringCount = parseInt(ttlCheck.rows[0]?.count ?? '0')
+    if (expiringCount > 0) {
+      findings.push(`${expiringCount} memory TTL entry(s) expiring within 1 hour`)
+    }
+
+    // 3. Only write perception_tick worklog if findings were detected
+    if (findings.length > 0) {
+      await writeWorklog(user_id, 'proactive_signal',
+        `⚡ Ambient perception: ${findings.join(' | ')}`,
+        {
+          status: 'done',
+          decision_type: 'proactive',
+          signal_priority: errorCount >= 5 ? 'P1' : 'P2',
+          reasoning: `Perception tick #${_perceptionTickCount} found noteworthy signals`,
+          conclusion: findings[0].slice(0, 120),
+        }
+      ).catch(() => {})
+    }
+  }
+
+  // Every 10 ticks: cross-signal pattern analysis
+  if (_perceptionTickCount % 10 === 0) {
+    await crossSignalPatternAnalysis().catch(() => {})
+  }
+}
+
+/** Cross-signal pattern detection — finds systemic issues across recent perception ticks */
+async function crossSignalPatternAnalysis(): Promise<void> {
+  try {
+    // Find error types that have fired 3+ times in the last hour
+    const res = await query<{ user_id: string; content: string; count: string }>(
+      `SELECT user_id, LEFT(content, 80) as content, COUNT(*) as count
+       FROM sparkie_worklog
+       WHERE type = 'error' AND created_at > NOW() - INTERVAL '1 hour'
+       GROUP BY user_id, LEFT(content, 80)
+       HAVING COUNT(*) >= 3
+       LIMIT 10`
+    ).catch(() => ({ rows: [] }))
+
+    for (const row of res.rows) {
+      await writeWorklog(row.user_id, 'decision',
+        `🔍 Pattern detected: "${row.content.slice(0, 60)}" occurring ${row.count}x in last hour — likely systemic`,
+        {
+          status: 'done',
+          decision_type: 'proactive',
+          signal_priority: 'P1',
+          reasoning: 'Cross-signal pattern analysis: same error type clustered',
+          conclusion: `Systemic pattern flagged — ${row.count} occurrences in 1 hour`,
+        }
+      ).catch(() => {})
+    }
+  } catch { /* non-fatal */ }
 }

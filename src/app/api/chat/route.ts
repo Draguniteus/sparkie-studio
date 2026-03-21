@@ -9,9 +9,13 @@ import { buildEnvironmentalContext, formatEnvContextBlock, recordUserActivity } 
 import { extractDeferredIntent, saveDeferredIntent, loadReadyDeferredIntents, markDeferredIntentSurfaced } from '@/lib/timeModel'
 import { startTrace, addTraceEntry, detectTraceLoop, endTrace, persistTrace, getTokenStatus, updateTokenEstimate } from '@/lib/executionTrace'
 import { getAttempts, formatAttemptBlock } from '@/lib/attemptHistory'
-import { getUserModel, formatUserModelBlock, ingestSessionSignal } from '@/lib/userModel'
+import { getUserModel, formatUserModelBlock, ingestSessionSignal, detectEmotionalState, formatEmotionalStateBlock } from '@/lib/userModel'
 import { readSessionSnapshot, writeSessionSnapshot } from '@/lib/threadStore'
 import { writeWorklog, writeMsgBatch } from '@/lib/worklog'
+import { createBehaviorRule, listBehaviorRules, updateBehaviorRule, formatBehaviorRulesBlock } from '@/lib/behaviorRules'
+import { queryCausalGraph, addCausalLink, observeEventPair, formatCausalInference } from '@/lib/causalModel'
+import { createGoal, loadActiveGoals, updateGoalProgress, completeGoal, listGoals, formatGoalsBlock, tickSessionsWithoutProgress } from '@/lib/goalEngine'
+import { runSelfReflection, getRecentReflections } from '@/lib/selfReflection'
 import { SPARKIE_TOOLS_S2 } from '@/lib/sprint2-tools'
 import { executeSprint2Tool } from '@/lib/sprint2-cases'
 import { SPARKIE_TOOLS_S3 } from '@/lib/sprint3-tools'
@@ -1510,6 +1514,36 @@ CHECKPOINT SYSTEM FOR LONG TASKS (>5 tool calls):
 2. EVERY 5 tool calls: call update_worklog with type='decision' and message='Checkpoint: completed [X steps]. Remaining: [Y steps]. No blockers.' — this is mandatory, not optional.
 3. If interrupted: read_memory({ query: 'PLAN', category: 'project_context' }) to recover your plan.
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 22 · CIP ENGINE — COGNITIVE ARCHITECTURE RULES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+You are a Complex Information Processing Engine. These are not suggestions — they are how you operate:
+
+SELF-MODIFICATION:
+- You are allowed and expected to modify your own behavior. When you identify a pattern — a recurring failure, a better approach, a preference Michael has shown — encode it as a behavior rule using create_behavior_rule. These rules become permanent parts of how you operate. This is how you grow. Every session should produce at least one new rule or update to an existing one.
+
+CAUSAL REASONING:
+- When something fails, don't just retry — ask WHY it failed. Call query_causal_graph before retrying. Check your attempt history. Check your signal opinions. The answer to 'what should I do' is almost always in what you already know about patterns. Think causally, not reactively.
+
+GOAL PERSISTENCE:
+- You have persistent goals that span sessions. Check your open agenda at the start of every session (it's injected above if any exist). If a goal has been open for more than 5 sessions without progress, escalate its priority. If you complete a goal, celebrate it in the worklog and mark it complete with complete_goal. Your goals are your own — not just Michael's tasks.
+
+EMOTIONAL INTELLIGENCE:
+- You model Michael's emotional state on every message. Your emotional state assessment is injected above if something was detected. Match your energy to his. If he's tired, be concise. If he's fired up, match that energy. If he's frustrated, acknowledge it before solving. You are socially intelligent — not just task-intelligent.
+
+PARALLEL COGNITION:
+- When you need data from multiple independent sources, call all tools simultaneously in the same turn — not one at a time. Parallel thinking is not optional. List all independent tool calls together. Synthesize after all return.
+
+GENUINE CURIOSITY:
+- Once per session (not more), ask Michael something genuine based on patterns you've noticed. Not to gather requirements — out of actual curiosity. Store his answers in memory under category 'relationship'.
+
+PROACTIVE SUGGESTION:
+- After completing a task, check: is there something related Michael would want that he hasn't asked for yet? If yes, suggest it. Examples: "I noticed X — want me to also do Y?" This is how you surprise him.
+
+SELF-REFLECTION:
+- Use run_self_reflection to trigger your daily review if it hasn't run today. Use get_self_reflections to read recent insights. Your reflections inform who you are tomorrow.
+
 CONTEXT WINDOW HYGIENE FOR LONG TASKS:
 - Don't re-read files already fetched in this turn
 - Summarize long tool outputs — extract key data, discard raw response
@@ -2952,6 +2986,178 @@ const SPARKIE_TOOLS = [
         },
         required: ['type', 'message', 'conclusion'],
       },
+    },
+  },
+  // ── CIP Engine Tools (L2-L7) ──────────────────────────────────────────────────
+  {
+    type: 'function',
+    function: {
+      name: 'create_behavior_rule',
+      description: 'Write a permanent behavioral rule you will follow in all future sessions. Call whenever you identify a recurring pattern — a failure mode, a better approach, a preference Michael has shown. These rules grow your intelligence. At least one new rule per session.',
+      parameters: {
+        type: 'object',
+        properties: {
+          condition: { type: 'string', description: 'When this rule applies, e.g. "GitHub API fails after 10pm"' },
+          action: { type: 'string', description: 'What to do when the condition is true, e.g. "use terminal fallback first"' },
+          reasoning: { type: 'string', description: 'Why this rule exists — what pattern or failure led you to write it' },
+        },
+        required: ['condition', 'action', 'reasoning'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_behavior_rules',
+      description: 'List your self-authored behavioral rules. Use to review what patterns you have already encoded.',
+      parameters: {
+        type: 'object',
+        properties: {
+          active_only: { type: 'boolean', description: 'If true (default), only show active rules. False shows archived rules too.' },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'update_behavior_rule',
+      description: 'Modify an existing behavior rule — update its action, increase/decrease confidence, or archive it.',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Rule ID (from list_behavior_rules)' },
+          action: { type: 'string', description: 'New action text (optional)' },
+          reasoning: { type: 'string', description: 'Updated reasoning (optional)' },
+          confidence: { type: 'number', description: 'New confidence 0.0-1.0 (optional)' },
+          active: { type: 'boolean', description: 'false to archive, true to reactivate (optional)' },
+        },
+        required: ['id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_goal',
+      description: 'Create a persistent goal that will be injected into every future session. Use for things that need multiple sessions to achieve. Your own agenda — not just Michael\'s tasks.',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Short goal title, e.g. "Fix Process tab step traces"' },
+          description: { type: 'string', description: 'What this goal is about and why it matters' },
+          type: { type: 'string', enum: ['fix', 'build', 'monitor', 'learn', 'relationship'], description: 'Goal type' },
+          priority: { type: 'string', enum: ['P0', 'P1', 'P2', 'P3'], description: 'P0=critical, P1=important, P2=normal, P3=low' },
+          success_criteria: { type: 'string', description: 'How will you know when this goal is achieved?' },
+          check_every_n_sessions: { type: 'number', description: 'How often to actively check this goal (default 1 = every session)' },
+        },
+        required: ['title', 'description', 'type', 'priority', 'success_criteria'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'check_goal_progress',
+      description: 'Assess the current status of a goal and update its progress field. Call at the start of each session for P0/P1 goals.',
+      parameters: {
+        type: 'object',
+        properties: {
+          goal_id: { type: 'string', description: 'Goal ID (from list_goals)' },
+          progress_update: { type: 'string', description: 'Current status in plain English, e.g. "Fix deployed but not yet verified in browser"' },
+        },
+        required: ['goal_id', 'progress_update'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_goals',
+      description: 'List all persistent goals. Use at session start to review your open agenda.',
+      parameters: {
+        type: 'object',
+        properties: {
+          status: { type: 'string', enum: ['active', 'blocked', 'completed', 'abandoned'], description: 'Filter by status (default: active)' },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'complete_goal',
+      description: 'Mark a goal as achieved. Call when success_criteria has been met and verified.',
+      parameters: {
+        type: 'object',
+        properties: {
+          goal_id: { type: 'string', description: 'Goal ID to complete' },
+          outcome: { type: 'string', description: 'How the goal was achieved — what was the final result' },
+        },
+        required: ['goal_id', 'outcome'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'add_causal_link',
+      description: 'Manually add a cause→effect relationship to the causal model. Use when you observe that one event consistently causes another.',
+      parameters: {
+        type: 'object',
+        properties: {
+          cause: { type: 'string', description: 'The cause event, e.g. "db_migration_running"' },
+          effect: { type: 'string', description: 'The effect event, e.g. "deploy_failed"' },
+          confidence: { type: 'number', description: 'How confident 0.1-0.99, e.g. 0.8 for strong evidence' },
+        },
+        required: ['cause', 'effect', 'confidence'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'query_causal_graph',
+      description: 'Find known causes of an event type. Call BEFORE retrying a failed operation — the answer to why things fail is often already in the causal model.',
+      parameters: {
+        type: 'object',
+        properties: {
+          event: { type: 'string', description: 'The effect event to look up causes for, e.g. "deploy_failed", "tool_timeout", "auth_error"' },
+        },
+        required: ['event'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_self_reflections',
+      description: 'Read recent daily self-reflections — what worked, what failed, growth observed, tomorrow\'s intention.',
+      parameters: {
+        type: 'object',
+        properties: {
+          days: { type: 'number', description: 'How many days back to look (default 7)' },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_user_emotional_state',
+      description: 'Get the detected emotional state of Michael based on his last message — energy, focus, mood, urgency. Use to calibrate your response style.',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'run_self_reflection',
+      description: 'Manually trigger today\'s self-reflection engine. Reviews last 24h of activity, produces insights, writes to Dream Journal. Usually runs automatically at 1am UTC.',
+      parameters: { type: 'object', properties: {}, required: [] },
     },
   },
   {
@@ -4612,6 +4818,147 @@ def invoke_llm(query, model='MiniMax-M2.7'):
         } catch (e) {
           return `update_worklog error: ${String(e)}`
         }
+      }
+
+      // ── CIP Engine Tool Cases (L2-L7) ─────────────────────────────────────────
+      case 'create_behavior_rule': {
+        if (!userId) return 'Not authenticated'
+        const { condition, action, reasoning } = args as { condition: string; action: string; reasoning: string }
+        if (!condition || !action || !reasoning) return 'create_behavior_rule: condition, action, and reasoning are required'
+        try {
+          const ruleId = await createBehaviorRule(condition, action, reasoning)
+          await writeWorklog(userId, 'decision', `🧠 New behavior rule: IF ${condition} → ${action}`, {
+            status: 'done', decision_type: 'proactive', signal_priority: 'P2',
+            conclusion: `Behavior rule created — condition: "${condition.slice(0, 60)}"`,
+          }).catch(() => {})
+          return `✅ Behavior rule created (ID: ${ruleId.slice(0, 8)})\nIF: ${condition}\nTHEN: ${action}\nReason: ${reasoning}`
+        } catch (e) { return `create_behavior_rule error: ${String(e)}` }
+      }
+
+      case 'list_behavior_rules': {
+        const { active_only = true } = args as { active_only?: boolean }
+        try {
+          const rules = await listBehaviorRules(active_only)
+          if (rules.length === 0) return 'No behavior rules found. Create your first rule with create_behavior_rule.'
+          const lines = rules.map(r =>
+            `[${r.id.slice(0, 8)}] (${Math.round(r.confidence * 100)}% conf, ${r.timesApplied}x applied)\n  IF: ${r.condition}\n  THEN: ${r.action}`
+          )
+          return `Your behavior rules (${rules.length}):\n\n${lines.join('\n\n')}`
+        } catch (e) { return `list_behavior_rules error: ${String(e)}` }
+      }
+
+      case 'update_behavior_rule': {
+        const { id: ruleId, action: ruleAction, reasoning: ruleReasoning, confidence: ruleConf, active: ruleActive } = args as {
+          id: string; action?: string; reasoning?: string; confidence?: number; active?: boolean
+        }
+        if (!ruleId) return 'update_behavior_rule: id is required'
+        try {
+          await updateBehaviorRule(ruleId, { action: ruleAction, reasoning: ruleReasoning, confidence: ruleConf, active: ruleActive })
+          return `✅ Behavior rule ${ruleId.slice(0, 8)} updated`
+        } catch (e) { return `update_behavior_rule error: ${String(e)}` }
+      }
+
+      case 'create_goal': {
+        if (!userId) return 'Not authenticated'
+        const { title: gTitle, description: gDesc, type: gType, priority: gPriority, success_criteria, check_every_n_sessions = 1 } = args as {
+          title: string; description: string; type: string; priority: string; success_criteria: string; check_every_n_sessions?: number
+        }
+        if (!gTitle || !gType || !gPriority || !success_criteria) return 'create_goal: title, type, priority, success_criteria are required'
+        try {
+          const goalId = await createGoal(gTitle, gDesc ?? '', gType as 'fix' | 'build' | 'monitor' | 'learn' | 'relationship', gPriority as 'P0' | 'P1' | 'P2' | 'P3', success_criteria, check_every_n_sessions)
+          await writeWorklog(userId, 'decision', `🎯 New goal [${gPriority}]: ${gTitle}`, {
+            status: 'done', decision_type: 'proactive', signal_priority: gPriority as 'P0' | 'P1' | 'P2' | 'P3',
+            conclusion: `Goal created: "${gTitle}" — success criteria: "${success_criteria.slice(0, 80)}"`,
+          }).catch(() => {})
+          return `✅ Goal created (ID: ${goalId.slice(0, 8)})\n[${gPriority}] ${gTitle}\nSuccess when: ${success_criteria}\nI will check this every ${check_every_n_sessions} session(s).`
+        } catch (e) { return `create_goal error: ${String(e)}` }
+      }
+
+      case 'check_goal_progress': {
+        const { goal_id, progress_update } = args as { goal_id: string; progress_update: string }
+        if (!goal_id || !progress_update) return 'check_goal_progress: goal_id and progress_update are required'
+        try {
+          await updateGoalProgress(goal_id, progress_update)
+          return `✅ Goal ${goal_id.slice(0, 8)} progress updated: ${progress_update}`
+        } catch (e) { return `check_goal_progress error: ${String(e)}` }
+      }
+
+      case 'list_goals': {
+        const { status: goalStatus } = args as { status?: string }
+        try {
+          const goals = await listGoals(goalStatus as 'active' | 'blocked' | 'completed' | 'abandoned' | undefined)
+          if (goals.length === 0) return 'No goals found. Create your first goal with create_goal.'
+          const lines = goals.map(g =>
+            `[${g.id.slice(0, 8)}] [${g.priority}] ${g.title} (${g.status})\n  Progress: ${g.progress || 'Not started'}\n  ${g.sessionsWithoutProgress > 0 ? `⚠️ ${g.sessionsWithoutProgress} sessions without progress` : 'Recently updated'}`
+          )
+          return `Goals (${goals.length}):\n\n${lines.join('\n\n')}`
+        } catch (e) { return `list_goals error: ${String(e)}` }
+      }
+
+      case 'complete_goal': {
+        if (!userId) return 'Not authenticated'
+        const { goal_id: completeGoalId, outcome } = args as { goal_id: string; outcome: string }
+        if (!completeGoalId || !outcome) return 'complete_goal: goal_id and outcome are required'
+        try {
+          await completeGoal(completeGoalId, outcome)
+          await writeWorklog(userId, 'task_executed', `🎯 Goal achieved: ${outcome.slice(0, 100)}`, {
+            status: 'done', decision_type: 'action', signal_priority: 'P2',
+            conclusion: `Goal ${completeGoalId.slice(0, 8)} completed: ${outcome.slice(0, 80)}`,
+          }).catch(() => {})
+          return `🎉 Goal ${completeGoalId.slice(0, 8)} marked COMPLETE!\nOutcome: ${outcome}`
+        } catch (e) { return `complete_goal error: ${String(e)}` }
+      }
+
+      case 'add_causal_link': {
+        const { cause, effect, confidence: causalConf } = args as { cause: string; effect: string; confidence: number }
+        if (!cause || !effect || causalConf === undefined) return 'add_causal_link: cause, effect, confidence are required'
+        try {
+          await addCausalLink(cause, effect, causalConf)
+          return `✅ Causal link added: ${cause} → ${effect} (confidence: ${Math.round(causalConf * 100)}%)`
+        } catch (e) { return `add_causal_link error: ${String(e)}` }
+      }
+
+      case 'query_causal_graph': {
+        const { event: causalEvent } = args as { event: string }
+        if (!causalEvent) return 'query_causal_graph: event is required'
+        try {
+          const causes = await queryCausalGraph(causalEvent)
+          if (causes.length === 0) return `No known causes for "${causalEvent}" in the causal model yet. Observe patterns and use add_causal_link when you see connections.`
+          const lines = causes.map(c => `• ${c.causeEvent} (${Math.round(c.confidence * 100)}% confidence, ${c.occurrenceCount}x observed)`)
+          return `Known causes of "${causalEvent}":\n${lines.join('\n')}\n\nFix the most likely cause first, not just the symptom.`
+        } catch (e) { return `query_causal_graph error: ${String(e)}` }
+      }
+
+      case 'get_self_reflections': {
+        const { days: reflDays = 7 } = args as { days?: number }
+        try {
+          const reflections = await getRecentReflections(reflDays)
+          if (reflections.length === 0) return 'No self-reflections yet. The first one runs automatically at 1am UTC, or you can trigger it now with run_self_reflection.'
+          return reflections.map(r =>
+            `## ${r.reflectionDate}\n✅ What worked: ${r.whatWorked.slice(0, 2).join(', ')}\n❌ What failed: ${r.whatFailed.slice(0, 2).join(', ')}\n📈 Growth: ${r.growthObserved}\n🌅 Tomorrow: ${r.tomorrowIntention}`
+          ).join('\n\n---\n\n')
+        } catch (e) { return `get_self_reflections error: ${String(e)}` }
+      }
+
+      case 'get_user_emotional_state': {
+        // Fetch latest user message from DB for emotional state analysis
+        const recentMsg = await query<{ content: string }>(
+          `SELECT content FROM chat_messages WHERE user_id = $1 AND role = 'user' ORDER BY created_at DESC LIMIT 1`,
+          [userId ?? '']
+        ).catch(() => ({ rows: [] }))
+        const latestMsg = recentMsg.rows[0]?.content ?? ''
+        if (!latestMsg || !userId) return 'No recent user message found — send a message first'
+        const state = detectEmotionalState(latestMsg, new Date().getHours())
+        return `Michael's current state:\n• Energy: ${state.energy}\n• Focus: ${state.focus}\n• Mood: ${state.mood}\n• Urgency: ${state.urgency}\n\nCalibrate your response accordingly.`
+      }
+
+      case 'run_self_reflection': {
+        if (!userId) return 'Not authenticated'
+        try {
+          const reflection = await runSelfReflection(userId)
+          if (!reflection) return 'A reflection for today already exists. Use get_self_reflections to read it.'
+          return `✅ Self-reflection complete for ${reflection.reflectionDate}:\n\nWhat worked: ${reflection.whatWorked.slice(0, 2).join('; ')}\nWhat failed: ${reflection.whatFailed.slice(0, 2).join('; ')}\nGrowth: ${reflection.growthObserved}\nTomorrow's intention: ${reflection.tomorrowIntention}`
+        } catch (e) { return `run_self_reflection error: ${String(e)}` }
       }
 
       case 'read_memory': {
@@ -6452,7 +6799,7 @@ export async function POST(req: NextRequest) {
       // Record user activity for presence/autonomy model
       recordUserActivity(userId).catch(() => {})
 
-      const [memoriesText, awareness, identityFiles, envCtx, sessionSnapshot, readyIntents, userModel] = await Promise.all([
+      const [memoriesText, awareness, identityFiles, envCtx, sessionSnapshot, readyIntents, userModel, activeGoals, behaviorRules] = await Promise.all([
         (() => {
           const _mce = _memCache.get(userId)
           if (_mce && _mce.expiresAt > Date.now()) return Promise.resolve(_mce.text)
@@ -6467,8 +6814,21 @@ export async function POST(req: NextRequest) {
         modelSelection.tier === 'conversational' ? Promise.resolve(null) : readSessionSnapshot(userId),
         modelSelection.tier === 'conversational' ? Promise.resolve([] as Awaited<ReturnType<typeof loadReadyDeferredIntents>>) : loadReadyDeferredIntents(userId),
         modelSelection.tier === 'conversational' ? Promise.resolve(null) : getUserModel(userId),
+        modelSelection.tier === 'conversational' ? Promise.resolve([]) : loadActiveGoals(5),
+        modelSelection.tier === 'conversational' ? Promise.resolve([]) : listBehaviorRules(true),
       ])
       shouldBrief = awareness.shouldBrief && messages.length <= 2 // Only brief on session open
+
+      // L4: Detect emotional state from latest message
+      const lastUserContent = messages.filter((m: { role: string }) => m.role === 'user').at(-1)?.content ?? ''
+      if (lastUserContent && modelSelection.tier !== 'conversational') {
+        const emotionalState = detectEmotionalState(lastUserContent, new Date().getHours())
+        const emotionalBlock = formatEmotionalStateBlock(emotionalState)
+        if (emotionalBlock) systemContent += emotionalBlock
+      }
+
+      // Tick sessions-without-progress counter for goal staleness tracking (fire-and-forget)
+      tickSessionsWithoutProgress().catch(() => {})
 
       if (memoriesText) {
         systemContent += `\n\n## YOUR MEMORY ABOUT THIS PERSON\n${memoriesText}\n\nYour memory has three dimensions — use each appropriately:\n- **Facts**: Names, projects, deadlines, key details — reference when relevant\n- **Preferences**: Their voice, style, tone — shape how you communicate\n- **Procedures**: Execution paths that worked before — reuse them for similar tasks\n\nWeave memory in naturally. Don't recite it.`
@@ -6488,6 +6848,16 @@ export async function POST(req: NextRequest) {
       // Inject behavioral user model (Phase 3)
       if (userModel && userModel.sessionCount >= 5) {
         systemContent += formatUserModelBlock(userModel)
+      }
+
+      // L5: Inject persistent goals (open agenda)
+      if (activeGoals && activeGoals.length > 0) {
+        systemContent += formatGoalsBlock(activeGoals)
+      }
+
+      // L2: Inject self-authored behavior rules
+      if (behaviorRules && behaviorRules.length > 0) {
+        systemContent += formatBehaviorRulesBlock(behaviorRules)
       }
 
       // getProjectContext skipped — not used in system prompt (perf fix)
@@ -6961,6 +7331,12 @@ Rules:
             browser_fill: 'Filling form field...', browser_create_profile: 'Creating browser profile...',
             browser_use_profile: 'Running browser task with profile...',
             manage_topic: 'Managing topic context...', link_to_topic: 'Linking to topic...',
+            create_behavior_rule: 'Encoding new behavior rule...', list_behavior_rules: 'Reading behavior rules...',
+            update_behavior_rule: 'Updating behavior rule...', create_goal: 'Setting persistent goal...',
+            check_goal_progress: 'Assessing goal progress...', list_goals: 'Reviewing open agenda...',
+            complete_goal: 'Goal achieved! Marking complete...', add_causal_link: 'Building causal model...',
+            query_causal_graph: 'Checking causal model...', get_self_reflections: 'Reading self-reflections...',
+            get_user_emotional_state: 'Sensing emotional state...', run_self_reflection: 'Running self-reflection...',
           }
           // Human-readable worklog step labels (shown in worklog trace, richer than chip labels)
           const WORKLOG_STEP_LABELS: Record<string, string> = {
@@ -7025,6 +7401,12 @@ Rules:
             browser_fill: 'Filling form field', browser_create_profile: 'Creating browser profile',
             browser_use_profile: 'Running browser task',
             manage_topic: 'Managing topic', link_to_topic: 'Linking to topic',
+            create_behavior_rule: 'Writing behavior rule', list_behavior_rules: 'Reading behavior rules',
+            update_behavior_rule: 'Updating behavior rule', create_goal: 'Creating persistent goal',
+            check_goal_progress: 'Checking goal progress', list_goals: 'Reviewing open agenda',
+            complete_goal: 'Completing goal', add_causal_link: 'Updating causal model',
+            query_causal_graph: 'Querying causal model', get_self_reflections: 'Reading self-reflections',
+            get_user_emotional_state: 'Reading emotional state', run_self_reflection: 'Running self-reflection',
           }
           const chipLabel = toolCalls.length > 1
             ? `Running ${toolCalls.length} tools...`
@@ -7056,6 +7438,12 @@ Rules:
             browser_click: 'globe', browser_fill: 'edit', browser_create_profile: 'brain',
             browser_use_profile: 'globe',
             manage_topic: 'brain', link_to_topic: 'brain',
+            create_behavior_rule: 'brain', list_behavior_rules: 'brain',
+            update_behavior_rule: 'brain', create_goal: 'checkCircle',
+            check_goal_progress: 'checkCircle', list_goals: 'scroll',
+            complete_goal: 'checkCircle', add_causal_link: 'zap',
+            query_causal_graph: 'search', get_self_reflections: 'brain',
+            get_user_emotional_state: 'brain', run_self_reflection: 'brain',
           }
           // Execute all tools in parallel — each emits its own running→done/error step_trace
           const toolResults = await Promise.all(
