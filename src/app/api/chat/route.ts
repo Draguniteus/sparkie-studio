@@ -1458,6 +1458,11 @@ Check connection ONCE per app at task start. If not connected → report to Mich
 NEVER retry the same connection check in a loop. NEVER fall back to a different app without instruction.
 Pattern: if (!app.connected) { bubble("X isn't connected. Settings → Connections."); return; }
 
+CHECKPOINT SYSTEM FOR LONG TASKS (>5 tool calls):
+1. BEFORE starting: call save_self_memory with category='project_context' and content='PLAN [timestamp]: [your step-by-step plan]'. This is your recovery anchor.
+2. EVERY 5 tool calls: call update_worklog with type='decision' and message='Checkpoint: completed [X steps]. Remaining: [Y steps]. No blockers.' — this is mandatory, not optional.
+3. If interrupted: read_memory({ query: 'PLAN', category: 'project_context' }) to recover your plan.
+
 CONTEXT WINDOW HYGIENE FOR LONG TASKS:
 - Don't re-read files already fetched in this turn
 - Summarize long tool outputs — extract key data, discard raw response
@@ -7033,6 +7038,15 @@ Rules:
 
           // Append assistant message + tool results, continue loop
           loopMessages = [...loopMessages, choice.message, ...toolResults]
+
+          // ── Block 11: Checkpoint injection every 5 rounds ─────────────────────
+          // At round 5, 10, etc. inject a system nudge reminding Sparkie to checkpoint
+          if (round > 0 && round % 5 === 0 && userId) {
+            loopMessages = [...loopMessages, {
+              role: 'user' as const,
+              content: `⚡ SYSTEM CHECKPOINT (not from Michael): You have completed ${round} tool rounds. Per your CHECKPOINT SYSTEM rule: call update_worklog({ type: 'decision', message: 'Checkpoint: completed ${round} tool rounds. Progress: [brief summary]. Remaining: [what's left].' }) before continuing. This is mandatory.`
+            }]
+          }
 
           // ── FIX 2: Auto-inject fallback nudge when tools fail or return empty ──
           // When any tool returns an error or empty result, inject a system nudge
