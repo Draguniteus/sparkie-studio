@@ -129,7 +129,7 @@ export function Terminal() {
       }
 
       term.write('\r\n\x1b[33m  \u26a1 Sparkie Terminal\x1b[0m\r\n')
-      term.write('\x1b[2m  Ready \u2014 E2B sandbox will connect when a build completes.\x1b[0m\r\n\r\n')
+      term.write('\x1b[2m  Ready \u2014 Start a build to launch an E2B sandbox.\x1b[0m\r\n\r\n')
     }).catch(err => console.error('xterm load failed:', err))
 
     return () => {

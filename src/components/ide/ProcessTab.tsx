@@ -128,6 +128,7 @@ export function ProcessTab() {
   // Track which trace keys are brand-new (for enter animation)
   const seenKeysRef = useRef<Set<string>>(new Set())
   const scrollRef = useRef<HTMLDivElement>(null)
+  const prevLongTaskRef = useRef<string | null>(null)
 
   // Subscribe to live step_trace SSE events
   useEffect(() => {
@@ -158,6 +159,16 @@ export function ProcessTab() {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
   }, [liveTraces.length])
+
+  // Clear live traces immediately when a new execution starts (longTaskLabel transitions null → non-null)
+  // This prevents previous session steps from mixing with the current session
+  useEffect(() => {
+    if (longTaskLabel && !prevLongTaskRef.current) {
+      setLiveTraces([])
+      seenKeysRef.current = new Set()
+    }
+    prevLongTaskRef.current = longTaskLabel ?? null
+  }, [longTaskLabel])
 
   // Clear live traces 3s after longTaskLabel clears (response done)
   useEffect(() => {

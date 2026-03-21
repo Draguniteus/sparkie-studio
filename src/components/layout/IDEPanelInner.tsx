@@ -239,7 +239,7 @@ export function IDEPanelInner() {
   return (
     <div className="h-full flex flex-col bg-hive-600 border-l border-hive-border">
       {/* Header */}
-      <div className="flex items-center h-10 px-3 bg-hive-700 border-b border-hive-border shrink-0 gap-1">
+      <div className="flex items-center h-10 px-3 bg-hive-700 border-b border-hive-border shrink-0 gap-1 overflow-x-auto scrollbar-none">
         {tabs.map(t => (
           <button key={t.id} onClick={() => setIdeTab(t.id)}
             className={`px-3 py-1 text-xs font-medium transition-colors rounded relative

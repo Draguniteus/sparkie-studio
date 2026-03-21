@@ -5052,7 +5052,7 @@ def invoke_llm(query, model='MiniMax-M2.7'):
           if (memSource === 'user') {
             await query('DELETE FROM user_memories WHERE id = $1 AND user_id = $2', [memId, userId])
           } else {
-            await query('DELETE FROM sparkie_self_memory WHERE id = $1 AND user_id = $2', [memId, userId])
+            await query('DELETE FROM sparkie_self_memory WHERE id = $1 AND source = $2', [memId, userId])
           }
           return `✅ delete_memory: entry ${memId} removed from ${memSource} memories`
         } catch (e) { return `delete_memory error: ${String(e)}` }
@@ -5071,7 +5071,7 @@ def invoke_llm(query, model='MiniMax-M2.7'):
           }
           const catFilter = listCat ? 'AND category = $2' : ''
           const params = listCat ? [userId, listCat, Math.min(Number(listLim), 50)] : [userId, Math.min(Number(listLim), 50)]
-          const res = await query(`SELECT id, category, content, created_at FROM sparkie_self_memory WHERE user_id = $1 ${catFilter} ORDER BY created_at DESC LIMIT $${params.length}`, params)
+          const res = await query(`SELECT id, category, content, created_at FROM sparkie_self_memory WHERE source = $1 ${catFilter} ORDER BY created_at DESC LIMIT $${params.length}`, params)
           const rows = res.rows as Array<{ id: number; category: string; content: string }>
           return rows.length ? rows.map(r => `[${r.id}:${r.category}] ${r.content.slice(0, 120)}`).join('\n') : 'No self memories found'
         } catch (e) { return `list_memories error: ${String(e)}` }
@@ -7253,11 +7253,12 @@ Rules:
         } catch { /* planning call failed — continue without plan */ }
       }
 
+      let autoContinuationRound = 0
       while (round < MAX_TOOL_ROUNDS) {
         round++
         hiveLog.push(pickHive(HIVE_ROUND[round] ?? HIVE_ROUND[3]))
         const { response: loopRes, modelUsed: loopModel } = await tryLLMCall({
-          stream: false, temperature: 0.8, max_tokens: 4096,
+          stream: false, temperature: 0.8, max_tokens: 16000,
           tools: [...SPARKIE_TOOLS, ...connectorTools],
           tool_choice: 'auto',
           messages: [{ role: 'system', content: systemContent }, ...loopMessages],
@@ -7520,6 +7521,20 @@ Rules:
               if (['save_memory', 'save_self_memory', 'log_worklog', 'patch_file', 'write_file', 'trigger_deploy', 'create_task', 'schedule_task'].includes(tc.function.name) && !isStepError) {
                 const wlSummary = result.slice(0, 200)
                 liveEnqueue({ worklog_card: { tool: tc.function.name, summary: wlSummary, ts: new Date().toISOString() } })
+              }
+
+              // BUG 3: Persist every tool call to DB worklog so Worklog tab shows full session history
+              if (userId && !result.startsWith('LOOP_INTERRUPT')) {
+                writeWorklog(userId, 'tool_call',
+                  `${tc.function.name.replace(/_/g, ' ')} — ${result.slice(0, 120)}`,
+                  {
+                    status: isStepError ? 'anomaly' : 'done',
+                    decision_type: 'action',
+                    signal_priority: 'P3',
+                    reasoning: argsHash,
+                    conclusion: isStepError ? `Tool failed: ${result.slice(0, 100)}` : result.slice(0, 150),
+                  }
+                ).catch(() => {})
               }
 
               return { role: 'tool' as const, tool_call_id: tc.id, content: result }
@@ -7887,8 +7902,21 @@ Rules:
           return new Response(combinedStream, {
             headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
           })
+        } else if (finishReason === 'length' && autoContinuationRound < 3) {
+          // Model hit max_tokens mid-response — auto-continue from where it left off
+          autoContinuationRound++
+          const partialContent: string = choice?.message?.content ?? ''
+          loopMessages = [
+            ...loopMessages,
+            { role: 'assistant' as const, content: partialContent },
+            {
+              role: 'user' as const,
+              content: `[SYSTEM: You were cut off mid-sentence due to token limit. Continue exactly where you left off — do not repeat anything already said, do not add a preamble. Pick up mid-sentence if needed.]`,
+            },
+          ]
+          continue
         } else {
-          break // unexpected finish reason
+          break // unexpected finish reason or max auto-continuations reached
         }
       }
 

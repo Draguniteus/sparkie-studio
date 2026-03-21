@@ -33,10 +33,10 @@ export async function GET(req: NextRequest) {
   const offset = parseInt(searchParams.get('offset') ?? '0')
 
   const result = await query(
-    `SELECT id, type, content, metadata, created_at, 
+    `SELECT id, type, content, metadata, created_at,
             COALESCE(status, 'done') as status,
             decision_type, reasoning, estimated_duration_ms, actual_duration_ms, signal_priority,
-            confidence, COALESCE(depends_on, '[]'::jsonb) as depends_on, side_effect_of
+            confidence, COALESCE(depends_on, '[]'::jsonb) as depends_on, side_effect_of, conclusion
      FROM sparkie_worklog
      WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
     [userId, limit, offset]

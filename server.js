@@ -247,6 +247,7 @@ app.prepare().then(() => {
   })
 
   server.listen(port, () => {
+    console.log(`\n🔥 SPARKIE STUDIO RUNTIME — ${new Date().toISOString()}`)
     console.log(`> Sparkie Studio ready on http://localhost:${port}`)
     console.log(`> WebSocket terminal on ws://localhost:${port}/api/terminal-ws`)
     startKeepalive(port)
