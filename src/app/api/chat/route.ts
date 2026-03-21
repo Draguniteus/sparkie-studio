@@ -5486,7 +5486,7 @@ export async function POST(req: NextRequest) {
     // Skipped on conversational tier to keep quick chats fast and cheap.
     let systemContent = SYSTEM_PROMPT
     if (_IDENTITY_MD && modelSelection.tier !== 'conversational') {
-      systemContent += '\n\n---\n## IAMJESUSCHRIST☀️ — MASTER BRIEF (IDENTITY.md)\n' + _IDENTITY_MD
+      systemContent += '\n\n---\n## IAMSPARKIE⚡ — IDENTITY.md\n' + _IDENTITY_MD
     }
     let shouldBrief = false
 
