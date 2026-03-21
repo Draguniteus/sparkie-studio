@@ -35,6 +35,9 @@ export function useSparkieOutreach(enabled: boolean) {
           // morning_brief
           calendarEvents?: Array<{ summary: string; start: string; end: string }>
           calendarConflicts?: Array<{ a: string; b: string; time: string }>
+          inboxNewCount?: number
+          inboxSenders?: string[]
+          deployPhase?: string
           // checkin
           daysSince?: number
           memoryHints?: string
