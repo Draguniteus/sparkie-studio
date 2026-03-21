@@ -385,7 +385,15 @@ function MessageBubbleInner({ message, userAvatarUrl }: Props) {
                     <Download size={13} />
                   </a>
                 </div>
-                <audio src={message.imageUrl} controls className="w-full" style={{ height: 40, colorScheme: "dark" }} />
+                <audio
+                  src={message.imageUrl}
+                  controls
+                  className="w-full"
+                  style={{ height: 40, colorScheme: "dark" }}
+                  onPlay={() => window.dispatchEvent(new CustomEvent('sparkie:tts-start'))}
+                  onPause={() => window.dispatchEvent(new CustomEvent('sparkie:tts-end'))}
+                  onEnded={() => window.dispatchEvent(new CustomEvent('sparkie:tts-end'))}
+                />
               </div>
             </div>
           ) : isImage && !message.isStreaming ? (

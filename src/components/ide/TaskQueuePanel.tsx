@@ -1,13 +1,13 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { CheckCircle2, Clock, Loader2, XCircle, RefreshCw, Calendar, Mail, Zap, StopCircle, HelpCircle } from 'lucide-react'
+import { CheckCircle2, Clock, Loader2, XCircle, RefreshCw, Calendar, Mail, Zap, StopCircle, HelpCircle, PauseCircle, PlayCircle } from 'lucide-react'
 
 interface SparkieTask {
   id: string
   label: string
   action: string
-  status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped' | 'cancelled'
+  status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped' | 'cancelled' | 'paused'
   executor: 'ai' | 'human'
   trigger_type: string
   scheduled_at: string | null
@@ -24,6 +24,7 @@ const statusConfig = {
   failed:      { icon: XCircle,      color: 'text-red-400',      bg: 'bg-red-400/10',     label: 'Failed'     },
   skipped:     { icon: XCircle,      color: 'text-zinc-500',     bg: 'bg-zinc-500/10',    label: 'Skipped'    },
   cancelled:   { icon: StopCircle,   color: 'text-orange-400',   bg: 'bg-orange-400/10',  label: 'Stopped'    },
+  paused:      { icon: PauseCircle,  color: 'text-violet-400',   bg: 'bg-violet-400/10',  label: 'Paused'     },
 }
 
 function actionIcon(action: string) {
@@ -139,8 +140,22 @@ export function TaskQueuePanel() {
     setActioning(taskId)
     try {
       await fetch(`/api/tasks?id=${taskId}`, { method: 'DELETE' })
-      // Optimistic update
       setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: 'cancelled' } : t))
+    } finally {
+      setActioning(null)
+    }
+  }
+
+  const handlePauseResume = async (taskId: string, currentStatus: string) => {
+    const newStatus = currentStatus === 'paused' ? 'pending' : 'paused'
+    setActioning(taskId)
+    try {
+      await fetch('/api/tasks', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: taskId, status: newStatus }),
+      })
+      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus as SparkieTask['status'] } : t))
     } finally {
       setActioning(null)
     }
@@ -155,6 +170,7 @@ export function TaskQueuePanel() {
 
   const pendingCount = tasks.filter(t => t.status === 'pending' && t.executor === 'human').length
   const runningCount = tasks.filter(t => t.status === 'in_progress').length
+  const pausedCount = tasks.filter(t => t.status === 'paused').length
 
   return (
     <div className="flex flex-col h-full bg-bg-primary text-text-primary">
@@ -171,6 +187,12 @@ export function TaskQueuePanel() {
             <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30 flex items-center gap-1">
               <Loader2 className="w-2.5 h-2.5 animate-spin" />
               {runningCount} running
+            </span>
+          )}
+          {pausedCount > 0 && (
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-violet-500/20 text-violet-400 border border-violet-500/30 flex items-center gap-1">
+              <PauseCircle className="w-2.5 h-2.5" />
+              {pausedCount} paused
             </span>
           )}
         </div>
@@ -229,6 +251,8 @@ export function TaskQueuePanel() {
               const isActioning = actioning === task.id
               const isPendingHuman = task.status === 'pending' && task.executor === 'human'
               const isRunningAI = task.status === 'in_progress' && task.executor === 'ai'
+              const isRecurring = task.trigger_type === 'cron' || task.trigger_type === 'recurring'
+              const isPaused = task.status === 'paused'
               const scheduledDisplay = formatScheduled(task.scheduled_at, task.trigger_type === 'cron' ? (task.payload as Record<string, unknown>)?.cron_expression as string | undefined : undefined)
 
               return (
@@ -282,6 +306,24 @@ export function TaskQueuePanel() {
                           >
                             <StopCircle className="w-2.5 h-2.5" />
                             {isActioning ? '...' : 'Stop'}
+                          </button>
+                        </div>
+                      )}
+                      {(isRecurring && (task.status === 'pending' || isPaused)) && (
+                        <div className="flex gap-1.5 mt-1.5">
+                          <button
+                            onClick={() => handlePauseResume(task.id, task.status)}
+                            disabled={!!actioning}
+                            className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold transition-colors disabled:opacity-50 ${
+                              isPaused
+                                ? 'bg-violet-500/10 text-violet-400 border border-violet-500/20 hover:bg-violet-500/20'
+                                : 'bg-slate-500/10 text-slate-400 border border-slate-500/20 hover:bg-slate-500/20'
+                            }`}
+                          >
+                            {isPaused
+                              ? <><PlayCircle className="w-2.5 h-2.5" />{actioning === task.id ? '...' : 'Resume'}</>
+                              : <><PauseCircle className="w-2.5 h-2.5" />{actioning === task.id ? '...' : 'Pause'}</>
+                            }
                           </button>
                         </div>
                       )}

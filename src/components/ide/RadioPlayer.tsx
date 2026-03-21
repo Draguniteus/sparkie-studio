@@ -185,6 +185,29 @@ export function RadioPlayer() {
     }))
   }, [isPlaying, currentTrack])
 
+  // Dim radio volume during TTS playback, restore after
+  const preTtsVolumeRef = useRef<number | null>(null)
+  useEffect(() => {
+    const onTtsStart = () => {
+      const audio = audioRef.current
+      if (!audio || isMuted) return
+      preTtsVolumeRef.current = audio.volume
+      audio.volume = Math.min(audio.volume * 0.25, 0.15)
+    }
+    const onTtsEnd = () => {
+      const audio = audioRef.current
+      if (!audio || preTtsVolumeRef.current === null) return
+      audio.volume = preTtsVolumeRef.current
+      preTtsVolumeRef.current = null
+    }
+    window.addEventListener('sparkie:tts-start', onTtsStart)
+    window.addEventListener('sparkie:tts-end', onTtsEnd)
+    return () => {
+      window.removeEventListener('sparkie:tts-start', onTtsStart)
+      window.removeEventListener('sparkie:tts-end', onTtsEnd)
+    }
+  }, [isMuted])
+
   const togglePlay = useCallback(() => {
     const audio = audioRef.current
     if (!audio) return

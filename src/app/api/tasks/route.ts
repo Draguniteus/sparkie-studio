@@ -229,7 +229,7 @@ export async function PATCH(req: NextRequest) {
     const { id, status, attachment } = body
     if (!id || !status) return NextResponse.json({ error: 'Missing id or status' }, { status: 400 })
 
-    const validStatuses = ['approved', 'rejected', 'completed', 'failed', 'skipped', 'pending', 'cancelled']
+    const validStatuses = ['approved', 'rejected', 'completed', 'failed', 'skipped', 'pending', 'cancelled', 'paused']
     if (!validStatuses.includes(status)) {
       return NextResponse.json({ error: 'Invalid status' }, { status: 400 })
     }
