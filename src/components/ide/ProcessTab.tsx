@@ -5,6 +5,20 @@ import { useAppStore, StepTrace } from '@/store/appStore'
 import { useShallow } from 'zustand/react/shallow'
 import { Brain, CheckCircle, AlertCircle, Loader2, Zap, Cpu, Database, ChevronRight } from 'lucide-react'
 
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/<minimax:tool_call>[\s\S]*?<\/minimax:tool_call>/g, '')
+    .replace(/<invoke[\s\S]*?<\/invoke>/g, '')
+    .replace(/<parameter[^>]*>[\s\S]*?<\/parameter>/g, '')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/\*(.+?)\*/g, '$1')
+    .replace(/#{1,6}\s*/g, '')
+    .replace(/`{1,3}[^`]*`{1,3}/g, '')
+    .replace(/\|[^\n]*/g, '')
+    .replace(/^\s*---+\s*$/gm, '')
+    .trim()
+}
+
 // Map model IDs to human-readable tier names
 function modelToTier(model: string): { label: string; color: string } {
   if (model.includes('qwen3-8b')) return { label: 'Sparkie · Conversational', color: 'text-blue-400' }
@@ -45,7 +59,7 @@ function ThoughtCard({ text, icon, isNew }: { text: string; icon?: string; isNew
       className="flex items-start gap-2.5 px-3 py-2 rounded-lg border border-purple-500/20 bg-purple-500/5 text-[11px] border-l-2 border-l-purple-400"
     >
       <span className="text-[13px] shrink-0 mt-px">{emoji}</span>
-      <span className="flex-1 leading-snug text-purple-200/80 italic break-words">{text}</span>
+      <span className="flex-1 leading-snug text-purple-200/80 italic break-words">{stripMarkdown(text)}</span>
     </div>
   )
 }
@@ -181,9 +195,11 @@ export function ProcessTab() {
     const handler = (e: Event) => {
       const text = (e as CustomEvent<string>).detail
       if (!text?.trim()) return
+      const clean = stripMarkdown(text)
+      if (!clean) return
       setLiveTraces(prev => [
         ...prev,
-        { type: 'thought', icon: 'brain', label: text.slice(0, 200), text, status: 'done', timestamp: Date.now() },
+        { type: 'thought', icon: 'brain', label: clean.slice(0, 200), text: clean, status: 'done', timestamp: Date.now() },
       ])
     }
     window.addEventListener('sparkie:thought-step', handler)

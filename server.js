@@ -134,6 +134,9 @@ function attachWsHandlers(ws, sess, sessionId) {
 
 app.prepare().then(() => {
   const server = http.createServer((req, res) => {
+    if (req.url?.startsWith('/api/')) {
+      console.log(`[req] ${new Date().toISOString()} ${req.method} ${req.url}`)
+    }
     handle(req, res, parse(req.url, true))
   })
 

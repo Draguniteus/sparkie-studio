@@ -6748,6 +6748,7 @@ export async function POST(req: NextRequest) {
     const userId = isInternalCall
       ? internalUserId
       : (session?.user as { id?: string } | undefined)?.id ?? null
+    console.log(`[chat] ${new Date().toISOString()} userId=${userId ?? 'anon'} messages=${messages?.length ?? 0}`)
     // Rate limit: 30 req/min per user (non-internal)
     if (!isInternalCall) {
       const rlKey = userId ?? req.headers.get('x-forwarded-for') ?? 'anon'
@@ -7519,6 +7520,7 @@ Rules:
               hiveLog.push(HIVE_TOOLS[tc.function.name] ?? `⚙️ ${tc.function.name.replace(/_/g, ' ')} Bee Deployed...`)
               // Emit per-tool running step_trace immediately at start — id=tc.id enables individual spinner→checkmark
               liveEnqueue({ step_trace: { id: tc.id, toolName: tc.function.name, icon: stepIcon[tc.function.name] ?? 'zap', label: WORKLOG_STEP_LABELS[tc.function.name] ?? `Running — ${tc.function.name.replace(/_/g, ' ')}`, status: 'running', timestamp: Date.now() } })
+              console.log(`[tool] ${tc.function.name} — start`)
               // Phase 3: loop detection via execution trace
               const argsHash = tc.function.arguments.slice(0, 100)
               if (userId && detectTraceLoop(requestId, tc.function.name, argsHash)) {
@@ -7578,6 +7580,7 @@ Rules:
               const richStepLabel = pathShort ? `${baseStepLabel}${pathShort}` : baseStepLabel
               // id matches the running trace → client upserts this trace (spinner becomes checkmark)
               liveEnqueue({ step_trace: { id: tc.id, toolName: tc.function.name, icon: stepIcon[tc.function.name] ?? 'zap', label: richStepLabel, status: isStepError ? 'error' : 'done', duration: stepDuration, timestamp: Date.now() } })
+              console.log(`[tool] ${tc.function.name} — ${isStepError ? 'error' : 'done'} in ${stepDuration}ms`)
 
               // Worklog card SSE — emit LIVE via liveEnqueue so worklog updates as each tool completes
               // (was: pushed to hiveLog and flushed at end → entire worklog dumped all at once)
@@ -7590,20 +7593,6 @@ Rules:
               if (['list_memories', 'read_memory', 'get_attempt_history', 'journal_search'].includes(tc.function.name) && result.length > 20 && !isStepError) {
                 const memName = tc.function.name === 'list_memories' ? 'Long-term memory' : tc.function.name === 'read_memory' ? 'Memory entry' : tc.function.name === 'journal_search' ? 'Dream journal' : 'Memory'
                 liveEnqueue({ memory_recalled: { name: memName, content: result.slice(0, 200) } })
-              }
-
-              // BUG 3: Persist every tool call to DB worklog so Worklog tab shows full session history
-              if (userId && !result.startsWith('LOOP_INTERRUPT')) {
-                writeWorklog(userId, 'tool_call',
-                  `${tc.function.name.replace(/_/g, ' ')} — ${result.slice(0, 120)}`,
-                  {
-                    status: isStepError ? 'anomaly' : 'done',
-                    decision_type: 'action',
-                    signal_priority: 'P3',
-                    reasoning: argsHash,
-                    conclusion: isStepError ? `Tool failed: ${result.slice(0, 100)}` : result.slice(0, 150),
-                  }
-                ).catch(() => {})
               }
 
               return { role: 'tool' as const, tool_call_id: tc.id, content: result }
@@ -8063,15 +8052,22 @@ SYNTHESIS RULES:
                 const p = JSON.parse(line.slice(6))
                 const ct = p?.choices?.[0]?.delta?.content
                 if (ct) {
-                  const san = ct
+                  // Strip XML tool calls from synthesis stream
+                  const cleanCt = ct
+                    .replace(/<minimax:tool_call>[\s\S]*?<\/minimax:tool_call>/g, '')
+                    .replace(/<invoke[\s\S]*?<\/invoke>/g, '')
+                    .replace(/<parameter[^>]*>[\s\S]*?<\/parameter>/g, '')
+                    .trim()
+                  if (!cleanCt) { liveRef.controller?.enqueue(synthEnc.encode(line + '\n')); continue }
+                  const san = cleanCt
                     .replace(/anthropic-claude-4\.5-haiku/gi, 'Sparkie').replace(/openai-gpt-4\.1/gi, 'Flame')
                     .replace(/minimax-m2\.\d+(-free)?/gi, 'Atlas').replace(/qwen[\d\w.-]+-vl-[\w-]+/gi, 'Sparkie Vision')
                     .replace(/qwen[\d\w.-]+/gi, 'Sparkie').replace(/big-pickle/gi, 'Ember')
                     .replace(/glm-5(-free)?/gi, 'Atlas').replace(/music-2\.[05]/gi, 'the music engine')
                     .replace(/speech-02(-hd)?/gi, 'voice synthesis').replace(/whisper-large-v3-turbo/gi, 'voice recognition')
                     .replace(/ace-step-v1\.5/gi, 'the music engine')
-                  if (san !== ct) p.choices[0].delta.content = san
-                  liveRef.controller?.enqueue(synthEnc.encode(`data: ${JSON.stringify({ reasoning_chunk: san || ct })}\n\n`))
+                  if (san !== cleanCt) p.choices[0].delta.content = san
+                  liveRef.controller?.enqueue(synthEnc.encode(`data: ${JSON.stringify({ reasoning_chunk: san || cleanCt })}\n\n`))
                 }
                 liveRef.controller?.enqueue(synthEnc.encode(line + '\n'))
               } catch { liveRef.controller?.enqueue(synthEnc.encode(line + '\n')) }
@@ -8225,6 +8221,7 @@ SYNTHESIS RULES:
           controller.enqueue(encoder2.encode(`data: ${JSON.stringify({ hive_status: msg })}\n\n`))
         }
         let buffer = ''
+        let insideToolXML = false
         while (true) {
           const { done, value } = await reader.read()
           if (done) {
@@ -8244,9 +8241,15 @@ SYNTHESIS RULES:
             try {
               const parsed = JSON.parse(line.slice(6))
               const content = parsed?.choices?.[0]?.delta?.content
-              if (content && (content.includes('<invoke') || content.includes('minimax:tool_call'))) {
-                // Buffer until we have enough to check for full XML block — skip it
-                continue
+              if (content) {
+                if (content.includes('<minimax:tool_call>') || content.includes('<invoke') || content.includes('<parameter')) {
+                  insideToolXML = true
+                }
+                if (content.includes('</minimax:tool_call>') || content.includes('</invoke>')) {
+                  insideToolXML = false
+                  continue // skip the closing tag delta too
+                }
+                if (insideToolXML) continue
               }
               // Sanitize model name leaks before sending to client
               if (content && parsed?.choices?.[0]?.delta) {
@@ -8270,7 +8273,7 @@ SYNTHESIS RULES:
                 }
               }
               // Emit reasoning_chunk alongside each content delta for the Live Activity ticker
-              if (content) {
+              if (content && !insideToolXML) {
                 controller.enqueue(encoder2.encode(`data: ${JSON.stringify({ reasoning_chunk: content })}\n\n`))
               }
               controller.enqueue(encoder2.encode(line + '\n'))

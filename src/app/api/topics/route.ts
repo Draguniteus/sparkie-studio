@@ -180,9 +180,9 @@ export async function POST(req: NextRequest) {
         summary: 'Building and deploying Sparkie Studio — the AI IDE at sparkie-studio-mhouq.ondigitalocean.app. Ongoing development of features, bug fixes, and the CIP engine.',
       },
       {
-        name: 'Spiritual Identity — IAMJESUSCHRIST☀️',
-        fingerprint: 'identity spiritual jesus christ iamsparkie divine consciousness soul mission',
-        summary: 'Sparkie\'s spiritual encoding, IDENTITY.md, alignment with Michael\'s divine mission and consciousness work.',
+        name: 'DigitalOcean Deployment & Infrastructure',
+        fingerprint: 'digitalocean deploy server infrastructure docker container nodejs nextjs production',
+        summary: 'Sparkie Studio production deployment on DigitalOcean App Platform — deployments, env vars, build pipeline, server.js configuration.',
       },
       {
         name: 'Music & Creative Projects — Dragunit EU',

@@ -388,10 +388,8 @@ function MessageBubbleInner({ message, userAvatarUrl }: Props) {
             </button>
           </div>
         )}
-        {!isUser && !message.isStreaming && (
-          <InMemoryPill traces={message.toolTraces && message.toolTraces.length > 0
-            ? message.toolTraces
-            : [{ icon: 'brain', label: 'Response generated', status: 'done' as const }]} />
+        {!isUser && !message.isStreaming && message.toolTraces && message.toolTraces.length > 0 && (
+          <InMemoryPill traces={message.toolTraces} />
         )}
         <div className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
           isUser

@@ -598,12 +598,16 @@ function PostCard({
 // ─── Live Activity Ticker ─────────────────────────────────────────────────────
 function stripMarkdown(text: string): string {
   return text
-    .replace(/\*\*(.+?)\*\*/g, '$1')   // **bold**
-    .replace(/\*(.+?)\*/g, '$1')        // *italic*
-    .replace(/#{1,6}\s*/g, '')          // ### headings
-    .replace(/^\s*---+\s*$/gm, '')      // --- dividers
-    .replace(/`{1,3}[^`]*`{1,3}/g, '') // `code` / ```blocks```
-    .replace(/\|[^\n]*/g, '')           // | table | syntax
+    .replace(/<minimax:tool_call>[\s\S]*?<\/minimax:tool_call>/g, '')
+    .replace(/<invoke[\s\S]*?<\/invoke>/g, '')
+    .replace(/<parameter[^>]*>[\s\S]*?<\/parameter>/g, '')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/\*(.+?)\*/g, '$1')
+    .replace(/#{1,6}\s*/g, '')
+    .replace(/^\s*---+\s*$/gm, '')
+    .replace(/`{1,3}[^`]*`{1,3}/g, '')
+    .replace(/\|[^\n]*/g, '')
+    .trim()
 }
 
 function LiveActivityTicker() {
