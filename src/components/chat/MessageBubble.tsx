@@ -120,9 +120,14 @@ const STEP_ICON_MAP: Record<string, string> = {
 
 function InMemoryPill({ traces }: { traces: StepTrace[] }) {
   const [open, setOpen] = React.useState(false)
-  const doneCount = traces.filter(t => t.status === 'done').length
-  const errorCount = traces.filter(t => t.status === 'error').length
-  const label = `In memory: ${doneCount}/${traces.length} steps${errorCount > 0 ? ` · ${errorCount} error` : ''}`
+  const toolTraces = traces.filter(t => t.type !== 'thought')
+  const doneCount = toolTraces.filter(t => t.status === 'done').length
+  const errorCount = toolTraces.filter(t => t.status === 'error').length
+  const memoryTrace = traces.find(t => t.type === 'memory')
+  // Smart label: "Memory recalled: [Name]" > "In memory: N steps"
+  const label = memoryTrace?.memoryName
+    ? `Memory recalled: ${memoryTrace.memoryName}`
+    : `In memory: ${doneCount}/${toolTraces.length} steps${errorCount > 0 ? ` · ${errorCount} error` : ''}`
   return (
     <div className="mb-1.5 flex flex-col gap-1">
       <button
@@ -136,19 +141,26 @@ function InMemoryPill({ traces }: { traces: StepTrace[] }) {
       {open && (
         <div className="ml-1 flex flex-col gap-0.5 border-l-2 border-purple-500/20 pl-2.5 pb-0.5">
           {traces.map((trace, i) => (
-            <div key={i} className={`flex items-center gap-1.5 text-[10px] ${
-              trace.status === 'error' ? 'text-red-400' : 'text-text-muted'
-            }`}>
-              <span className="text-[11px] shrink-0">{STEP_ICON_MAP[trace.icon] ?? '⚡'}</span>
-              <span className="flex-1 truncate">{trace.label}</span>
-              {trace.status === 'done' && <CheckCircle size={8} className="text-green-400 shrink-0" />}
-              {trace.status === 'error' && <AlertCircle size={8} className="text-red-400 shrink-0" />}
-              {trace.duration != null && (
-                <span className="text-[9px] tabular-nums shrink-0 text-text-muted/60">
-                  {trace.duration < 1000 ? `${trace.duration}ms` : `${(trace.duration / 1000).toFixed(1)}s`}
-                </span>
-              )}
-            </div>
+            trace.type === 'thought' ? (
+              <div key={i} className="flex items-start gap-1.5 text-[10px] text-purple-300/70 italic">
+                <span className="text-[11px] shrink-0">🧠</span>
+                <span className="flex-1 break-words leading-snug">{(trace.text ?? trace.label).slice(0, 120)}</span>
+              </div>
+            ) : (
+              <div key={i} className={`flex items-center gap-1.5 text-[10px] ${
+                trace.status === 'error' ? 'text-red-400' : trace.type === 'memory' ? 'text-purple-300/80' : 'text-text-muted'
+              }`}>
+                <span className="text-[11px] shrink-0">{trace.type === 'memory' ? '💾' : STEP_ICON_MAP[trace.icon] ?? '⚡'}</span>
+                <span className="flex-1 truncate">{trace.label}</span>
+                {trace.status === 'done' && <CheckCircle size={8} className="text-green-400 shrink-0" />}
+                {trace.status === 'error' && <AlertCircle size={8} className="text-red-400 shrink-0" />}
+                {trace.duration != null && (
+                  <span className="text-[9px] tabular-nums shrink-0 text-text-muted/60">
+                    {trace.duration < 1000 ? `${trace.duration}ms` : `${(trace.duration / 1000).toFixed(1)}s`}
+                  </span>
+                )}
+              </div>
+            )
           ))}
         </div>
       )}

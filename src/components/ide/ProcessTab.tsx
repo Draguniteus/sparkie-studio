@@ -19,16 +19,38 @@ const STEP_ICON_MAP: Record<string, string> = {
   rocket: '🚀', image: '🎨', music: '🎵', video: '🎬', mic: '🎤', zap: '⚡',
 }
 
-// Stable key for a trace row — label + status so React can track identity
-function traceKey(trace: StepTrace) {
-  return `${trace.label}__${trace.status}`
+// Stable key for React list rendering — prefer id, fallback to label+status
+function traceKey(trace: StepTrace, i: number) {
+  return trace.id ? `${trace.id}__${trace.status}` : `${i}__${trace.label}__${trace.status}`
+}
+
+function ThoughtCard({ text, isNew }: { text: string; isNew?: boolean }) {
+  const [visible, setVisible] = useState(!isNew)
+  useEffect(() => {
+    if (isNew) {
+      const raf = requestAnimationFrame(() => setVisible(true))
+      return () => cancelAnimationFrame(raf)
+    }
+  }, [isNew])
+  return (
+    <div
+      style={{
+        opacity: visible ? 1 : 0,
+        transform: visible ? 'translateY(0)' : 'translateY(-6px)',
+        transition: 'opacity 220ms ease, transform 220ms ease',
+      }}
+      className="flex items-start gap-2.5 px-3 py-2 rounded-lg border border-purple-500/20 bg-purple-500/5 text-[11px] border-l-2 border-l-purple-400"
+    >
+      <span className="text-[13px] shrink-0 mt-px">🧠</span>
+      <span className="flex-1 leading-snug text-purple-200/80 italic break-words">{text}</span>
+    </div>
+  )
 }
 
 function TraceRow({ trace, isNew }: { trace: StepTrace; isNew?: boolean }) {
   const icon = STEP_ICON_MAP[trace.icon] ?? '⚡'
   const [visible, setVisible] = useState(!isNew)
 
-  // Fade+slide in on mount for new rows
   useEffect(() => {
     if (isNew) {
       const raf = requestAnimationFrame(() => setVisible(true))
@@ -52,7 +74,6 @@ function TraceRow({ trace, isNew }: { trace: StepTrace; isNew?: boolean }) {
       }`}
     >
       <span className="text-[13px] shrink-0 mt-px">{icon}</span>
-      {/* Use break-all so long paths wrap instead of truncating */}
       <span className="flex-1 break-all leading-snug">{trace.label}</span>
       {trace.status === 'running' && (
         <Loader2 size={10} className="shrink-0 text-purple-400 animate-spin mt-0.5" />
@@ -105,7 +126,9 @@ function FrozenCard({ group, index, hasLive }: { group: { chipLabel: string; tra
       {open && (
         <div className="p-2 flex flex-col gap-1 bg-hive-600/20">
           {group.traces.map((trace, ti) => (
-            <TraceRow key={ti} trace={trace} />
+            trace.type === 'thought'
+              ? <ThoughtCard key={ti} text={trace.text ?? trace.label} />
+              : <TraceRow key={ti} trace={trace} />
           ))}
         </div>
       )}
@@ -130,27 +153,38 @@ export function ProcessTab() {
   const scrollRef = useRef<HTMLDivElement>(null)
   const prevLongTaskRef = useRef<string | null>(null)
 
-  // Subscribe to live step_trace SSE events
+  // Subscribe to live step_trace SSE events (id-based upsert for per-tool spinner→checkmark)
   useEffect(() => {
     const handler = (e: Event) => {
       const trace = (e as CustomEvent<StepTrace>).detail
       if (!trace) return
       setLiveTraces(prev => {
         if (trace.status === 'running') {
-          const allSettled = prev.length > 0 && prev.every(t => t.status !== 'running')
-          if (allSettled) {
-            seenKeysRef.current = new Set()
-            return [trace]
-          }
           return [...prev, trace]
         }
-        const idx = prev.findIndex(t => t.label === trace.label && t.status === 'running')
-        if (idx >= 0) return prev.map((t, i) => i === idx ? trace : t)
+        // id-based upsert: find running trace with same id → update (spinner→checkmark)
+        let idx = trace.id ? prev.findIndex(t => t.id === trace.id) : -1
+        if (idx < 0) idx = prev.findIndex(t => t.label === trace.label && t.status === 'running')
+        if (idx >= 0) return prev.map((t, i) => i === idx ? { ...t, ...trace } : t)
         return [...prev, trace]
       })
     }
     window.addEventListener('sparkie_step_trace', handler)
     return () => window.removeEventListener('sparkie_step_trace', handler)
+  }, [])
+
+  // Subscribe to thought_step events — insert as thought card BEFORE next tool batch
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const text = (e as CustomEvent<string>).detail
+      if (!text?.trim()) return
+      setLiveTraces(prev => [
+        ...prev,
+        { type: 'thought', icon: 'brain', label: text.slice(0, 200), text, status: 'done', timestamp: Date.now() },
+      ])
+    }
+    window.addEventListener('sparkie:thought-step', handler)
+    return () => window.removeEventListener('sparkie:thought-step', handler)
   }, [])
 
   // Auto-scroll to bottom as new traces arrive
@@ -161,7 +195,6 @@ export function ProcessTab() {
   }, [liveTraces.length])
 
   // Clear live traces immediately when a new execution starts (longTaskLabel transitions null → non-null)
-  // This prevents previous session steps from mixing with the current session
   useEffect(() => {
     if (longTaskLabel && !prevLongTaskRef.current) {
       setLiveTraces([])
@@ -200,10 +233,10 @@ export function ProcessTab() {
   const isLive = !!longTaskLabel || liveTraces.some(t => t.status === 'running')
   const hasContent = liveTraces.length > 0 || recentFrozen.length > 0
 
-  // Determine which live trace keys are new (not yet seen)
+  // Determine which trace keys are new (for enter animation)
   const newKeys = new Set<string>()
-  for (const trace of liveTraces) {
-    const k = traceKey(trace)
+  for (let i = 0; i < liveTraces.length; i++) {
+    const k = traceKey(liveTraces[i], i)
     if (!seenKeysRef.current.has(k)) {
       newKeys.add(k)
       seenKeysRef.current.add(k)
@@ -228,7 +261,7 @@ export function ProcessTab() {
         </div>
         {hasContent && (
           <span className="text-[10px] text-text-muted">
-            {isLive ? `${liveTraces.length} steps` : `${recentFrozen.length} session${recentFrozen.length !== 1 ? 's' : ''}`}
+            {isLive ? `${liveTraces.filter(t => t.type !== 'thought').length} steps` : `${recentFrozen.length} session${recentFrozen.length !== 1 ? 's' : ''}`}
           </span>
         )}
       </div>
@@ -240,20 +273,24 @@ export function ProcessTab() {
         <span className="text-text-muted/40 text-[9px]">·</span>
         <Database size={9} className="text-text-muted shrink-0" />
         <span className="text-[10px] text-text-muted">
-          {liveTraces.length > 0 ? `${liveTraces.filter(t => t.status === 'done').length}/${liveTraces.length} steps done` : recentFrozen.length === 0 ? 'No sessions yet' : `${recentFrozen.length} session${recentFrozen.length !== 1 ? 's' : ''} in memory`}
+          {liveTraces.length > 0
+            ? `${liveTraces.filter(t => t.status === 'done' && t.type !== 'thought').length}/${liveTraces.filter(t => t.type !== 'thought').length} steps done`
+            : recentFrozen.length === 0 ? 'No sessions yet' : `${recentFrozen.length} session${recentFrozen.length !== 1 ? 's' : ''} in memory`}
         </span>
       </div>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 flex flex-col gap-3">
-        {/* Live traces */}
+        {/* Live traces — interleaved thoughts + tool cards */}
         {liveTraces.length > 0 && (
           <div className="flex flex-col gap-1">
             <p className="text-[10px] text-text-muted px-1 mb-0.5 uppercase tracking-wide">Live</p>
-            {liveTraces.map((trace) => {
-              const k = traceKey(trace)
-              return (
-                <TraceRow key={k} trace={trace} isNew={newKeys.has(k)} />
-              )
+            {liveTraces.map((trace, i) => {
+              const k = traceKey(trace, i)
+              const isNew = newKeys.has(k)
+              if (trace.type === 'thought') {
+                return <ThoughtCard key={k} text={trace.text ?? trace.label} isNew={isNew} />
+              }
+              return <TraceRow key={k} trace={trace} isNew={isNew} />
             })}
           </div>
         )}

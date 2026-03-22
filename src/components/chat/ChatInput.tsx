@@ -1052,10 +1052,13 @@ export function ChatInput() {
               // Auto-open IDE panel so user sees live activity — same as streamAgent
               if (!ideOpen) openIDE()
               _setStepTraces(prev => {
-                const existing = prev.findIndex(t => t.label === trace.label && t.status === 'running')
+                // id-based upsert: find running trace with same id → update (spinner→checkmark per tool)
+                // Fallback to label match for backwards compat with traces emitted without id
+                let existingIdx = trace.id ? prev.findIndex(t => t.id === trace.id) : -1
+                if (existingIdx < 0) existingIdx = prev.findIndex(t => t.label === trace.label && t.status === 'running')
                 let next: StepTrace[]
-                if (existing >= 0 && (trace.status === 'done' || trace.status === 'error')) {
-                  next = prev.map((t, i) => i === existing ? trace : t)
+                if (existingIdx >= 0 && (trace.status === 'done' || trace.status === 'error')) {
+                  next = prev.map((t, i) => i === existingIdx ? { ...t, ...trace } : t)
                 } else if (trace.status === 'running') {
                   next = [...prev, trace]
                 } else {
@@ -1076,9 +1079,26 @@ export function ChatInput() {
               window.dispatchEvent(new CustomEvent('sparkie_step_trace', { detail: trace }))
               continue
             }
-            // Worklog card inline
+            // Thought step — Sparkie's reasoning text before tool calls
+            if (parsed.thought_step) {
+              window.dispatchEvent(new CustomEvent('sparkie:thought-step', { detail: parsed.thought_step as string }))
+              continue
+            }
+            // Memory recalled — drives InMemoryPill label and ProcessTab memory card
+            if (parsed.memory_recalled) {
+              const memData = parsed.memory_recalled as { name: string; content: string }
+              // Add memory trace to step traces so InMemoryPill label can detect it
+              const memTrace: StepTrace = { type: 'memory', icon: 'brain', label: `Memory recalled: ${memData.name}`, status: 'done', memoryName: memData.name, timestamp: Date.now() }
+              _setStepTraces(prev => { const next = [...prev, memTrace]; _stepTracesRef.current = next; return next })
+              window.dispatchEvent(new CustomEvent('sparkie_step_trace', { detail: memTrace }))
+              window.dispatchEvent(new CustomEvent('sparkie:memory-recalled', { detail: memData }))
+              continue
+            }
+            // Worklog card inline — also trigger WorklogPage live refresh
             if (parsed.worklog_card) {
               _setInlineFeedCards(prev => [...prev, parsed.worklog_card as WorklogCard])
+              // Refresh WorklogPage so new entries appear without waiting for the 30s poll
+              window.dispatchEvent(new CustomEvent('sparkie:worklog-refresh'))
               continue
             }
             // IDE build trigger — chat route detected a build request, hand off to streamAgent

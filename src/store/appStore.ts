@@ -52,10 +52,17 @@ export interface PendingTask {
 }
 
 export interface StepTrace {
+  id?: string           // unique ID for upsert (tc.id from tool call)
+  type?: 'tool' | 'thought' | 'memory'  // card type; default = 'tool'
   icon: string
   label: string
   status: 'running' | 'done' | 'error'
   duration?: number
+  text?: string         // thought text for type='thought' cards
+  toolName?: string     // raw tool name for coloring
+  memoryName?: string   // for type='memory' cards
+  round?: number        // which tool round
+  timestamp?: number    // unix ms when emitted
 }
 
 export interface AceMusicMetadata {

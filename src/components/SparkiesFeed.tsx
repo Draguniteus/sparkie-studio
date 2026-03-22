@@ -607,44 +607,53 @@ function stripMarkdown(text: string): string {
 }
 
 function LiveActivityTicker() {
-  const [chunks, setChunks] = useState<string[]>([])
+  const [text, setText] = useState('')
+  const [thoughtText, setThoughtText] = useState('')
   const [active, setActive] = useState(false)
   const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const onChunk = (e: Event) => {
-      const text = (e as CustomEvent<string>).detail
-      if (!text) return
-      const clean = stripMarkdown(text)
+      const chunk = (e as CustomEvent<string>).detail
+      if (!chunk) return
+      const clean = stripMarkdown(chunk)
       if (!clean) return
       if (clearTimerRef.current) clearTimeout(clearTimerRef.current)
       setActive(true)
-      setChunks(prev => {
-        // Keep last 200 chars of clean text visible
-        const joined = (prev.join('') + clean).slice(-200)
-        return [joined]
-      })
+      // Keep last 400 chars visible
+      setText(prev => (prev + clean).slice(-400))
+    }
+    const onThought = (e: Event) => {
+      const t = (e as CustomEvent<string>).detail
+      if (!t?.trim()) return
+      if (clearTimerRef.current) clearTimeout(clearTimerRef.current)
+      setActive(true)
+      setThoughtText(t.slice(0, 200))
+      setText('')  // clear streaming text when a thought step arrives
     }
     const onDone = () => {
       clearTimerRef.current = setTimeout(() => {
-        setChunks([])
+        setText('')
+        setThoughtText('')
         setActive(false)
-      }, 3000)
+      }, 4000)
     }
     window.addEventListener('sparkie:live-chunk', onChunk)
+    window.addEventListener('sparkie:thought-step', onThought)
     window.addEventListener('sparkie:live-done', onDone)
     return () => {
       window.removeEventListener('sparkie:live-chunk', onChunk)
+      window.removeEventListener('sparkie:thought-step', onThought)
       window.removeEventListener('sparkie:live-done', onDone)
     }
   }, [])
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-  }, [chunks])
+  }, [text, thoughtText])
 
-  if (!active && chunks.length === 0) return null
+  if (!active && !text && !thoughtText) return null
 
   return (
     <div className="mx-3 md:mx-4 mt-3 rounded-xl border border-purple-500/25 bg-purple-500/5 overflow-hidden">
@@ -653,10 +662,17 @@ function LiveActivityTicker() {
         <span className="text-[10px] font-semibold text-purple-300/80 uppercase tracking-wide">Sparkie is thinking</span>
       </div>
       <div ref={scrollRef} className="px-3 py-2 max-h-24 overflow-y-auto">
-        <p className="text-[11px] text-text-secondary leading-relaxed whitespace-pre-wrap break-words font-mono">
-          {chunks.join('')}
-          {active && <span className="inline-block w-1 h-3 bg-purple-400/70 animate-pulse ml-0.5 rounded-sm align-middle" />}
-        </p>
+        {thoughtText ? (
+          <p className="text-[11px] text-purple-200/80 leading-relaxed italic whitespace-pre-wrap break-words">
+            🧠 {thoughtText}
+            {active && <span className="inline-block w-1 h-3 bg-purple-400/70 animate-pulse ml-0.5 rounded-sm align-middle" />}
+          </p>
+        ) : (
+          <p className="text-[11px] text-text-secondary leading-relaxed whitespace-pre-wrap break-words font-mono">
+            {text}
+            {active && <span className="inline-block w-1 h-3 bg-purple-400/70 animate-pulse ml-0.5 rounded-sm align-middle" />}
+          </p>
+        )}
       </div>
     </div>
   )

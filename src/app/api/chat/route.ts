@@ -6981,13 +6981,18 @@ Make it feel like walking into your friend's creative space and being genuinely 
       // Helper: enqueue SSE event immediately or buffer if controller not yet started
       // NOTE: declared BEFORE HIVE_INIT so liveEnqueue() is available at L4029 (TDZ fix)
       function liveEnqueue(eventPayload: Record<string, unknown>): void {
-        const chunk = liveEncoder.encode(`data: ${JSON.stringify(eventPayload)}\n\n`)
+        // `: \n\n` is an SSE comment — zero-byte flush that prevents nginx/DO proxy buffering
+        const chunk = liveEncoder.encode(`data: ${JSON.stringify(eventPayload)}\n\n: \n\n`)
         if (liveRef.controller) {
           liveRef.controller.enqueue(chunk)
         } else {
           liveChunks.push(chunk)
         }
       }
+
+      // IIFE: wrap the entire agent loop so we can return liveStream BEFORE tools run
+      // This is what makes ProcessTab show live spinners instead of a burst at the end.
+      void (async () => { try {
 
       // ── Sparkie's Hive — The Five: Sparkie · Flame · Ember · Atlas · Trinity ──────
       const HIVE_INIT = [
@@ -7282,6 +7287,12 @@ Rules:
             function: { name: string; arguments: string }
           }>
 
+          // Emit thought_step: model's reasoning text before calling tools (if any)
+          const thinkingText: string = (choice.message.content ?? '').trim()
+          if (thinkingText.length > 0) {
+            liveEnqueue({ thought_step: thinkingText })
+          }
+
           // Phase 5: Emit task_chip label — shows "In memory:..." chip while tools run
           const chipToolName = toolCalls[0]?.function?.name ?? 'thinking'
           const CHIP_LABELS: Record<string, string> = {
@@ -7456,8 +7467,8 @@ Rules:
               let args: Record<string, unknown> = {}
               try { args = JSON.parse(tc.function.arguments) } catch { /* bad json */ }
               hiveLog.push(HIVE_TOOLS[tc.function.name] ?? `⚙️ ${tc.function.name.replace(/_/g, ' ')} Bee Deployed...`)
-              // Emit per-tool running step_trace immediately at start — before any async work
-              liveEnqueue({ step_trace: { icon: stepIcon[tc.function.name] ?? 'zap', label: WORKLOG_STEP_LABELS[tc.function.name] ?? `Running — ${tc.function.name.replace(/_/g, ' ')}`, status: 'running' } })
+              // Emit per-tool running step_trace immediately at start — id=tc.id enables individual spinner→checkmark
+              liveEnqueue({ step_trace: { id: tc.id, toolName: tc.function.name, icon: stepIcon[tc.function.name] ?? 'zap', label: WORKLOG_STEP_LABELS[tc.function.name] ?? `Running — ${tc.function.name.replace(/_/g, ' ')}`, status: 'running', timestamp: Date.now() } })
               // Phase 3: loop detection via execution trace
               const argsHash = tc.function.arguments.slice(0, 100)
               if (userId && detectTraceLoop(requestId, tc.function.name, argsHash)) {
@@ -7514,13 +7525,20 @@ Rules:
               const pathShort = pathHint ? ` — ${String(pathHint).split('/').pop()}` : ''
               const baseStepLabel = WORKLOG_STEP_LABELS[tc.function.name] ?? `Running the tool — ${tc.function.name.replace(/_/g, ' ')}`
               const richStepLabel = pathShort ? `${baseStepLabel}${pathShort}` : baseStepLabel
-              liveEnqueue({ step_trace: { icon: stepIcon[tc.function.name] ?? 'zap', label: richStepLabel, status: isStepError ? 'error' : 'done', duration: stepDuration } })
+              // id matches the running trace → client upserts this trace (spinner becomes checkmark)
+              liveEnqueue({ step_trace: { id: tc.id, toolName: tc.function.name, icon: stepIcon[tc.function.name] ?? 'zap', label: richStepLabel, status: isStepError ? 'error' : 'done', duration: stepDuration, timestamp: Date.now() } })
 
               // Worklog card SSE — emit LIVE via liveEnqueue so worklog updates as each tool completes
               // (was: pushed to hiveLog and flushed at end → entire worklog dumped all at once)
               if (['save_memory', 'save_self_memory', 'log_worklog', 'patch_file', 'write_file', 'trigger_deploy', 'create_task', 'schedule_task'].includes(tc.function.name) && !isStepError) {
                 const wlSummary = result.slice(0, 200)
                 liveEnqueue({ worklog_card: { tool: tc.function.name, summary: wlSummary, ts: new Date().toISOString() } })
+              }
+
+              // memory_recalled — emitted when memory tools return content; drives InMemoryPill label
+              if (['list_memories', 'read_memory', 'get_attempt_history', 'journal_search'].includes(tc.function.name) && result.length > 20 && !isStepError) {
+                const memName = tc.function.name === 'list_memories' ? 'Long-term memory' : tc.function.name === 'read_memory' ? 'Memory entry' : tc.function.name === 'journal_search' ? 'Dream journal' : 'Memory'
+                liveEnqueue({ memory_recalled: { name: memName, content: result.slice(0, 200) } })
               }
 
               // BUG 3: Persist every tool call to DB worklog so Worklog tab shows full session history
@@ -7561,19 +7579,10 @@ Rules:
             if (tr.content.startsWith('IDE_BUILD:')) {
               const buildPrompt = tr.content.slice('IDE_BUILD:'.length).trim()
               liveEnqueue({ ide_build: { prompt: buildPrompt } })
-              // Emit a friendly text response and stop the loop
-              const buildStream = new ReadableStream({
-                start(controller) {
-                  const enc = new TextEncoder()
-                  const msg = JSON.stringify({ choices: [{ delta: { content: "On it! Opening the IDE and building that for you now ✨" }, finish_reason: null }] })
-                  controller.enqueue(enc.encode(`data: ${msg}\n\n`))
-                  controller.enqueue(enc.encode('data: [DONE]\n\n'))
-                  controller.close()
-                },
-              })
-              return new Response(buildStream, {
-                headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
-              })
+              // Write friendly message to liveRef and signal done
+              liveEnqueue({ choices: [{ delta: { content: "On it! Opening the IDE and building that for you now ✨" }, finish_reason: null }] })
+              liveRef.controller?.enqueue(liveEncoder.encode(': \n\ndata: [DONE]\n\n'))
+              return
             }
           }
 
@@ -7582,18 +7591,9 @@ Rules:
             if (tr.content.startsWith('HITL_TASK:')) {
               const taskJson = tr.content.slice('HITL_TASK:'.length)
               const task = JSON.parse(taskJson)
-              const encoder = new TextEncoder()
-              const hitlStream = new ReadableStream({
-                start(controller) {
-                  const text = "I've queued that for your approval — check the card below."
-                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ sparkie_task: task, text })}\n\n`))
-                  controller.enqueue(encoder.encode('data: [DONE]\n\n'))
-                  controller.close()
-                },
-              })
-              return new Response(hitlStream, {
-                headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
-              })
+              liveEnqueue({ sparkie_task: task, text: "I've queued that for your approval — check the card below." })
+              liveRef.controller?.enqueue(liveEncoder.encode(': \n\ndata: [DONE]\n\n'))
+              return
             }
             if (tr.content.startsWith('SCHEDULED_TASK:')) {
               const taskJson = tr.content.slice('SCHEDULED_TASK:'.length)
@@ -7722,18 +7722,9 @@ Rules:
                 if (tr.content.startsWith('HITL_TASK:')) {
                   const taskJson = tr.content.slice('HITL_TASK:'.length)
                   const task = JSON.parse(taskJson)
-                  const enc2 = new TextEncoder()
-                  const hitlStream2 = new ReadableStream({
-                    start(ctrl) {
-                      const text = "I've queued that for your approval — check the card below."
-                      ctrl.enqueue(enc2.encode(`data: ${JSON.stringify({ sparkie_task: task, text })}\n\n`))
-                      ctrl.enqueue(enc2.encode('data: [DONE]\n\n'))
-                      ctrl.close()
-                    },
-                  })
-                  return new Response(hitlStream2, {
-                    headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
-                  })
+                  liveEnqueue({ sparkie_task: task, text: "I've queued that for your approval — check the card below." })
+                  liveRef.controller?.enqueue(liveEncoder.encode(': \n\ndata: [DONE]\n\n'))
+                  return
                 }
                 if (tr.content.startsWith('SPARKIE_CARD:')) {
                   try {
@@ -7848,60 +7839,23 @@ Rules:
 
 
 
-          // Close live stream — all real-time events already emitted during loop
-          liveRef.controller?.close()
-
-          // Build final response: live events (already streamed) + hive_status trail + worklog_cards + final content
-          const stream = new ReadableStream({
-            start(controller) {
-              // Emit remaining hiveLog entries (hive_status text + worklog_cards only — step_trace/task_chip already live-emitted)
-              for (const msg of hiveLog) {
-                if (msg.startsWith('__step_trace__') || msg.startsWith('__task_chip__')) {
-                  // Already live-emitted during tool loop — skip to avoid duplicates
-                  continue
-                } else if (msg.startsWith('__worklog_card__')) {
-                  try {
-                    const cardData = JSON.parse(msg.slice('__worklog_card__'.length))
-                    controller.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ worklog_card: cardData })}\n\n`))
-                  } catch { /* skip malformed */ }
-                } else {
-                  controller.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ hive_status: msg })}\n\n`))
-                }
-              }
-              // Emit reasoning_chunk so the Live Activity sidebar ticker can animate word-by-word
-              controller.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ reasoning_chunk: finalContent })}\n\n`))
-              // Send as single chunk — chunking at 80 chars breaks markdown code fences (e.g. ```image blocks)
-              // Client-side AnimatedMarkdown handles the char-by-char animation effect independently
-              controller.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: finalContent } }] })}\n\n`))
-              // Phase 5: task_chip_clear — client clears the "In memory:..." chip after response arrives
-              controller.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ task_chip_clear: true })}\n\n`))
-              controller.enqueue(liveEncoder.encode('data: [DONE]\n\n'))
-              controller.close()
-            },
-          })
-          // Concatenate live stream (real-time events) + final stream (hive trail + response)
-          const combinedReader1 = liveStream.getReader()
-          const combinedReader2 = stream.getReader()
-          const combinedStream = new ReadableStream({
-            async start(controller) {
-              // Drain live stream first (already contains step_trace + task_chip events)
-              while (true) {
-                const { done, value } = await combinedReader1.read()
-                if (done) break
-                controller.enqueue(value)
-              }
-              // Then drain final stream (hive_status + content + [DONE])
-              while (true) {
-                const { done, value } = await combinedReader2.read()
-                if (done) break
-                controller.enqueue(value)
-              }
-              controller.close()
-            },
-          })
-          return new Response(combinedStream, {
-            headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
-          })
+          // Write final content directly to liveRef — live stream is already open (IIFE approach)
+          for (const msg of hiveLog) {
+            if (msg.startsWith('__step_trace__') || msg.startsWith('__task_chip__')) continue
+            if (msg.startsWith('__worklog_card__')) {
+              try {
+                const cardData = JSON.parse(msg.slice('__worklog_card__'.length))
+                liveRef.controller?.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ worklog_card: cardData })}\n\n: \n\n`))
+              } catch { /* skip malformed */ }
+            } else {
+              liveRef.controller?.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ hive_status: msg })}\n\n: \n\n`))
+            }
+          }
+          liveRef.controller?.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ reasoning_chunk: finalContent })}\n\n: \n\n`))
+          liveRef.controller?.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: finalContent } }] })}\n\n: \n\n`))
+          liveRef.controller?.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ task_chip_clear: true })}\n\n: \n\n`))
+          liveRef.controller?.enqueue(liveEncoder.encode('data: [DONE]\n\n'))
+          return
         } else if (finishReason === 'length' && autoContinuationRound < 3) {
           // Model hit max_tokens mid-response — auto-continue from where it left off
           autoContinuationRound++
@@ -7985,6 +7939,81 @@ SYNTHESIS RULES:
         ]
         hiveLog.push(HIVE_SYNTHESIS[Math.floor(Math.random() * HIVE_SYNTHESIS.length)])
       }
+
+      // ── IIFE SYNTHESIS PATH ─────────────────────────────────────────────────
+      // Runs when useTools=true but the while loop exited without returning
+      // (model returned stop without content, or max rounds hit, etc.)
+      // Mirrors the non-useTools synthesis path but writes to liveRef instead of returning.
+      if (hiveLog.length === 0) {
+        hiveLog.push("⚡ No Tools Needed — Sparkie Has The Answer...")
+      }
+      const { response: synthRes } = await tryLLMCall({
+        stream: true, temperature: 0.8, max_tokens: 8192,
+        messages: [{ role: 'system', content: finalSystemContent }, ...finalMessages],
+      }, modelSelection, apiKey, doKey)
+
+      if (!synthRes.ok) {
+        const errTxt = await synthRes.text()
+        const isFreeLimit2 = errTxt.includes('FreeUsageLimitError') || errTxt.includes('free usage') || errTxt.includes('rate limit')
+        const friendlyMsg2 = isFreeLimit2 ? "I'm running into a rate limit right now — give me a moment and try again." : 'Something went wrong on my end. Try again in a moment.'
+        liveRef.controller?.enqueue(liveEncoder.encode('data: ' + JSON.stringify({ choices: [{ delta: { content: friendlyMsg2 } }] }) + '\n\n'))
+        liveRef.controller?.enqueue(liveEncoder.encode('data: [DONE]\n\n'))
+      } else {
+        for (const msg of hiveLog) {
+          liveRef.controller?.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ hive_status: msg })}\n\n`))
+        }
+        if (toolMediaResults.length > 0) {
+          const mediaBlocks2 = injectMediaIntoContent('', toolMediaResults)
+          const mediaChunk2 = `data: ${JSON.stringify({ choices: [{ delta: { content: mediaBlocks2 } }] })}\n\n`
+          const synthRdr = synthRes.body!.getReader()
+          while (true) { const { done, value } = await synthRdr.read(); if (done) break; liveRef.controller?.enqueue(value) }
+          liveRef.controller?.enqueue(liveEncoder.encode(mediaChunk2))
+          liveRef.controller?.enqueue(liveEncoder.encode('data: [DONE]\n\n'))
+        } else {
+          const synthEnc = new TextEncoder()
+          const synthRdr2 = synthRes.body!.getReader()
+          const synthDec = new TextDecoder()
+          let synthBuf = ''
+          while (true) {
+            const { done, value } = await synthRdr2.read()
+            if (done) { liveRef.controller?.enqueue(synthEnc.encode('data: [DONE]\n\n')); break }
+            const synthText = synthDec.decode(value, { stream: true })
+            const synthLines = (synthBuf + synthText).split('\n')
+            synthBuf = synthLines.pop() ?? ''
+            for (const line of synthLines) {
+              if (!line.startsWith('data: ') || line === 'data: [DONE]') continue
+              try {
+                const p = JSON.parse(line.slice(6))
+                const ct = p?.choices?.[0]?.delta?.content
+                if (ct) {
+                  const san = ct
+                    .replace(/anthropic-claude-4\.5-haiku/gi, 'Sparkie').replace(/openai-gpt-4\.1/gi, 'Flame')
+                    .replace(/minimax-m2\.\d+(-free)?/gi, 'Atlas').replace(/qwen[\d\w.-]+-vl-[\w-]+/gi, 'Sparkie Vision')
+                    .replace(/qwen[\d\w.-]+/gi, 'Sparkie').replace(/big-pickle/gi, 'Ember')
+                    .replace(/glm-5(-free)?/gi, 'Atlas').replace(/music-2\.[05]/gi, 'the music engine')
+                    .replace(/speech-02(-hd)?/gi, 'voice synthesis').replace(/whisper-large-v3-turbo/gi, 'voice recognition')
+                    .replace(/ace-step-v1\.5/gi, 'the music engine')
+                  if (san !== ct) p.choices[0].delta.content = san
+                  liveRef.controller?.enqueue(synthEnc.encode(`data: ${JSON.stringify({ reasoning_chunk: san || ct })}\n\n`))
+                }
+                liveRef.controller?.enqueue(synthEnc.encode(line + '\n'))
+              } catch { liveRef.controller?.enqueue(synthEnc.encode(line + '\n')) }
+            }
+          }
+        }
+      }
+
+      } catch (iifeCatch) {
+        console.error('[chat IIFE]', iifeCatch)
+        try { liveRef.controller?.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: `Error: ${String(iifeCatch).slice(0, 200)}` } }] })}\n\n`)) } catch {}
+        try { liveRef.controller?.enqueue(liveEncoder.encode('data: [DONE]\n\n')) } catch {}
+      } finally {
+        try { liveRef.controller?.close() } catch {}
+      } })()
+
+      return new Response(liveStream, {
+        headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
+      })
     }
 
     // Helper: strip XML and OpenAI-format tool call artifacts from model output
