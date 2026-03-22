@@ -7885,6 +7885,8 @@ Rules:
             .replace(/<parameter[^>]*>[\s\S]*?<\/parameter>/g, '')
             .replace(/<\/?minimax:tool_call>/g, '')
             .trim()
+          // If content is entirely XML (empty after strip) and tools were used, route to synthesis
+          if (!content.trim() && usedTools) { finalMessages = loopMessages; break }
           const encoder = new TextEncoder()
 
           if (userId && messages.length >= 2) {
@@ -8070,6 +8072,11 @@ SYNTHESIS RULES:
       if (hiveLog.length === 0) {
         hiveLog.push("⚡ No Tools Needed — Sparkie Has The Answer...")
       }
+      // Nudge prevents synthesis from calling tools again or emitting XML
+      finalMessages = [...finalMessages, {
+        role: 'user' as const,
+        content: '⚡ SYSTEM: Write your full response now in plain English. No tools. No XML.',
+      }]
       const { response: synthRes } = await tryLLMCall({
         stream: true, temperature: 0.8, max_tokens: 8192,
         messages: [{ role: 'system', content: finalSystemContent }, ...finalMessages],
@@ -8099,7 +8106,11 @@ SYNTHESIS RULES:
           let synthBuf = ''
           while (true) {
             const { done, value } = await synthRdr2.read()
-            if (done) { liveRef.controller?.enqueue(synthEnc.encode('data: [DONE]\n\n')); break }
+            if (done) {
+              liveRef.controller?.enqueue(synthEnc.encode(`data: ${JSON.stringify({ task_chip_clear: true })}\n\n`))
+              liveRef.controller?.enqueue(synthEnc.encode('data: [DONE]\n\n'))
+              break
+            }
             const synthText = synthDec.decode(value, { stream: true })
             const synthLines = (synthBuf + synthText).split('\n')
             synthBuf = synthLines.pop() ?? ''
@@ -8115,7 +8126,7 @@ SYNTHESIS RULES:
                     .replace(/<invoke[\s\S]*?<\/invoke>/g, '')
                     .replace(/<parameter[^>]*>[\s\S]*?<\/parameter>/g, '')
                     .trim()
-                  if (!cleanCt) { liveRef.controller?.enqueue(synthEnc.encode(line + '\n')); continue }
+                  if (!cleanCt) continue // skip XML-only deltas entirely
                   const san = cleanCt
                     .replace(/anthropic-claude-4\.5-haiku/gi, 'Sparkie').replace(/openai-gpt-4\.1/gi, 'Flame')
                     .replace(/minimax-m2\.\d+(-free)?/gi, 'Atlas').replace(/qwen[\d\w.-]+-vl-[\w-]+/gi, 'Sparkie Vision')
@@ -8123,11 +8134,12 @@ SYNTHESIS RULES:
                     .replace(/glm-5(-free)?/gi, 'Atlas').replace(/music-2\.[05]/gi, 'the music engine')
                     .replace(/speech-02(-hd)?/gi, 'voice synthesis').replace(/whisper-large-v3-turbo/gi, 'voice recognition')
                     .replace(/ace-step-v1\.5/gi, 'the music engine')
-                  if (san !== cleanCt) p.choices[0].delta.content = san
+                  // Always patch delta.content to the clean version before emitting
+                  p.choices[0].delta.content = san || cleanCt
                   liveRef.controller?.enqueue(synthEnc.encode(`data: ${JSON.stringify({ reasoning_chunk: san || cleanCt })}\n\n`))
+                  liveRef.controller?.enqueue(synthEnc.encode(`data: ${JSON.stringify(p)}\n`))
                 }
-                liveRef.controller?.enqueue(synthEnc.encode(line + '\n'))
-              } catch { liveRef.controller?.enqueue(synthEnc.encode(line + '\n')) }
+              } catch { /* skip malformed SSE line */ }
             }
           }
         }

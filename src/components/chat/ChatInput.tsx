@@ -1068,9 +1068,7 @@ export function ChatInput() {
                 return next
               })
               // Log real step to worklog so Live Activity shows what Sparkie is actually doing
-              if (trace.status === 'running') {
-                addWorklogEntry({ type: 'action', content: trace.label, status: 'running' })
-              } else if (trace.status === 'done') {
+              if (trace.status === 'done') {
                 addWorklogEntry({ type: 'result', content: trace.label + (trace.duration ? ` (${trace.duration < 1000 ? trace.duration + 'ms' : (trace.duration / 1000).toFixed(1) + 's'})` : ''), status: 'done' })
               } else if (trace.status === 'error') {
                 addWorklogEntry({ type: 'error', content: trace.label, status: 'error' })
