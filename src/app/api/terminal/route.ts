@@ -25,8 +25,10 @@ export async function POST(req: NextRequest) {
   const apiKey = process.env.E2B_API_KEY
   if (!apiKey) return NextResponse.json({ error: 'E2B_API_KEY not set' }, { status: 500 })
 
-  // Allow internal server.js 'start' calls to bypass NextAuth
+  // Allow internal server.js 'start' calls or chat route tool calls to bypass NextAuth
+  const internalSecret = process.env.SPARKIE_INTERNAL_SECRET
   const isInternal = req.headers.get('x-internal-call') === 'terminal-start'
+    || (internalSecret && req.headers.get('x-internal-secret') === internalSecret)
 
   if (!isInternal) {
     let authSession = null

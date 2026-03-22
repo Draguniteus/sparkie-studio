@@ -10,6 +10,12 @@ const ALLOWED_TABLES = new Set([
   'sparkie_skills', 'sparkie_assets', 'sparkie_radio_tracks', 'chat_messages',
   'dream_journal', 'dream_journal_lock', 'user_sessions', 'sparkie_outreach_log',
   'user_identity_files', 'users',
+  // CIP engine tables
+  'sparkie_goals', 'sparkie_behavior_rules', 'sparkie_causal_graph',
+  'sparkie_self_reflections', 'sparkie_self_memory', 'sparkie_topics',
+  'sparkie_dream_journal',
+  // Schema introspection
+  'information_schema',
 ])
 
 function isSelectOnly(sql: string): boolean {

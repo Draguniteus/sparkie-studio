@@ -2930,7 +2930,7 @@ const SPARKIE_TOOLS = [
     type: 'function',
     function: {
       name: 'write_database',
-      description: 'Run an INSERT, UPDATE, or DELETE SQL statement on the Sparkie database. Use to manage tasks, worklog entries, memories, feed posts, or any other Sparkie data. Always query_database first to confirm the record exists before updating/deleting.',
+      description: 'Run an INSERT, UPDATE, or DELETE SQL statement on the Sparkie database. Use to manage tasks, worklog entries, memories, feed posts, or any other Sparkie data. Always query_database first to confirm the record exists before updating/deleting. KEY SCHEMAS: sparkie_worklog(id TEXT PRIMARY KEY, user_id TEXT, type TEXT, content TEXT, metadata JSONB, status TEXT) — id must be gen_random_uuid()::text, use "content" not "message"; sparkie_self_memory(id SERIAL, category TEXT, content TEXT, source TEXT DEFAULT \'sparkie\') — no user_id column; sparkie_goals(id uuid DEFAULT gen_random_uuid(), title TEXT, type TEXT, priority TEXT, status TEXT, progress TEXT); sparkie_behavior_rules(id uuid DEFAULT gen_random_uuid(), condition TEXT, action TEXT, reasoning TEXT, confidence FLOAT, active BOOLEAN).',
       parameters: {
         type: 'object',
         properties: {
@@ -4536,10 +4536,15 @@ def invoke_llm(query, model='MiniMax-M2.7'):
         try {
           const termRes = await fetch(`${baseUrl}/api/terminal`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...(process.env.SPARKIE_INTERNAL_SECRET ? { 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET } : {}) },
             body: JSON.stringify({ action, sessionId, data: cmdData }),
           })
-          if (!termRes.ok) return `Terminal error: ${termRes.status} — ${await termRes.text()}`
+          if (!termRes.ok) {
+            const errText = await termRes.text()
+            if (termRes.status === 401) return 'Terminal error: unauthorized — check SPARKIE_INTERNAL_SECRET env var'
+            if (termRes.status === 500 && errText.includes('E2B_API_KEY')) return 'Terminal unavailable — E2B_API_KEY not set. Use get_github to read files or query_database for data instead.'
+            return `Terminal error: ${termRes.status} — ${errText}`
+          }
           const termData = await termRes.json() as { sessionId?: string; output?: string; error?: string }
           if (termData.error) return `Terminal error: ${termData.error}`
           if (action === 'create') return JSON.stringify({ sessionId: termData.sessionId, ready: true })
@@ -4983,18 +4988,15 @@ def invoke_llm(query, model='MiniMax-M2.7'):
             userParams = [userId, memLimit]
           }
           const userMems = await query(userMemSql, userParams)
-          await query(`CREATE TABLE IF NOT EXISTS sparkie_self_memory (
-            id SERIAL PRIMARY KEY, user_id TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'self',
-            content TEXT NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW()
-          )`).catch(() => {})
+          // sparkie_self_memory uses 'source' column (not user_id) — global table, not per-user
           let selfMemSql: string
           let selfParams: unknown[]
           if (memQuery) {
-            selfMemSql = `SELECT 'self' AS source, category, content, created_at FROM sparkie_self_memory WHERE user_id = $1 AND content ILIKE $2 ORDER BY created_at DESC LIMIT $3`
-            selfParams = [userId, `%${memQuery}%`, memLimit]
+            selfMemSql = `SELECT 'self' AS source, category, content, created_at FROM sparkie_self_memory WHERE content ILIKE $1 ORDER BY created_at DESC LIMIT $2`
+            selfParams = [`%${memQuery}%`, memLimit]
           } else {
-            selfMemSql = `SELECT 'self' AS source, category, content, created_at FROM sparkie_self_memory WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2`
-            selfParams = [userId, memLimit]
+            selfMemSql = `SELECT 'self' AS source, category, content, created_at FROM sparkie_self_memory ORDER BY created_at DESC LIMIT $1`
+            selfParams = [memLimit]
           }
           const selfMems = await query(selfMemSql, selfParams)
           const allRows = [...userMems.rows, ...selfMems.rows] as Array<{ source: string; category: string; content: string }>
@@ -5052,7 +5054,7 @@ def invoke_llm(query, model='MiniMax-M2.7'):
           if (memSource === 'user') {
             await query('DELETE FROM user_memories WHERE id = $1 AND user_id = $2', [memId, userId])
           } else {
-            await query('DELETE FROM sparkie_self_memory WHERE id = $1 AND source = $2', [memId, userId])
+            await query('DELETE FROM sparkie_self_memory WHERE id = $1', [memId])
           }
           return `✅ delete_memory: entry ${memId} removed from ${memSource} memories`
         } catch (e) { return `delete_memory error: ${String(e)}` }
@@ -5069,9 +5071,10 @@ def invoke_llm(query, model='MiniMax-M2.7'):
             const rows = res.rows as Array<{ id: number; category: string; content: string }>
             return rows.length ? rows.map(r => `[${r.id}:${r.category}] ${r.content.slice(0, 120)}`).join('\n') : 'No user memories found'
           }
-          const catFilter = listCat ? 'AND category = $2' : ''
-          const params = listCat ? [userId, listCat, Math.min(Number(listLim), 50)] : [userId, Math.min(Number(listLim), 50)]
-          const res = await query(`SELECT id, category, content, created_at FROM sparkie_self_memory WHERE source = $1 ${catFilter} ORDER BY created_at DESC LIMIT $${params.length}`, params)
+          // sparkie_self_memory is a global table (no user_id) — source is 'sparkie', not userId
+          const catFilter = listCat ? 'WHERE category = $1' : ''
+          const params = listCat ? [listCat, Math.min(Number(listLim), 50)] : [Math.min(Number(listLim), 50)]
+          const res = await query(`SELECT id, category, content, created_at FROM sparkie_self_memory ${catFilter} ORDER BY created_at DESC LIMIT $${params.length}`, params)
           const rows = res.rows as Array<{ id: number; category: string; content: string }>
           return rows.length ? rows.map(r => `[${r.id}:${r.category}] ${r.content.slice(0, 120)}`).join('\n') : 'No self memories found'
         } catch (e) { return `list_memories error: ${String(e)}` }
@@ -5542,7 +5545,7 @@ def invoke_llm(query, model='MiniMax-M2.7'):
         checks.push({ name: 'MINIMAX_API_KEY', status: process.env.MINIMAX_API_KEY ? 'ok' : 'fail', detail: process.env.MINIMAX_API_KEY ? 'set' : 'MISSING — build/chat broken' })
         checks.push({ name: 'COMPOSIO_API_KEY', status: process.env.COMPOSIO_API_KEY ? 'ok' : 'warn', detail: process.env.COMPOSIO_API_KEY ? 'set' : 'not set — Gmail/Calendar/tools disabled' })
         checks.push({ name: 'SUPERMEMORY_API_KEY', status: process.env.SUPERMEMORY_API_KEY ? 'ok' : 'warn', detail: process.env.SUPERMEMORY_API_KEY ? 'set' : 'not set — Supermemory disabled' })
-        checks.push({ name: 'E2B_API_KEY', status: process.env.E2B_API_KEY ? 'ok' : 'warn', detail: process.env.E2B_API_KEY ? 'set' : 'not set — terminal/workbench disabled' })
+        checks.push({ name: 'E2B_API_KEY', status: process.env.E2B_API_KEY ? 'ok' : 'fail', detail: process.env.E2B_API_KEY ? 'set' : 'MISSING — execute_terminal/grep_codebase/find_file will return 500. Fallback: use get_github for file reads, query_database for data.' })
         checks.push({ name: 'MIGRATE_SECRET', status: process.env.MIGRATE_SECRET ? 'ok' : 'warn', detail: process.env.MIGRATE_SECRET ? 'set' : 'not set — skill bootstrap disabled' })
 
         // 2. Skills count
