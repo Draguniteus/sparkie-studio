@@ -310,6 +310,8 @@ export function WorklogPage() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [expanded, setExpanded] = useState(false)
+  const [newEntryIds, setNewEntryIds] = useState<Set<string>>(new Set())
+  const prevIdsRef = useRef<Set<string>>(new Set())
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const fetchEntries = useCallback(async (silent = false) => {
@@ -318,7 +320,17 @@ export function WorklogPage() {
       const res = await fetch('/api/worklog?limit=80')
       if (res.ok) {
         const data = await res.json() as { entries: WorklogEntry[]; stats: Stats }
-        setEntries(data.entries ?? [])
+        const fresh = data.entries ?? []
+        // Track which IDs are new since last fetch for slide-in animation
+        const freshIds = new Set(fresh.map(e => e.id))
+        const added = fresh.filter(e => !prevIdsRef.current.has(e.id)).map(e => e.id)
+        prevIdsRef.current = freshIds
+        if (added.length > 0) {
+          setNewEntryIds(prev => new Set([...prev, ...added]))
+          // Clear new-entry highlight after animation completes
+          setTimeout(() => setNewEntryIds(prev => { const next = new Set(prev); added.forEach(id => next.delete(id)); return next }), 800)
+        }
+        setEntries(fresh)
         setStats(data.stats ?? { emails: 0, messages: 0 })
       }
     } finally {
@@ -418,8 +430,11 @@ export function WorklogPage() {
         {shown.map((item, i) =>
           item.type === 'collapsed'
             ? <CollapsedRow key={`collapsed-${i}`} item={item} />
-            : <EntryCard key={item.entry.id} entry={item.entry} />
+            : <div key={item.entry.id} style={newEntryIds.has(item.entry.id) ? { animation: 'worklog-slide-in 0.35s ease-out' } : undefined}>
+                <EntryCard entry={item.entry} />
+              </div>
         )}
+        <style>{`@keyframes worklog-slide-in { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }`}</style>
 
         {grouped.length > 40 && !expanded && (
           <button

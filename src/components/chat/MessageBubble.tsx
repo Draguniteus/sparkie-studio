@@ -124,10 +124,12 @@ function InMemoryPill({ traces }: { traces: StepTrace[] }) {
   const doneCount = toolTraces.filter(t => t.status === 'done').length
   const errorCount = toolTraces.filter(t => t.status === 'error').length
   const memoryTrace = traces.find(t => t.type === 'memory')
-  // Smart label: "Memory recalled: [Name]" > "In memory: N steps"
-  const label = memoryTrace?.memoryName
-    ? `Memory recalled: ${memoryTrace.memoryName}`
-    : `In memory: ${doneCount}/${toolTraces.length} steps${errorCount > 0 ? ` · ${errorCount} error` : ''}`
+  // Smart label: "Resuming: [Topic]" > "Memory recalled: [Name]" > "In memory: N steps"
+  const label = memoryTrace?.resuming && memoryTrace?.memoryName
+    ? `Resuming: ${memoryTrace.memoryName}`
+    : memoryTrace?.memoryName
+      ? `Memory recalled: ${memoryTrace.memoryName}`
+      : `In memory: ${doneCount}/${toolTraces.length} steps${errorCount > 0 ? ` · ${errorCount} error` : ''}`
   return (
     <div className="mb-1.5 flex flex-col gap-1">
       <button

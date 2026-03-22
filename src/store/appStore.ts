@@ -61,6 +61,7 @@ export interface StepTrace {
   text?: string         // thought text for type='thought' cards
   toolName?: string     // raw tool name for coloring
   memoryName?: string   // for type='memory' cards
+  resuming?: boolean    // true when memory_recalled is a topic resumption
   round?: number        // which tool round
   timestamp?: number    // unix ms when emitted
 }
@@ -273,6 +274,17 @@ interface AppState {
   // Avatar
   userAvatarUrl: string | null
   setUserAvatarUrl: (url: string | null) => void
+
+  // Live trace store (session-only, not persisted)
+  liveTraces: StepTrace[]
+  currentThought: string
+  memoryRecalled: { name: string; content: string; resuming?: boolean } | null
+  upsertLiveTrace: (trace: StepTrace) => void
+  addThoughtStep: (text: string) => void
+  clearLiveTraces: () => void
+  appendThought: (text: string) => void
+  clearThought: () => void
+  setMemoryRecalled: (data: { name: string; content: string; resuming?: boolean } | null) => void
 }
 
 export const useAppStore = create<AppState>()(persist((set, get) => ({
@@ -542,6 +554,28 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
   // Avatar URL (loaded from DB on settings open)
   userAvatarUrl: null,
   setUserAvatarUrl: (url) => set({ userAvatarUrl: url }),
+
+  // Live trace store (session-only, not persisted)
+  liveTraces: [],
+  currentThought: '',
+  memoryRecalled: null,
+  upsertLiveTrace: (trace) => set((s) => {
+    let idx = trace.id ? s.liveTraces.findIndex(t => t.id === trace.id) : -1
+    if (idx < 0) idx = s.liveTraces.findIndex(t => t.label === trace.label && t.status === 'running')
+    if (idx >= 0) {
+      const next = [...s.liveTraces]
+      next[idx] = { ...next[idx], ...trace }
+      return { liveTraces: next }
+    }
+    return { liveTraces: [...s.liveTraces, trace] }
+  }),
+  addThoughtStep: (text) => set((s) => ({
+    liveTraces: [...s.liveTraces, { type: 'thought', icon: 'brain', label: text.slice(0, 200), text, status: 'done', timestamp: Date.now() }],
+  })),
+  clearLiveTraces: () => set({ liveTraces: [], currentThought: '', memoryRecalled: null }),
+  appendThought: (text) => set((s) => ({ currentThought: s.currentThought + text })),
+  clearThought: () => set({ currentThought: '' }),
+  setMemoryRecalled: (data) => set({ memoryRecalled: data }),
   settingsOpen: false,
   openSettings: () => set({ settingsOpen: true }),
   closeSettings: () => set({ settingsOpen: false }),

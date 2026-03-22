@@ -114,7 +114,15 @@ export function TopicsPanel() {
       const res = await fetch('/api/topics')
       if (res.ok) {
         const data = await res.json() as { topics: Topic[] }
-        setTopics(data.topics ?? [])
+        const topics = data.topics ?? []
+        setTopics(topics)
+        // Auto-seed default topics on first load if none exist
+        if (topics.length === 0) {
+          fetch('/api/topics', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'seed' }) })
+            .then(r => r.ok ? r.json() : null)
+            .then(d => { if (d?.action === 'seeded') void fetchTopics(true) })
+            .catch(() => {})
+        }
       }
     } finally {
       setLoading(false)

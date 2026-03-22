@@ -6943,6 +6943,42 @@ Make it feel like walking into your friend's creative space and being genuinely 
       }
     }
 
+    // ── Topics: find matching active topic and inject cross-session context ───────────
+    let activeTopicId: string | null = null
+    let activeTopicName: string | null = null
+    let activeTopicContext: string | null = null
+    if (userId && lastUserContent && modelSelection.tier !== 'conversational') {
+      try {
+        const topicsRes = await query<{ id: string; name: string; summary: string; fingerprint: string; last_state: string; last_round: number; step_count: number }>(
+          `SELECT id, name, summary, fingerprint, last_state, last_round, step_count FROM sparkie_topics WHERE user_id = $1 AND status = 'active' ORDER BY updated_at DESC LIMIT 20`,
+          [userId]
+        )
+        const msgLower = lastUserContent.toLowerCase()
+        for (const topic of topicsRes.rows) {
+          const keywords = (topic.fingerprint ?? '').split(/\s+/).filter(k => k.length > 2)
+          const matchCount = keywords.filter(k => msgLower.includes(k)).length
+          if (matchCount >= 2) {
+            activeTopicId = topic.id
+            activeTopicName = topic.name
+            const contextParts = [`## ACTIVE TOPIC CONTEXT\nTopic: ${topic.name}`, `Summary: ${topic.summary ?? 'No summary yet.'}`]
+            if (topic.last_state) contextParts.push(`Last known state: ${topic.last_state}`)
+            if (topic.last_round > 0) contextParts.push(`Prior tool rounds: ${topic.last_round}`)
+            if (topic.step_count > 0) contextParts.push(`Total steps taken: ${topic.step_count}`)
+            activeTopicContext = contextParts.join('\n')
+            break
+          }
+        }
+        if (activeTopicContext) {
+          finalSystemContent += `\n\n${activeTopicContext}`
+        }
+      } catch {}
+    }
+
+    // ── "Thinking out loud" — narrate before each tool call so thought_step fires ──
+    if (modelSelection.tier !== 'conversational') {
+      finalSystemContent += `\n\nBefore calling any tool, write ONE sentence narrating what you are about to do and why. Keep it short and direct.`
+    }
+
     // Generate requestId for execution trace
     const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
     if (userId) startTrace(requestId, userId)
@@ -7168,6 +7204,17 @@ Make it feel like walking into your friend's creative space and being genuinely 
         liveEnqueue({ step_trace: { icon: 'brain', label: tierMsg, status: 'done' } })
       }
 
+      // ── Topics: emit resumption event if we matched an active topic ────────────
+      if (activeTopicId && activeTopicName) {
+        liveEnqueue({ memory_recalled: { name: activeTopicName, resuming: true, content: activeTopicContext ?? '' } })
+        // Seed original_request if this is the first round touching it
+        fetch(`${baseUrl}/api/topics`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', cookie: req.headers.get('cookie') ?? '' },
+          body: JSON.stringify({ action: 'update_state', id: activeTopicId, original_request: lastUserContent.slice(0, 500) }),
+        }).catch(() => {})
+      }
+
       // ── TWO-PHASE AGENT LOOP: Flame Plans → Atlas Executes ─────────────────────
       // Activates for Atlas (deep) and complex Flame (capable) tasks.
       // Phase 1: Flame creates a structured execution plan (fast, ~500 tokens, no tools).
@@ -7262,6 +7309,9 @@ Rules:
       while (round < MAX_TOOL_ROUNDS) {
         round++
         hiveLog.push(pickHive(HIVE_ROUND[round] ?? HIVE_ROUND[3]))
+        if (round % 5 === 0) {
+          liveEnqueue({ checkpoint_event: { round, message: `Checkpoint: ${round} rounds completed` } })
+        }
         const { response: loopRes, modelUsed: loopModel } = await tryLLMCall({
           stream: false, temperature: 0.8, max_tokens: 16000,
           tools: [...SPARKIE_TOOLS, ...connectorTools],
@@ -7495,6 +7545,7 @@ Rules:
                       conclusion: `Rule fired for tool "${tc.function.name}" — ${matchingRule.action.slice(0, 80)}`,
                     }
                   ).catch(() => {})
+                  liveEnqueue({ rule_fired: { condition: matchingRule.condition.slice(0, 100), action: matchingRule.action.slice(0, 100), tool: tc.function.name } })
                 }
               }
               const toolStart = Date.now()
@@ -7872,6 +7923,15 @@ Rules:
         } else {
           break // unexpected finish reason or max auto-continuations reached
         }
+      }
+
+      // ── Topics: update last_round + step_count after agent loop ─────────────────
+      if (activeTopicId && usedTools && round > 0) {
+        fetch(`${baseUrl}/api/topics`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', cookie: req.headers.get('cookie') ?? '' },
+          body: JSON.stringify({ action: 'update_state', id: activeTopicId, last_round: round, step_count: round }),
+        }).catch(() => {})
       }
 
       // If we exhausted rounds with tool calls, set up for final streaming synthesis

@@ -1086,12 +1086,32 @@ export function ChatInput() {
             }
             // Memory recalled — drives InMemoryPill label and ProcessTab memory card
             if (parsed.memory_recalled) {
-              const memData = parsed.memory_recalled as { name: string; content: string }
-              // Add memory trace to step traces so InMemoryPill label can detect it
-              const memTrace: StepTrace = { type: 'memory', icon: 'brain', label: `Memory recalled: ${memData.name}`, status: 'done', memoryName: memData.name, timestamp: Date.now() }
+              const memData = parsed.memory_recalled as { name: string; content: string; resuming?: boolean }
+              const label = memData.resuming ? `Resuming: ${memData.name}` : `Memory recalled: ${memData.name}`
+              const memTrace: StepTrace = { type: 'memory', icon: 'brain', label, status: 'done', memoryName: memData.name, resuming: memData.resuming, timestamp: Date.now() }
               _setStepTraces(prev => { const next = [...prev, memTrace]; _stepTracesRef.current = next; return next })
               window.dispatchEvent(new CustomEvent('sparkie_step_trace', { detail: memTrace }))
               window.dispatchEvent(new CustomEvent('sparkie:memory-recalled', { detail: memData }))
+              continue
+            }
+            // Rule fired — behavior rule triggered during tool execution
+            if (parsed.rule_fired) {
+              window.dispatchEvent(new CustomEvent('sparkie:rule-fired', { detail: parsed.rule_fired }))
+              continue
+            }
+            // Checkpoint event — emitted every 5 rounds
+            if (parsed.checkpoint_event) {
+              window.dispatchEvent(new CustomEvent('sparkie:checkpoint', { detail: parsed.checkpoint_event }))
+              continue
+            }
+            // Decision event
+            if (parsed.decision_event) {
+              window.dispatchEvent(new CustomEvent('sparkie:decision', { detail: parsed.decision_event }))
+              continue
+            }
+            // Code block start
+            if (parsed.code_block_start) {
+              window.dispatchEvent(new CustomEvent('sparkie:code-block', { detail: parsed.code_block_start }))
               continue
             }
             // Worklog card inline — also trigger WorklogPage live refresh
