@@ -898,7 +898,7 @@ export function ChatInput() {
 
     // ── FORCE CHAT: agentic repair/audit/search — NEVER route to build ──────────────────────────
     // These patterns describe autonomous investigation/repair tasks that need the chat agent route
-    const FORCE_CHAT_RE = /\b(fix it yourself|find and fix|find the bug|find a bug|fix the bug|fix this bug|diagnose and fix|go through the codebase|audit the codebase|search the codebase|scan the codebase|look through the codebase|check the codebase|find every place|find all places|find every|without asking me|do it yourself|autonomously|self.?repair|commit the changes|commit and push|push the fix|grep for|search for it|find the issue|find the error|find the problem|track it down|trace the|look through every|go through every|inspect every|check every file|search every|find where|locate the bug|find what.{0,20}wrong|find what.{0,20}broken|find why)\b/i
+    const FORCE_CHAT_RE = /\b(fix it yourself|find and fix|find the bug|find a bug|fix the bug|fix this bug|diagnose and fix|go through the codebase|audit the codebase|search the codebase|scan the codebase|look through the codebase|check the codebase|find every place|find all places|find every|without asking me|do it yourself|autonomously|self.?repair|commit the changes|commit and push|push the fix|grep for|search for it|find the issue|find the error|find the problem|track it down|trace the|look through every|go through every|inspect every|check every file|search every|find where|locate the bug|find what.{0,20}wrong|find what.{0,20}broken|find why|every file|every route|every place|every function|fail silently|silently failing|failing silently|codebase)\b/i
     if (FORCE_CHAT_RE.test(t)) return true
 
     // ── Tier 1: INSTANT CHAT ────────────────────────────────────────────────
@@ -1027,7 +1027,7 @@ export function ChatInput() {
   const streamReply = useCallback(async (chatId: string, userContent: string) => {
     const chat = useAppStore.getState().chats.find((c) => c.id === chatId)
     if (!chat) return
-    const apiMessages = chat.messages
+    const rawMessages = chat.messages
       .filter((m) => m.type !== "image" && m.type !== "video")
       .map((m) => {
         // Vision: if this message has an imageUrl, send as multipart content for model to see
@@ -1042,6 +1042,15 @@ export function ChatInput() {
         }
         return { role: m.role, content: m.content }
       })
+    // Inject the effective prompt as the last user message.
+    // Slash commands store "/diagnose" in chat but must send the expanded agent prompt to the API.
+    // For regular messages, userContent matches the stored content — this is a no-op.
+    const lastUserIdx = rawMessages.reduce((acc: number, m: {role: string}, i: number) => m.role === 'user' ? i : acc, -1)
+    const apiMessages = lastUserIdx >= 0
+      ? rawMessages.map((m: {role: string; content: unknown}, i: number) =>
+          i === lastUserIdx && typeof m.content === 'string' ? { ...m, content: userContent } : m
+        )
+      : rawMessages
     const assistantMsgId = addMessage(chatId, { role: "assistant", content: "", model: selectedModel, isStreaming: true })
     setStreaming(true)
     // ── Worklog framing: open IDE + log session start ──
@@ -1261,12 +1270,8 @@ export function ChatInput() {
             }
             // reasoning_chunk — animate word-by-word in the Live Activity sidebar ticker
             if (parsed.reasoning_chunk) {
-              const words = (parsed.reasoning_chunk as string).split(/\s+/).filter(Boolean)
-              words.forEach((word, i) => {
-                setTimeout(() => {
-                  window.dispatchEvent(new CustomEvent('sparkie:live-chunk', { detail: (i === 0 ? '' : ' ') + word }))
-                }, i * 25)
-              })
+              // Dispatch immediately so Live Activity shows word-by-word in real time during stream
+              window.dispatchEvent(new CustomEvent('sparkie:live-chunk', { detail: parsed.reasoning_chunk as string }))
             }
             const delta = parsed.choices?.[0]?.delta
             if (delta?.content) {
@@ -2363,7 +2368,7 @@ Promise.all([
       }
 
       // FORCE CHAT override — agentic repair/audit tasks must never go to build, even with active project
-      const FORCE_CHAT_SUBMIT = /\b(fix it yourself|find and fix|find the bug|find a bug|fix the bug|fix this bug|diagnose and fix|go through the codebase|audit the codebase|search the codebase|scan the codebase|find every place|find all places|without asking me|do it yourself|autonomously|self.?repair|commit the changes|commit and push|grep for|find the issue|find the error|find the problem|track it down|find where|locate the bug)\b/i
+      const FORCE_CHAT_SUBMIT = /\b(fix it yourself|find and fix|find the bug|find a bug|fix the bug|fix this bug|diagnose and fix|go through the codebase|audit the codebase|search the codebase|scan the codebase|find every place|find all places|without asking me|do it yourself|autonomously|self.?repair|commit the changes|commit and push|grep for|find the issue|find the error|find the problem|track it down|find where|locate the bug|every file|every route|every place|every function|fail silently|silently failing|codebase)\b/i
       if (FORCE_CHAT_SUBMIT.test(userContent)) {
         setLastMode('chat')
         streamReply(chatId, userContent)
@@ -2458,6 +2463,7 @@ Promise.all([
       {/* Slash command autocomplete */}
       {slashSuggestions.length > 0 && (
         <div className="mb-1 rounded-xl border border-honey-500/30 bg-hive-elevated overflow-hidden shadow-lg">
+          <div className="max-h-80 overflow-y-auto">
           {slashSuggestions.map((s) => (
             <button
               key={s.cmd}
@@ -2468,6 +2474,7 @@ Promise.all([
               <span className="text-xs text-text-muted">{s.desc}</span>
             </button>
           ))}
+          </div>
         </div>
       )}
 

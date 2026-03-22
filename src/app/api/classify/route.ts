@@ -10,6 +10,23 @@ export async function POST(req: NextRequest) {
     const apiKey = process.env.QWEN_API_KEY
     if (!apiKey) return new Response(JSON.stringify({ mode: 'chat' }), { headers: { 'Content-Type': 'application/json' } })
 
+    // Force chat BEFORE LLM call — same patterns as client quickClassify
+    const msgLower = (message as string ?? '').toLowerCase()
+    const FORCE_CHAT_PATTERNS = [
+      'codebase', 'go through', 'find every', 'find all places', 'audit',
+      'fix it yourself', 'without asking', 'autonomously', 'do it yourself',
+      'search the code', 'grep for', 'fail silently', 'silently failing',
+      'commit the changes', 'push the fix', 'find the bug', 'repair',
+      'every file', 'every route', 'every place', 'every function',
+    ]
+    if (FORCE_CHAT_PATTERNS.some(p => msgLower.includes(p))) {
+      return new Response(JSON.stringify({ mode: 'chat' }), { headers: { 'Content-Type': 'application/json' } })
+    }
+    // All slash commands except /build → chat
+    if (typeof message === 'string' && message.startsWith('/') && !message.startsWith('/build')) {
+      return new Response(JSON.stringify({ mode: 'chat' }), { headers: { 'Content-Type': 'application/json' } })
+    }
+
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 1500)
 

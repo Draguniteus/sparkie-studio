@@ -6501,8 +6501,9 @@ async function handleBuildMode(
 }
 
 function selectModel(messages: Array<{ role: string; content: string }>): ModelSelection {
-  const lastUser = messages.slice().reverse().find(m => m.role === 'user')?.content ?? ''
-  const lower = lastUser.toLowerCase()
+  const safeMessages = messages ?? []
+  const lastUser = safeMessages.slice().reverse().find(m => m.role === 'user')?.content ?? ''
+  const lower = (typeof lastUser === 'string' ? lastUser : '').toLowerCase()
   const msgLen = lastUser.length
   const userTurns = messages.filter(m => m.role === 'user').length
 
@@ -7906,7 +7907,7 @@ Rules:
               usedTools: usedTools,
             }).catch(() => {})
             const snap = messages.slice(-6).map((m: { role: string; content: string }) =>
-              `${m.role === 'user' ? 'User' : 'Sparkie'}: ${m.content.slice(0, 400)}`
+              `${m.role === 'user' ? 'User' : 'Sparkie'}: ${(typeof m.content === 'string' ? m.content : '').slice(0, 400)}`
             ).join('\n')
             extractAndSaveMemories(userId, snap, apiKey)
             // Extract deferred intents from the user's message
@@ -8231,7 +8232,7 @@ SYNTHESIS RULES:
         usedTools: false,
       }).catch(() => {})
       const snap = messages.slice(-6).map((m: { role: string; content: string }) =>
-        `${m.role === 'user' ? 'User' : 'Sparkie'}: ${m.content.slice(0, 400)}`
+        `${m.role === 'user' ? 'User' : 'Sparkie'}: ${(typeof m.content === 'string' ? m.content : '').slice(0, 400)}`
       ).join('\n')
       extractAndSaveMemories(userId, snap, apiKey)
       // Write message batch to worklog (fire-and-forget)
