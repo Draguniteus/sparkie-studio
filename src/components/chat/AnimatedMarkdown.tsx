@@ -1,6 +1,5 @@
 "use client"
 
-import { useRef } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import type { Components } from "react-markdown"
@@ -9,49 +8,6 @@ interface Props {
   content: string
   isStreaming: boolean
   messageId: string
-}
-
-// Tracks which messages have finished animating (module-level, resets on page reload)
-const animationDoneSet = new Set<string>()
-
-// Per-render char offset — reset each render, incremented as spans are created
-let renderCharOffset = 0
-
-function AnimatedText({
-  text,
-  isDone,
-}: {
-  text: string
-  isDone: boolean
-}) {
-  if (!text) return null
-
-  // Already animated (or historical) — render settled plain text, no animation
-  if (isDone) {
-    return <>{text}</>
-  }
-
-  const startOffset = renderCharOffset
-  const chars = Array.from(text)
-  renderCharOffset += chars.length
-
-  return (
-    <>
-      {chars.map((char, i) => (
-        <span
-          key={`${startOffset}-${i}`}
-          className="char"
-          style={{
-            opacity: 0,
-            animation: "colorShift 1s forwards",
-            animationDelay: `${(startOffset + i) * 0.03}s`,
-          }}
-        >
-          {char}
-        </span>
-      ))}
-    </>
-  )
 }
 
 // ── Media renderers ──────────────────────────────────────────────────────────
@@ -111,125 +67,47 @@ function SparkieVideo({ src }: { src: string }) {
   )
 }
 
+// ── Static markdown components (no animation) ────────────────────────────────
+
+const components: Components = {
+  p({ children }) {
+    return <p style={{ wordBreak: "break-word", overflowWrap: "anywhere" }}>{children}</p>
+  },
+  a({ children, href }) {
+    return <a href={href} target="_blank" rel="noopener noreferrer" style={{ wordBreak: "break-all" }}>{children}</a>
+  },
+  code(props) {
+    const { children, className } = props
+    const lang = className?.replace("language-", "") ?? ""
+    const raw = String(children).trim()
+
+    if (lang === "image") return <SparkieImage src={raw} />
+    if (lang === "audio") return <SparkieAudio src={raw} />
+    if (lang === "video") return <SparkieVideo src={raw} />
+
+    return <code className={className}>{children}</code>
+  },
+  pre({ children }) {
+    return <pre>{children}</pre>
+  },
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
-export function AnimatedMarkdown({ content, isStreaming, messageId }: Props) {
-  const wasStreamingRef = useRef(isStreaming)
-  const markedDoneRef = useRef(false)
-
-  // Case A: was streaming, now done — mark after animation completes
-  if (wasStreamingRef.current && !isStreaming && !markedDoneRef.current) {
-    markedDoneRef.current = true
-    const id = messageId
-    const charCount = Array.from(content).length
-    setTimeout(() => {
-      animationDoneSet.add(id)
-    }, (charCount * 0.03 + 1.2) * 1000)
-  }
-  wasStreamingRef.current = isStreaming
-
-  // Case B: message was never streamed in this session (historical / loaded from DB)
-  // Mark done IMMEDIATELY — no animation, render plain text right away
-  const neverStreamedRef = useRef(!isStreaming)
-  if (neverStreamedRef.current && !markedDoneRef.current) {
-    markedDoneRef.current = true
-    animationDoneSet.add(messageId)
-  }
-
-  const isDone = animationDoneSet.has(messageId)
-
-  // KEY PERF: During active streaming, skip ReactMarkdown entirely.
-  // ReactMarkdown re-parses the full AST on every token — O(n^2) for long responses.
-  // Plain pre-wrap render is negligible. Markdown is only parsed once streaming ends.
-  if (isStreaming && !isDone) {
+export function AnimatedMarkdown({ content, isStreaming, messageId: _ }: Props) {
+  // During streaming: plain pre-wrap render — fast, no re-parsing
+  if (isStreaming) {
     return (
       <p style={{ wordBreak: "break-word", overflowWrap: "anywhere", whiteSpace: "pre-wrap", margin: 0 }}>
-        {content || " "}
+        {content || " "}
       </p>
     )
   }
 
-  // Reset per-render offset at top of each render
-  renderCharOffset = 0
-
+  // After streaming: full markdown render, static, no animation
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={makeComponents(isDone)}>
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
       {content || " "}
     </ReactMarkdown>
   )
-}
-
-function makeComponents(done: boolean): Components {
-  return {
-    p({ children }) {
-      return <p style={{ wordBreak: "break-word", overflowWrap: "anywhere" }}><AnimatedNodes isDone={done}>{children}</AnimatedNodes></p>
-    },
-    a({ children, href }) {
-      return <a href={href} target="_blank" rel="noopener noreferrer" style={{ wordBreak: "break-all" }}><AnimatedNodes isDone={done}>{children}</AnimatedNodes></a>
-    },
-    h1({ children }) {
-      return <h1><AnimatedNodes isDone={done}>{children}</AnimatedNodes></h1>
-    },
-    h2({ children }) {
-      return <h2><AnimatedNodes isDone={done}>{children}</AnimatedNodes></h2>
-    },
-    h3({ children }) {
-      return <h3><AnimatedNodes isDone={done}>{children}</AnimatedNodes></h3>
-    },
-    h4({ children }) {
-      return <h4><AnimatedNodes isDone={done}>{children}</AnimatedNodes></h4>
-    },
-    strong({ children }) {
-      return <strong><AnimatedNodes isDone={done}>{children}</AnimatedNodes></strong>
-    },
-    em({ children }) {
-      return <em><AnimatedNodes isDone={done}>{children}</AnimatedNodes></em>
-    },
-    li({ children }) {
-      return <li><AnimatedNodes isDone={done}>{children}</AnimatedNodes></li>
-    },
-    code(props) {
-      const { children, className } = props
-      const lang = className?.replace("language-", "") ?? ""
-      const raw = String(children).trim()
-
-      if (lang === "image") return <SparkieImage src={raw} />
-      if (lang === "audio") return <SparkieAudio src={raw} />
-      if (lang === "video") return <SparkieVideo src={raw} />
-
-      return <code className={className}>{children}</code>
-    },
-    pre({ children }) {
-      return <pre>{children}</pre>
-    },
-  }
-}
-
-function AnimatedNodes({
-  children,
-  isDone,
-}: {
-  children: React.ReactNode
-  isDone: boolean
-}): React.ReactElement {
-  return <>{flatMapChildren(children, isDone)}</>
-}
-
-function flatMapChildren(children: React.ReactNode, isDone: boolean): React.ReactNode[] {
-  const result: React.ReactNode[] = []
-
-  const walk = (node: React.ReactNode) => {
-    if (typeof node === "string") {
-      result.push(
-        <AnimatedText key={`t-${result.length}`} text={node} isDone={isDone} />
-      )
-    } else if (Array.isArray(node)) {
-      node.forEach(walk)
-    } else {
-      result.push(node)
-    }
-  }
-
-  walk(children)
-  return result
 }

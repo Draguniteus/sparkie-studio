@@ -623,7 +623,13 @@ function LiveActivityTicker() {
       if (!chunk) return
       const clean = stripMarkdown(chunk)
       if (!clean) return
-      if (clearTimerRef.current) clearTimeout(clearTimerRef.current)
+      if (clearTimerRef.current) {
+        // New response starting after a done — cancel pending clear and wipe old buffer
+        clearTimeout(clearTimerRef.current)
+        clearTimerRef.current = null
+        setText('')
+        setThoughtText('')
+      }
       setActive(true)
       // Keep last 400 chars visible
       setText(prev => (prev + clean).slice(-400))
@@ -631,16 +637,21 @@ function LiveActivityTicker() {
     const onThought = (e: Event) => {
       const t = (e as CustomEvent<string>).detail
       if (!t?.trim()) return
-      if (clearTimerRef.current) clearTimeout(clearTimerRef.current)
+      if (clearTimerRef.current) {
+        clearTimeout(clearTimerRef.current)
+        clearTimerRef.current = null
+      }
       setActive(true)
       setThoughtText(t.slice(0, 200))
       setText('')  // clear streaming text when a thought step arrives
     }
     const onDone = () => {
+      // Immediately stop active indicator; keep text visible 4s then wipe
+      setActive(false)
       clearTimerRef.current = setTimeout(() => {
         setText('')
         setThoughtText('')
-        setActive(false)
+        clearTimerRef.current = null
       }, 4000)
     }
     window.addEventListener('sparkie:live-chunk', onChunk)

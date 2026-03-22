@@ -1001,7 +1001,6 @@ export function ChatInput() {
     const assistantMsgId = addMessage(chatId, { role: "assistant", content: "", model: selectedModel, isStreaming: true })
     setStreaming(true)
     // ── Worklog framing: open IDE + log session start ──
-    clearWorklog()
     if (!ideOpen) openIDE()
     setIDETab('worklog')
     addWorklogEntry({ type: 'action', content: 'Query received — routing...', status: 'running' })

@@ -116,7 +116,11 @@ function FrozenCard({ group, index, hasLive }: { group: { chipLabel: string; tra
   const errorTraces = group.traces.filter(t => t.status === 'error')
   const totalMs = group.traces.reduce((sum, t) => sum + (t.duration ?? 0), 0)
 
-  const label = index === 0 && !hasLive ? 'Last response' : `${index + 1} response${index > 0 ? 's' : ''} ago`
+  const firstMeaningful = group.traces.find(t => t.type === 'thought')?.text
+    ?? group.traces.find(t => t.type === 'thought')?.label
+    ?? group.traces[0]?.label
+    ?? ''
+  const label = firstMeaningful.slice(0, 55) || (index === 0 && !hasLive ? 'Last response' : `${index + 1} responses ago`)
 
   return (
     <div className="rounded-lg border border-hive-border/60 overflow-hidden">
@@ -141,7 +145,7 @@ function FrozenCard({ group, index, hasLive }: { group: { chipLabel: string; tra
         </div>
       </button>
       {open && (
-        <div className="p-2 flex flex-col gap-1 bg-hive-600/20">
+        <div className="p-2 flex flex-col gap-1 bg-hive-600/20 max-h-72 overflow-y-auto">
           {group.traces.map((trace, ti) => (
             trace.type === 'thought'
               ? <ThoughtCard key={ti} text={trace.text ?? trace.label} icon={trace.icon} />
@@ -250,6 +254,15 @@ export function ProcessTab() {
     prevLongTaskRef.current = longTaskLabel ?? null
   }, [longTaskLabel])
 
+  // On sparkie:live-done — immediately mark all running traces as done (stops spinner + "Working..." header)
+  useEffect(() => {
+    const handler = () => {
+      setLiveTraces(prev => prev.map(t => t.status === 'running' ? { ...t, status: 'done' as const } : t))
+    }
+    window.addEventListener('sparkie:live-done', handler)
+    return () => window.removeEventListener('sparkie:live-done', handler)
+  }, [])
+
   // Clear live traces 3s after longTaskLabel clears (response done)
   useEffect(() => {
     if (!longTaskLabel && liveTraces.length > 0) {
@@ -277,7 +290,7 @@ export function ProcessTab() {
     }
   }
 
-  const isLive = !!longTaskLabel || liveTraces.some(t => t.status === 'running')
+  const isLive = !!longTaskLabel
   const hasContent = liveTraces.length > 0 || recentFrozen.length > 0
 
   // Determine which trace keys are new (for enter animation)
