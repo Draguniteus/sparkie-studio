@@ -7,15 +7,14 @@ import { Globe, RefreshCw, Loader2, ExternalLink } from "lucide-react"
 const PREVIEW_BASE_STYLES = `
   *, *::before, *::after { box-sizing: border-box; }
   html, body {
-    margin: 0; padding: 0; width: 100%; height: 100%;
-    overflow: hidden; background: #0a0a0a;
+    margin: 0; padding: 0; width: 100%; min-height: 100%;
+    overflow: auto; background: #0a0a0a;
   }
   svg:only-child, body > svg {
     display: block; width: 100% !important; height: 100% !important;
     max-width: 100vw; max-height: 100vh;
   }
   canvas { max-width: 100%; max-height: 100%; display: block; }
-  body { display: flex; justify-content: center; align-items: center; }
 `
 const CODE_VIEWER_STYLES = `
   body { margin:0; padding:16px; font-family:'Fira Code','Cascadia Code',monospace;

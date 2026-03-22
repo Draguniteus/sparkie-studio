@@ -652,7 +652,7 @@ function LiveActivityTicker() {
         setText('')
         setThoughtText('')
         clearTimerRef.current = null
-      }, 4000)
+      }, 20000)
     }
     window.addEventListener('sparkie:live-chunk', onChunk)
     window.addEventListener('sparkie:thought-step', onThought)
@@ -676,7 +676,7 @@ function LiveActivityTicker() {
         <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse shrink-0" />
         <span className="text-[10px] font-semibold text-purple-300/80 uppercase tracking-wide">Sparkie is thinking</span>
       </div>
-      <div ref={scrollRef} className="px-3 py-2 max-h-24 overflow-y-auto">
+      <div ref={scrollRef} className="px-3 py-2 min-h-[200px] max-h-64 overflow-y-auto">
         {thoughtText ? (
           <p className="text-[11px] text-purple-200/80 leading-relaxed italic whitespace-pre-wrap break-words">
             🧠 {thoughtText}

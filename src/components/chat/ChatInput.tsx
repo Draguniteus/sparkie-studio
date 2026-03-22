@@ -31,11 +31,50 @@ function detectAssetTypeFromName(name: string): import('@/store/appStore').Asset
 
 // ─── Slash commands registry ─────────────────────────────────────────────────
 const SLASH_COMMANDS = [
-  { cmd: '/startradio', desc: 'Start Sparkie Radio' },
-  { cmd: '/stopradio',  desc: 'Stop the radio' },
-  { cmd: '/weather',    desc: 'Get your local weather forecast' },
-  { cmd: '/journal',    desc: 'Search or discuss your Dream Journal entries' },
-  { cmd: '/dream',      desc: 'Add a dream or entry to your Dream Journal' },
+  // System / status
+  { cmd: '/diagnose',    desc: 'Run a full self-diagnosis — deploy, DB, tools, memory' },
+  { cmd: '/goals',       desc: 'Show all active goals and their progress' },
+  { cmd: '/rules',       desc: 'List all behavior rules Sparkie has written' },
+  { cmd: '/memory',      desc: 'Search memories — usage: /memory [query]' },
+  { cmd: '/recap',       desc: 'Summarize everything worked on this session' },
+  { cmd: '/brief',       desc: 'Run the morning brief right now' },
+  { cmd: '/inbox',       desc: 'Check inbox and triage emails' },
+  { cmd: '/deploy',      desc: 'Check current deployment status and recent logs' },
+  { cmd: '/cron',        desc: 'Show last 5 cron sweep results' },
+  { cmd: '/cip',         desc: 'Show CIP Engine status across all 7 layers' },
+  { cmd: '/topic',       desc: 'List all active topics and where we left off' },
+  { cmd: '/checkpoint',  desc: 'Save current session progress to memory' },
+  { cmd: '/reflect',     desc: 'Run a manual self-reflection right now' },
+  { cmd: '/score',       desc: 'Show REAL score breakdown with component explanations' },
+  { cmd: '/causal',      desc: 'Query the causal graph — what causes what' },
+  { cmd: '/agenda',      desc: "Show Sparkie's open agenda for this session" },
+  { cmd: '/skills',      desc: 'List all installed skills' },
+  { cmd: '/tasks',       desc: 'Show all pending HITL tasks' },
+  { cmd: '/logs',        desc: 'Show last 10 DO runtime log entries' },
+  // Actions
+  { cmd: '/build',       desc: 'Build something — usage: /build a todo app' },
+  { cmd: '/fix',         desc: 'Fix something autonomously — usage: /fix memory tools' },
+  { cmd: '/search',      desc: 'Search codebase — usage: /search writeWorklog' },
+  { cmd: '/commit',      desc: 'Commit and push any pending local changes' },
+  { cmd: '/diff',        desc: 'Show what changed in the last commit' },
+  { cmd: '/rollback',    desc: 'Roll back to the previous deployment' },
+  // Media
+  { cmd: '/generate',    desc: 'Generate an image — usage: /generate sunset over ocean' },
+  { cmd: '/music',       desc: 'Generate music — usage: /music lo-fi chill beats' },
+  { cmd: '/video',       desc: 'Generate video — usage: /video timelapse of city' },
+  { cmd: '/screenshot',  desc: 'Take a screenshot of the live app right now' },
+  // Navigation
+  { cmd: '/corner',      desc: "Open Sparkie's Corner" },
+  { cmd: '/feed',        desc: "Show Sparkie's latest Feed posts" },
+  // Radio
+  { cmd: '/startradio',  desc: 'Start Sparkie Radio' },
+  { cmd: '/stopradio',   desc: 'Stop the radio' },
+  // Utility
+  { cmd: '/weather',     desc: 'Get your local weather forecast' },
+  { cmd: '/journal',     desc: 'Search or discuss your Dream Journal entries' },
+  { cmd: '/dream',       desc: 'Add a dream or entry to your Dream Journal' },
+  { cmd: '/clear',       desc: 'Clear chat history' },
+  { cmd: '/help',        desc: 'Show all available commands' },
 ] as const
 
 // Chat model routing is handled server-side — Sparkie auto-selects the best model.
@@ -857,6 +896,11 @@ export function ChatInput() {
     const words = t.split(/\s+/).filter(Boolean)
     const wordCount = words.length
 
+    // ── FORCE CHAT: agentic repair/audit/search — NEVER route to build ──────────────────────────
+    // These patterns describe autonomous investigation/repair tasks that need the chat agent route
+    const FORCE_CHAT_RE = /\b(fix it yourself|find and fix|find the bug|find a bug|fix the bug|fix this bug|diagnose and fix|go through the codebase|audit the codebase|search the codebase|scan the codebase|look through the codebase|check the codebase|find every place|find all places|find every|without asking me|do it yourself|autonomously|self.?repair|commit the changes|commit and push|push the fix|grep for|search for it|find the issue|find the error|find the problem|track it down|trace the|look through every|go through every|inspect every|check every file|search every|find where|locate the bug|find what.{0,20}wrong|find what.{0,20}broken|find why)\b/i
+    if (FORCE_CHAT_RE.test(t)) return true
+
     // ── Tier 1: INSTANT CHAT ────────────────────────────────────────────────
     // These ALWAYS go to chat — even if they contain build-like words
 
@@ -1121,7 +1165,8 @@ export function ChatInput() {
             // IDE build trigger — chat route detected a build request, hand off to streamAgent
             if (parsed.ide_build) {
               const buildPrompt = (parsed.ide_build as { prompt: string }).prompt
-              // Let the current chat message finish, then trigger the build pipeline
+              // Mark current message done immediately — prevents duplicate Pause/Stop buttons
+              updateMessage(chatId, assistantMsgId, { content: '', isStreaming: false })
               setTimeout(() => streamAgent(chatId, buildPrompt), 100)
               continue
             }
@@ -1327,8 +1372,6 @@ export function ChatInput() {
       ? `[EDIT REQUEST — output the COMPLETE updated file(s) with ---FILE: filename--- markers. Do NOT respond conversationally. Regenerate the full file with changes applied.]\n\n${userContent}`
       : userContent
 
-    // BUG-06/07/08: Auto-clear IDE process pane + preview before every new build
-    clearWorklog()
     setPreviewUrl('')
 
     // Pre-build acknowledgement — shown immediately so user isn't staring at silence
@@ -1363,7 +1406,6 @@ export function ChatInput() {
     setStreaming(true)
     setExecuting(true)
     clearLiveCode()
-    clearWorklog()
     setContainerStatus('idle')
     setPreviewUrl(null)
     if (!ideOpen) openIDE()
@@ -2185,10 +2227,83 @@ Promise.all([
         return
       }
 
-      // Unknown slash command — let Sparkie explain what's available
+      // Agent-routed slash commands — these go straight to streamReply with a crafted prompt
+      const AGENT_SLASH_MAP: Record<string, string> = {
+        '/diagnose':   'Run a full self-diagnosis: check deployment status, DB connectivity, all tools, memory system, E2B sandbox. Report results clearly with pass/fail for each.',
+        '/goals':      'Show me all active goals from the sparkie_goals table. Include priority, status, last progress, and any P0 flags.',
+        '/rules':      'List all behavior rules from sparkie_behavior_rules. Show condition, action, confidence, and how many times each has been applied.',
+        '/recap':      'Summarize everything we\'ve worked on this session in detail. What was accomplished, what changed, what\'s pending.',
+        '/brief':      'Run the morning brief now. Check emails, tasks, goals, cron results, deployment status, and give me a full rundown.',
+        '/inbox':      'Check my inbox right now. Triage emails and tell me what needs attention.',
+        '/deploy':     'Check the current deployment status. Show recent logs, any errors, and whether the app is healthy.',
+        '/cron':       'Show the last 5 cron sweep results with timestamps and what was found.',
+        '/cip':        'Show CIP Engine status across all 7 layers. Include scores, trends, and any warnings.',
+        '/topic':      'List all active topics from sparkie_topics and where we left off on each.',
+        '/checkpoint': 'Save the current session progress to memory. Summarize what was accomplished and what\'s next.',
+        '/reflect':    'Run a manual self-reflection right now. Analyze recent actions, goals progress, and what to improve.',
+        '/score':      'Show my REAL score breakdown with detailed explanations for each component.',
+        '/causal':     'Query the causal graph. Show me what causes what in my behavior model.',
+        '/agenda':     'Show the open agenda for this session — what needs to be done.',
+        '/skills':     'List all installed skills from sparkie_skills.',
+        '/tasks':      'Show all pending HITL tasks that need my approval.',
+        '/logs':       'Show the last 10 DO runtime log entries.',
+        '/commit':     'Commit and push any pending local changes with a good commit message.',
+        '/diff':       'Show what changed in the last commit.',
+        '/rollback':   'Roll back to the previous deployment safely.',
+        '/screenshot': 'Take a screenshot of the live app right now and show it to me.',
+        '/corner':     'Open Sparkie\'s Corner for me.',
+        '/feed':       'Show Sparkie\'s latest Feed posts.',
+        '/help':       'Show me all available slash commands and what they do.',
+        '/clear':      'Clear the chat history.',
+      }
+
+      // /memory and /search take arguments — handle separately
+      if (slashCmd === '/memory') {
+        const query = trimmed.slice('/memory'.length).trim() || 'recent memories'
+        streamReply(chatId, `Search your memories for: ${query}`)
+        return
+      }
+      if (slashCmd === '/search') {
+        const query = trimmed.slice('/search'.length).trim()
+        if (query) { streamReply(chatId, `Search the codebase for: ${query}`); return }
+      }
+      if (slashCmd === '/build') {
+        const idea = trimmed.slice('/build'.length).trim()
+        if (idea) { streamAgent(chatId, `Build: ${idea}`); return }
+      }
+      if (slashCmd === '/fix') {
+        const issue = trimmed.slice('/fix'.length).trim()
+        if (issue) { streamReply(chatId, `Find and fix autonomously: ${issue}. Do it yourself without asking me.`); return }
+      }
+      if (slashCmd === '/generate') {
+        const desc = trimmed.slice('/generate'.length).trim()
+        if (desc) { generateMedia(chatId, desc, 'image'); return }
+      }
+      if (slashCmd === '/music') {
+        const desc = trimmed.slice('/music'.length).trim()
+        if (desc) { generateMedia(chatId, desc, 'music'); return }
+      }
+      if (slashCmd === '/video') {
+        const desc = trimmed.slice('/video'.length).trim()
+        if (desc) { generateMedia(chatId, desc, 'video'); return }
+      }
+      if (slashCmd === '/resume') {
+        const topic = trimmed.slice('/resume'.length).trim()
+        if (topic) { streamReply(chatId, `Resume the topic: ${topic}. Show me where we left off and continue from there.`); return }
+      }
+
+      // Check if it's an agent-routed command
+      const agentPrompt = AGENT_SLASH_MAP[slashCmd]
+      if (agentPrompt) {
+        streamReply(chatId, agentPrompt)
+        return
+      }
+
+      // Unknown slash command — show full command list
+      const cmdList = SLASH_COMMANDS.map(s => `**\`${s.cmd}\`** — ${s.desc}`).join('\n')
       addMessage(chatId, {
         role: 'assistant',
-        content: `I don't know that command yet! Here's what I've got:\n\n**\`/startradio\`** — Start Sparkie Radio\n**\`/stopradio\`** — Stop the radio\n**\`/weather\`** — Get your local weather forecast`,
+        content: `I don't know that command! Here's everything I support:\n\n${cmdList}`,
       })
       return
     }
@@ -2244,6 +2359,14 @@ Promise.all([
       if (isContinue && lastMode === 'build') {
         setLastMode('build')
         streamAgent(chatId, userContent)
+        return
+      }
+
+      // FORCE CHAT override — agentic repair/audit tasks must never go to build, even with active project
+      const FORCE_CHAT_SUBMIT = /\b(fix it yourself|find and fix|find the bug|find a bug|fix the bug|fix this bug|diagnose and fix|go through the codebase|audit the codebase|search the codebase|scan the codebase|find every place|find all places|without asking me|do it yourself|autonomously|self.?repair|commit the changes|commit and push|grep for|find the issue|find the error|find the problem|track it down|find where|locate the bug)\b/i
+      if (FORCE_CHAT_SUBMIT.test(userContent)) {
+        setLastMode('chat')
+        streamReply(chatId, userContent)
         return
       }
 

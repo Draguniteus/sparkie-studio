@@ -242,7 +242,7 @@ export function IDEPanelInner() {
       <div className="flex items-center h-10 px-3 bg-hive-700 border-b border-hive-border shrink-0 gap-1 overflow-x-auto scrollbar-none">
         {tabs.map(t => (
           <button key={t.id} onClick={() => setIdeTab(t.id)}
-            className={`px-3 py-1 text-xs font-medium transition-colors rounded relative
+            className={`px-3 py-1 text-xs font-medium transition-colors rounded relative shrink-0 whitespace-nowrap
               ${ideTab === t.id
                 ? 'text-text-primary after:absolute after:bottom-0 after:left-0 after:right-0 after:h-[2px] after:bg-honey-500 after:rounded-t bg-hive-500/40'
                 : 'text-text-muted hover:text-text-secondary hover:bg-hive-hover'
