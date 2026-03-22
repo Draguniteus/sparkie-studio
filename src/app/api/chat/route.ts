@@ -7316,7 +7316,7 @@ Rules:
           stream: false, temperature: 0.8, max_tokens: 16000,
           tools: [...SPARKIE_TOOLS, ...connectorTools],
           tool_choice: 'auto',
-          messages: [{ role: 'system', content: systemContent }, ...loopMessages],
+          messages: [{ role: 'system', content: finalSystemContent }, ...loopMessages],
         }, modelSelection, apiKey, doKey)
         void loopModel // tracked internally; not exposed to user
 
@@ -7888,7 +7888,24 @@ Rules:
             finalContent += injectMediaIntoContent('', toolMediaResults)
           }
 
+          // Emit decision_event — model chose to stop and deliver a response
+          if (usedTools) {
+            liveEnqueue({ decision_event: { round, summary: content.slice(0, 120), tools_used: round } })
+          }
+          // Emit code_block_start — response contains at least one code fence
+          if (/```/.test(finalContent)) {
+            const lang = (finalContent.match(/```(\w+)/) ?? [])[1] ?? 'code'
+            liveEnqueue({ code_block_start: { language: lang } })
+          }
 
+          // Auto-save last_state to active topic — captures where this session left off
+          if (activeTopicId && content.length > 40) {
+            fetch(`${baseUrl}/api/topics`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', cookie: req.headers.get('cookie') ?? '' },
+              body: JSON.stringify({ action: 'update_state', id: activeTopicId, last_state: content.slice(0, 500) }),
+            }).catch(() => {})
+          }
 
           // Write final content directly to liveRef — live stream is already open (IIFE approach)
           for (const msg of hiveLog) {

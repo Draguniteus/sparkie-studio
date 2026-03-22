@@ -24,7 +24,9 @@ function traceKey(trace: StepTrace, i: number) {
   return trace.id ? `${trace.id}__${trace.status}` : `${i}__${trace.label}__${trace.status}`
 }
 
-function ThoughtCard({ text, isNew }: { text: string; isNew?: boolean }) {
+const THOUGHT_ICON_MAP: Record<string, string> = { brain: '🧠', zap: '⚡', flag: '🚩', memory: '💾' }
+
+function ThoughtCard({ text, icon, isNew }: { text: string; icon?: string; isNew?: boolean }) {
   const [visible, setVisible] = useState(!isNew)
   useEffect(() => {
     if (isNew) {
@@ -32,6 +34,7 @@ function ThoughtCard({ text, isNew }: { text: string; isNew?: boolean }) {
       return () => cancelAnimationFrame(raf)
     }
   }, [isNew])
+  const emoji = THOUGHT_ICON_MAP[icon ?? 'brain'] ?? '🧠'
   return (
     <div
       style={{
@@ -41,7 +44,7 @@ function ThoughtCard({ text, isNew }: { text: string; isNew?: boolean }) {
       }}
       className="flex items-start gap-2.5 px-3 py-2 rounded-lg border border-purple-500/20 bg-purple-500/5 text-[11px] border-l-2 border-l-purple-400"
     >
-      <span className="text-[13px] shrink-0 mt-px">🧠</span>
+      <span className="text-[13px] shrink-0 mt-px">{emoji}</span>
       <span className="flex-1 leading-snug text-purple-200/80 italic break-words">{text}</span>
     </div>
   )
@@ -127,7 +130,7 @@ function FrozenCard({ group, index, hasLive }: { group: { chipLabel: string; tra
         <div className="p-2 flex flex-col gap-1 bg-hive-600/20">
           {group.traces.map((trace, ti) => (
             trace.type === 'thought'
-              ? <ThoughtCard key={ti} text={trace.text ?? trace.label} />
+              ? <ThoughtCard key={ti} text={trace.text ?? trace.label} icon={trace.icon} />
               : <TraceRow key={ti} trace={trace} />
           ))}
         </div>
@@ -185,6 +188,34 @@ export function ProcessTab() {
     }
     window.addEventListener('sparkie:thought-step', handler)
     return () => window.removeEventListener('sparkie:thought-step', handler)
+  }, [])
+
+  // rule_fired — show as a dim rule card in the live trace list
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const data = (e as CustomEvent<{ condition: string; action: string; tool: string }>).detail
+      if (!data) return
+      setLiveTraces(prev => [
+        ...prev,
+        { type: 'thought', icon: 'zap', label: `Rule: ${data.condition.slice(0, 80)}`, text: `IF ${data.condition} → ${data.action}`, status: 'done', timestamp: Date.now() },
+      ])
+    }
+    window.addEventListener('sparkie:rule-fired', handler)
+    return () => window.removeEventListener('sparkie:rule-fired', handler)
+  }, [])
+
+  // checkpoint_event — show round milestone card
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const data = (e as CustomEvent<{ round: number; message: string }>).detail
+      if (!data) return
+      setLiveTraces(prev => [
+        ...prev,
+        { type: 'thought', icon: 'flag', label: data.message, status: 'done', timestamp: Date.now() },
+      ])
+    }
+    window.addEventListener('sparkie:checkpoint', handler)
+    return () => window.removeEventListener('sparkie:checkpoint', handler)
   }, [])
 
   // Auto-scroll to bottom as new traces arrive
@@ -288,7 +319,7 @@ export function ProcessTab() {
               const k = traceKey(trace, i)
               const isNew = newKeys.has(k)
               if (trace.type === 'thought') {
-                return <ThoughtCard key={k} text={trace.text ?? trace.label} isNew={isNew} />
+                return <ThoughtCard key={k} text={trace.text ?? trace.label} icon={trace.icon} isNew={isNew} />
               }
               return <TraceRow key={k} trace={trace} isNew={isNew} />
             })}
