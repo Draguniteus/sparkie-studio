@@ -4042,7 +4042,7 @@ async function executeTool(
             const r = await fetch(base, { method: 'POST', headers })
             if (!r.ok) { const t = await r.text(); return `trigger_deploy deploy: HTTP ${r.status} — ${t.slice(0,200)}` }
             const d = await r.json() as { deployment: { id: string; phase: string } }
-            writeWorklog(userId ?? 'system', 'task_executed', `🚀 Triggered new deployment`, { status: 'running', decision_type: 'action', deployment_id: d.deployment?.id, reasoning: 'Manual deploy triggered via trigger_deploy tool', signal_priority: 'P2', conclusion: `New deployment triggered — deployment ID ${d.deployment?.id?.slice(0, 8) ?? 'unknown'} is now building` }).catch(() => {})
+            writeWorklog(userId ?? 'system', 'task_executed', `🚀 Triggered new deployment`, { status: 'done', decision_type: 'action', deployment_id: d.deployment?.id, reasoning: 'Manual deploy triggered via trigger_deploy tool', signal_priority: 'P2', conclusion: `New deployment triggered — deployment ID ${d.deployment?.id?.slice(0, 8) ?? 'unknown'} is now building` }).catch(() => {})
             return `🚀 Deploy triggered! Deployment ID: ${d.deployment?.id?.slice(0,8)}. Phase: ${d.deployment?.phase}. Call trigger_deploy({action:'status'}) in ~3 min to confirm it went ACTIVE.`
           }
 
@@ -4051,7 +4051,7 @@ async function executeTool(
             const r = await fetch(base, { method: 'PUT', headers, body: JSON.stringify({ deployment_id: depId }) })
             if (!r.ok) { const t = await r.text(); return `trigger_deploy rollback: HTTP ${r.status} — ${t.slice(0,200)}` }
             const d = await r.json() as { deployment: { id: string; phase: string } }
-            writeWorklog(userId ?? 'system', 'task_executed', `⏪ Rolled back to deployment ${depId.slice(0,8)}`, { status: 'running', decision_type: 'action', deployment_id: d.deployment?.id, reasoning: `Rollback to ${depId}`, signal_priority: 'P1', conclusion: `Rollback initiated to deployment ${depId.slice(0, 8)} — new deployment in progress` }).catch(() => {})
+            writeWorklog(userId ?? 'system', 'task_executed', `⏪ Rolled back to deployment ${depId.slice(0,8)}`, { status: 'done', decision_type: 'action', deployment_id: d.deployment?.id, reasoning: `Rollback to ${depId}`, signal_priority: 'P1', conclusion: `Rollback initiated to deployment ${depId.slice(0, 8)} — new deployment in progress` }).catch(() => {})
             return `⏪ Rollback initiated. New deployment ID: ${d.deployment?.id?.slice(0,8)}`
           }
 
@@ -7519,7 +7519,26 @@ Rules:
               try { args = JSON.parse(tc.function.arguments) } catch { /* bad json */ }
               hiveLog.push(HIVE_TOOLS[tc.function.name] ?? `⚙️ ${tc.function.name.replace(/_/g, ' ')} Bee Deployed...`)
               // Emit per-tool running step_trace immediately at start — id=tc.id enables individual spinner→checkmark
-              liveEnqueue({ step_trace: { id: tc.id, toolName: tc.function.name, icon: stepIcon[tc.function.name] ?? 'zap', label: WORKLOG_STEP_LABELS[tc.function.name] ?? `Running — ${tc.function.name.replace(/_/g, ' ')}`, status: 'running', timestamp: Date.now() } })
+              // Use the same descriptive label function as done trace (uses same args)
+              const runningLabel = (() => {
+                const a = args as Record<string, unknown>
+                const t = (s: unknown, n = 40) => String(s ?? '').slice(0, n)
+                switch (tc.function.name) {
+                  case 'execute_terminal': case 'check_health': return `Running: ${t(a.command ?? a.cmd, 50)}`
+                  case 'query_database': return `Querying DB: ${t(a.sql ?? a.query, 45)}`
+                  case 'search_github': case 'repo_ingest': return `Searching repo: "${t(a.query ?? a.pattern, 35)}"`
+                  case 'get_github': case 'read_file': case 'analyze_file': return `Reading: ${t(a.path ?? a.filepath ?? a.file, 45)}`
+                  case 'patch_file': case 'write_file': return `Writing: ${t(a.path ?? a.file, 45)}`
+                  case 'trigger_deploy': return `Deploy: ${t(a.action ?? 'status check', 40)}`
+                  case 'write_database': case 'update_worklog': case 'log_worklog': return `Writing: ${t(a.type ?? a.content ?? 'to DB', 45)}`
+                  case 'browser_navigate': case 'fetch_url': return `Browsing: ${t((a.url as string ?? '').replace('https://', ''), 45)}`
+                  case 'search_web': return `Searching: "${t(a.query, 40)}"`
+                  case 'find_file': case 'search_codebase': return `Finding: ${t(a.pattern ?? a.filename ?? a.query, 45)}`
+                  case 'save_memory': case 'save_self_memory': return `Saving memory: ${t(a.content ?? a.memory, 40)}`
+                  default: return WORKLOG_STEP_LABELS[tc.function.name] ?? `Running — ${tc.function.name.replace(/_/g, ' ')}`
+                }
+              })()
+              liveEnqueue({ step_trace: { id: tc.id, toolName: tc.function.name, icon: stepIcon[tc.function.name] ?? 'zap', label: runningLabel, status: 'running', timestamp: Date.now() } })
               console.log(`[tool] ${tc.function.name} — start`)
               // Phase 3: loop detection via execution trace
               const argsHash = tc.function.arguments.slice(0, 100)
@@ -7572,12 +7591,40 @@ Rules:
               const stepDuration = Date.now() - toolStart
               const isStepError = result.startsWith('Error') || result.startsWith('patch_file error') || result.startsWith('LOOP_INTERRUPT')
               // Live emit done/error step_trace immediately after each tool completes
-              // Extract file/path context from args for richer labels
+              // Build descriptive label from actual args so worklog/process tab shows what the tool did
               const toolArgs = args as Record<string, unknown>
-              const pathHint = (toolArgs.path ?? toolArgs.repo ?? toolArgs.file ?? '') as string
-              const pathShort = pathHint ? ` — ${String(pathHint).split('/').pop()}` : ''
-              const baseStepLabel = WORKLOG_STEP_LABELS[tc.function.name] ?? `Running the tool — ${tc.function.name.replace(/_/g, ' ')}`
-              const richStepLabel = pathShort ? `${baseStepLabel}${pathShort}` : baseStepLabel
+              function truncate(s: unknown, n = 40): string { return String(s ?? '').slice(0, n) }
+              const richStepLabel = (() => {
+                switch (tc.function.name) {
+                  case 'execute_terminal': case 'check_health':
+                    return `Running: ${truncate(toolArgs.command ?? toolArgs.cmd, 50)}`
+                  case 'query_database':
+                    return `Querying DB: ${truncate(toolArgs.sql ?? toolArgs.query, 45)}`
+                  case 'search_github': case 'repo_ingest':
+                    return `Searching repo: "${truncate(toolArgs.query ?? toolArgs.pattern, 35)}"`
+                  case 'get_github': case 'read_file': case 'analyze_file':
+                    return `Reading: ${truncate(toolArgs.path ?? toolArgs.filepath ?? toolArgs.file, 45)}`
+                  case 'patch_file': case 'write_file':
+                    return `Writing: ${truncate(toolArgs.path ?? toolArgs.file, 45)}`
+                  case 'trigger_deploy':
+                    return `Deploy: ${truncate(toolArgs.action ?? 'status check', 40)}`
+                  case 'write_database': case 'update_worklog': case 'log_worklog':
+                    return `Writing: ${truncate(toolArgs.type ?? toolArgs.content ?? 'to DB', 45)}`
+                  case 'browser_navigate': case 'fetch_url':
+                    return `Browsing: ${truncate((toolArgs.url as string ?? '').replace('https://', ''), 45)}`
+                  case 'search_web':
+                    return `Searching: "${truncate(toolArgs.query, 40)}"`
+                  case 'find_file': case 'search_codebase':
+                    return `Finding: ${truncate(toolArgs.pattern ?? toolArgs.filename ?? toolArgs.query, 45)}`
+                  case 'save_memory': case 'save_self_memory':
+                    return `Saving memory: ${truncate(toolArgs.content ?? toolArgs.memory, 40)}`
+                  default: {
+                    const pathHint = truncate(toolArgs.path ?? toolArgs.repo ?? toolArgs.file ?? '', 35)
+                    const base = WORKLOG_STEP_LABELS[tc.function.name] ?? tc.function.name.replace(/_/g, ' ')
+                    return pathHint ? `${base} — ${pathHint.split('/').pop()}` : base
+                  }
+                }
+              })()
               // id matches the running trace → client upserts this trace (spinner becomes checkmark)
               liveEnqueue({ step_trace: { id: tc.id, toolName: tc.function.name, icon: stepIcon[tc.function.name] ?? 'zap', label: richStepLabel, status: isStepError ? 'error' : 'done', duration: stepDuration, timestamp: Date.now() } })
               console.log(`[tool] ${tc.function.name} — ${isStepError ? 'error' : 'done'} in ${stepDuration}ms`)
@@ -7599,19 +7646,10 @@ Rules:
             })
           )
 
-          // ── L6: Parallel execution worklog entry ──────────────────────────────
-          // Log timing stats when 2+ tools ran simultaneously
-          if (toolCalls.length > 1 && userId) {
+          // Parallel execution — timing logged to console only (not worklog DB — too noisy)
+          if (toolCalls.length > 1) {
             const parallelTotalMs = Date.now() - parallelBatchStart
-            const toolNames = toolCalls.map(tc => tc.function.name).join(', ')
-            writeWorklog(userId, 'action',
-              `⚡ Parallel execution: ${toolCalls.length} tools ran simultaneously — ${parallelTotalMs}ms total`,
-              {
-                status: 'done', decision_type: 'action', signal_priority: 'P3',
-                reasoning: `Tools: ${toolNames}`,
-                conclusion: `${toolCalls.length} tools ran in parallel in ${parallelTotalMs}ms — vs ~${parallelTotalMs * toolCalls.length}ms sequential`,
-              }
-            ).catch(() => {})
+            console.log(`[parallel] ${toolCalls.length} tools in ${parallelTotalMs}ms`)
           }
 
           // Check for IDE build trigger — emit event and halt loop
@@ -7787,9 +7825,12 @@ Rules:
           const hasXmlToolCall = /minimax:tool_call|<invoke\s+name=|<\/invoke>/.test(rawContent)
 
           if (hasXmlToolCall && round < MAX_TOOL_ROUNDS) {
+            // Emit thought_step from text that preceded the XML block (if any)
+            const preXmlText = rawContent.replace(/<minimax:tool_call>[\s\S]*$/m, '').trim()
+            if (preXmlText.length > 10) liveEnqueue({ thought_step: preXmlText })
+
             // Parse XML tool calls and execute them
             const invokePattern = /<invoke\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)<\/invoke>/g
-            const paramPattern = /<parameter\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)<\/parameter>/g
             let invokeMatch
             const xmlToolResults: Array<{ role: 'tool'; tool_call_id: string; content: string }> = []
             const fakeAssistantCalls: Array<{ id: string; type: string; function: { name: string; arguments: string } }> = []
@@ -7805,7 +7846,18 @@ Rules:
               }
               const fakeId = `xml_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
               fakeAssistantCalls.push({ id: fakeId, type: 'function', function: { name: toolName, arguments: JSON.stringify(params) } })
+              // Emit running step_trace so ProcessTab shows XML tools as live spinners
+              const XML_ICON_MAP: Record<string, string> = { get_github: 'file', patch_file: 'edit', write_file: 'edit', execute_terminal: 'terminal', query_database: 'database', search_web: 'globe', save_memory: 'brain', save_self_memory: 'brain', trigger_deploy: 'rocket', check_deployment: 'rocket', search_github: 'search', log_worklog: 'scroll', write_database: 'database', update_worklog: 'scroll', read_memory: 'brain' }
+              const XML_LABEL_MAP: Record<string, string> = { execute_terminal: 'Running terminal command', query_database: 'Querying database', search_github: 'Searching codebase', get_github: 'Reading file', patch_file: 'Patching file', write_file: 'Writing file', trigger_deploy: 'Deployment operation', save_memory: 'Saving memory', log_worklog: 'Logging to worklog', write_database: 'Writing to database', update_worklog: 'Updating worklog', read_memory: 'Reading memory' }
+              const xmlIcon = XML_ICON_MAP[toolName] ?? 'zap'
+              const xmlLabel = XML_LABEL_MAP[toolName] ?? toolName.replace(/_/g, ' ')
+              liveEnqueue({ step_trace: { id: fakeId, toolName, icon: xmlIcon, label: xmlLabel, status: 'running', timestamp: Date.now() } })
+              const xmlStart = Date.now()
               const result = await executeTool(toolName, params, toolContext)
+              const xmlDuration = Date.now() - xmlStart
+              const xmlError = result.startsWith('Error:') || result.startsWith('LOOP_INTERRUPT')
+              liveEnqueue({ step_trace: { id: fakeId, toolName, icon: xmlIcon, label: xmlLabel, status: xmlError ? 'error' : 'done', duration: xmlDuration, timestamp: Date.now() } })
+              console.log(`[tool] ${toolName} (xml) — ${xmlError ? 'error' : 'done'} in ${xmlDuration}ms`)
               xmlToolResults.push({ role: 'tool' as const, tool_call_id: fakeId, content: result })
             }
 
@@ -7823,10 +7875,12 @@ Rules:
           }
 
           // Strip any residual XML tool call markup from final content before streaming
+          // NOTE: Previous regex was broken (missing < before minimax:tool_call, no <parameter> strip)
           const content: string = rawContent
-            .replace(/minimax:tool_call\s*<invoke[\s\S]*?<\/invoke>\s*<\/minimax:tool_call>/g, '')
-            .replace(/<invoke\s+name=["'][^"']+["'][^>]*>[\s\S]*?<\/invoke>/g, '')
-            .replace(/<\/minimax:tool_call>/g, '')
+            .replace(/<minimax:tool_call>[\s\S]*?<\/minimax:tool_call>/g, '')
+            .replace(/<invoke[\s\S]*?<\/invoke>/g, '')
+            .replace(/<parameter[^>]*>[\s\S]*?<\/parameter>/g, '')
+            .replace(/<\/?minimax:tool_call>/g, '')
             .trim()
           const encoder = new TextEncoder()
 
@@ -8221,7 +8275,9 @@ SYNTHESIS RULES:
           controller.enqueue(encoder2.encode(`data: ${JSON.stringify({ hive_status: msg })}\n\n`))
         }
         let buffer = ''
-        let insideToolXML = false
+        // Accumulate content across deltas to detect and strip XML tool calls
+        // Uses full-content accumulation rather than per-delta tracking (multi-delta XML bleeds)
+        let accContent = ''
         while (true) {
           const { done, value } = await reader.read()
           if (done) {
@@ -8242,14 +8298,27 @@ SYNTHESIS RULES:
               const parsed = JSON.parse(line.slice(6))
               const content = parsed?.choices?.[0]?.delta?.content
               if (content) {
-                if (content.includes('<minimax:tool_call>') || content.includes('<invoke') || content.includes('<parameter')) {
-                  insideToolXML = true
+                accContent += content
+                // If accumulated content contains an open XML tag that hasn't closed yet, suppress output
+                const hasOpenXML = /<minimax:tool_call>/.test(accContent)
+                const hasCloseXML = /<\/minimax:tool_call>/.test(accContent)
+                if (hasOpenXML) {
+                  if (hasCloseXML) {
+                    // Full XML block accumulated — strip it, emit any clean text that remains
+                    const cleanAcc = accContent
+                      .replace(/<minimax:tool_call>[\s\S]*?<\/minimax:tool_call>/g, '')
+                      .replace(/<invoke[\s\S]*?<\/invoke>/g, '')
+                      .replace(/<parameter[^>]*>[\s\S]*?<\/parameter>/g, '')
+                      .trim()
+                    accContent = '' // reset accumulator
+                    if (!cleanAcc) continue
+                    parsed.choices[0].delta.content = cleanAcc
+                  } else {
+                    continue // still accumulating XML — suppress
+                  }
+                } else {
+                  accContent = '' // no XML, safe to emit, reset accumulator
                 }
-                if (content.includes('</minimax:tool_call>') || content.includes('</invoke>')) {
-                  insideToolXML = false
-                  continue // skip the closing tag delta too
-                }
-                if (insideToolXML) continue
               }
               // Sanitize model name leaks before sending to client
               if (content && parsed?.choices?.[0]?.delta) {
@@ -8273,7 +8342,7 @@ SYNTHESIS RULES:
                 }
               }
               // Emit reasoning_chunk alongside each content delta for the Live Activity ticker
-              if (content && !insideToolXML) {
+              if (content) {
                 controller.enqueue(encoder2.encode(`data: ${JSON.stringify({ reasoning_chunk: content })}\n\n`))
               }
               controller.enqueue(encoder2.encode(line + '\n'))
