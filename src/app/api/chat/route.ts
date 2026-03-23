@@ -3506,9 +3506,9 @@ async function executeTool(
         if (!prompt?.trim()) return 'No prompt provided for image generation'
 
         // ── Pollinations gen.pollinations.ai — direct, no slow pre-providers ──
-        // flux and zimage are fast/reliable (5K imgs/day); imagen-4/grok-imagine are alpha
-        // 25s timeout each × 3 models max = ~75s total, well under serverless limits
-        const polModels = ['flux', 'zimage', 'imagen-4', 'grok-imagine']
+        // grok-imagine/p-image/klein confirmed working; seedream/seedream5 for quality variety
+        // 25s timeout each × 5 models max = ~125s total, well under serverless limits
+        const polModels = ['grok-imagine', 'p-image', 'klein', 'seedream', 'seedream5']
         for (const polModel of polModels) {
           try {
             const seed = Math.floor(Math.random() * 999999)
@@ -5249,10 +5249,12 @@ def invoke_llm(query, model='MiniMax-M2.7'):
             signal: AbortSignal.timeout(35000),
           })
           if (!res.ok) return `browser_screenshot error: ${res.status} — ${await res.text()}`
-          const data = await res.json() as { screenshot?: string; markdown?: string; metadata?: { title?: string } }
+          const data = await res.json() as { screenshot?: string; markdown?: string; metadata?: { title?: string }; data?: { screenshot?: string; markdown?: string } }
+          const screenshot = data.screenshot ?? data.data?.screenshot
+          const markdown = data.markdown ?? data.data?.markdown
           const pageTitle = data.metadata?.title ?? hbUrl
-          if (data.screenshot) {
-            const imgData = data.screenshot.startsWith('data:') ? data.screenshot : `data:image/png;base64,${data.screenshot}`
+          if (screenshot) {
+            const imgData = screenshot.startsWith('data:') ? screenshot : `data:image/png;base64,${screenshot}`
             // Persist to DB asset for stable URL if userId available
             if (userId) {
               try {
@@ -5262,12 +5264,12 @@ def invoke_llm(query, model='MiniMax-M2.7'):
                   `INSERT INTO sparkie_assets (user_id, name, content, asset_type, source, file_id, chat_title, chat_id, language) VALUES ($1, $2, $3, 'image', 'browser', $4, '', '', '')`,
                   [userId, `screenshot-${Date.now()}.png`, imgData, fid]
                 )
-                return `IMAGE_URL:${hbBaseUrl}/api/assets-image?fid=${fid}\nScreenshot of: ${pageTitle}\n${data.markdown?.slice(0, 300) ?? ''}`
+                return `IMAGE_URL:${hbBaseUrl}/api/assets-image?fid=${fid}\nScreenshot of: ${pageTitle}\n${markdown?.slice(0, 300) ?? ''}`
               } catch { /* fall through to raw data URL */ }
             }
             return `IMAGE_URL:${imgData}\nScreenshot of: ${pageTitle}`
           }
-          return `browser_screenshot: no image returned. Page: ${pageTitle}\n${data.markdown?.slice(0, 500) ?? ''}`
+          return `browser_screenshot: no image returned. Page: ${pageTitle}\n${markdown?.slice(0, 500) ?? ''}`
         } catch (e) { return `browser_screenshot error: ${String(e)}` }
       }
 

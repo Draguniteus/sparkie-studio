@@ -77,7 +77,10 @@ export async function POST(req: NextRequest) {
     const result = await query(safeSQL)
     return NextResponse.json({ rows: result.rows, rowCount: result.rowCount })
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    return NextResponse.json({ error: msg }, { status: 500 })
+    // NEVER swallow — always surface the real PostgreSQL error so Sparkie reports it accurately
+    const err = e as { message?: string; code?: string }
+    const msg = err.message ?? String(e)
+    console.error('[db/query] SQL error:', msg, '| code:', err.code, '| sql:', safeSQL.slice(0, 200))
+    return NextResponse.json({ error: msg, code: err.code }, { status: 400 })
   }
 }

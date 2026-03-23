@@ -345,7 +345,7 @@ export function SparkiesFeed() {
 
   const loadEntries = useCallback(async () => {
     try {
-      const r = await fetch('/api/worklog?limit=60')
+      const r = await fetch('/api/worklog?limit=200')
       if (r.ok) {
         const data = await r.json() as { entries: WorklogEntry[]; stats: BrainStats }
         setEntries(data.entries ?? [])

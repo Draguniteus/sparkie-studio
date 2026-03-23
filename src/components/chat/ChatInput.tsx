@@ -207,6 +207,7 @@ export function ChatInput() {
   const streamFlushRef = useRef<number>(0)
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [isVoiceChatOpen, setIsVoiceChatOpen] = useState(false)
+  const [messageQueue, setMessageQueue] = useState<string[]>([])
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const {
@@ -898,7 +899,7 @@ export function ChatInput() {
 
     // ── FORCE CHAT: agentic repair/audit/search — NEVER route to build ──────────────────────────
     // These patterns describe autonomous investigation/repair tasks that need the chat agent route
-    const FORCE_CHAT_RE = /\b(fix it yourself|find and fix|find the bug|find a bug|fix the bug|fix this bug|diagnose and fix|go through the codebase|audit the codebase|search the codebase|scan the codebase|look through the codebase|check the codebase|find every place|find all places|find every|without asking me|do it yourself|autonomously|self.?repair|commit the changes|commit and push|push the fix|grep for|search for it|find the issue|find the error|find the problem|track it down|trace the|look through every|go through every|inspect every|check every file|search every|find where|locate the bug|find what.{0,20}wrong|find what.{0,20}broken|find why|every file|every route|every place|every function|fail silently|silently failing|failing silently|codebase)\b/i
+    const FORCE_CHAT_RE = /\b(fix it yourself|find and fix|find the bug|find a bug|fix the bug|fix this bug|diagnose and fix|go through the codebase|audit the codebase|search the codebase|scan the codebase|look through the codebase|check the codebase|find every place|find all places|find every|without asking me|do it yourself|autonomously|self.?repair|commit the changes|commit and push|push the fix|grep for|search for it|find the issue|find the error|find the problem|track it down|trace the|look through every|go through every|inspect every|check every file|search every|find where|locate the bug|find what.{0,20}wrong|find what.{0,20}broken|find why|every file|every route|every place|every function|fail silently|silently failing|failing silently|codebase|summarize everything|summarize every|tell me everything|what have we built|what did we build|what'?s broken|what is broken|what tools are broken|go fix|just fix it|fix whatever|most broken|highest impact|be honest|tell me the truth|self.?aware)\b/i
     if (FORCE_CHAT_RE.test(t)) return true
 
     // ── Tier 1: INSTANT CHAT ────────────────────────────────────────────────
@@ -2035,6 +2036,23 @@ Promise.all([
     return () => window.removeEventListener('sparkie_preview_ready', handler)
   }, [])
 
+  // Process queued messages when streaming finishes
+  useEffect(() => {
+    const handler = () => {
+      setMessageQueue(prev => {
+        if (prev.length === 0) return prev
+        const [next, ...rest] = prev
+        // Brief delay so state settles
+        setTimeout(() => {
+          handleSubmit(next)
+        }, 300)
+        return rest
+      })
+    }
+    window.addEventListener('sparkie:live-done', handler)
+    return () => window.removeEventListener('sparkie:live-done', handler)
+  }, [handleSubmit])
+
   // ── Voice recording ───────────────────────────────────────────────────────
   const toggleRecording = useCallback(async () => {
     if (isRecording) {
@@ -2168,9 +2186,18 @@ Promise.all([
     setIsEmpty(true)
   }, [])
 
-  const handleSubmit = useCallback(async () => {
-    const currentValue = textareaRef.current?.value ?? ''
-    if ((!currentValue.trim() && !uploadedFile) || isStreaming) return
+  const handleSubmit = useCallback(async (queuedMessage?: string) => {
+    const currentValue = queuedMessage ?? textareaRef.current?.value ?? ''
+    if (!currentValue.trim() && !uploadedFile) return
+    if (!queuedMessage && isStreaming) {
+      const val = textareaRef.current?.value ?? ''
+      if (val.trim()) {
+        setMessageQueue(prev => [...prev, val.trim()])
+        if (textareaRef.current) textareaRef.current.value = ''
+        setIsEmpty(true)
+      }
+      return
+    }
 
     // ─── Slash commands ────────────────────────────────────────────────────
     const trimmed = currentValue.trim()
@@ -2316,7 +2343,7 @@ Promise.all([
 
     let chatId = getOrCreateSingleChat()
 
-    const userContent = (textareaRef.current?.value ?? '').trim()
+    const userContent = (queuedMessage ?? textareaRef.current?.value ?? '').trim()
     // ── Include attached file in message ────────────────────────────────────
     let messageContent = userContent
     let messageImageUrl: string | undefined
@@ -2368,7 +2395,7 @@ Promise.all([
       }
 
       // FORCE CHAT override — agentic repair/audit tasks must never go to build, even with active project
-      const FORCE_CHAT_SUBMIT = /\b(fix it yourself|find and fix|find the bug|find a bug|fix the bug|fix this bug|diagnose and fix|go through the codebase|audit the codebase|search the codebase|scan the codebase|find every place|find all places|without asking me|do it yourself|autonomously|self.?repair|commit the changes|commit and push|grep for|find the issue|find the error|find the problem|track it down|find where|locate the bug|every file|every route|every place|every function|fail silently|silently failing|codebase)\b/i
+      const FORCE_CHAT_SUBMIT = /\b(fix it yourself|find and fix|find the bug|find a bug|fix the bug|fix this bug|diagnose and fix|go through the codebase|audit the codebase|search the codebase|scan the codebase|find every place|find all places|without asking me|do it yourself|autonomously|self.?repair|commit the changes|commit and push|grep for|find the issue|find the error|find the problem|track it down|find where|locate the bug|every file|every route|every place|every function|fail silently|silently failing|codebase|summarize everything|summarize every|tell me everything|what have we built|what did we build|what'?s broken|what is broken|what tools are broken|go fix|just fix it|fix whatever|most broken|highest impact|be honest|tell me the truth|self.?aware)\b/i
       if (FORCE_CHAT_SUBMIT.test(userContent)) {
         setLastMode('chat')
         streamReply(chatId, userContent)
@@ -2736,14 +2763,19 @@ Promise.all([
 
             {/* Send button — Stop is in the InMemoryPill above chat only */}
             <button
-              onClick={handleSubmit} disabled={isEmpty && !uploadedFile}
-              className={`p-2 rounded-xl transition-all duration-200 active:scale-95 ${
+              onClick={() => handleSubmit()} disabled={isEmpty && !uploadedFile}
+              className={`relative p-2 rounded-xl transition-all duration-200 active:scale-95 ${
                 !isEmpty || uploadedFile
                   ? "bg-honey-500 text-hive-900 hover:bg-honey-400 shadow-lg shadow-honey-500/25 hover:shadow-honey-500/40 hover:scale-105"
                   : "bg-hive-hover text-text-muted cursor-not-allowed opacity-50"
               }`}
             >
               <ArrowUp size={16} />
+              {messageQueue.length > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-honey-500 text-black text-[9px] font-bold flex items-center justify-center">
+                  {messageQueue.length}
+                </span>
+              )}
             </button>
           </div>
         </div>

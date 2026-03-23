@@ -275,6 +275,7 @@ export async function PATCH(req: NextRequest) {
         }
       }
 
+      let attachmentNote: string | null = null
       if (task && (task.action?.includes('create_email_draft') || task.action?.includes('send_email'))) {
         // Normalize payload — Postgres JSONB may come back as object or string depending on pg driver
         const payload = normalizePayload(task.payload)
@@ -385,6 +386,7 @@ export async function PATCH(req: NextRequest) {
                   const proxyText = await proxyRes.text()
                   if (!proxyRes.ok) {
                     console.error('[tasks PATCH] Gmail proxy send failed:', proxyRes.status, proxyText.slice(0, 400))
+                    attachmentNote = `Email sent but attachment failed (proxy ${proxyRes.status}): ${proxyText.slice(0, 200)}`
                     const fallbackRes = await fetch(`${V3}/tools/execute/GMAIL_SEND_EMAIL`, {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json', 'x-api-key': composioKey },
@@ -406,11 +408,13 @@ export async function PATCH(req: NextRequest) {
                   }
                 } catch (e) {
                   console.error('[tasks PATCH] Gmail proxy send error:', e)
+                  attachmentNote = `Email sent but attachment failed: ${e instanceof Error ? e.message : String(e)}`
                 }
               }
             }
           } catch (e) {
             console.error('[tasks PATCH] Gmail send error:', e)
+            attachmentNote = `Email send error: ${e instanceof Error ? e.message : String(e)}`
           }
         } else {
           console.warn('[tasks PATCH] Gmail send skipped — composioKey:', !!composioKey, 'recipient:', recipientEmail)
@@ -424,7 +428,7 @@ export async function PATCH(req: NextRequest) {
       [resolvedStatus, id, userId]
     )
 
-    return NextResponse.json({ ok: true, status: resolvedStatus })
+    return NextResponse.json({ ok: true, status: resolvedStatus, ...(attachmentNote ? { attachmentNote } : {}) })
   } catch (e) {
     console.error('tasks PATCH error:', e)
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })

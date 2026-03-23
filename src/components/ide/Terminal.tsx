@@ -249,7 +249,7 @@ export function Terminal() {
       } else if (retries >= maxRetries) {
         setContainerStatus('error')
         if (mountedRef.current) setWsStatus('error')
-        term.write(`\r\n\x1b[31m  [E2B]\x1b[0m Connection failed after ${maxRetries} retries\r\n`)
+        term.write(`\r\n\x1b[31m  [E2B]\x1b[0m Sandbox unavailable — retrying in a moment. Click ▶ to reconnect.\r\n`)
       }
     }
 

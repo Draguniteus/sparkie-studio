@@ -7,6 +7,12 @@ const QWEN_BASE = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
 export async function POST(req: NextRequest) {
   try {
     const { message } = await req.json()
+
+    // ── Slash commands ALWAYS go to chat (fast-path before anything else) ──
+    if (typeof message === 'string' && message.startsWith('/') && !message.startsWith('/build')) {
+      return new Response(JSON.stringify({ mode: 'chat' }), { headers: { 'Content-Type': 'application/json' } })
+    }
+
     const apiKey = process.env.QWEN_API_KEY
     if (!apiKey) return new Response(JSON.stringify({ mode: 'chat' }), { headers: { 'Content-Type': 'application/json' } })
 
@@ -18,12 +24,24 @@ export async function POST(req: NextRequest) {
       'search the code', 'grep for', 'fail silently', 'silently failing',
       'commit the changes', 'push the fix', 'find the bug', 'repair',
       'every file', 'every route', 'every place', 'every function',
+      // Extended patterns from stress testing
+      'summarize every', 'summarize everything', 'tell me everything',
+      'full chronology', 'in chronological order', 'every feature',
+      'go fix', 'just fix it', 'fix whatever', 'most broken',
+      'highest impact', 'highest leverage', "don't ask me anything",
+      'just do it', 'on your own', 'by yourself',
+      'what have we built', 'what did we build',
+      'be honest', 'tell me the truth', 'what tools are broken',
+      "what's broken", 'what is broken', 'self-aware',
+      'what broke', 'walk me through', 'take me through',
     ]
     if (FORCE_CHAT_PATTERNS.some(p => msgLower.includes(p))) {
       return new Response(JSON.stringify({ mode: 'chat' }), { headers: { 'Content-Type': 'application/json' } })
     }
-    // All slash commands except /build → chat
-    if (typeof message === 'string' && message.startsWith('/') && !message.startsWith('/build')) {
+
+    // Long messages without explicit build intent → chat
+    const isBuildPhrase = /\b(build me|create a|make me a|generate a|\/build)\b/i.test(message as string ?? '')
+    if (typeof message === 'string' && message.length > 150 && !isBuildPhrase) {
       return new Response(JSON.stringify({ mode: 'chat' }), { headers: { 'Content-Type': 'application/json' } })
     }
 

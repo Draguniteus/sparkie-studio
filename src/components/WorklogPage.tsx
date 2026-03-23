@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import {
   Brain, Zap, CheckCircle, AlertCircle, Code, Loader2,
   Mail, MessageSquare, Sparkles, RefreshCw, Cpu, BookOpen,
-  Shield, Heart, ChevronDown, ChevronUp, User,
+  Shield, Heart, User,
 } from 'lucide-react'
 
 interface WorklogEntry {
@@ -309,7 +309,7 @@ export function WorklogPage() {
   const [stats, setStats] = useState<Stats>({ emails: 0, messages: 0 })
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
-  const [expanded, setExpanded] = useState(false)
+
   const [newEntryIds, setNewEntryIds] = useState<Set<string>>(new Set())
   const prevIdsRef = useRef<Set<string>>(new Set())
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -317,7 +317,7 @@ export function WorklogPage() {
   const fetchEntries = useCallback(async (silent = false) => {
     if (!silent) setRefreshing(true)
     try {
-      const res = await fetch('/api/worklog?limit=80')
+      const res = await fetch('/api/worklog?limit=200')
       if (res.ok) {
         const data = await res.json() as { entries: WorklogEntry[]; stats: Stats }
         const fresh = data.entries ?? []
@@ -353,7 +353,7 @@ export function WorklogPage() {
   }, [fetchEntries])
 
   const grouped = groupEntries(entries)
-  const shown = expanded ? grouped : grouped.slice(0, 40)
+  const shown = grouped
 
   return (
     <div className="h-full flex flex-col bg-hive-800 overflow-hidden">
@@ -436,25 +436,6 @@ export function WorklogPage() {
         )}
         <style>{`@keyframes worklog-slide-in { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }`}</style>
 
-        {grouped.length > 40 && !expanded && (
-          <button
-            onClick={() => setExpanded(true)}
-            className="w-full flex items-center justify-center gap-1.5 py-3 text-[10px] text-text-muted hover:text-honey-500 transition-colors"
-          >
-            <ChevronDown size={11} />
-            Show {grouped.length - 40} more entries
-          </button>
-        )}
-
-        {expanded && grouped.length > 40 && (
-          <button
-            onClick={() => setExpanded(false)}
-            className="w-full flex items-center justify-center gap-1.5 py-3 text-[10px] text-text-muted hover:text-honey-500 transition-colors"
-          >
-            <ChevronUp size={11} />
-            Collapse
-          </button>
-        )}
 
         {entries.length > 0 && (
           <div className="flex items-center gap-2 px-4 py-4 text-[10px] text-text-muted">

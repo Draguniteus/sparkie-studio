@@ -143,7 +143,6 @@ export function isCDNCompatible(files: FileNode[], activeProjectRoot?: string | 
     // Check all deps (runtime + dev) for backend-only packages
     const allDeps = { ...(parsed.dependencies ?? {}), ...(parsed.devDependencies ?? {}) }
     const depKeys = Object.keys(allDeps).filter(d => !SKIP_PREFIXES.some(s => d.startsWith(s)))
-    if (depKeys.length === 0) return false
 
     // If any dep is a known backend package, this project needs WC/E2B
     const hasBackend = depKeys.some(d => BACKEND_DEPS.has(d))
@@ -153,7 +152,14 @@ export function isCDNCompatible(files: FileNode[], activeProjectRoot?: string | 
     const hasFrontend = depKeys.some(d =>
       FRONTEND_SIGNALS.some(sig => d === sig || d.startsWith(sig + '/') || d.startsWith('@' + sig.replace(/^@/, '')))
     )
-    return hasFrontend
+    if (hasFrontend) return true
+
+    // Vite-only projects: all deps are in SKIP_PREFIXES → depKeys is empty.
+    // Fall back to checking for JSX/TSX/static files — if they exist and no backend,
+    // treat as CDN-compatible (React will be auto-resolved via esm.sh).
+    const hasJsxFiles = scoped.some(f => /\.(tsx|jsx)$/.test(f.name))
+    const hasStaticHtml = scoped.some(f => f.name === 'index.html' || f.name.endsWith('/index.html'))
+    return hasJsxFiles || hasStaticHtml
   } catch { return false }
 }
 
