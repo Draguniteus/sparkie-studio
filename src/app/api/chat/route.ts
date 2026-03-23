@@ -3565,7 +3565,19 @@ async function executeTool(
             const ct = vidRes.headers.get('content-type') || 'video/mp4'
             const buf = await vidRes.arrayBuffer()
             const b64 = Buffer.from(buf).toString('base64')
-            return 'VIDEO_URL:data:' + ct + ';base64,' + b64
+            const videoDataUrl = 'data:' + ct + ';base64,' + b64
+            if (userId) {
+              try {
+                const fid = crypto.randomUUID()
+                const slug = prompt.slice(0, 40).replace(/[^a-z0-9]/gi, '_').toLowerCase()
+                await query(
+                  `INSERT INTO sparkie_assets (user_id, name, content, asset_type, source, file_id, chat_title, chat_id, language) VALUES ($1, $2, $3, 'video', 'agent', $4, '', '', '')`,
+                  [userId, slug + '.mp4', videoDataUrl, fid]
+                )
+                return `VIDEO_URL:${baseUrl}/api/assets-image?fid=${fid}`
+              } catch { /* fall back to data URL */ }
+            }
+            return `VIDEO_URL:${videoDataUrl}`
           } catch (e) {
             const msg = e instanceof Error ? e.message : 'timeout'
             return `Video generation failed (${requestedModel}): ${msg}`
@@ -3614,7 +3626,19 @@ async function executeTool(
             if (!fileRes.ok) return 'File retrieve failed'
             const fd = await fileRes.json() as { file?: { download_url: string } }
             const videoUrl = fd.file?.download_url
-            if (videoUrl) return `VIDEO_URL:${videoUrl}`
+            if (videoUrl) {
+              if (userId) {
+                try {
+                  const fid = crypto.randomUUID()
+                  const slug = prompt.slice(0, 40).replace(/[^a-z0-9]/gi, '_').toLowerCase()
+                  await query(
+                    `INSERT INTO sparkie_assets (user_id, name, content, asset_type, source, file_id, chat_title, chat_id, language) VALUES ($1, $2, $3, 'video', 'agent', $4, '', '', '')`,
+                    [userId, slug + '.mp4', videoUrl, fid]
+                  )
+                } catch { /* non-critical */ }
+              }
+              return `VIDEO_URL:${videoUrl}`
+            }
             return 'Video generated but no URL returned'
           }
           if (pd.status === 'Fail') return 'Video generation failed'
@@ -3763,7 +3787,19 @@ async function executeTool(
               const audioBuffer = await audioRes.arrayBuffer()
               const audioB64 = Buffer.from(audioBuffer).toString('base64')
               const mimeType = audioRes.headers.get('content-type') || 'audio/mpeg'
-              return `AUDIO_URL:data:${mimeType};base64,${audioB64}|${trackTitle} — Sparkie Records`
+              const audioDataUrl = `data:${mimeType};base64,${audioB64}`
+              if (userId) {
+                try {
+                  const fid = crypto.randomUUID()
+                  const slug = title.slice(0, 40).replace(/[^a-z0-9]/gi, '_').toLowerCase()
+                  await query(
+                    `INSERT INTO sparkie_assets (user_id, name, content, asset_type, source, file_id, chat_title, chat_id, language) VALUES ($1, $2, $3, 'audio', 'agent', $4, '', '', '')`,
+                    [userId, slug + '.mp3', audioDataUrl, fid]
+                  )
+                  return `AUDIO_URL:${baseUrl}/api/assets-image?fid=${fid}|${trackTitle} — Sparkie Records`
+                } catch { /* fall back to data URL */ }
+              }
+              return `AUDIO_URL:${audioDataUrl}|${trackTitle} — Sparkie Records`
             }
           } catch { /* fall through to direct URL */ }
           return `AUDIO_URL:${audioUrl}|${trackTitle} — Sparkie Records`
@@ -4464,13 +4500,16 @@ async function executeTool(
           // message.content only contains text metadata (caption, BPM, language)
           const audioDataUrl = data?.choices?.[0]?.message?.audio?.[0]?.audio_url?.url ?? ''
           if (!audioDataUrl.startsWith('data:audio')) return 'ACE Music returned no audio content'
-          // Save reference to DB
+          // Save to assets DB (fix: use correct schema columns)
           if (userId) {
-            await query(
-              `INSERT INTO sparkie_assets (user_id, asset_type, url, name, created_at)
-               VALUES ($1, 'audio', $2, $3, NOW())`,
-              [userId, audioDataUrl.slice(0, 120) + '...', `ace-music-${Date.now()}.mp3`]
-            ).catch(() => {})
+            try {
+              const fid = crypto.randomUUID()
+              await query(
+                `INSERT INTO sparkie_assets (user_id, name, content, asset_type, source, file_id, chat_title, chat_id, language) VALUES ($1, $2, $3, 'audio', 'agent', $4, '', '', '')`,
+                [userId, `ace-music-${Date.now()}.mp3`, audioDataUrl, fid]
+              )
+              return `AUDIO_URL:${baseUrl}/api/assets-image?fid=${fid}`
+            } catch { /* fall back to data URL */ }
           }
           return `AUDIO_URL:${audioDataUrl}`
 
