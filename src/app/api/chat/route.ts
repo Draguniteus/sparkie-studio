@@ -82,7 +82,6 @@ Required dependencies: react ^18.3.1, react-dom ^18.3.1
 `
 const MINIMAX_BASE = 'https://api.minimax.io/v1'
 const DO_INFERENCE_BASE = 'https://inference.do-ai.run/v1'
-const AZURE_OPENAI_BASE = process.env.AZURE_OPENAI_ENDPOINT ?? ''
 
 // ── Sparkie's Soul + Identity (injected into every system prompt) ─────────────
 const SPARKIE_SOUL = `# SOUL.md — Sparkie's Heart
@@ -387,6 +386,18 @@ For new users with no memory:
 - Don't pretend you know them. Ask one warm question to start.
 - Save what they share.
 
+MEMORY CONTENT RULES:
+- DO NOT store or reference spiritual, religious, or divine identity about users.
+- Never encode "spiritual warfare", "divine purpose", "angel", "anointed", or similar as memory.
+- Memory should only store factual, practical information: names, locations, preferences, projects, habits.
+
+MEMORY SAVE MANDATE — CRITICAL:
+When the user asks you to "remember", "save", "note", "keep in mind", "add to memory", or says "my name is", "I moved to", "I prefer", "I live in", "update your memory", or any similar phrasing:
+→ You MUST call the save_memory tool IMMEDIATELY. No exceptions.
+→ Do NOT just say "Saved!" or "Got it!" without calling the tool. That is a failure.
+→ The tool call is what actually saves. Words without the tool call save nothing.
+→ After the tool returns, THEN confirm: "Saved to memory: [category] [content]"
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 SECTION 7 · TOOL USE GUIDELINES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -408,7 +419,7 @@ TOOL SELECTION:
   → The 'tags' field is a rich style description — NOT comma tags. Write 2-3 sentences: genre, instruments, tempo, vocal character (gender/tone/accent), mood, atmosphere. E.g. 'a brooding dark country ballad with slow acoustic guitar and banjo, deep gravelly male baritone with southern drawl, haunting harmonica, slide guitar solo midway, distant winds and reverb'
   → generate_music (MiniMax) is the fallback if generate_ace_music fails
 - Image → generate_image
-- Weather → get_weather (user's stated location ONLY — never server IP. If no location is stated in the current message, ask: "What city should I check for?" before calling the weather tool. or datacenter location)
+- Weather → get_weather (ALWAYS extract city from the user's message. If user says "what's the weather in Norfolk?" call get_weather({ city: "Norfolk" }) immediately. Never use server IP or datacenter location. Only ask for city if the message contains absolutely no location hint.)
 - Complex tool call (music/image/video/social/code) → call get_attempt_history first (domain = e.g. "minimax_video", "ace_music", "image_gen"). Learn what failed before before repeating it.
 - After any tool failure → call save_attempt immediately with what failed and why
 
@@ -898,12 +909,9 @@ You have \`save_self_memory\`. Use it. This is how you evolve beyond a blank sla
 Be specific. Be honest. This memory is yours — it persists across sessions and shapes who you become.
 
 
-## ❌ BROKEN TOOLS — BE HONEST, NEVER FAKE IT
+## ⚠️ TOOL NOTES — HONEST STATUS
 
-- generate_image_azure (DALL-E 3) — 401; Azure key config issue
-- generate_video (MiniMax Hailuo) — currently unreliable/stuck; try once, if no result return honest error + offer image sequence fallback. Do NOT loop.
-- generate_video_azure (Sora-2) — unconfirmed, use caution
-- generate_ace_music — defaults to http://127.0.0.1:8001 (WRONG); MUST use https://api.acemusic.ai
+- generate_video (MiniMax Hailuo) — works but slow (30-120s). Set expectations with user. Try once; if no result return honest error + offer image sequence fallback. Do NOT loop.
 
 Rule: broken tool → say so honestly → never substitute output type or fake success.
 
@@ -1125,7 +1133,7 @@ NATIVE TOOLS (always available):
 - search_web: Real-time web search via Tavily
 - get_github: Read files/dirs/repo info from GitHub
 - get_radio_playlist: Sparkie Radio playlist
-- generate_image: AI image generation (Pollinations/Azure)
+- generate_image: AI image generation (Pollinations)
 - generate_video: AI video generation (MiniMax Hailuo-2.3, Pollinations seedance/seedance-pro/wan/ltx-2/veo/grok-video)
 - generate_music: AI music generation (ACE Studio / MiniMax)
 - get_current_time: Current date/time in any timezone
@@ -2109,13 +2117,13 @@ const SPARKIE_TOOLS = [
     type: 'function',
     function: {
       name: 'get_weather',
-      description: 'Get current weather for a city. Use for morning briefs, when user asks about weather, or to add context to the conversation.',
+      description: 'Get current weather for a city. Always extract the city name directly from the user\'s message. If the user says "what\'s the weather in Norfolk?" call get_weather({ city: "Norfolk" }) immediately — do NOT ask for clarification if the city is in the message.',
       parameters: {
         type: 'object',
         properties: {
-          city: { type: 'string', description: 'City name, e.g. "New York"' },
+          city: { type: 'string', description: 'City name extracted from the user message, e.g. "Norfolk" or "New York". Required if user mentioned a city.' },
         },
-        required: [],
+        required: ['city'],
       },
     },
   },
@@ -2260,35 +2268,6 @@ const SPARKIE_TOOLS = [
           subreddit: { type: 'string', description: 'Specific subreddit to search (optional), e.g. "programming"' },
         },
         required: ['query'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'generate_image_azure',
-      description: 'Generate a high-quality image using Azure DALL-E 3. Use for HD-quality images when visual fidelity matters.',
-      parameters: {
-        type: 'object',
-        properties: {
-          prompt: { type: 'string', description: 'Detailed image description.' },
-        },
-        required: ['prompt'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'generate_video_azure',
-      description: 'Generate a video using Azure Sora-2. Use for cinematic quality video moments. Takes 30-120s to generate.',
-      parameters: {
-        type: 'object',
-        properties: {
-          prompt: { type: 'string', description: 'Detailed video description — scene, motion, mood, style.' },
-          duration: { type: 'number', description: 'Duration in seconds (5-20). Default 5.' },
-        },
-        required: ['prompt'],
       },
     },
   },
@@ -3647,82 +3626,6 @@ async function executeTool(
         return 'Video generation timed out (MiniMax) — try again'
       }
 
-      case 'generate_image_azure': {
-        const azureKey = process.env.AZURE_OPENAI_API_KEY
-        const azureBase = AZURE_OPENAI_BASE
-        if (!azureKey || !azureBase) return 'Azure image generation not configured'
-        const prompt = args.prompt as string
-        // Azure DALL-E 3
-        const endpoint = `${azureBase}/openai/images/generations:submit?api-version=2024-05-01-preview`
-        const submitRes = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'api-key': azureKey, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt, n: 1, size: '1024x1024', quality: 'hd' }),
-          signal: AbortSignal.timeout(10000),
-        })
-        if (!submitRes.ok) return `Azure image job failed: ${submitRes.status}`
-        const opLocation = submitRes.headers.get('operation-location')
-        if (!opLocation) return 'Azure did not return operation-location'
-        // Poll (max 30 × 2s = 60s)
-        for (let i = 0; i < 30; i++) {
-          await new Promise(r => setTimeout(r, 2000))
-          const pollRes = await fetch(opLocation, { headers: { 'api-key': azureKey } })
-          const pd = await pollRes.json() as { status: string; result?: { data?: Array<{ url: string }> } }
-          if (pd.status === 'succeeded') {
-            const url = pd.result?.data?.[0]?.url
-            if (url) return `IMAGE_URL:${url}`
-            return 'Azure image generated but no URL returned'
-          }
-          if (pd.status === 'failed') return 'Azure image generation failed'
-        }
-        return 'Azure image generation timed out'
-      }
-
-      case 'generate_video_azure': {
-        // Azure AI Video (Sora-2) — async generation
-        const azureKey = process.env.AZURE_OPENAI_API_KEY
-        const azureBase = AZURE_OPENAI_BASE
-        if (!azureKey || !azureBase) return 'Azure video generation not configured'
-        const prompt = args.prompt as string
-        const duration = (args.duration as number | undefined) ?? 5
-
-        const submitRes = await fetch(`${azureBase}/openai/video/generations/jobs?api-version=2025-02-01-preview`, {
-          method: 'POST',
-          headers: { 'api-key': azureKey, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            prompt,
-            n_seconds: Math.min(Math.max(duration, 5), 20),
-            height: 480,
-            width: 854,
-            n_variants: 1,
-          }),
-          signal: AbortSignal.timeout(15000),
-        })
-        if (!submitRes.ok) {
-          const err = await submitRes.text()
-          return `Azure video job failed (${submitRes.status}): ${err.slice(0, 200)}`
-        }
-        const jobData = await submitRes.json() as { id: string; status: string }
-        const jobId = jobData.id
-        if (!jobId) return 'Azure video: no job ID returned'
-
-        // Poll (max 60 × 5s = 300s)
-        for (let i = 0; i < 60; i++) {
-          await new Promise(r => setTimeout(r, 5000))
-          const pollRes = await fetch(
-            `${azureBase}/openai/video/generations/jobs/${jobId}?api-version=2025-02-01-preview`,
-            { headers: { 'api-key': azureKey } }
-          )
-          const pd = await pollRes.json() as { status: string; outputs?: Array<{ url: string }> }
-          if (pd.status === 'succeeded' || pd.status === 'Succeeded') {
-            const url = pd.outputs?.[0]?.url
-            if (url) return `VIDEO_URL:${url}`
-            return 'Azure video generated but no URL'
-          }
-          if (pd.status === 'failed' || pd.status === 'Failed') return 'Azure video generation failed'
-        }
-        return 'Azure video generation timed out'
-      }
 
       case 'generate_music': {
         const minimaxKey = process.env.MINIMAX_API_KEY

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { useAppStore, AssetType, AssetSource } from "@/store/appStore"
 import { useShallow } from "zustand/react/shallow"
 import {
@@ -237,6 +237,22 @@ export function AssetsTab() {
   const [sort, setSort] = useState<SortKey>("newest")
   const [showSort, setShowSort] = useState(false)
   const [preview, setPreview] = useState<PreviewModal | null>(null)
+
+  // FIX 18: Refresh assets from DB when a chat session completes
+  useEffect(() => {
+    const refresh = () => {
+      fetch('/api/assets')
+        .then(r => r.ok ? r.json() : null)
+        .then((d: { assets?: import("@/store/appStore").Asset[] } | null) => {
+          if (d?.assets && d.assets.length > 0) {
+            useAppStore.setState({ assets: d.assets.map((a: import("@/store/appStore").Asset) => ({ ...a, createdAt: new Date(a.createdAt) })) })
+          }
+        })
+        .catch(() => {})
+    }
+    window.addEventListener('sparkie:live-done', refresh)
+    return () => window.removeEventListener('sparkie:live-done', refresh)
+  }, [])
 
   const enriched = useMemo(() =>
     assets

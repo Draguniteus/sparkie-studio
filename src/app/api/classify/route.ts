@@ -34,6 +34,16 @@ export async function POST(req: NextRequest) {
       'be honest', 'tell me the truth', 'what tools are broken',
       "what's broken", 'what is broken', 'self-aware',
       'what broke', 'walk me through', 'take me through',
+      // FIX 1/2: Memory save/update patterns — always chat, never build
+      'remember that', 'save that', 'save this', 'save to memory', 'add to memory',
+      'note that', 'keep that in mind', "don't forget", 'make a note',
+      'update.*memory', 'update my location', 'update your memory', 'update my memory',
+      'forget.*about', 'delete.*memory', 'clear.*memory', 'change my location',
+      'i moved', 'i live in', 'my name is', 'my favorite', 'i prefer',
+      // FIX 3: Long text corrections and opinion/instruction messages
+      'you should', "you shouldn't", 'you should not', "don't use", 'stop using',
+      'instead of', 'fix this', 'how are you', 'teach me', 'tell me',
+      'you need to', 'you must', 'i want you to', "please don't", 'never use',
     ]
     if (FORCE_CHAT_PATTERNS.some(p => msgLower.includes(p))) {
       return new Response(JSON.stringify({ mode: 'chat' }), { headers: { 'Content-Type': 'application/json' } })

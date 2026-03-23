@@ -24,7 +24,7 @@ export function Sidebar() {
         .catch(() => setConnectorHealth('error'))
     }
     check()
-    const t = setInterval(check, 60_000)
+    const t = setInterval(check, 240_000)
     return () => clearInterval(t)
   }, [])
 

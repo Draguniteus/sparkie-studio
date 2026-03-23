@@ -349,6 +349,16 @@ export async function POST(req: NextRequest) {
           return
         }
 
+        // FIX 17: If no file markers AND no code blocks → prose-only response → route to chat display
+        const hasCodeBlocks = /```|<html|<!DOCTYPE/i.test(fullBuildRaw)
+        if (!hasMarkers && !hasCodeBlocks) {
+          console.log('[BUILD] Prose-only output — routing to chat display')
+          send('chat_fallback', { content: fullBuildRaw })
+          send('done', {})
+          controller.close()
+          return
+        }
+
         // Note: MiniMax-M2.7 outputs clean ---FILE:---/---END FILE--- blocks per prompt instructions.
         // fileParser.ts handles any format variations via parseAIResponse() on the client side.
         // Do NOT block here — pass through to 'done' and let the client parser handle it.

@@ -5,7 +5,7 @@ import { SessionProvider } from '@/components/providers/SessionProvider'
 export const metadata: Metadata = {
   title: 'Sparkie Studio | Polleneer AI Workspace',
   description: 'Your AI-powered creative workspace. Chat, code, create — all in one place.',
-  icons: { icon: '/favicon.ico' },
+  icons: { icon: 'data:,' },
 }
 
 export default function RootLayout({

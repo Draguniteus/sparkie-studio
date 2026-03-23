@@ -270,7 +270,7 @@ export function Worklog({ compact = false }: WorklogProps) {
   // Seed worklog from DB on mount — always merge, never skip
   useEffect(() => {
     if (dbLoaded) return
-    fetch("/api/worklog?limit=30")
+    fetch("/api/worklog?limit=200")
       .then(r => r.json())
       .then((d: { entries?: { type: string; content: string; status: string; created_at: string; decision_type?: string; reasoning?: string; conclusion?: string; metadata?: Record<string,unknown> }[] }) => {
         if (d.entries && d.entries.length > 0) mergeDbEntries(d.entries)
@@ -283,7 +283,7 @@ export function Worklog({ compact = false }: WorklogProps) {
   useEffect(() => {
     if (!dbLoaded) return
     const t = setInterval(() => {
-      fetch("/api/worklog?limit=10")
+      fetch("/api/worklog?limit=200")
         .then(r => r.json())
         .then((d: { entries?: { type: string; content: string; status: string; created_at: string; decision_type?: string; reasoning?: string; conclusion?: string; metadata?: Record<string,unknown> }[] }) => {
           if (d.entries && d.entries.length > 0) mergeDbEntries(d.entries)
@@ -299,7 +299,7 @@ export function Worklog({ compact = false }: WorklogProps) {
       const trace = (ev as CustomEvent<{ status: string }>).detail
       if (trace?.status === "done") {
         setTimeout(() => {
-          fetch("/api/worklog?limit=10")
+          fetch("/api/worklog?limit=200")
             .then(r => r.json())
             .then((d: { entries?: { type: string; content: string; status: string; created_at: string; decision_type?: string; reasoning?: string; conclusion?: string; metadata?: Record<string,unknown> }[] }) => {
               if (d.entries && d.entries.length > 0) mergeDbEntries(d.entries)

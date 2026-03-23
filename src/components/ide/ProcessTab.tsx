@@ -279,7 +279,6 @@ export function ProcessTab() {
   if (chat) {
     const assistantMsgs = [...chat.messages]
       .filter(m => m.role === 'assistant' && m.toolTraces && m.toolTraces.length > 0)
-      .slice(-3)
       .reverse()
     for (const msg of assistantMsgs) {
       recentFrozen.push({
