@@ -237,6 +237,7 @@ export async function PATCH(req: NextRequest) {
     const resolvedStatus = status === 'approved' ? 'completed' : status === 'rejected' ? 'skipped' : status
     const setResolved = ['completed', 'skipped', 'failed', 'cancelled'].includes(resolvedStatus)
 
+    let attachmentNote: string | null = null
     if (status === 'approved') {
       const taskRes = await query<{ action: string; payload: unknown }>(
         `SELECT action, payload FROM sparkie_tasks WHERE id = $1 AND user_id = $2`,
@@ -275,7 +276,6 @@ export async function PATCH(req: NextRequest) {
         }
       }
 
-      let attachmentNote: string | null = null
       if (task && (task.action?.includes('create_email_draft') || task.action?.includes('send_email'))) {
         // Normalize payload — Postgres JSONB may come back as object or string depending on pg driver
         const payload = normalizePayload(task.payload)
