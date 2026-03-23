@@ -1081,7 +1081,7 @@ export function ChatInput() {
       // Seed the initial "thinking" trace into both the ref (for frozen cards) and the
       // custom event (for the live ProcessTab listener). Without seeding the ref here,
       // pure conversational responses with no tools would have zero traces in toolTraces.
-      const initialTrace: StepTrace = { icon: 'brain', label: 'Sparkie thinking…', status: 'running' }
+      const initialTrace: StepTrace = { type: 'thought', icon: 'brain', label: 'Sparkie thinking…', status: 'running' }
       _setStepTraces([initialTrace])
       _stepTracesRef.current = [initialTrace]
       window.dispatchEvent(new CustomEvent('sparkie_step_trace', { detail: initialTrace }))
