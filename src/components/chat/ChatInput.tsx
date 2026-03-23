@@ -2036,23 +2036,6 @@ Promise.all([
     return () => window.removeEventListener('sparkie_preview_ready', handler)
   }, [])
 
-  // Process queued messages when streaming finishes
-  useEffect(() => {
-    const handler = () => {
-      setMessageQueue(prev => {
-        if (prev.length === 0) return prev
-        const [next, ...rest] = prev
-        // Brief delay so state settles
-        setTimeout(() => {
-          handleSubmit(next)
-        }, 300)
-        return rest
-      })
-    }
-    window.addEventListener('sparkie:live-done', handler)
-    return () => window.removeEventListener('sparkie:live-done', handler)
-  }, [handleSubmit])
-
   // ── Voice recording ───────────────────────────────────────────────────────
   const toggleRecording = useCallback(async () => {
     if (isRecording) {
@@ -2425,6 +2408,23 @@ Promise.all([
       }
     }
   }, [isStreaming, currentChatId, createChat, addMessage, genMode, streamAgent, generateMedia, classifyIntent, streamReply, clearTextarea])
+
+  // Process queued messages when streaming finishes
+  useEffect(() => {
+    const handler = () => {
+      setMessageQueue(prev => {
+        if (prev.length === 0) return prev
+        const [next, ...rest] = prev
+        // Brief delay so state settles
+        setTimeout(() => {
+          handleSubmit(next)
+        }, 300)
+        return rest
+      })
+    }
+    window.addEventListener('sparkie:live-done', handler)
+    return () => window.removeEventListener('sparkie:live-done', handler)
+  }, [handleSubmit])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (slashSuggestions.length > 0) {
