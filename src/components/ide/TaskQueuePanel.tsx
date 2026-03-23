@@ -113,9 +113,6 @@ export function TaskQueuePanel() {
       pollRef.current = setInterval(fetchTasks, 10_000)
     }
 
-    // Fallback poll also starts initially — SSE onopen will clear it if connected
-    pollRef.current = setInterval(fetchTasks, 10_000)
-
     return () => {
       sseRef.current?.close()
       if (pollRef.current) clearInterval(pollRef.current)

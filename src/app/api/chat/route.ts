@@ -5101,21 +5101,35 @@ def invoke_llm(query, model='MiniMax-M2.7'):
 
       case 'list_memories': {
         if (!userId) return 'Not authenticated'
-        const { category: listCat, source: listSource = 'self', limit: listLim = 20 } = args as { category?: string; source?: string; limit?: number }
+        const { category: listCat, source: listSource = 'user', limit: listLim = 50 } = args as { category?: string; source?: string; limit?: number }
         try {
-          if (listSource === 'user' || listSource === 'all') {
-            const catFilter = listCat ? 'AND category = $2' : ''
-            const params = listCat ? [userId, listCat, Math.min(Number(listLim), 50)] : [userId, Math.min(Number(listLim), 50)]
-            const res = await query(`SELECT id, category, content, created_at FROM user_memories WHERE user_id = $1 ${catFilter} ORDER BY created_at DESC LIMIT $${params.length}`, params)
+          const cap = Math.min(Number(listLim), 100)
+          if (listSource === 'self') {
+            // sparkie_self_memory is a global table (no user_id)
+            const catFilter = listCat ? 'WHERE category = $1' : ''
+            const params = listCat ? [listCat, cap] : [cap]
+            const res = await query(`SELECT id, category, content, created_at FROM sparkie_self_memory ${catFilter} ORDER BY created_at DESC LIMIT $${params.length}`, params)
             const rows = res.rows as Array<{ id: number; category: string; content: string }>
-            return rows.length ? rows.map(r => `[${r.id}:${r.category}] ${r.content.slice(0, 120)}`).join('\n') : 'No user memories found'
+            return rows.length ? rows.map(r => `[${r.id}:${r.category}] ${r.content.slice(0, 120)}`).join('\n') : 'No self memories found'
           }
-          // sparkie_self_memory is a global table (no user_id) — source is 'sparkie', not userId
-          const catFilter = listCat ? 'WHERE category = $1' : ''
-          const params = listCat ? [listCat, Math.min(Number(listLim), 50)] : [Math.min(Number(listLim), 50)]
-          const res = await query(`SELECT id, category, content, created_at FROM sparkie_self_memory ${catFilter} ORDER BY created_at DESC LIMIT $${params.length}`, params)
-          const rows = res.rows as Array<{ id: number; category: string; content: string }>
-          return rows.length ? rows.map(r => `[${r.id}:${r.category}] ${r.content.slice(0, 120)}`).join('\n') : 'No self memories found'
+          // 'user' or 'all' — query user_memories
+          const catFilter = listCat ? 'AND category = $2' : ''
+          const params = listCat ? [userId, listCat, cap] : [userId, cap]
+          const userRes = await query(`SELECT id, category, content, created_at FROM user_memories WHERE user_id = $1 ${catFilter} ORDER BY created_at DESC LIMIT $${params.length}`, params)
+          const userRows = userRes.rows as Array<{ id: number; category: string; content: string }>
+          if (listSource === 'all') {
+            // Also include sparkie self-memories
+            const selfCatFilter = listCat ? 'WHERE category = $1' : ''
+            const selfParams = listCat ? [listCat, Math.max(1, Math.floor(cap / 2))] : [Math.max(1, Math.floor(cap / 2))]
+            const selfRes = await query(`SELECT id, category, content, created_at FROM sparkie_self_memory ${selfCatFilter} ORDER BY created_at DESC LIMIT $${selfParams.length}`, selfParams).catch(() => ({ rows: [] }))
+            const selfRows = selfRes.rows as Array<{ id: number; category: string; content: string }>
+            const combined = [
+              ...userRows.map(r => `[user:${r.id}:${r.category}] ${r.content.slice(0, 120)}`),
+              ...selfRows.map(r => `[self:${r.id}:${r.category}] ${r.content.slice(0, 120)}`),
+            ]
+            return combined.length ? combined.join('\n') : 'No memories found'
+          }
+          return userRows.length ? userRows.map(r => `[${r.id}:${r.category}] ${r.content.slice(0, 120)}`).join('\n') : 'No user memories found'
         } catch (e) { return `list_memories error: ${String(e)}` }
       }
 
