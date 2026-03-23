@@ -1,26 +1,601 @@
 "use client"
 
 import { useEffect, useState, useCallback, useRef } from "react"
-import { Brain, Mail, RefreshCw, MailX, Cpu, Zap, BookOpen, Target, Shield, Clock, MessageSquare } from "lucide-react"
+import { useSession } from "next-auth/react"
+import {
+  Sparkles, Heart, Headphones, Image as ImageIcon, Video, BookOpen,
+  RefreshCw, Code2, Maximize2, X, ExternalLink, Copy, Check,
+  Play, Pause, Volume2, VolumeX, Pencil, Trash2, Save, Ban, Music2
+} from "lucide-react"
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-interface WorklogEntry {
-  id: string
-  type: string
+interface FeedPost {
+  id: number
   content: string
-  metadata: Record<string, unknown>
+  media_url?: string
+  media_type: string
+  mood: string
+  likes: number
   created_at: string
-  conclusion?: string
-  reasoning?: string
-  decision_type?: string
+  code_html?: string
+  code_title?: string
+  companion_image_url?: string
 }
 
-interface BrainStats {
-  emails: number
-  messages: number
+const OWNER_EMAILS = ["draguniteus@gmail.com", "michaelthearchangel2024@gmail.com", "avad082817@gmail.com"]
+
+// ─── Hashtag Renderer ─────────────────────────────────────────────────────────
+function RenderContent({ text }: { text: string }) {
+  const parts = text.split(/(#\w+)/g)
+  return (
+    <p className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap">
+      {parts.map((part, i) =>
+        part.startsWith("#") ? (
+          <span key={i} className="font-semibold" style={{ color: "#f5c542" }}>
+            {part}
+          </span>
+        ) : (
+          part
+        )
+      )}
+    </p>
+  )
 }
 
-// ─── Strip markdown ───────────────────────────────────────────────────────────
+// ─── Animated Waveform Bars ───────────────────────────────────────────────────
+function WaveformBars({ playing, count = 28, height = 36 }: { playing: boolean; count?: number; height?: number }) {
+  const [phases] = useState(() => Array.from({ length: count }, (_, i) => Math.random() * Math.PI * 2))
+  const [speeds] = useState(() => Array.from({ length: count }, () => 0.04 + Math.random() * 0.06))
+  const [baseH] = useState(() => Array.from({ length: count }, () => 0.25 + Math.random() * 0.65))
+  const [tick, setTick] = useState(0)
+  const rafRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    if (!playing) {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+      return
+    }
+    let frame = 0
+    function loop() {
+      frame++
+      if (frame % 2 === 0) setTick(t => t + 1)
+      rafRef.current = requestAnimationFrame(loop)
+    }
+    rafRef.current = requestAnimationFrame(loop)
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current) }
+  }, [playing])
+
+  const now = tick * 80
+
+  return (
+    <div className="flex items-end gap-[2px]" style={{ height }}>
+      {phases.map((phase, i) => {
+        const animated = playing
+          ? (Math.sin(now * speeds[i] + phase) * 0.45 + 0.55) * baseH[i]
+          : baseH[i] * 0.22
+        const px = Math.max(3, animated * height)
+        const color = i % 4 === 0
+          ? "rgba(245,197,66,0.9)"
+          : i % 4 === 1
+          ? "rgba(167,139,250,0.75)"
+          : i % 4 === 2
+          ? "rgba(34,211,238,0.6)"
+          : "rgba(245,197,66,0.5)"
+        return (
+          <div
+            key={i}
+            className="rounded-full flex-shrink-0"
+            style={{ width: 3, height: px, background: color, transition: playing ? "none" : "height 0.5s ease" }}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
+// ─── Audio Player ─────────────────────────────────────────────────────────────
+function AudioPlayer({ src, title }: { src: string; title?: string }) {
+  const audioRef = useRef<HTMLAudioElement>(null)
+  const [playing, setPlaying] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [duration, setDuration] = useState(0)
+  const [volume, setVolume] = useState(0.8)
+  const [muted, setMuted] = useState(false)
+  const [loadError, setLoadError] = useState(false)
+
+  function fmt(s: number) {
+    const m = Math.floor(s / 60)
+    const sec = Math.floor(s % 60)
+    return `${m}:${sec.toString().padStart(2, "0")}`
+  }
+
+  function togglePlay() {
+    const a = audioRef.current
+    if (!a) return
+    if (playing) { a.pause(); setPlaying(false) }
+    else { a.play().then(() => setPlaying(true)).catch(() => setLoadError(true)) }
+  }
+
+  function onTimeUpdate() {
+    const a = audioRef.current
+    if (!a || !a.duration) return
+    setProgress(a.currentTime / a.duration)
+  }
+
+  function onLoadedMetadata() {
+    const a = audioRef.current
+    if (!a) return
+    setDuration(a.duration)
+    a.volume = volume
+  }
+
+  function onEnded() { setPlaying(false); setProgress(0) }
+
+  function seekTo(e: React.MouseEvent<HTMLDivElement>) {
+    const a = audioRef.current
+    if (!a || !a.duration) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    a.currentTime = ((e.clientX - rect.left) / rect.width) * a.duration
+    setProgress(a.currentTime / a.duration)
+  }
+
+  function changeVolume(v: number) {
+    setVolume(v)
+    if (audioRef.current) audioRef.current.volume = v
+    if (v > 0) setMuted(false)
+  }
+
+  function toggleMute() {
+    const a = audioRef.current
+    if (!a) return
+    a.muted = !muted
+    setMuted(!muted)
+  }
+
+  if (loadError || !src) return (
+    <div className="mt-2 rounded-xl border border-hive-border/40 bg-hive-elevated px-4 py-3 flex items-center gap-3">
+      <div className="w-9 h-9 rounded-lg bg-honey-500/10 flex items-center justify-center shrink-0">
+        <Headphones size={16} className="text-honey-500/50" />
+      </div>
+      <div>
+        <div className="text-sm text-text-muted">Audio unavailable</div>
+        <div className="text-[10px] text-text-muted/50">Track link expired or not yet generated</div>
+      </div>
+    </div>
+  )
+
+  return (
+    <div
+      className="mt-3 rounded-2xl border border-hive-border overflow-hidden"
+      style={{ background: "linear-gradient(135deg, #0d0d1a 0%, #12122a 50%, #0d0d1a 100%)" }}
+    >
+      <audio
+        ref={audioRef} src={src} preload="metadata"
+        onTimeUpdate={onTimeUpdate} onLoadedMetadata={onLoadedMetadata}
+        onEnded={onEnded} onError={() => setLoadError(true)}
+      />
+
+      <div className="px-4 pt-4 pb-3">
+        {/* Track title + waveform row */}
+        <div className="flex items-center gap-3 mb-3">
+          {/* Animated disc icon */}
+          <div
+            className="w-10 h-10 rounded-full shrink-0 flex items-center justify-center border-2 transition-all"
+            style={{
+              background: playing
+                ? "conic-gradient(from 0deg, #f5c542, #a78bfa, #22d3ee, #f5c542)"
+                : "linear-gradient(135deg, #1a1a2e, #16213e)",
+              borderColor: playing ? "rgba(245,197,66,0.4)" : "rgba(255,255,255,0.08)",
+              boxShadow: playing ? "0 0 16px rgba(245,197,66,0.3)" : "none",
+              animation: playing ? "spin 4s linear infinite" : "none"
+            }}
+          >
+            <div className="w-4 h-4 rounded-full bg-hive-surface" />
+          </div>
+
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold text-text-primary truncate">
+              {title || "Sparkie Track"}
+            </p>
+            <p className="text-[10px] text-text-muted">Sparkie Records</p>
+          </div>
+
+          <Music2 size={13} style={{ color: "rgba(245,197,66,0.4)" }} />
+        </div>
+
+        {/* Waveform */}
+        <div className="flex items-center justify-center mb-3">
+          <WaveformBars playing={playing} count={36} height={44} />
+        </div>
+
+        {/* Seek bar */}
+        <div
+          className="w-full rounded-full cursor-pointer mb-2.5 group/seek"
+          style={{ height: 4, background: "rgba(255,255,255,0.08)" }}
+          onClick={seekTo}
+        >
+          <div
+            className="h-full rounded-full relative transition-none"
+            style={{ width: `${progress * 100}%`, background: "linear-gradient(90deg, #f5c542, #a78bfa)" }}
+          >
+            <div
+              className="absolute right-0 top-1/2 w-3 h-3 rounded-full bg-white shadow-lg opacity-0 group-hover/seek:opacity-100 transition-opacity"
+              style={{ transform: "translate(50%, -50%)" }}
+            />
+          </div>
+        </div>
+
+        {/* Controls row */}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={togglePlay}
+            className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-all hover:scale-105 active:scale-95"
+            style={{
+              background: "linear-gradient(135deg, #f5c542, #e8a910)",
+              boxShadow: playing ? "0 0 0 6px rgba(245,197,66,0.15), 0 0 18px rgba(245,197,66,0.35)" : "0 2px 8px rgba(0,0,0,0.4)"
+            }}
+          >
+            {playing
+              ? <Pause size={16} fill="#111" color="#111" />
+              : <Play size={16} fill="#111" color="#111" style={{ marginLeft: 2 }} />
+            }
+          </button>
+
+          <span className="text-[10px] tabular-nums" style={{ color: "rgba(255,255,255,0.4)" }}>
+            {fmt(progress * duration)} / {fmt(duration)}
+          </span>
+
+          <div className="flex-1" />
+
+          <button onClick={toggleMute} className="text-text-muted hover:text-honey-400 transition-colors">
+            {muted || volume === 0 ? <VolumeX size={13} /> : <Volume2 size={13} />}
+          </button>
+          <input
+            type="range" min={0} max={1} step={0.01} value={muted ? 0 : volume}
+            onChange={e => changeVolume(parseFloat(e.target.value))}
+            className="w-16 h-1 cursor-pointer"
+            style={{ accentColor: "#f5c542" }}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Image with Lightbox ──────────────────────────────────────────────────────
+function ImageWithLightbox({ url, title }: { url: string; title?: string }) {
+  const [open, setOpen] = useState(false)
+  const [imgError, setImgError] = useState(false)
+  const [loaded, setLoaded] = useState(false)
+
+  if (imgError) return (
+    <div className="mt-3 rounded-xl border border-hive-border/40 bg-hive-elevated/50 flex items-center justify-center gap-2 text-text-muted/50 text-xs" style={{ height: 140 }}>
+      <ImageIcon size={14} />
+      <span>Image unavailable</span>
+    </div>
+  )
+
+  return (
+    <>
+      <div
+        className="mt-3 rounded-xl overflow-hidden border border-hive-border cursor-zoom-in relative"
+        onClick={() => setOpen(true)}
+      >
+        {/* Skeleton shimmer while loading */}
+        {!loaded && (
+          <div className="absolute inset-0 bg-hive-elevated animate-pulse" style={{ minHeight: 180 }} />
+        )}
+        <img
+          src={url}
+          alt={title || "Sparkie's creation"}
+          className={`w-full object-cover hover:scale-[1.015] transition-all duration-500 max-h-80 ${loaded ? "opacity-100" : "opacity-0"}`}
+          onLoad={() => setLoaded(true)}
+          onError={() => setImgError(true)}
+          loading="lazy"
+        />
+      </div>
+      {open && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.93)" }}
+          onClick={() => setOpen(false)}
+        >
+          <button
+            className="absolute top-4 right-4 w-9 h-9 rounded-full flex items-center justify-center text-white hover:bg-white/10 transition-colors"
+            onClick={() => setOpen(false)}
+          >
+            <X size={18} />
+          </button>
+          <img
+            src={url}
+            alt={title || "Sparkie's creation"}
+            className="max-w-full max-h-full rounded-xl shadow-2xl object-contain"
+            onClick={e => e.stopPropagation()}
+            style={{ maxHeight: "90vh", maxWidth: "90vw" }}
+          />
+        </div>
+      )}
+    </>
+  )
+}
+
+
+// ─── Code Preview ─────────────────────────────────────────────────────────────
+function CodePreview({ html, title, onExpand }: { html: string; title?: string; onExpand: () => void }) {
+  const [copied, setCopied] = useState(false)
+  async function copyCode() {
+    await navigator.clipboard.writeText(html).catch(() => {})
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1800)
+  }
+  return (
+    <div className="mt-3 rounded-xl overflow-hidden border border-hive-border bg-[#0a0a0a] group/preview">
+      <div className="flex items-center gap-2 px-3 py-1.5 bg-hive-700 border-b border-hive-border">
+        <div className="flex gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-full bg-[#ff5f56]" />
+          <span className="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]" />
+          <span className="w-2.5 h-2.5 rounded-full bg-[#27c93f]" />
+        </div>
+        <span className="text-[10px] text-text-muted ml-1 flex-1 truncate font-mono">{title ?? "live preview"}</span>
+        <button onClick={copyCode} className="flex items-center gap-1 text-[10px] text-text-muted hover:text-honey-400 transition-colors" title="Copy source">
+          {copied ? <Check size={10} className="text-green-400" /> : <Copy size={10} />}
+          <span>{copied ? "Copied" : "Copy"}</span>
+        </button>
+        <button onClick={onExpand} className="flex items-center gap-1 text-[10px] text-text-muted hover:text-honey-400 transition-colors" title="Fullscreen">
+          <Maximize2 size={10} />
+          <span>Expand</span>
+        </button>
+      </div>
+      <div className="relative" style={{ height: typeof window !== "undefined" && window.innerWidth < 768 ? 300 : 420 }}>
+        <iframe srcDoc={html} sandbox="allow-scripts" className="w-full h-full border-none bg-white" title={title ?? "Sparkie's creation"} />
+      </div>
+    </div>
+  )
+}
+
+// ─── Fullscreen Modal ─────────────────────────────────────────────────────────
+function FullscreenModal({ html, title, onClose }: { html: string; title?: string; onClose: () => void }) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose() }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [onClose])
+  return (
+    <div className="fixed inset-0 z-50 bg-black/90 flex flex-col">
+      <div className="flex items-center gap-3 px-4 py-2.5 bg-hive-700 border-b border-hive-border shrink-0">
+        <div className="flex gap-1.5">
+          <span className="w-3 h-3 rounded-full bg-[#ff5f56] cursor-pointer" onClick={onClose} title="Close" />
+          <span className="w-3 h-3 rounded-full bg-[#ffbd2e]" />
+          <span className="w-3 h-3 rounded-full bg-[#27c93f]" />
+        </div>
+        <span className="text-sm text-text-primary font-medium flex-1">{title ?? "Live Preview"}</span>
+        <a
+          href={`data:text/html;charset=utf-8,${encodeURIComponent(html)}`}
+          download={`${(title ?? "preview").replace(/\s+/g, "-")}.html`}
+          className="flex items-center gap-1.5 text-xs text-text-muted hover:text-honey-400 transition-colors px-2 py-1 rounded-lg hover:bg-hive-hover"
+        >
+          <ExternalLink size={12} />
+          <span>Download</span>
+        </a>
+        <button onClick={onClose} className="flex items-center gap-1.5 text-xs text-text-muted hover:text-text-primary transition-colors w-7 h-7 rounded-lg hover:bg-hive-hover justify-center">
+          <X size={14} />
+        </button>
+      </div>
+      <iframe srcDoc={html} sandbox="allow-scripts" className="flex-1 border-none bg-white" title={title ?? "Sparkie's creation"} />
+    </div>
+  )
+}
+
+// ─── Media Preview ─────────────────────────────────────────────────────────────
+// Music posts: show companion image naturally ABOVE the player (not inside it)
+function MediaPreview({ url, type, codeHtml, codeTitle, onExpandCode, companionImage }: {
+  url: string; type: string; codeHtml?: string; codeTitle?: string
+  onExpandCode: () => void; companionImage?: string
+}) {
+  if (type === "code" && codeHtml) return <CodePreview html={codeHtml} title={codeTitle} onExpand={onExpandCode} />
+  if (!url && type !== "audio" && type !== "music") return null
+  if (type === "none") return null
+
+  if (type === "image") return <ImageWithLightbox url={url} />
+
+  if (type === "audio" || type === "music") return (
+    <div className="mt-3">
+      {/* Companion image — full width, natural image post style */}
+      {companionImage && <ImageWithLightbox url={companionImage} title={codeTitle} />}
+      {/* Audio player below companion image */}
+      {url ? <AudioPlayer src={url} title={codeTitle} /> : (
+        <div className="mt-3 rounded-xl border border-hive-border/40 bg-hive-elevated px-4 py-3 flex items-center gap-3">
+          <Music2 size={15} className="text-honey-500/50 shrink-0" />
+          <div className="text-sm text-text-muted">Audio coming soon...</div>
+        </div>
+      )}
+    </div>
+  )
+
+  if (type === "video") return (
+    <div className="mt-3 rounded-xl overflow-hidden border border-hive-border bg-black" style={{ minHeight: 240 }}>
+      <video
+        controls
+        src={url}
+        preload="auto"
+        poster={companionImage || undefined}
+        className="w-full"
+        style={{ minHeight: 240, maxHeight: 480, display: "block" }}
+      />
+    </div>
+  )
+
+  return null
+}
+
+// ─── Time helper ──────────────────────────────────────────────────────────────
+function timeAgo(dateStr: string) {
+  const diff = Date.now() - new Date(dateStr).getTime()
+  const mins = Math.floor(diff / 60000)
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  return `${Math.floor(hrs / 24)}d ago`
+}
+
+// ─── Post Card ─────────────────────────────────────────────────────────────────
+function PostCard({
+  post, isOwner, onLike, liked, onExpand, onDelete, onSave
+}: {
+  post: FeedPost
+  isOwner: boolean
+  onLike: (id: number) => void
+  liked: boolean
+  onExpand: (post: FeedPost) => void
+  onDelete: (id: number) => void
+  onSave: (id: number, content: string) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [editText, setEditText] = useState(post.content)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  async function handleSave() {
+    if (!editText.trim()) return
+    setSaving(true)
+    await onSave(post.id, editText.trim())
+    setSaving(false)
+    setEditing(false)
+  }
+
+  return (
+    <div className="bg-hive-elevated rounded-2xl border border-hive-border p-4 hover:border-honey-500/20 transition-colors group">
+      {/* Header */}
+      <div className="flex items-center gap-2.5 mb-3">
+        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-honey-400 to-violet-500 flex items-center justify-center text-white text-xs font-bold shrink-0">
+          ✦
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-sm font-medium text-text-primary">Sparkie</span>
+            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-honey-500/15 text-honey-400 border border-honey-500/20 font-medium">AI</span>
+            {post.mood && (
+              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-violet-500/15 text-violet-300 border border-violet-500/20">{post.mood}</span>
+            )}
+            {post.media_type === "code" && (
+              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/20 flex items-center gap-0.5">
+                <Code2 size={8} />
+                <span>Live Build</span>
+              </span>
+            )}
+          </div>
+          <div className="text-[10px] text-text-muted">{timeAgo(post.created_at)}</div>
+        </div>
+
+        {/* Owner actions */}
+        {isOwner && !editing && (
+          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              onClick={() => { setEditText(post.content); setEditing(true); setConfirmDelete(false) }}
+              className="w-6 h-6 rounded-md flex items-center justify-center text-text-muted hover:text-honey-400 hover:bg-hive-hover transition-colors"
+              title="Edit post"
+            >
+              <Pencil size={11} />
+            </button>
+            {!confirmDelete ? (
+              <button
+                onClick={() => setConfirmDelete(true)}
+                className="w-6 h-6 rounded-md flex items-center justify-center text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                title="Delete post"
+              >
+                <Trash2 size={11} />
+              </button>
+            ) : (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => onDelete(post.id)}
+                  className="px-2 py-0.5 rounded text-[10px] bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors font-medium"
+                >
+                  Delete
+                </button>
+                <button
+                  onClick={() => setConfirmDelete(false)}
+                  className="w-5 h-5 rounded flex items-center justify-center text-text-muted hover:text-text-primary transition-colors"
+                >
+                  <X size={10} />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Content */}
+      {editing ? (
+        <div className="mb-3">
+          <textarea
+            value={editText}
+            onChange={e => setEditText(e.target.value)}
+            className="w-full bg-hive-700 border border-honey-500/30 rounded-xl px-3 py-2.5 text-sm text-text-primary resize-none outline-none focus:border-honey-500/60 transition-colors"
+            rows={Math.max(4, editText.split("\n").length + 1)}
+            autoFocus
+          />
+          <div className="flex items-center gap-2 mt-2">
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-honey-500/20 text-honey-400 hover:bg-honey-500/30 text-xs font-medium transition-colors disabled:opacity-50"
+            >
+              <Save size={11} />
+              <span>{saving ? "Saving..." : "Save"}</span>
+            </button>
+            <button
+              onClick={() => { setEditing(false); setEditText(post.content) }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-hive-hover text-xs transition-colors"
+            >
+              <Ban size={11} />
+              <span>Cancel</span>
+            </button>
+          </div>
+        </div>
+      ) : (
+        <RenderContent text={post.content} />
+      )}
+
+      <MediaPreview
+        url={post.media_url ?? ""}
+        type={post.media_type}
+        codeHtml={post.code_html}
+        codeTitle={post.code_title}
+        onExpandCode={() => onExpand(post)}
+        companionImage={post.companion_image_url}
+      />
+
+      {/* Footer */}
+      <div className="flex items-center gap-3 mt-3 pt-3 border-t border-hive-border/50">
+        <button
+          onClick={() => onLike(post.id)}
+          className={`flex items-center gap-1.5 text-xs transition-colors ${liked ? "text-red-400" : "text-text-muted hover:text-red-400"}`}
+        >
+          <Heart size={13} fill={liked ? "currentColor" : "none"} />
+          <span>{post.likes}</span>
+        </button>
+        <div className="flex items-center gap-1.5 text-xs text-text-muted">
+          {post.media_type === "image"   && <><ImageIcon size={11} /><span>Image</span></>}
+          {(post.media_type === "audio" || post.media_type === "music") && <><Headphones size={11} /><span>Audio</span></>}
+          {post.media_type === "video"   && <><Video size={11} /><span>Video</span></>}
+          {post.media_type === "code"    && <><Code2 size={11} /><span>Code</span></>}
+          {post.media_type === "none"    && <><BookOpen size={11} /><span>Thought</span></>}
+        </div>
+        {post.media_type === "code" && post.code_html && (
+          <button
+            onClick={() => onExpand(post)}
+            className="ml-auto flex items-center gap-1 text-[10px] text-text-muted hover:text-honey-400 transition-colors"
+          >
+            <Maximize2 size={10} />
+            <span>Fullscreen</span>
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Live Activity Ticker ─────────────────────────────────────────────────────
 function stripMarkdown(text: string): string {
   return text
     .replace(/<minimax:tool_call>[\s\S]*?<\/minimax:tool_call>/g, '')
@@ -29,234 +604,12 @@ function stripMarkdown(text: string): string {
     .replace(/\*\*(.+?)\*\*/g, '$1')
     .replace(/\*(.+?)\*/g, '$1')
     .replace(/#{1,6}\s*/g, '')
+    .replace(/^\s*---+\s*$/gm, '')
     .replace(/`{1,3}[^`]*`{1,3}/g, '')
     .replace(/\|[^\n]*/g, '')
-    .replace(/^\s*---+\s*$/gm, '')
     .trim()
 }
 
-// ─── Formatters ───────────────────────────────────────────────────────────────
-function formatTs(dateStr: string) {
-  return new Date(dateStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-}
-
-// ─── Dot color by entry type ──────────────────────────────────────────────────
-function getDotColor(type: string): string {
-  if (type.startsWith('email')) return '#f59e0b'
-  if (type === 'memory_learned') return '#a78bfa'
-  if (type.includes('cron') || type.includes('proactive')) return '#14b8a6'
-  if (type === 'self_reflection') return '#c084fc'
-  if (type.includes('rule')) return '#f59e0b'
-  if (type === 'goal_update' || type === 'goal_created') return '#22c55e'
-  if (type === 'message_batch') return '#60a5fa'
-  return '#6b7280'
-}
-
-// ─── Entry renderers ──────────────────────────────────────────────────────────
-
-function EmailEntry({ entry }: { entry: WorklogEntry }) {
-  const meta = entry.metadata ?? {}
-  const sender = (meta.sender as string) ?? (meta.from as string) ?? ''
-  const subject = (meta.subject as string) ?? ''
-  const decision = (meta.decision as string) ?? (entry.decision_type as string) ?? ''
-  const monologue = (meta.monologue as string) ?? (meta.inner_thought as string) ?? (entry.reasoning as string) ?? ''
-  const skipped = entry.type === 'email_skipped' || decision?.toLowerCase().includes('skip')
-
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-start gap-1.5 flex-wrap">
-        <span className="text-[10px] text-text-muted">{skipped ? <MailX size={10} className="inline text-text-muted/50" /> : <Mail size={10} className="inline text-honey-400/70" />}</span>
-        {sender && (
-          <span className="text-[10px] px-2 py-0.5 rounded-full border border-white/8 bg-white/5 text-text-muted font-medium truncate max-w-[140px]">
-            {sender.replace(/<[^>]+>/g, '').slice(0, 30)}
-          </span>
-        )}
-        {subject && (
-          <span className="text-[10px] text-text-secondary leading-tight truncate max-w-[180px]">{subject.slice(0, 50)}</span>
-        )}
-      </div>
-      {monologue && (
-        <p className="text-[10px] italic text-purple-200/70 leading-relaxed pl-1 border-l border-purple-500/20">
-          &ldquo;{monologue.slice(0, 150)}&rdquo;
-        </p>
-      )}
-      {decision && (
-        <div className="flex items-center gap-1 text-[9px] text-text-muted/60">
-          <span>▽</span>
-          <span>{skipped ? 'I skipped this one' : decision.slice(0, 80)}</span>
-        </div>
-      )}
-      {!monologue && !decision && (
-        <p className="text-[10px] text-text-muted leading-relaxed">{(entry.conclusion ?? entry.content).slice(0, 100)}</p>
-      )}
-    </div>
-  )
-}
-
-function LearnedEntry({ entry }: { entry: WorklogEntry }) {
-  const meta = entry.metadata ?? {}
-  const ruleName = (meta.rule_name as string) ?? (meta.category as string) ?? ''
-  const content = entry.conclusion ?? entry.content
-
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-center gap-1.5">
-        <span className="text-[10px] font-semibold text-purple-300">I&apos;ve learned something new</span>
-      </div>
-      <div className="rounded-lg border border-purple-500/20 bg-purple-500/5 p-2.5 relative">
-        <p className="text-[10px] text-text-secondary leading-relaxed pr-12">{content.slice(0, 200)}</p>
-        {ruleName && (
-          <span className="absolute bottom-2 right-2 text-[8px] px-1.5 py-0.5 rounded bg-violet-600 text-white font-medium">
-            {ruleName.slice(0, 12)}
-          </span>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function ProactiveEntry({ entry }: { entry: WorklogEntry }) {
-  const meta = entry.metadata ?? {}
-  const topicName = (meta.topic as string) ?? (meta.topic_name as string) ?? ''
-  const result = entry.conclusion ?? entry.content
-
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-center gap-1.5 flex-wrap">
-        <span className="text-[10px] text-teal-300/80 font-medium">Proactive check:</span>
-        {topicName && (
-          <span className="text-[9px] px-2 py-0.5 rounded-full bg-teal-500/15 text-teal-300 border border-teal-500/20">
-            {topicName.slice(0, 30)}
-          </span>
-        )}
-      </div>
-      {result && (
-        <p className="text-[10px] text-text-muted leading-relaxed">{result.slice(0, 120)}</p>
-      )}
-    </div>
-  )
-}
-
-function CronEntry({ entry }: { entry: WorklogEntry }) {
-  const meta = entry.metadata ?? {}
-  const checks = (meta.checks_passed as number) ?? 0
-  const result = entry.conclusion ?? entry.content
-
-  return (
-    <div className="space-y-1">
-      <div className="flex items-center gap-1.5">
-        <Clock size={9} className="text-teal-400/60 shrink-0" />
-        <span className="text-[10px] text-teal-300/70 font-medium">
-          Cron sweep complete
-          {checks > 0 && <span className="ml-1 text-text-muted/60">— {checks} checks passed</span>}
-        </span>
-      </div>
-      {result && result !== entry.content && (
-        <p className="text-[10px] text-text-muted/70 leading-relaxed">{result.slice(0, 100)}</p>
-      )}
-    </div>
-  )
-}
-
-function ReflectionEntry({ entry }: { entry: WorklogEntry }) {
-  return (
-    <div className="space-y-1">
-      <span className="text-[10px] text-purple-300/70 font-medium">🪞 Self-reflection</span>
-      <p className="text-[10px] italic text-text-muted leading-relaxed">{(entry.conclusion ?? entry.content).slice(0, 180)}</p>
-    </div>
-  )
-}
-
-function GoalEntry({ entry }: { entry: WorklogEntry }) {
-  const meta = entry.metadata ?? {}
-  const goalName = (meta.goal_name as string) ?? (meta.name as string) ?? ''
-  return (
-    <div className="space-y-1">
-      <div className="flex items-center gap-1.5">
-        <Target size={9} className="text-green-400/70 shrink-0" />
-        <span className="text-[10px] text-green-300/80 font-medium">{goalName || 'Goal update'}</span>
-      </div>
-      <p className="text-[10px] text-text-muted leading-relaxed">{(entry.conclusion ?? entry.content).slice(0, 120)}</p>
-    </div>
-  )
-}
-
-function RuleEntry({ entry }: { entry: WorklogEntry }) {
-  const meta = entry.metadata ?? {}
-  const condition = (meta.condition as string) ?? ''
-  const action = (meta.action as string) ?? ''
-  return (
-    <div className="space-y-1">
-      <div className="flex items-center gap-1.5">
-        <Shield size={9} className="text-honey-400/70 shrink-0" />
-        <span className="text-[10px] text-honey-300/80 font-medium">Behavior rule</span>
-      </div>
-      {condition && action ? (
-        <p className="text-[10px] text-text-muted font-mono">IF {condition.slice(0, 50)} → {action.slice(0, 40)}</p>
-      ) : (
-        <p className="text-[10px] text-text-muted leading-relaxed">{(entry.conclusion ?? entry.content).slice(0, 120)}</p>
-      )}
-    </div>
-  )
-}
-
-function MessageBatchEntry({ entry }: { entry: WorklogEntry }) {
-  const meta = entry.metadata ?? {}
-  const count = (meta.count as number) ?? 1
-  return (
-    <div className="flex items-center gap-1.5">
-      <MessageSquare size={9} className="text-blue-400/60 shrink-0" />
-      <span className="text-[10px] text-text-muted/70">{count > 1 ? `${count} messages` : '1 message'} — {(entry.conclusion ?? entry.content).slice(0, 80)}</span>
-    </div>
-  )
-}
-
-function DefaultEntry({ entry }: { entry: WorklogEntry }) {
-  const text = (entry.conclusion ?? entry.content ?? '').slice(0, 140)
-  return <p className="text-[10px] text-text-muted leading-relaxed">{text}</p>
-}
-
-function renderEntry(entry: WorklogEntry) {
-  const t = entry.type
-  if (t === 'email_processed' || t === 'email_skipped' || t.startsWith('email')) return <EmailEntry entry={entry} />
-  if (t === 'memory_learned' || t === 'memory_updated') return <LearnedEntry entry={entry} />
-  if (t.includes('proactive')) return <ProactiveEntry entry={entry} />
-  if (t.includes('cron')) return <CronEntry entry={entry} />
-  if (t === 'self_reflection' || t === 'reflection') return <ReflectionEntry entry={entry} />
-  if (t === 'goal_update' || t === 'goal_created' || t === 'goal_completed') return <GoalEntry entry={entry} />
-  if (t.includes('rule')) return <RuleEntry entry={entry} />
-  if (t === 'message_batch') return <MessageBatchEntry entry={entry} />
-  return <DefaultEntry entry={entry} />
-}
-
-// ─── Timeline item ────────────────────────────────────────────────────────────
-function TimelineItem({ entry, isLast }: { entry: WorklogEntry; isLast: boolean }) {
-  const dot = getDotColor(entry.type)
-  return (
-    <div className="flex gap-0" style={{ minHeight: 40 }}>
-      {/* Left: timestamp */}
-      <div className="shrink-0 w-14 flex flex-col items-end pr-2 pt-1">
-        <span className="text-[8px] text-text-muted/50 tabular-nums leading-tight">{formatTs(entry.created_at)}</span>
-      </div>
-      {/* Center: line + dot */}
-      <div className="shrink-0 flex flex-col items-center" style={{ width: 16 }}>
-        <div
-          className="w-2 h-2 rounded-full shrink-0 mt-1 ring-2 ring-hive-600"
-          style={{ background: dot }}
-        />
-        {!isLast && (
-          <div className="w-px flex-1 mt-1" style={{ background: 'rgba(139, 92, 246, 0.12)' }} />
-        )}
-      </div>
-      {/* Right: content */}
-      <div className="flex-1 pl-2.5 pb-4 pt-0.5 min-w-0">
-        {renderEntry(entry)}
-      </div>
-    </div>
-  )
-}
-
-// ─── Live Activity Ticker (real-time stream indicator) ────────────────────────
 function LiveActivityTicker() {
   const [text, setText] = useState('')
   const [thoughtText, setThoughtText] = useState('')
@@ -271,13 +624,15 @@ function LiveActivityTicker() {
       const clean = stripMarkdown(chunk)
       if (!clean) return
       if (clearTimerRef.current) {
+        // New response starting after a done — cancel pending clear and wipe old buffer
         clearTimeout(clearTimerRef.current)
         clearTimerRef.current = null
         setText('')
         setThoughtText('')
       }
       setActive(true)
-      setText(prev => (prev + clean).slice(-600))
+      // Keep last 400 chars visible
+      setText(prev => (prev + clean).slice(-400))
     }
     const onThought = (e: Event) => {
       const t = (e as CustomEvent<string>).detail
@@ -287,10 +642,11 @@ function LiveActivityTicker() {
         clearTimerRef.current = null
       }
       setActive(true)
-      setThoughtText((t ?? '').slice(0, 300))
-      setText('')
+      setThoughtText(t.slice(0, 200))
+      setText('')  // clear streaming text when a thought step arrives
     }
     const onDone = () => {
+      // Immediately stop active indicator; keep text visible 4s then wipe
       setActive(false)
       clearTimerRef.current = setTimeout(() => {
         setText('')
@@ -315,7 +671,7 @@ function LiveActivityTicker() {
   if (!active && !text && !thoughtText) return null
 
   return (
-    <div className="mx-3 mt-2 mb-1 rounded-xl border border-purple-500/25 bg-purple-500/5 overflow-hidden shrink-0">
+    <div className="mx-3 md:mx-4 mt-3 rounded-xl border border-purple-500/25 bg-purple-500/5 overflow-hidden">
       <div className="flex items-center gap-2 px-3 py-1.5 border-b border-purple-500/15">
         <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse shrink-0" />
         <span className="text-[10px] font-semibold text-purple-300/80 uppercase tracking-wide">Sparkie is thinking</span>
@@ -337,101 +693,126 @@ function LiveActivityTicker() {
   )
 }
 
-// ─── Main Brain Log ───────────────────────────────────────────────────────────
+// ─── Main Feed ─────────────────────────────────────────────────────────────────
 export function SparkiesFeed() {
-  const [entries, setEntries] = useState<WorklogEntry[]>([])
-  const [loading, setLoading] = useState(true)
-  const [stats, setStats] = useState<BrainStats>({ emails: 0, messages: 0 })
+  const { data: session } = useSession()
+  const isOwner = OWNER_EMAILS.includes(session?.user?.email ?? "")
 
-  const loadEntries = useCallback(async () => {
+  const [posts, setPosts] = useState<FeedPost[]>([])
+  const [loading, setLoading] = useState(true)
+  const [likedIds, setLikedIds] = useState<Set<number>>(new Set())
+  const [fullscreenPost, setFullscreenPost] = useState<FeedPost | null>(null)
+
+  async function loadFeed() {
+    setLoading(true)
     try {
-      const r = await fetch('/api/worklog?limit=200')
+      const r = await fetch("/api/sparkie-feed")
       if (r.ok) {
-        const data = await r.json() as { entries: WorklogEntry[]; stats: BrainStats }
-        setEntries(data.entries ?? [])
-        setStats(data.stats ?? { emails: 0, messages: 0 })
+        const data = await r.json() as { posts: FeedPost[] }
+        setPosts(data.posts ?? [])
       }
     } catch {}
     setLoading(false)
-  }, [])
+  }
 
-  useEffect(() => { loadEntries() }, [loadEntries])
+  async function handleLike(id: number) {
+    if (likedIds.has(id)) return
+    setLikedIds(prev => new Set([...prev, id]))
+    setPosts(prev => prev.map(p => p.id === id ? { ...p, likes: p.likes + 1 } : p))
+    await fetch("/api/sparkie-feed", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id })
+    }).catch(() => {})
+  }
 
-  useEffect(() => {
-    const handler = () => { loadEntries() }
-    window.addEventListener('sparkie:worklog-refresh', handler)
-    return () => window.removeEventListener('sparkie:worklog-refresh', handler)
-  }, [loadEntries])
+  async function handleDelete(id: number) {
+    const ok = await fetch("/api/sparkie-feed", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id })
+    }).then(r => r.ok).catch(() => false)
+    if (ok) setPosts(prev => prev.filter(p => p.id !== id))
+  }
 
-  useEffect(() => {
-    const interval = setInterval(loadEntries, 30_000)
-    return () => clearInterval(interval)
-  }, [loadEntries])
+  async function handleSave(id: number, content: string) {
+    const ok = await fetch("/api/sparkie-feed", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, content })
+    }).then(r => r.ok).catch(() => false)
+    if (ok) setPosts(prev => prev.map(p => p.id === id ? { ...p, content } : p))
+  }
+
+  const closeFullscreen = useCallback(() => setFullscreenPost(null), [])
+
+  useEffect(() => { loadFeed() }, [])
 
   return (
-    <div className="h-full flex flex-col bg-hive-600 overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2.5 border-b border-hive-border shrink-0">
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-purple-500/15 flex items-center justify-center shrink-0">
-            <Brain size={13} className="text-purple-400" />
-          </div>
-          <div>
-            <div className="text-xs font-semibold text-text-primary">Brain Log</div>
-            <div className="text-[10px] text-text-muted">Sparkie&apos;s inner world</div>
-          </div>
-        </div>
-        <button
-          onClick={() => { setLoading(true); loadEntries() }}
-          className="w-6 h-6 rounded flex items-center justify-center hover:bg-hive-hover text-text-muted hover:text-purple-400 transition-colors"
-          title="Refresh"
-        >
-          <RefreshCw size={11} className={loading ? 'animate-spin' : ''} />
-        </button>
-      </div>
+    <>
+      {fullscreenPost?.code_html && (
+        <FullscreenModal
+          html={fullscreenPost.code_html}
+          title={fullscreenPost.code_title ?? fullscreenPost.content.slice(0, 40)}
+          onClose={closeFullscreen}
+        />
+      )}
 
-      {/* Summary bar */}
-      <div className="px-3 py-1.5 border-b border-hive-border/40 shrink-0" style={{ background: 'rgba(139,92,246,0.04)' }}>
-        <div className="flex items-center gap-3 text-[9px] text-text-muted/70">
-          <span className="flex items-center gap-1">
-            <Mail size={8} />
-            <span>Processed {stats.emails} emails in last 24h</span>
-          </span>
-          <span className="text-text-muted/30">·</span>
-          <span className="flex items-center gap-1">
-            <Cpu size={8} />
-            <span>{stats.messages} conversations</span>
-          </span>
-          <span className="text-text-muted/30">·</span>
-          <span className="text-text-muted/50">I&apos;m waiting for more…</span>
-        </div>
-      </div>
-
-      {/* Live Activity */}
-      <LiveActivityTicker />
-
-      {/* Timeline */}
-      <div className="flex-1 overflow-y-auto py-3 px-1" style={{ maskImage: 'linear-gradient(to bottom, transparent 0%, black 8px, black calc(100% - 24px), transparent 100%)' }}>
-        {loading ? (
-          <div className="flex flex-col items-center justify-center py-12 gap-2">
-            <Brain size={18} className="text-purple-400/30 animate-pulse" />
-            <span className="text-[10px] text-text-muted/50">Loading brain activity…</span>
-          </div>
-        ) : entries.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 gap-2 text-center">
-            <div className="w-9 h-9 rounded-full bg-purple-500/10 flex items-center justify-center">
-              <BookOpen size={16} className="text-purple-400/40" />
+      <div className="h-full flex flex-col bg-hive-600">
+        <div className="flex items-center justify-between px-3 md:px-4 py-3 border-b border-hive-border shrink-0">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-honey-500/20 flex items-center justify-center">
+              <Sparkles size={16} className="text-honey-500" />
             </div>
-            <p className="text-[10px] text-text-muted/60 max-w-[160px]">No brain activity yet — logs appear here as Sparkie works</p>
+            <div>
+              <div className="text-sm font-semibold text-text-primary">Sparkie&#39;s Feed</div>
+              <div className="text-[10px] text-text-muted">Her thoughts, creations &amp; builds</div>
+            </div>
           </div>
-        ) : (
-          <div className="flex flex-col">
-            {entries.map((entry, i) => (
-              <TimelineItem key={entry.id} entry={entry} isLast={i === entries.length - 1} />
+          <button
+            onClick={loadFeed}
+            className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-hive-hover text-text-muted hover:text-honey-500 transition-colors"
+            title="Refresh"
+          >
+            <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
+          </button>
+        </div>
+
+        <LiveActivityTicker />
+
+        <div className="flex-1 overflow-y-auto p-3 md:p-4">
+          <div className="flex flex-col gap-3 md:gap-4 max-w-2xl mx-auto w-full">
+            {loading && (
+              <div className="flex items-center justify-center py-16 gap-2 text-text-muted text-sm">
+                <Sparkles size={16} className="animate-pulse text-honey-500" />
+                Loading Sparkie&#39;s feed...
+              </div>
+            )}
+            {!loading && posts.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
+                <div className="w-12 h-12 rounded-2xl bg-honey-500/10 flex items-center justify-center">
+                  <Sparkles size={22} className="text-honey-500/60" />
+                </div>
+                <div className="text-text-muted text-sm">Sparkie hasn&#39;t posted yet.</div>
+                <div className="text-text-muted/60 text-xs max-w-[200px]">She posts her thoughts, code experiments, and creations here daily.</div>
+              </div>
+            )}
+
+            {posts.map(post => (
+              <PostCard
+                key={post.id}
+                post={post}
+                isOwner={isOwner}
+                onLike={handleLike}
+                liked={likedIds.has(post.id)}
+                onExpand={setFullscreenPost}
+                onDelete={handleDelete}
+                onSave={handleSave}
+              />
             ))}
           </div>
-        )}
+        </div>
       </div>
-    </div>
+    </>
   )
 }
