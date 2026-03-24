@@ -5,7 +5,7 @@ import { query } from '@/lib/db'
 import { loadIdentityFiles, buildIdentityBlock } from '@/lib/identity'
 
 export const runtime = 'nodejs'
-export const maxDuration = 120
+export const maxDuration = 180
 
 const MINIMAX_CHAT_ENDPOINT = 'https://api.minimax.io/v1/text/chatcompletion_v2'
 
@@ -260,7 +260,7 @@ export async function POST(req: NextRequest) {
 
           const res = await fetch(MINIMAX_CHAT_ENDPOINT, {
             method: 'POST',
-            signal: AbortSignal.timeout(110_000),
+            signal: AbortSignal.timeout(170_000),
             headers: {
               'Content-Type': 'application/json',
               Authorization: `Bearer ${apiKey}`,
@@ -349,8 +349,10 @@ export async function POST(req: NextRequest) {
           return
         }
 
-        // FIX 17: If no file markers AND no code blocks → prose-only response → route to chat display
-        const hasCodeBlocks = /```|<html|<!DOCTYPE/i.test(fullBuildRaw)
+        // FIX 17: If no file markers AND no code/XML blocks → prose-only response → route to chat display
+        // Note: XML tool calls (<tool_call>, <invoke>, <minimax:tool_call>) are NOT prose —
+        // they contain code in a different format that fileparser.ts can extract.
+        const hasCodeBlocks = /```|<html|<!DOCTYPE|<tool_call|<invoke\s+name=|<minimax:tool_call|<function_calls/i.test(fullBuildRaw)
         if (!hasMarkers && !hasCodeBlocks) {
           console.log('[BUILD] Prose-only output — routing to chat display')
           send('chat_fallback', { content: fullBuildRaw })

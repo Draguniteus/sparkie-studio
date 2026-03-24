@@ -228,14 +228,16 @@ export function parseAIResponse(raw: string, projectName?: string): ParseResult 
 
   // Fallback C: raw HTML/JS/CSS (no markers at all)
   // ── MiniMax XML tool-call parser ─────────────────────────────────────────
-  // M2.5 always outputs <invoke name="write_file"> XML. Extract files from it.
+  // Supports two formats:
+  //   M2.5: <minimax:tool_call><invoke name="write_file"><parameter name="path">...</parameter>...</invoke></minimax:tool_call>
+  //   M2.7: <tool_call>{"name":"write_file","arguments":{"path":"...","content":"..."}}</tool_call>
   const isToolCallXml = /<minimax:tool_call|<invoke\s+name=|<tool_call|<function_calls/i.test(normalized)
   if (isToolCallXml) {
     const xmlFiles: ParsedFile[] = []
-    // M2.5 wraps each file in <minimax:tool_call><invoke name="write_file">...</invoke></minimax:tool_call>
-    // Tolerate truncated responses: match even if </invoke> closing tag is missing
+
+    // Format A: M2.5 <invoke name="write_file"> with <parameter> children
     const invokeRe = /<invoke[^>]*name=["']write_file["'][^>]*>([\s\S]*?)(?:<\/invoke>|<\/minimax:tool_call>)/gi
-    let m
+    let m: RegExpExecArray | null
     while ((m = invokeRe.exec(normalized)) !== null) {
       const body = m[1]
       const pPath = /<parameter[^>]*name=["']path["'][^>]*>([\s\S]*?)<\/parameter>/i.exec(body)
@@ -246,6 +248,36 @@ export function parseAIResponse(raw: string, projectName?: string): ParseResult 
         if (fp && fc.length > 0) xmlFiles.push({ name: fp, content: fc })
       }
     }
+
+    // Format B: M2.7 <tool_call>{"name":"write_file","arguments":{...}}</tool_call>
+    // Also handles <minimax:tool_call> with JSON body
+    if (xmlFiles.length === 0) {
+      const toolCallJsonRe = /<(?:tool_call|minimax:tool_call)[^>]*>([\s\S]*?)<\/(?:tool_call|minimax:tool_call)>/gi
+      while ((m = toolCallJsonRe.exec(normalized)) !== null) {
+        try {
+          const raw = m[1].trim()
+          if (!raw.startsWith('{')) continue  // not JSON body
+          const payload = JSON.parse(raw) as {
+            name?: string
+            arguments?: Record<string, string>
+            function?: { name?: string; arguments?: string | Record<string, string> }
+          }
+          const toolName = payload.name ?? payload.function?.name ?? ''
+          if (toolName !== 'write_file') continue
+          let args: Record<string, string> = {}
+          if (payload.arguments && typeof payload.arguments === 'object') {
+            args = payload.arguments as Record<string, string>
+          } else if (payload.function?.arguments) {
+            const fa = payload.function.arguments
+            args = typeof fa === 'string' ? JSON.parse(fa) as Record<string, string> : fa as Record<string, string>
+          }
+          const fp = (args.path || args.filename || '').trim().replace(/^\/workspace\//, '').replace(/^\//, '')
+          const fc = (args.content || '').trimEnd()
+          if (fp && fc.length > 0) xmlFiles.push({ name: fp, content: fc })
+        } catch { /* malformed JSON — skip */ }
+      }
+    }
+
     if (xmlFiles.length > 0) {
       console.log(`[PARSER] XML mode: extracted ${xmlFiles.length} file(s): ${xmlFiles.map(f => f.name).join(', ')}`)
       return { text: '', files: wrapInProjectFolder(xmlFiles, projectName || 'project'), folders: [] }

@@ -55,6 +55,16 @@ export async function POST(req: NextRequest) {
       return new Response(JSON.stringify({ mode: 'chat' }), { headers: { 'Content-Type': 'application/json' } })
     }
 
+    // Questions ending in ? → always chat unless explicit build keyword
+    const msgTrimmed = (message as string ?? '').trim()
+    if (msgTrimmed.endsWith('?') && !isBuildPhrase) {
+      return new Response(JSON.stringify({ mode: 'chat' }), { headers: { 'Content-Type': 'application/json' } })
+    }
+    // Questions starting with question words → chat
+    if (/^(is |are |was |were |why |who |when |where )/i.test(msgTrimmed)) {
+      return new Response(JSON.stringify({ mode: 'chat' }), { headers: { 'Content-Type': 'application/json' } })
+    }
+
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 1500)
 

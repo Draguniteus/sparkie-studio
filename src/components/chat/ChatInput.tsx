@@ -986,6 +986,14 @@ export function ChatInput() {
       return false
     }
 
+    // Questions ending in ? — ALWAYS chat unless explicit build keyword
+    if (t.endsWith('?')) {
+      const hasBuildKeyword = /\b(build me|build a|create a|make me|generate a|implement a|write a)\b/i.test(t)
+      if (!hasBuildKeyword) return true
+    }
+    // Questions starting with question words — ALWAYS chat
+    if (/^(is |are |was |were |why |who |when |where )/i.test(t)) return true
+
     // Explicit edit commands on existing code
     const EDIT_PHRASE = /\b(edit|update|upgrade|change|switch|swap|replace|rename|remove|delete|adjust|alter|amend|convert|modify|revise|refactor|rewrite|redo|refine|restyle|recolor|resize|transform|overhaul|patch|correct|improve|fix|tweak|tune|undo|revert|rollback)\b/i
     if (EDIT_PHRASE.test(t)) {
@@ -1535,6 +1543,16 @@ export function ChatInput() {
               // CDN-compatible projects: all files are now present, switch to preview.
               if (isCDNCompatible(useAppStore.getState().files, projectName)) {
                 setIDETab('preview')
+              }
+            } else if (parsed.event === 'chat_fallback') {
+              // Build model returned a prose/chat response instead of code
+              // Display it as a normal assistant message so the user sees the reply
+              const fallbackContent = (parsed.content as string) || ''
+              if (fallbackContent) {
+                updateMessage(chatId, ackMsgId, { content: fallbackContent, isStreaming: false })
+                if (buildMsgId) updateMessage(chatId, buildMsgId, { content: '', isStreaming: false })
+                saveMessage('assistant', fallbackContent)
+                addWorklogEntry({ type: 'ai_response', content: fallbackContent.slice(0, 120), status: 'done' })
               }
             } else if (parsed.event === 'error') {
               // Sanitize: never show raw JSON error blobs to the user
