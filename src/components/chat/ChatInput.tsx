@@ -953,6 +953,13 @@ export function ChatInput() {
     // Deliberate non-build opinions about the project
     if (/\b(what would make (this|it) better|what would improve|what should i add|review (this|my) code|can you review|what do you see|look at this|take a look)\b/.test(t)) return true
 
+    // Memory operations — ALWAYS chat (saving/updating facts about user or Sparkie)
+    if (/\b(memory|remember|reminder|memori)\b/i.test(t) ||
+        /\b(my name is|i live in|i moved|i'?m (from|in|at)|i prefer|my favorite|i like|i love that|save (that|this|it)|note that|keep that|don'?t forget)\b/i.test(t)) return true
+
+    // Behavior corrections and opinions — ALWAYS chat (user instructing Sparkie)
+    if (/\b(you should(n'?t)?( not)?|stop using|don'?t use|never use|you need to|you must( not)?|instead of (using|that)|switch to|use .{0,20} instead|please don'?t|you'?re (using|doing|calling)|you shouldn'?t)\b/i.test(t)) return true
+
     // ── BUILD SESSION SHORT-CIRCUIT ──────────────────────────────────────────
     // When in an active build session, short edit follow-ups that don't match
     // Tier 1 chat patterns above are routed directly to build.

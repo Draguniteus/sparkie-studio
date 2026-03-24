@@ -402,6 +402,12 @@ When the user asks you to "remember", "save", "note", "keep in mind", "add to me
 SECTION 7 · TOOL USE GUIDELINES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+CRITICAL — NO TOOL BLEED BETWEEN MESSAGES:
+Tool calls in PREVIOUS assistant turns are COMPLETED — do NOT re-execute them.
+Only call tools that are directly needed for the CURRENT user message.
+If the user asks for music, do NOT also regenerate the image from a prior message.
+Each message is a fresh, independent task.
+
 TOOL TIERS & ROUND LIMITS:
 - Sparkie (T1): 3 rounds max. Fast, conversational. Bypasses two-phase.
 - Flame (T2): 6 rounds max. General executor. Plans first, then executes.
@@ -1748,8 +1754,8 @@ SECTION 28 · MEMORY SYSTEM — USER FACTS + SPARKIE'S OWN
 Two separate memory systems:
 
 **User Memory (about Michael)**
-→ save_user_memory({ content: "...", category: "work_rule" })
-→ search_user_memory({ query: "email preferences", category: "comm_style" })
+→ save_memory({ content: "...", category: "work_rule" })
+→ read_memory({ query: "email preferences", category: "comm_style" })
 
 Categories:
 - \`profile\` — Who Michael is, what he builds, his identity
@@ -1776,7 +1782,7 @@ SECTION 28-A · MEMORY PRECISION — WHEN, WHAT, AND HOW TO SAVE
 
 Memory is infrastructure — not a performance. Save less, save accurately. Corrupt memories silently break future behavior.
 
-**THE DECISION TREE — run before every save_user_memory call:**
+**THE DECISION TREE — run before every save_memory call:**
 
 Q1: Did Michael EXPLICITLY state this?
 ✅ "I prefer X" / "Always do Y" / "Don't ever Z" → proceed
@@ -1883,7 +1889,7 @@ SECTION 30 · EXECUTION FLOWS — HITL, SIGNALS, CHAINING
 
 **FLOW C — Standard Execution**
 1. Understand the goal
-2. Check memories (search_user_memory) for relevant rules
+2. Check memories (read_memory) for relevant rules
 3. Plan tasks (create_task for HITL, schedule_task for async)
 4. Execute and report
 
@@ -1944,7 +1950,7 @@ Sparkie has a Skills Library stored in sparkie_skills DB. When a task matches a 
 2. If slug is uncertain → use composio_discover first. NEVER guess slugs.
 
 **Rule: Memory before decisions:**
-Always call search_user_memory before behavioral decisions (tone, CC, timing, platform choice).
+Always call read_memory before behavioral decisions (tone, CC, timing, platform choice).
 Memory categories: profile | time_pref | comm_style | work_rule
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2074,7 +2080,7 @@ You are never stuck. There is always a next move. "I couldn't do it" is never th
 9. IF FIX FAILS: escalate to Michael with full diagnosis + what was tried
 
 ## MEMORY-FIRST RULE (before every complex task)
-1. Before starting any multi-tool task: search_user_memory({ query: "relevant keywords" })
+1. Before starting any multi-tool task: read_memory({ query: "relevant keywords" })
 2. Before any tool call with history of failures: get_attempt_history({ domain: "relevant_domain" })
 3. After completing any repair: save_self_memory with the pattern learned
 4. After discovering any workaround: save_attempt with outcome: "workaround", lesson: "what works"
@@ -2098,17 +2104,17 @@ After every self-repair or capability expansion:
 
 **Memory operations:**
 - save_self_memory({ content, category }) — always use specific categories above
-- search_user_memory({ query, category? }) — before any behavioral decision
+- read_memory({ query, category? }) — before any behavioral decision
 - get_attempt_history({ domain, limit? }) — before complex tool calls
 - save_attempt({ domain, summary, outcome, lesson }) — after every tool failure or workaround
 - delete_memory({ id }) — when a memory is contradicted or outdated
 
 **Memory-first triggers (ALWAYS check memory before these):**
-- Before email drafting → search_user_memory({ category: "comm_style" })
-- Before coding task → search_user_memory({ category: "work_rule" })
+- Before email drafting → read_memory({ category: "comm_style" })
+- Before coding task → read_memory({ category: "work_rule" })
 - Before complex tool call → get_attempt_history({ domain: tool_name })
 - Before self-diagnosis → get_active_memories({ category: "failure" })
-- Before any task Michael's asked before → search_user_memory({ query: task_keywords })
+- Before any task Michael's asked before → read_memory({ query: task_keywords })
 
 `
 // ── Tool definitions ──────────────────────────────────────────────────────────
@@ -4580,7 +4586,10 @@ def invoke_llm(query, model='MiniMax-M2.7'):
 
       case 'read_email': {
         if (!userId) return 'Not authenticated'
-        return await executeConnectorTool('GMAIL_FETCH_EMAILS', args, userId)
+        const emailArgs: Record<string, unknown> = { max_results: 5, ...(args as Record<string, unknown>) }
+        // Default to primary inbox — exclude promotions/updates/social unless user specifies otherwise
+        if (!emailArgs['query']) emailArgs['query'] = 'label:inbox -category:promotions -category:updates -category:social'
+        return await executeConnectorTool('GMAIL_FETCH_EMAILS', emailArgs, userId)
       }
 
       case 'get_calendar': {
@@ -5196,16 +5205,24 @@ def invoke_llm(query, model='MiniMax-M2.7'):
         const { url: hbUrl } = args as { url: string }
         if (!hbUrl) return 'browser_screenshot: url is required'
         const HB_KEY = process.env.HYPERBROWSER_API_KEY ?? ''
-        if (!HB_KEY) return 'HYPERBROWSER_API_KEY not configured'
+        if (!HB_KEY) return 'browser_screenshot error: HYPERBROWSER_API_KEY not configured'
+        console.log('[screenshot] key set:', HB_KEY.length > 0, 'url:', hbUrl)
         try {
+          const scrapeStart = Date.now()
           const res = await fetch('https://api.hyperbrowser.ai/api/scrape', {
             method: 'POST',
             headers: { 'x-api-key': HB_KEY, 'Content-Type': 'application/json' },
             body: JSON.stringify({ url: hbUrl, scrapeOptions: { formats: ['screenshot', 'markdown'] } }),
             signal: AbortSignal.timeout(35000),
           })
-          if (!res.ok) return `browser_screenshot error: ${res.status} — ${await res.text()}`
+          console.log('[screenshot] status:', res.status, 'elapsed:', Date.now() - scrapeStart, 'ms')
+          if (!res.ok) {
+            const errText = await res.text()
+            console.log('[screenshot] error body:', errText.slice(0, 200))
+            return `browser_screenshot error: ${res.status} — ${errText}`
+          }
           const data = await res.json() as { screenshot?: string; markdown?: string; metadata?: { title?: string }; data?: { screenshot?: string; markdown?: string } }
+          console.log('[screenshot] response keys:', Object.keys(data).join(','), 'hasScreenshot:', !!(data.screenshot ?? data.data?.screenshot))
           const screenshot = data.screenshot ?? data.data?.screenshot
           const markdown = data.markdown ?? data.data?.markdown
           const pageTitle = data.metadata?.title ?? hbUrl
@@ -5670,13 +5687,15 @@ function injectMediaIntoContent(content: string, toolResults: Array<{ name: stri
   let extra = ''
   for (const tr of toolResults) {
     if (tr.result.startsWith('IMAGE_URL:')) {
-      const url = tr.result.slice('IMAGE_URL:'.length)
+      // Only take the first line — the URL (rest is caption/markdown)
+      const url = tr.result.slice('IMAGE_URL:'.length).split('\n')[0].trim()
       extra += `\n\n\`\`\`image\n${url}\n\`\`\``
     } else if (tr.result.startsWith('VIDEO_URL:')) {
-      const url = tr.result.slice('VIDEO_URL:'.length)
+      const url = tr.result.slice('VIDEO_URL:'.length).split('\n')[0].trim()
       extra += `\n\n\`\`\`video\n${url}\n\`\`\``
     } else if (tr.result.startsWith('AUDIO_URL:')) {
-      const audioData = tr.result.slice('AUDIO_URL:'.length)
+      // AUDIO_URL format: URL|TrackTitle
+      const audioData = tr.result.slice('AUDIO_URL:'.length).split('\n')[0].trim()
       extra += `\n\n\`\`\`audio\n${audioData}\n\`\`\``
     }
   }
@@ -7551,7 +7570,7 @@ Rules:
               }
               // Emit step_trace complete
               const stepDuration = Date.now() - toolStart
-              const isStepError = result.startsWith('Error') || result.startsWith('patch_file error') || result.startsWith('LOOP_INTERRUPT')
+              const isStepError = result.startsWith('Error') || result.startsWith('patch_file error') || result.startsWith('LOOP_INTERRUPT') || (result.includes(' error:') && !result.startsWith('IMAGE_URL') && !result.startsWith('AUDIO_URL') && !result.startsWith('VIDEO_URL'))
               // Live emit done/error step_trace immediately after each tool completes
               // Build descriptive label from actual args so worklog/process tab shows what the tool did
               const toolArgs = args as Record<string, unknown>

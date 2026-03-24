@@ -404,7 +404,7 @@ export function WorklogPage() {
       </div>
 
       {/* Feed */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto pb-12">
         {loading && (
           <div className="flex items-center gap-2 px-5 py-4 text-xs text-text-muted">
             <Loader2 size={12} className="animate-spin" />

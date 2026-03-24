@@ -40,40 +40,62 @@ function cToF(c: number): number {
 
 export async function GET(req: Request) {
   try {
-    // 1. Get user location — browser-supplied lat/lon required
     const { searchParams } = new URL(req.url)
     const qLat = searchParams.get('lat')
     const qLon = searchParams.get('lon')
+    const qCity = searchParams.get('city')
 
-    if (!qLat || !qLon) {
-      return NextResponse.json(
-        { error: 'Location required. Please allow location access in your browser.' },
-        { status: 400 }
-      )
-    }
-
-    let lat = parseFloat(qLat)
-    let lon = parseFloat(qLon)
+    let lat: number, lon: number
     let city = 'Your area', region = '', country = ''
 
-    if (isNaN(lat) || isNaN(lon)) {
+    if (qLat && qLon) {
+      // Browser-supplied coordinates
+      lat = parseFloat(qLat)
+      lon = parseFloat(qLon)
+      if (isNaN(lat) || isNaN(lon)) {
+        return NextResponse.json({ error: 'Invalid coordinates supplied.' }, { status: 400 })
+      }
+      // Reverse-geocode to get city name
+      try {
+        const rgRes = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`,
+          { headers: { 'User-Agent': 'SparkieStudio/1.0' } }
+        )
+        const rg = await rgRes.json()
+        city = rg.address?.city || rg.address?.town || rg.address?.village || rg.address?.county || 'Your area'
+        region = rg.address?.state || ''
+        country = rg.address?.country_code?.toUpperCase() || ''
+      } catch { /* use 'Your area' default */ }
+    } else if (qCity) {
+      // City name — forward-geocode via Nominatim, bias to US
+      const geoRes = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(qCity)}&format=json&limit=1&countrycodes=us`,
+        { headers: { 'User-Agent': 'SparkieStudio/1.0' } }
+      )
+      const geoData = await geoRes.json() as Array<{ lat: string; lon: string; display_name: string; address?: { city?: string; town?: string; state?: string; country_code?: string } }>
+      if (!geoData.length) {
+        // Try without country bias
+        const geoRes2 = await fetch(
+          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(qCity)}&format=json&limit=1`,
+          { headers: { 'User-Agent': 'SparkieStudio/1.0' } }
+        )
+        const geoData2 = await geoRes2.json() as typeof geoData
+        if (!geoData2.length) return NextResponse.json({ error: `City not found: ${qCity}` }, { status: 404 })
+        geoData.push(...geoData2)
+      }
+      lat = parseFloat(geoData[0].lat)
+      lon = parseFloat(geoData[0].lon)
+      // Parse display name for friendly city/region
+      const parts = geoData[0].display_name.split(',').map((s: string) => s.trim())
+      city = parts[0] || qCity
+      region = parts[2] || parts[1] || ''
+      country = parts[parts.length - 1] || ''
+    } else {
       return NextResponse.json(
-        { error: 'Invalid coordinates supplied.' },
+        { error: 'Location required. Pass lat/lon or city parameter.' },
         { status: 400 }
       )
     }
-
-    // Reverse-geocode to get city name
-    try {
-      const rgRes = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`,
-        { headers: { 'User-Agent': 'SparkyStudio/1.0' } }
-      )
-      const rg = await rgRes.json()
-      city = rg.address?.city || rg.address?.town || rg.address?.village || rg.address?.county || 'Your area'
-      region = rg.address?.state || ''
-      country = rg.address?.country_code?.toUpperCase() || ''
-    } catch { /* use 'Your area' default */ }
 
     // 2. Fetch weather from open-meteo (free, no API key)
     const weatherUrl = new URL('https://api.open-meteo.com/v1/forecast')
