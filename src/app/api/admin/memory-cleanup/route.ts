@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { query } from '@/lib/db'
 
 // One-time memory cleanup endpoint — call once after deploy to fix bad DB entries.
-// Protected by ADMIN_SECRET env var.
+// Auth: x-admin-secret header must match NEXTAUTH_SECRET env var.
 export async function POST(req: NextRequest) {
-  const { secret } = await req.json().catch(() => ({}))
-  if (!secret || secret !== process.env.ADMIN_SECRET) {
+  const secret = req.headers.get('x-admin-secret') ?? ''
+  const expected = process.env.NEXTAUTH_SECRET ?? ''
+  if (!expected || secret !== expected) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -20,13 +21,13 @@ export async function POST(req: NextRequest) {
 
     // 2. Delete template string entries (contain "${") from user_memories
     const r2 = await query(
-      `DELETE FROM user_memories WHERE content LIKE '%\${%'`
+      `DELETE FROM user_memories WHERE content LIKE '%${'{'}%'`
     )
     results.deleted_template_strings_user = r2.rowCount ?? 0
 
     // 3. Delete template string entries from sparkie_self_memory
     const r3 = await query(
-      `DELETE FROM sparkie_self_memory WHERE content LIKE '%\${%'`
+      `DELETE FROM sparkie_self_memory WHERE content LIKE '%${'{'}%'`
     )
     results.deleted_template_strings_self = r3.rowCount ?? 0
 
@@ -36,17 +37,17 @@ export async function POST(req: NextRequest) {
     )
     results.deleted_skill_docs_from_user = r4.rowCount ?? 0
 
-    // 5. Replace "They " / "Their " / "the user" with "Michael " in user_memories
+    // 5. Replace "They " / "Their " / "The user" with "Michael" in user_memories
     const r5 = await query(
       `UPDATE user_memories
        SET content = regexp_replace(
          regexp_replace(
-           regexp_replace(content, '\\bThey\\b', 'Michael', 'g'),
-           '\\bTheir\\b', 'Michael''s', 'g'
+           regexp_replace(content, '\\mThey\\M', 'Michael', 'g'),
+           '\\mTheir\\M', 'Michael''s', 'g'
          ),
-         '\\bThe user\\b', 'Michael', 'g'
+         '\\mThe user\\M', 'Michael', 'gi'
        )
-       WHERE content ~* '\\b(They|Their|The user)\\b'`
+       WHERE content ~* '\\m(They|Their|The user)\\M'`
     )
     results.fixed_pronouns = r5.rowCount ?? 0
 
