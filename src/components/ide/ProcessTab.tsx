@@ -112,8 +112,10 @@ function TraceRow({ trace, isNew }: { trace: StepTrace; isNew?: boolean }) {
 
 function FrozenCard({ group, index, hasLive }: { group: { chipLabel: string; traces: StepTrace[] }; index: number; hasLive: boolean }) {
   const [open, setOpen] = useState(index === 0 && !hasLive)
-  const doneTraces = group.traces.filter(t => t.status === 'done')
-  const errorTraces = group.traces.filter(t => t.status === 'error')
+  // Count only non-thought traces for the step counter
+  const toolTraces = group.traces.filter(t => t.type !== 'thought')
+  const doneTraces = toolTraces.filter(t => t.status === 'done' || t.status === 'error')
+  const errorTraces = toolTraces.filter(t => t.status === 'error')
   const totalMs = group.traces.reduce((sum, t) => sum + (t.duration ?? 0), 0)
 
   const firstMeaningful = group.traces.find(t => t.type === 'thought' && (t.text ?? t.label ?? '').length > 20 && !/sparkie thinking/i.test(t.text ?? t.label ?? ''))
@@ -134,7 +136,7 @@ function FrozenCard({ group, index, hasLive }: { group: { chipLabel: string; tra
             <span className="text-[9px] text-red-400">{errorTraces.length} err</span>
           )}
           <span className="text-[9px] text-text-muted/60 tabular-nums">
-            {doneTraces.length}/{group.traces.length} steps
+            {doneTraces.length}/{toolTraces.length} steps
           </span>
           {totalMs > 0 && (
             <span className="text-[9px] text-text-muted/60 tabular-nums">

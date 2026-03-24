@@ -121,7 +121,7 @@ const STEP_ICON_MAP: Record<string, string> = {
 function InMemoryPill({ traces }: { traces: StepTrace[] }) {
   const [open, setOpen] = React.useState(false)
   const toolTraces = traces.filter(t => t.type !== 'thought')
-  const doneCount = toolTraces.filter(t => t.status === 'done').length
+  const finishedCount = toolTraces.filter(t => t.status === 'done' || t.status === 'error').length
   const errorCount = toolTraces.filter(t => t.status === 'error').length
   const memoryTrace = traces.find(t => t.type === 'memory')
   // Smart label: "Resuming: [Topic]" > "Memory recalled: [Name]" > "In memory: N steps"
@@ -129,7 +129,7 @@ function InMemoryPill({ traces }: { traces: StepTrace[] }) {
     ? `Resuming: ${memoryTrace.memoryName}`
     : memoryTrace?.memoryName
       ? `Memory recalled: ${memoryTrace.memoryName}`
-      : `In memory: ${doneCount}/${toolTraces.length} steps${errorCount > 0 ? ` · ${errorCount} error` : ''}`
+      : `In memory: ${finishedCount}/${toolTraces.length} steps${errorCount > 0 ? ` · ${errorCount} error` : ''}`
   return (
     <div className="mb-1.5 flex flex-col gap-1">
       <button
@@ -439,17 +439,36 @@ function MessageBubbleInner({ message, userAvatarUrl }: Props) {
               </div>
             </div>
           ) : isImage && !message.isStreaming ? (
-            <div className="space-y-2">
-              <div className="relative group rounded-lg overflow-hidden">
-                <img src={message.imageUrl} alt={message.imagePrompt || "Generated image"} className="w-full max-w-md rounded-lg" loading="lazy" />
-                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <a href={message.imageUrl} download target="_blank" rel="noopener noreferrer"
-                    className="p-1.5 rounded-md bg-black/60 text-white hover:bg-black/80 transition-colors">
-                    <Download size={14} />
-                  </a>
-                </div>
+            <div
+              style={{
+                background: '#0f0f14',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: '12px',
+                overflow: 'hidden',
+                maxWidth: '420px',
+                display: 'inline-block',
+                transition: 'box-shadow 0.2s, transform 0.2s',
+              }}
+              className="group hover:shadow-[0_0_0_2px_rgba(139,92,246,0.3)] hover:-translate-y-0.5"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={message.imageUrl}
+                alt={message.imagePrompt || "Generated image"}
+                style={{ width: '100%', display: 'block', objectFit: 'cover' }}
+                loading="lazy"
+              />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                {message.imagePrompt && (
+                  <span style={{ fontSize: '11px', color: '#9ca3af', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {message.imagePrompt.slice(0, 80)}
+                  </span>
+                )}
+                <a href={message.imageUrl} download target="_blank" rel="noopener noreferrer"
+                  className="p-1 rounded hover:bg-white/10 text-text-muted hover:text-text-primary transition-colors shrink-0 ml-1">
+                  <Download size={12} />
+                </a>
               </div>
-              {message.imagePrompt && <p className="text-xs text-text-muted italic">{message.imagePrompt}</p>}
             </div>
           ) : isBuildCard && !message.isStreaming ? (
             <BuildCard card={message.buildCard!} />

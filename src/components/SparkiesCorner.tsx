@@ -953,7 +953,7 @@ export function SparkiesCorner() {
         fetch('/api/identity?type=session').then(r => r.json()).catch(() => ({})),
         fetch('/api/identity?type=user').then(r => r.json()).catch(() => ({})),
         fetch('/api/identity?type=memory').then(r => r.json()).catch(() => ({})),
-        fetch('/api/worklog?limit=60').then(r => r.ok ? r.json() : { entries: [] }).catch(() => ({ entries: [] })),
+        fetch('/api/worklog?limit=200').then(r => r.ok ? r.json() : { entries: [] }).catch(() => ({ entries: [] })),
         fetch('/api/sparkie-feed').then(r => r.ok ? r.json() : { posts: [] }).catch(() => ({ posts: [] })),
       ])
 

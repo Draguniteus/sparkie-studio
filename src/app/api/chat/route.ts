@@ -5206,26 +5206,47 @@ def invoke_llm(query, model='MiniMax-M2.7'):
         if (!hbUrl) return 'browser_screenshot: url is required'
         const HB_KEY = process.env.HYPERBROWSER_API_KEY ?? ''
         if (!HB_KEY) return 'browser_screenshot error: HYPERBROWSER_API_KEY not configured'
-        console.log('[screenshot] key set:', HB_KEY.length > 0, 'url:', hbUrl)
+        console.log('[screenshot] starting for url:', hbUrl)
         try {
+          // Hyperbrowser /api/scrape supports 'screenshot' format — pass it alongside 'markdown'
+          // The response nests data under a top-level 'data' key when using session-mode
           const scrapeStart = Date.now()
           const res = await fetch('https://api.hyperbrowser.ai/api/scrape', {
             method: 'POST',
             headers: { 'x-api-key': HB_KEY, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url: hbUrl, scrapeOptions: { formats: ['screenshot', 'markdown'] } }),
+            body: JSON.stringify({
+              url: hbUrl,
+              scrapeOptions: { formats: ['screenshot', 'markdown'] },
+              sessionOptions: { useProxy: false, solveCaptchas: false },
+            }),
             signal: AbortSignal.timeout(35000),
           })
           console.log('[screenshot] status:', res.status, 'elapsed:', Date.now() - scrapeStart, 'ms')
           if (!res.ok) {
             const errText = await res.text()
-            console.log('[screenshot] error body:', errText.slice(0, 200))
-            return `browser_screenshot error: ${res.status} — ${errText}`
+            console.log('[screenshot] error body:', errText.slice(0, 300))
+            // Fallback: use browser_navigate to get page content instead of screenshot
+            const fallbackRes = await fetch('https://api.hyperbrowser.ai/api/scrape', {
+              method: 'POST',
+              headers: { 'x-api-key': HB_KEY, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url: hbUrl, scrapeOptions: { formats: ['markdown'] } }),
+              signal: AbortSignal.timeout(30000),
+            })
+            if (fallbackRes.ok) {
+              const fd = await fallbackRes.json() as { markdown?: string; data?: { markdown?: string }; metadata?: { title?: string } }
+              const md = fd.markdown ?? fd.data?.markdown ?? ''
+              return `browser_screenshot: screenshot unavailable (API error ${res.status}). Page text:\nURL: ${hbUrl}\nTitle: ${fd.metadata?.title ?? hbUrl}\n\n${md.slice(0, 800)}`
+            }
+            return `browser_screenshot error: ${res.status} — ${errText.slice(0, 200)}`
           }
-          const data = await res.json() as { screenshot?: string; markdown?: string; metadata?: { title?: string }; data?: { screenshot?: string; markdown?: string } }
-          console.log('[screenshot] response keys:', Object.keys(data).join(','), 'hasScreenshot:', !!(data.screenshot ?? data.data?.screenshot))
+          const data = await res.json() as {
+            screenshot?: string; markdown?: string; metadata?: { title?: string }
+            data?: { screenshot?: string; markdown?: string; metadata?: { title?: string } }
+          }
+          console.log('[screenshot] response keys:', Object.keys(data).join(','))
           const screenshot = data.screenshot ?? data.data?.screenshot
           const markdown = data.markdown ?? data.data?.markdown
-          const pageTitle = data.metadata?.title ?? hbUrl
+          const pageTitle = data.metadata?.title ?? data.data?.metadata?.title ?? hbUrl
           if (screenshot) {
             const imgData = screenshot.startsWith('data:') ? screenshot : `data:image/png;base64,${screenshot}`
             // Persist to DB asset for stable URL if userId available
@@ -5242,6 +5263,7 @@ def invoke_llm(query, model='MiniMax-M2.7'):
             }
             return `IMAGE_URL:${imgData}\nScreenshot of: ${pageTitle}`
           }
+          // No screenshot in response — return page text as fallback
           return `browser_screenshot: no image returned. Page: ${pageTitle}\n${markdown?.slice(0, 500) ?? ''}`
         } catch (e) { return `browser_screenshot error: ${String(e)}` }
       }
@@ -7631,6 +7653,39 @@ Rules:
           if (toolCalls.length > 1) {
             const parallelTotalMs = Date.now() - parallelBatchStart
             console.log(`[parallel] ${toolCalls.length} tools in ${parallelTotalMs}ms`)
+          }
+
+          // Fallback asset save: for any media result that came back as a raw data URL
+          // (meaning the in-tool DB save failed), try to persist it now.
+          if (userId) {
+            for (const mr of toolMediaResults) {
+              const url = mr.result.slice(mr.result.indexOf(':') + 1).trim()
+              const prefix = mr.result.startsWith('IMAGE_URL:') ? 'IMAGE_URL:' : mr.result.startsWith('AUDIO_URL:') ? 'AUDIO_URL:' : 'VIDEO_URL:'
+              const assetType = prefix === 'IMAGE_URL:' ? 'image' : prefix === 'AUDIO_URL:' ? 'audio' : 'video'
+              // Only fallback-save raw data URLs — stable /api/assets-image?fid= URLs are already saved
+              if (url.startsWith('data:')) {
+                try {
+                  const fid = crypto.randomUUID()
+                  const ext = assetType === 'image' ? 'jpg' : assetType === 'audio' ? 'mp3' : 'mp4'
+                  await query(
+                    `INSERT INTO sparkie_assets (user_id, name, content, asset_type, source, file_id, chat_title, chat_id, language) VALUES ($1, $2, $3, $4, 'agent', $5, '', '', '')`,
+                    [userId, `${assetType}-${Date.now()}.${ext}`, url, assetType, fid]
+                  )
+                  const savedUrl = `${baseUrl}/api/assets-image?fid=${fid}`
+                  console.log(`[asset-fallback] saved ${assetType} → ${savedUrl}`)
+                  // Update toolResults content so the AI sees the stable URL
+                  for (const tr of toolResults) {
+                    if (tr.content.includes(url)) {
+                      const idx = toolResults.indexOf(tr)
+                      toolResults[idx] = { ...tr, content: tr.content.replace(url, savedUrl) }
+                      mr.result = mr.result.replace(url, savedUrl)
+                    }
+                  }
+                } catch (saveErr) {
+                  console.warn(`[asset-fallback] DB save failed:`, saveErr)
+                }
+              }
+            }
           }
 
           // Check for IDE build trigger — emit event and halt loop
