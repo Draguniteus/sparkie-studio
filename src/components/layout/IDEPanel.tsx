@@ -24,7 +24,9 @@ export function IDEPanel() {
           </svg>
         </button>
       </div>
-      <IDEPanelInner />
+      <div className="flex-1 min-h-0 overflow-hidden">
+        <IDEPanelInner />
+      </div>
     </div>
   )
 }

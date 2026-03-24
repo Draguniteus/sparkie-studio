@@ -344,13 +344,18 @@ export function MemoryTab() {
   )
 }
 
+const TRUNCATE_LEN = 150
+
 // ── User memory card ───────────────────────────────────────────────────────
 function UserMemoryCard({ m, onForget, forgetting, forgotten }: {
   m: UserMemoryEntry; onForget: (id: number) => void; forgetting: boolean; forgotten: boolean
 }) {
+  const [expanded, setExpanded] = useState(false)
   const style = getUserStyle(m.category)
   const Icon = style.icon
   const label = 'label' in style ? (style as { label: string }).label : m.category.replace(/_/g, ' ')
+  const isLong = m.content.length > TRUNCATE_LEN
+  const displayContent = isLong && !expanded ? m.content.slice(0, TRUNCATE_LEN) + '…' : m.content
 
   return (
     <div className={`relative rounded-xl border-l-2 p-3 transition-all duration-500 ${style.card} ${forgotten ? 'opacity-30 scale-95' : 'opacity-100'}`}>
@@ -365,12 +370,17 @@ function UserMemoryCard({ m, onForget, forgetting, forgotten }: {
           <Icon size={11} className={style.dot === 'bg-purple-500' ? 'text-purple-300' : style.dot === 'bg-indigo-400' ? 'text-indigo-300' : style.dot === 'bg-amber-500' ? 'text-amber-300' : 'text-blue-300'} />
         </div>
         <div className="flex-1 min-w-0">
-          <p className={`text-xs text-text-secondary leading-relaxed break-words ${forgotten ? 'line-through decoration-white/40' : ''}`}>{m.content}</p>
+          <p className={`text-xs text-text-secondary leading-relaxed break-words ${forgotten ? 'line-through decoration-white/40' : ''}`}>{displayContent}</p>
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
             <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${style.pill}`}>{label}</span>
             <span className="text-[9px] text-text-muted flex items-center gap-0.5">
               <Clock size={8} />{formatDate(m.created_at)}
             </span>
+            {isLong && (
+              <button onClick={() => setExpanded(v => !v)} className="text-[9px] text-purple-400 hover:text-purple-300 transition-colors">
+                {expanded ? 'collapse' : `+${m.content.length - TRUNCATE_LEN} more`}
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -382,9 +392,12 @@ function UserMemoryCard({ m, onForget, forgetting, forgotten }: {
 function SelfMemoryCard({ m, onForget, forgetting, forgotten }: {
   m: SelfMemoryEntry; onForget: (id: number) => void; forgetting: boolean; forgotten: boolean
 }) {
+  const [expanded, setExpanded] = useState(false)
   const style = getSelfStyle(m.category)
   const Icon = style.icon
   const ttl = ttlLabel(m.expires_at, m.stale_flagged)
+  const isLong = m.content.length > TRUNCATE_LEN
+  const displayContent = isLong && !expanded ? m.content.slice(0, TRUNCATE_LEN) + '…' : m.content
 
   return (
     <div className={`relative rounded-xl border-l-2 p-3 transition-all duration-500 ${style.card} ${forgotten ? 'opacity-30 scale-95' : 'opacity-100'}`}>
@@ -399,11 +412,16 @@ function SelfMemoryCard({ m, onForget, forgetting, forgotten }: {
           <Icon size={11} className={m.category === 'work_rule' ? 'text-purple-300' : m.category === 'self' ? 'text-blue-300' : m.category === 'api_behavior' ? 'text-amber-300' : 'text-slate-300'} />
         </div>
         <div className="flex-1 min-w-0">
-          <p className={`text-xs text-text-secondary leading-relaxed break-words ${forgotten ? 'line-through decoration-white/40' : ''}`}>{m.content}</p>
+          <p className={`text-xs text-text-secondary leading-relaxed break-words ${forgotten ? 'line-through decoration-white/40' : ''}`}>{displayContent}</p>
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
             <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${style.pill}`}>{m.category.replace(/_/g, ' ')}</span>
             <span className="text-[9px] text-text-muted flex items-center gap-0.5"><Clock size={8} />{formatDate(m.created_at)}</span>
             {ttl && <span className={`text-[9px] ${ttl.cls}`}>{ttl.label}</span>}
+            {isLong && (
+              <button onClick={() => setExpanded(v => !v)} className="text-[9px] text-blue-400 hover:text-blue-300 transition-colors">
+                {expanded ? 'collapse' : `+${m.content.length - TRUNCATE_LEN} more`}
+              </button>
+            )}
           </div>
         </div>
       </div>

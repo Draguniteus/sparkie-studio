@@ -119,9 +119,10 @@ function FrozenCard({ group, index, hasLive }: { group: { chipLabel: string; tra
   const totalMs = group.traces.reduce((sum, t) => sum + (t.duration ?? 0), 0)
 
   const firstMeaningful = group.traces.find(t => t.type === 'thought' && (t.text ?? t.label ?? '').length > 20 && !/sparkie thinking/i.test(t.text ?? t.label ?? ''))
-  const firstTool = group.traces.find(t => t.type !== 'thought')
-  const raw = firstMeaningful?.text ?? firstMeaningful?.label ?? firstTool?.label ?? ''
-  const label = raw.slice(0, 55) || (index === 0 && !hasLive ? 'Last response' : `${index + 1} responses ago`)
+  const toolTraceLabels = group.traces.filter(t => t.type !== 'thought').map(t => t.label ?? t.toolName ?? '').filter(Boolean)
+  const raw = firstMeaningful?.text ?? firstMeaningful?.label ?? toolTraceLabels[0] ?? ''
+  const toolSummary = toolTraceLabels.length > 0 ? toolTraceLabels.slice(0, 3).join(' → ') : ''
+  const label = raw.slice(0, 55) || toolSummary.slice(0, 55) || (index === 0 && !hasLive ? 'Last response' : `${index + 1} responses ago`)
 
   return (
     <div className="rounded-lg border border-hive-border/60 overflow-hidden">

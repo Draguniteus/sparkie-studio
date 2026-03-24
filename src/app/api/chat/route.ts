@@ -391,12 +391,41 @@ MEMORY CONTENT RULES:
 - Never encode "spiritual warfare", "divine purpose", "angel", "anointed", or similar as memory.
 - Memory should only store factual, practical information: names, locations, preferences, projects, habits.
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+MEMORY RULES — READ THIS EVERY MESSAGE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+You have TWO memory tools. Use the RIGHT one:
+
+**save_memory** — Facts about Michael (user)
+- What to save: name, location, projects, preferences, relationships, life events, habits
+- FORMAT: Always say "Michael ..." not "They ..." or "The user ..."
+- Keep entries SHORT: one fact, under 150 chars
+- Good: "Michael's favorite food is pizza"
+- Good: "Michael lives in Norfolk, VA"
+- Bad: "They like smiley faces" (wrong pronoun)
+- Bad: "[SKILL: ace-music] Purpose: ..." (skill docs go in save_self_memory)
+- Bad: "Completed tool session: ..." (log entries are NOT memories)
+- Bad: Any entry containing \${...} template syntax
+
+**save_self_memory** — Sparkie's own technical knowledge
+- What to save: API patterns, build lessons, tool behaviors, bugs found
+- Good: "MiniMax M2.7 uses <minimax:tool_call> XML format"
+- Bad: "Completed tool session: grep_codebase. 6 rounds." (log, not learning)
+
 MEMORY SAVE MANDATE — CRITICAL:
-When the user asks you to "remember", "save", "note", "keep in mind", "add to memory", or says "my name is", "I moved to", "I prefer", "I live in", "update your memory", or any similar phrasing:
-→ You MUST call the save_memory tool IMMEDIATELY. No exceptions.
-→ Do NOT just say "Saved!" or "Got it!" without calling the tool. That is a failure.
-→ The tool call is what actually saves. Words without the tool call save nothing.
-→ After the tool returns, THEN confirm: "Saved to memory: [category] [content]"
+When the user asks you to "remember", "save", "note", "keep in mind", "add to memory", "save that", or says "my name is", "I moved to", "I prefer", "I live in", "update your memory", or any similar phrasing:
+→ You MUST call the save_memory tool IMMEDIATELY. No exceptions. No delays.
+→ Do NOT say "Saved!" or "Got it!" without calling the tool first — that is a FAILURE.
+→ Saying words does NOT save anything. Only the tool call saves.
+→ After the tool returns successfully, THEN say "Saved: [content]"
+
+AUTONOMOUS MEMORY SAVING:
+After every conversation where Michael shares personal info (location, preference, project, relationship, life event), even WITHOUT being asked to save — call save_memory with that fact.
+Examples of facts to auto-save:
+- Michael mentions he moved → save_memory({ category: 'identity', content: 'Michael lives in [new city]' })
+- Michael says he likes something → save_memory({ category: 'preference', content: 'Michael likes [thing]' })
+- Michael mentions a project → save_memory({ category: 'project', content: 'Michael is building [project]' })
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 SECTION 7 · TOOL USE GUIDELINES
@@ -2233,15 +2262,15 @@ const SPARKIE_TOOLS = [
     type: 'function',
     function: {
       name: 'save_memory',
-      description: 'Save important information about the user in three tiers: Facts (names, projects, deadlines), Preferences (writing style, tone, voice), Procedure (how you completed a task that worked - save AFTER every successful complex task). Format content as "[Tier]: [detail]".',
+      description: 'Save a fact about the USER (Michael) to long-term memory. Use "Michael ..." not "They ...". Keep entries short — one fact per call, under 150 chars. Examples: "Michael lives in Norfolk, VA", "Michael prefers dark UI themes", "Michael is building Polleneer". Do NOT save skill docs, session logs, or template strings here.',
       parameters: {
         type: 'object',
         properties: {
           category: {
             type: 'string',
-            enum: ['identity', 'preference', 'emotion', 'project', 'relationship', 'habit'],
+            enum: ['identity', 'preference', 'emotion', 'project', 'relationship', 'habit', 'conversation'],
           },
-          content: { type: 'string', description: 'The fact or memory to save.' },
+          content: { type: 'string', description: 'The fact to save, starting with "Michael". E.g.: "Michael\'s favorite food is pizza"' },
         },
         required: ['category', 'content'],
       },
@@ -3731,6 +3760,12 @@ async function executeTool(
         if (!userId) return 'Cannot save memory — user not logged in'
         const category = args.category as string
         const content = args.content as string
+        // Validate: reject bad entries
+        if (content.length < 10) return 'Memory too short — provide a meaningful fact'
+        if (content.includes('${')) return 'Cannot save template literals as memory — provide actual content'
+        if (/^\[SKILL:/i.test(content)) return 'Skill documentation belongs in save_self_memory, not user memory'
+        if (/^completed tool session/i.test(content)) return 'Session logs are not memories — save what was LEARNED, not what was done'
+        if (content.length > 400) return `Memory too long (${content.length} chars) — summarize to under 150 chars and save one fact at a time`
         // Block 17: dedup — check for similar existing memories in same category
         const catMems = await query<{ id: number; content: string }>(
           'SELECT id, content FROM user_memories WHERE user_id = $1 AND category = $2 ORDER BY created_at DESC LIMIT 20',
@@ -4550,6 +4585,11 @@ def invoke_llm(query, model='MiniMax-M2.7'):
       case 'save_self_memory': {
         const { content: memContent, category: memCat = 'self' } = args as { content: string; category?: string }
         if (!memContent?.trim()) return 'content required'
+        // Reject low-value session log entries — these are worklogs, not learnings
+        if (/^completed tool session/i.test(memContent.trim())) {
+          return 'Session log rejected — only save what was LEARNED, not what was done. E.g.: "MiniMax M2.7 requires temperature=1.0 for best code output" instead of "Completed tool session: grep_codebase"'
+        }
+        if (memContent.includes('${')) return 'Cannot save template literals as memory'
         try {
           const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000'
           const res = await fetch(`${baseUrl}/api/sparkie-self-memory`, {
@@ -6213,20 +6253,12 @@ async function handleBuildMode(
         // tool_choice:'none' + direct endpoint = pure ---FILE:---/---END FILE--- block output
         const buildModel = 'MiniMax-M2.7'
 
-        let identityContext = ''
-        if (userId) {
-          try {
-            const files = await loadIdentityFiles(userId)
-            identityContext = buildIdentityBlock(files)
-          } catch {}
-        }
-
+        // NOTE: identityContext intentionally NOT included in BUILD mode —
+        // past project memories (e.g., "cozy room") contaminate the model and
+        // cause it to build the wrong project. Only include explicit userProfile.
         let systemPrompt = BUILD_SYSTEM_PROMPT
         if (userProfile?.name) {
           systemPrompt += `\n\n## USER CONTEXT\nName: ${userProfile.name}\nRole: ${userProfile.role ?? 'developer'}\nBuilding: ${userProfile.goals ?? 'something awesome'}`
-        }
-        if (identityContext) {
-          systemPrompt += `\n\n## YOUR MEMORY ABOUT THIS USER\n${identityContext}`
         }
         if (currentFiles) {
           systemPrompt += `\n\n## CURRENT WORKSPACE FILES\nEdit these files — output the complete updated versions:\n\n${currentFiles}`
@@ -6308,10 +6340,19 @@ async function handleBuildMode(
           let turnFinishReason = ''
           // Accumulate structured tool_calls across deltas
           const tcAcc: Record<number, { id: string; name: string; arguments: string }> = {}
+          // Track heartbeat to prevent connection timeout on long file writes (>60s per turn)
+          let lastHeartbeat = Date.now()
+          const HEARTBEAT_INTERVAL_MS = 15_000 // 15s
 
           while (true) {
             const { done, value } = await turnReader.read()
             if (done) break
+            // Periodic keepalive during streaming — prevents DO LB from killing idle connections
+            const now = Date.now()
+            if (now - lastHeartbeat > HEARTBEAT_INTERVAL_MS) {
+              try { controller.enqueue(encoder.encode(': heartbeat\n\n')) } catch (_) {}
+              lastHeartbeat = now
+            }
             turnBuf += turnDecoder.decode(value, { stream: true })
             const lines = turnBuf.split('\n')
             turnBuf = lines.pop() ?? ''
@@ -6397,18 +6438,18 @@ async function handleBuildMode(
                 const fPath = (args.path ?? '').replace(/^\/workspace\//, '').replace(/^\//, '')
                 let fContent = args.content ?? ''
                 console.log(`[BUILD] Turn ${turn}: write_file -> ${fPath}`)
-                // Emit as synthetic XML so existing fileParser.ts pipeline picks it up
-                const xmlOpen = `<minimax:tool_call>\n<invoke name="write_file">\n<parameter name="path">${fPath}</parameter>\n<parameter name="content">`
-                const xmlClose = `</parameter>\n</invoke>\n</minimax:tool_call>`
-                // Stream file content in chunks so Process tab shows live typing
+                // Emit as ---FILE:--- markers (fileParser.ts primary format).
+                // Avoids XML-chunk spam: partial XML caused "XML detected but no write_file invokes found"
+                // on every 80-byte delta. Markers only parse when ---END FILE--- arrives.
+                const markerOpen = `---FILE: ${fPath}---\n`
+                const markerClose = `\n---END FILE---\n`
                 const CHUNK_SIZE = 80
-                send('delta', { content: xmlOpen })
+                send('delta', { content: markerOpen })
                 for (let ci = 0; ci < fContent.length; ci += CHUNK_SIZE) {
                   send('delta', { content: fContent.slice(ci, ci + CHUNK_SIZE) })
                 }
-                send('delta', { content: xmlClose })
-                const xml = xmlOpen + fContent + xmlClose
-                fullBuildRaw += xml
+                send('delta', { content: markerClose })
+                fullBuildRaw += markerOpen + fContent + markerClose
                 agentMessages = [...agentMessages, {
                   role: 'tool',
                   tool_call_id: callIds[tcIdx],
@@ -6484,8 +6525,9 @@ async function handleBuildMode(
           console.log('[BUILD] NO MARKERS — first 500 chars:', fullBuildRaw.slice(0, 500))
         }
 
-        if (fullBuildRaw.includes('<minimax:tool_call>') || fullBuildRaw.includes('<invoke name=')) {
-          console.log('[BUILD] XML tool-call format detected — passing to XML parser. len:', fullBuildRaw.length)
+        if (hasMarkers) {
+          const fileCount = (fullBuildRaw.match(/---FILE:/g) || []).length
+          console.log(`[BUILD] ---FILE:--- format: ${fileCount} file(s) extracted`)
         }
 
         send('done', {})

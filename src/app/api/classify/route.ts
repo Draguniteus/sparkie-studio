@@ -50,14 +50,16 @@ export async function POST(req: NextRequest) {
     }
 
     // Long messages without explicit build intent → chat
-    const isBuildPhrase = /\b(build me|create a|make me a|generate a|\/build)\b/i.test(message as string ?? '')
-    if (typeof message === 'string' && message.length > 150 && !isBuildPhrase) {
+    const isBuildPhrase = /\b(build me|build a|build an|build the|build it|create a|create an|create the|make me a|make a|make an|make the|generate a|generate an|implement a|implement an|write a|write an|\/build)\b/i.test(message as string ?? '')
+    // Also catch messages that START with build verbs (e.g. "Build an interactive...")
+    const startsWithBuildVerb = /^(build|create|make|generate|implement|write|scaffold|develop|code|program)\b/i.test((message as string ?? '').trim())
+    if (typeof message === 'string' && message.length > 150 && !isBuildPhrase && !startsWithBuildVerb) {
       return new Response(JSON.stringify({ mode: 'chat' }), { headers: { 'Content-Type': 'application/json' } })
     }
 
     // Questions ending in ? → always chat unless explicit build keyword
     const msgTrimmed = (message as string ?? '').trim()
-    if (msgTrimmed.endsWith('?') && !isBuildPhrase) {
+    if (msgTrimmed.endsWith('?') && !isBuildPhrase && !startsWithBuildVerb) {
       return new Response(JSON.stringify({ mode: 'chat' }), { headers: { 'Content-Type': 'application/json' } })
     }
     // Questions starting with question words → chat
