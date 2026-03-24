@@ -6234,9 +6234,16 @@ async function handleBuildMode(
 
         send('thinking', { text: '⚡ Analyzing request…' })
 
+        // Build mode: only send the last user message (the actual build request).
+        // Full conversation history causes MiniMax to respond conversationally
+        // ("On it!", "All done!") instead of calling write_file — prior Sparkie
+        // ACK/chat messages confuse the model about whether it's chatting or coding.
+        const lastUserMsg = (messages as Array<{ role: string; content: string }>)
+          .filter(m => m.role === 'user')
+          .slice(-1)
         const apiMessages = [
           { role: 'system', content: systemPrompt },
-          ...messages,
+          ...lastUserMsg,
         ]
 
         // MiniMax direct API — no proxy, no hardwired XML tool-call behavior
@@ -6272,7 +6279,7 @@ async function handleBuildMode(
           if (turn > 0) { try { controller.enqueue(encoder.encode(': heartbeat\n\n')) } catch (_) {} }
           const turnRes = await fetch(buildEndpoint, {
             method: 'POST',
-            signal: AbortSignal.timeout(120_000),
+            signal: AbortSignal.timeout(170_000),
             headers: {
               'Content-Type': 'application/json',
               Authorization: `Bearer ${apiKey}`,
@@ -6282,7 +6289,8 @@ async function handleBuildMode(
               messages: agentMessages,
               stream: true,
               max_tokens: 16000,
-              temperature: 0.1,
+              temperature: 1.0,
+              top_p: 0.95,
               tools: [WRITE_FILE_TOOL],
               tool_choice: 'auto',
             }),
@@ -6438,7 +6446,8 @@ async function handleBuildMode(
           emptyRetries = 0 // reset on any non-empty turn
 
           // Fallback: XML text-mode content — extract path from XML to build tool result
-          const invokeMatch = /<invoke[^>]*name=["']write_file["'][^>]*>[\s\S]*?<parameter[^>]*name=["']path["'][^>]*>([\s\S]*?)<\/parameter>/i.exec(turnContent)
+          // Handle both quoted (<invoke name="write_file">) and unquoted (<invoke name=write_file>) per M2.7 docs
+          const invokeMatch = /<invoke[^>]*name=["']?write_file["']?[^>]*>[\s\S]*?<parameter[^>]*name=["']?path["']?[^>]*>([\s\S]*?)<\/parameter>/i.exec(turnContent)
           if (invokeMatch) {
             const fPath = invokeMatch[1].trim().replace(/^\/workspace\//, '').replace(/^\//, '')
             console.log(`[BUILD] Turn ${turn}: XML text-mode -> ${fPath}`)
@@ -6449,6 +6458,19 @@ async function handleBuildMode(
             ]
             if (turnFinishReason === 'stop' || turnFinishReason === '') break
             continue
+          }
+
+          // No tool call, no XML invoke, but model returned short prose on turn 0
+          // This means the model responded conversationally instead of calling write_file.
+          // Nudge it once with an explicit instruction to call the tool.
+          if (turn === 0 && turnContent.length > 0 && turnContent.length < 500) {
+            console.log(`[BUILD] Turn 0: prose response (${turnContent.length} chars) — nudging model to call write_file`)
+            agentMessages = [
+              ...agentMessages,
+              { role: 'assistant', content: turnContent.trim() },
+              { role: 'user', content: 'Call write_file now with the first file. Do not respond with text.' },
+            ]
+            continue  // retry as turn 1
           }
 
           // No tool call and no XML invoke — model is done or gave a conversational response

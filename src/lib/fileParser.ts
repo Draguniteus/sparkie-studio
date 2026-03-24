@@ -235,13 +235,14 @@ export function parseAIResponse(raw: string, projectName?: string): ParseResult 
   if (isToolCallXml) {
     const xmlFiles: ParsedFile[] = []
 
-    // Format A: M2.5 <invoke name="write_file"> with <parameter> children
-    const invokeRe = /<invoke[^>]*name=["']write_file["'][^>]*>([\s\S]*?)(?:<\/invoke>|<\/minimax:tool_call>)/gi
+    // Format A: M2.5/M2.7 <invoke name="write_file"> with <parameter> children
+    // Handles both quoted (name="write_file") and unquoted (name=write_file) per official MiniMax docs
+    const invokeRe = /<invoke[^>]*name=["']?write_file["']?[^>]*>([\s\S]*?)(?:<\/invoke>|<\/minimax:tool_call>)/gi
     let m: RegExpExecArray | null
     while ((m = invokeRe.exec(normalized)) !== null) {
       const body = m[1]
-      const pPath = /<parameter[^>]*name=["']path["'][^>]*>([\s\S]*?)<\/parameter>/i.exec(body)
-      const pContent = /<parameter[^>]*name=["']content["'][^>]*>([\s\S]*?)<\/parameter>/i.exec(body)
+      const pPath = /<parameter[^>]*name=["']?path["']?[^>]*>([\s\S]*?)<\/parameter>/i.exec(body)
+      const pContent = /<parameter[^>]*name=["']?content["']?[^>]*>([\s\S]*?)<\/parameter>/i.exec(body)
       if (pPath && pContent) {
         const fp = pPath[1].trim().replace(/^\/workspace\//, '').replace(/^\//, '')
         const fc = pContent[1].trimEnd()
