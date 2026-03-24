@@ -5,7 +5,7 @@ import { query } from '@/lib/db'
 // Auth: x-admin-secret header must match NEXTAUTH_SECRET env var.
 export async function POST(req: NextRequest) {
   const secret = req.headers.get('x-admin-secret') ?? ''
-  const expected = process.env.NEXTAUTH_SECRET ?? ''
+  const expected = process.env.MIGRATE_SECRET ?? ''
   if (!expected || secret !== expected) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
