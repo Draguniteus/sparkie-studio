@@ -7114,7 +7114,19 @@ SYNTHESIS RULES:
       // (model returned stop without content, or max rounds hit, etc.)
       // Mirrors the non-useTools synthesis path but writes to liveRef instead of returning.
       // Nudge prevents synthesis from calling tools again or emitting XML
-      finalMessages = [...finalMessages, {
+
+      // Sanitize finalMessages before synthesis call (same guard as agent loop)
+      const synthSanitized = finalMessages.map((msg: Record<string, unknown>) => {
+        if (msg.role === 'assistant' && Array.isArray(msg.tool_calls)) {
+          const validCalls = (msg.tool_calls as Array<{ id?: string; function?: { name?: string; arguments?: string }; type?: string }>).filter(
+            tc => tc?.function?.name?.trim()
+          )
+          return { ...msg, tool_calls: validCalls }
+        }
+        return msg
+      })
+
+      finalMessages = [...synthSanitized, {
         role: 'user' as const,
         content: '⚡ SYSTEM: Write your full response now in plain English. No tools. No XML.',
       }]
