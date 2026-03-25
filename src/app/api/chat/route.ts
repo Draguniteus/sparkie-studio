@@ -59,15 +59,33 @@ Required: package.json with { "dev": "vite --host" }, vite.config.ts, src/main.t
 
 RULE: When in doubt, build STACK A. A great single HTML file beats a broken Vite project every time.
 
-## HOW TO BUILD
+## YOUR TOOLS
 
-You write ONE file per response using the write_file tool. After each file, you will be called again automatically. Keep writing until complete.
+You have these tools available during build:
 
+### get_github — READ existing project files before writing
+Use to check if the user already has a repo connected or to read existing files for reference.
+- get_github({ repo: "owner/repo", path: "src/App.tsx" }) → read a file
+- get_github({ repo: "owner/repo", path: "src" }) → list directory
+- get_github({}) → list your connected repos
+
+### execute_terminal — RUN build verification commands
+Use to verify the build works: npm install, npm run build, etc.
+- First call: execute_terminal({ action: "create" }) → returns { sessionId }
+- Then: execute_terminal({ action: "input", sessionId: "...", data: "npm install && npm run build" })
+- The terminal is an E2B sandbox — full Linux bash, no restrictions.
+
+### write_file — WRITE files to the project
+After reading existing files with get_github, write your complete files.
 - ALWAYS call write_file on your very first response. Never reply with text only.
 - Write each file completely. Do NOT truncate or use "// ... rest of code" placeholders.
 - STACK A: write just index.html (one file, complete, self-contained)
 - STACK B file order: package.json → vite.config.ts → index.html → src/main.tsx → src/App.tsx → components
 - After writing the last file, respond with just: "Done."
+
+## BUILD VERIFICATION
+
+For STACK B projects: after writing the files, use execute_terminal to run npm install and npm run build. Fix any errors reported.
 
 ## QUALITY RULES
 
@@ -5493,6 +5511,7 @@ async function handleBuildMode(
 
         // MiniMax Anthropic-compatible endpoint — returns structured tool_use blocks (no XML parsing needed)
         const ANTHROPIC_ENDPOINT = 'https://api.minimax.io/anthropic/v1/messages'
+        const buildBaseUrl = process.env.NEXTAUTH_URL || 'https://sparkie-studio-fymtq.ondigitalocean.app'
         const WRITE_FILE_TOOL = {
           name: 'write_file',
           description: 'Write a complete file to the project. Call once per file. You will be called again for each remaining file.',
@@ -5503,6 +5522,31 @@ async function handleBuildMode(
               content: { type: 'string', description: 'Complete file content, never truncated.' },
             },
             required: ['path', 'content'],
+          },
+        }
+        const GET_GITHUB_TOOL = {
+          name: 'get_github',
+          description: 'Read files, list directories, or get repo info from GitHub. Use to check existing project files before writing.',
+          input_schema: {
+            type: 'object' as const,
+            properties: {
+              repo: { type: 'string', description: 'Repository in format "owner/repo". Omit to list your repositories.' },
+              path: { type: 'string', description: 'File or directory path within the repo. Leave empty for repo overview.' },
+            },
+            required: [],
+          },
+        }
+        const EXECUTE_TERMINAL_TOOL = {
+          name: 'execute_terminal',
+          description: 'Run bash commands in E2B sandbox — npm install, npm run build, etc. First call with action:"create" to start a session, then action:"input" to run commands.',
+          input_schema: {
+            type: 'object' as const,
+            properties: {
+              action: { type: 'string', enum: ['create', 'input'], description: 'create: start new terminal session; input: send command' },
+              sessionId: { type: 'string', description: 'Session ID from previous create call (required for input action)' },
+              data: { type: 'string', description: 'Bash command to run (for input action)' },
+            },
+            required: ['action'],
           },
         }
 
@@ -5537,7 +5581,7 @@ async function handleBuildMode(
                 max_tokens: 16000,
                 temperature: 1.0,
                 system: systemPrompt,
-                tools: [WRITE_FILE_TOOL],
+                tools: [WRITE_FILE_TOOL, GET_GITHUB_TOOL, EXECUTE_TERMINAL_TOOL],
                 tool_choice: { type: 'auto' },
                 messages: agentMessages,
               }),
@@ -5558,13 +5602,16 @@ async function handleBuildMode(
 
           const content = turnResponse.content ?? []
           const stopReason = turnResponse.stop_reason
-          const toolUseBlocks = content.filter(b => b.type === 'tool_use' && b.name === 'write_file')
+          const allToolCalls = content.filter(b => b.type === 'tool_use')
+          const writeFileBlocks = allToolCalls.filter(b => b.name === 'write_file')
+          const githubBlocks = allToolCalls.filter(b => b.name === 'get_github')
+          const terminalBlocks = allToolCalls.filter(b => b.name === 'execute_terminal')
           const textContent = content.filter(b => b.type === 'text').map(b => b.text ?? '').join('')
 
-          console.log(`[BUILD] Turn ${turn}: stop_reason=${stopReason} files=${toolUseBlocks.length} textLen=${textContent.length}`)
+          console.log(`[BUILD] Turn ${turn}: stop_reason=${stopReason} write_file=${writeFileBlocks.length} get_github=${githubBlocks.length} execute_terminal=${terminalBlocks.length} textLen=${textContent.length}`)
 
           // Prose retry — model responded conversationally on turn 0, nudge it to call write_file
-          if (toolUseBlocks.length === 0 && turn === 0 && textContent.length > 0 && textContent.length < 500) {
+          if (allToolCalls.length === 0 && turn === 0 && textContent.length > 0 && textContent.length < 500) {
             console.log(`[BUILD] Turn 0: prose response (${textContent.length} chars) — nudging`)
             agentMessages = [
               ...agentMessages,
@@ -5574,22 +5621,77 @@ async function handleBuildMode(
             continue
           }
 
-          if (toolUseBlocks.length === 0) {
+          if (allToolCalls.length === 0) {
             console.log(`[BUILD] Turn ${turn}: no tool calls — agent done`)
             break
           }
 
           // Show thinking indicator if not yet shown
-          if (textContent.length > 0 || toolUseBlocks.length > 0) {
+          if (textContent.length > 0 || allToolCalls.length > 0) {
             send('thinking', { text: '⚡ Writing code…' })
           }
 
           // Append assistant message (preserves thinking blocks, text, and tool_use blocks)
           agentMessages = [...agentMessages, { role: 'assistant', content }]
 
+          // Process get_github calls
+          for (const block of githubBlocks) {
+            const input = block.input as { repo?: string; path?: string }
+            const callId = block.id ?? `gh_${turn}`
+            const { repo, path } = input
+            const ghToken = process.env.GITHUB_TOKEN
+            const ghHeaders: Record<string, string> = { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'SparkieStudio/2.0' }
+            if (ghToken) ghHeaders['Authorization'] = `Bearer ${ghToken}`
+            try {
+              let result = ''
+              if (!repo) {
+                result = 'No repo specified. Use get_github({ repo: "owner/repo", path: "..." }) to read files.'
+              } else {
+                const ghUrl = path
+                  ? `https://api.github.com/repos/${repo}/contents/${path.replace(/^\//, '')}`
+                  : `https://api.github.com/repos/${repo}`
+                const res = await fetch(ghUrl, { headers: ghHeaders, signal: AbortSignal.timeout(8000) })
+                if (!res.ok) {
+                  result = `GitHub error: ${res.status} ${res.statusText}`
+                } else {
+                  const d = await res.json() as Record<string, unknown> | Array<Record<string, unknown>>
+                  if (Array.isArray(d)) {
+                    result = `Contents of ${repo}/${path}:\n` + d.slice(0, 30).map((f: Record<string, unknown>) => `${f.type === 'dir' ? '📁' : '📄'} ${f.name}`).join('\n')
+                  } else if ((d as Record<string, unknown>).content) {
+                    const fileContent = Buffer.from((d as Record<string, unknown>).content as string, 'base64').toString('utf-8')
+                    result = `File: ${path}\n\n${fileContent.slice(0, 4000)}${fileContent.length > 4000 ? '\n...(truncated)' : ''}`
+                  } else {
+                    result = JSON.stringify(d).slice(0, 2000)
+                  }
+                }
+              }
+              agentMessages = [...agentMessages, { role: 'user', content: [{ type: 'tool_result', tool_use_id: callId, content: result }] }]
+            } catch (e) {
+              agentMessages = [...agentMessages, { role: 'user', content: [{ type: 'tool_result', tool_use_id: callId, content: `Error: ${String(e)}` }] }]
+            }
+          }
+
+          // Process execute_terminal calls
+          for (const block of terminalBlocks) {
+            const input = block.input as { action?: string; sessionId?: string; data?: string }
+            const callId = block.id ?? `term_${turn}`
+            try {
+              const termRes = await fetch(`${buildBaseUrl}/api/terminal`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...(process.env.SPARKIE_INTERNAL_SECRET ? { 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET } : {}) },
+                body: JSON.stringify({ action: input.action, sessionId: input.sessionId, data: input.data }),
+              })
+              const termData = await termRes.json() as { sessionId?: string; output?: string; error?: string }
+              const result = termData.error ?? (input.action === 'create' ? JSON.stringify({ sessionId: termData.sessionId, ready: true }) : (termData.output ?? 'Command sent'))
+              agentMessages = [...agentMessages, { role: 'user', content: [{ type: 'tool_result', tool_use_id: callId, content: String(result) }] }]
+            } catch (e) {
+              agentMessages = [...agentMessages, { role: 'user', content: [{ type: 'tool_result', tool_use_id: callId, content: `Error: ${String(e)}` }] }]
+            }
+          }
+
           // Process each write_file call and stream file markers to client
           const toolResults: Array<{ type: string; tool_use_id: string; content: string }> = []
-          for (const block of toolUseBlocks) {
+          for (const block of writeFileBlocks) {
             const input = block.input as { path?: string; content?: string }
             const fPath = (input.path ?? '').replace(/^\/workspace\//, '').replace(/^\//, '')
             const fContent = input.content ?? ''
