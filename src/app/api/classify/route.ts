@@ -2,8 +2,6 @@ import { NextRequest } from 'next/server'
 
 export const runtime = 'edge'
 
-const QWEN_BASE = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
-
 export async function POST(req: NextRequest) {
   try {
     const { message } = await req.json()
@@ -13,7 +11,7 @@ export async function POST(req: NextRequest) {
       return new Response(JSON.stringify({ mode: 'chat' }), { headers: { 'Content-Type': 'application/json' } })
     }
 
-    const apiKey = process.env.QWEN_API_KEY
+    const apiKey = process.env.MINIMAX_API_KEY
     if (!apiKey) return new Response(JSON.stringify({ mode: 'chat' }), { headers: { 'Content-Type': 'application/json' } })
 
     // Force chat BEFORE LLM call — same patterns as client quickClassify
@@ -34,18 +32,18 @@ export async function POST(req: NextRequest) {
       'be honest', 'tell me the truth', 'what tools are broken',
       "what's broken", 'what is broken', 'self-aware',
       'what broke', 'walk me through', 'take me through',
-      // FIX 1/2: Memory save/update patterns — always chat, never build
+      // Memory save/update patterns — always chat, never build
       'remember that', 'save that', 'save this', 'save to memory', 'add to memory',
       'note that', 'keep that in mind', "don't forget", 'make a note',
       'update.*memory', 'update my location', 'update your memory', 'update my memory',
       'forget.*about', 'delete.*memory', 'clear.*memory', 'change my location',
       'i moved', 'i live in', 'my name is', 'my favorite', 'i prefer',
-      // FIX 3: Long text corrections and opinion/instruction messages
+      // Long text corrections and opinion/instruction messages
       'you should', "you shouldn't", 'you should not', "don't use", 'stop using',
       'instead of', 'fix this', 'how are you', 'teach me', 'tell me',
       'you need to', 'you must', 'i want you to', "please don't", 'never use',
     ]
-    if (FORCE_CHAT_PATTERNS.some(p => msgLower.includes(p))) {
+    if (FORCE_CHAT_PATTERNS.some((p: string) => msgLower.includes(p))) {
       return new Response(JSON.stringify({ mode: 'chat' }), { headers: { 'Content-Type': 'application/json' } })
     }
 
@@ -70,19 +68,20 @@ export async function POST(req: NextRequest) {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 1500)
 
-    const response = await fetch(`${QWEN_BASE}/chat/completions`, {
+    const response = await fetch('https://api.minimax.io/anthropic/v1/messages', {
       method: 'POST',
       signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
-        'User-Agent': 'SparkieStudio/2.0',
+        'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'qwen3-8b',
+        model: 'MiniMax-M2.7',
+        max_tokens: 5,
         messages: [
           {
-            role: 'system',
+            role: 'user',
             content: `You are a message classifier. Respond with exactly one word: "build" or "chat".
 
 build = user wants code written, a UI element created, or an existing project modified. Must have clear intent to produce runnable code or a visible UI component.
@@ -105,20 +104,17 @@ Examples:
 
 When in doubt → chat.
 A wrong chat costs nothing — user rephrases.
-A wrong build is jarring and breaks trust.`
+A wrong build is jarring and breaks trust.`,
           },
           { role: 'user', content: message }
         ],
-        stream: false,
-        temperature: 0,
-        max_tokens: 5,
       }),
     }).finally(() => clearTimeout(timeout))
 
     if (!response.ok) return new Response(JSON.stringify({ mode: 'chat' }), { headers: { 'Content-Type': 'application/json' } })
 
     const data = await response.json()
-    const answer = data.choices?.[0]?.message?.content?.trim().toLowerCase() ?? 'chat'
+    const answer = data.content?.[0]?.text?.trim().toLowerCase() ?? 'chat'
     const mode = answer.startsWith('build') ? 'build' : 'chat'
     return new Response(JSON.stringify({ mode }), { headers: { 'Content-Type': 'application/json' } })
   } catch {

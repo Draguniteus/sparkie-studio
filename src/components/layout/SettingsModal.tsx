@@ -23,9 +23,7 @@ const NAV: { id: SettingsTab; icon: LucideIcon; label: string; desc: string }[] 
 ]
 
 const SPARKIE_MODELS = [
-  { value: 'MiniMax-M2.7',             label: 'MiniMax M2.7',       badge: '🔥 Best' },
-  { value: 'qwen3-8b',                 label: 'Qwen3 8B',           badge: 'Fast' },
-  { value: 'qwen2.5-vl-72b-instruct',  label: 'Qwen2.5 VL 72B',    badge: '👁 Vision' },
+  { value: 'MiniMax-M2.7', label: 'MiniMax M2.7', badge: '🔥 Best' },
 ]
 
 const LANGUAGES = [

@@ -543,19 +543,8 @@ function MessageBubbleInner({ message, userAvatarUrl }: Props) {
             </button>
             {message.model && (() => {
               const TEAM_NAMES: Record<string, string> = {
-                "MiniMax-M2.7": "Flame",
-                "MiniMax-M2.5": "Atlas",
-                "qwen3-8b": "Sparkie",
-                "qwen2.5-vl-72b-instruct": "Sparkie Vision",
-                // legacy — kept so old chat history still displays correctly
-                "anthropic-claude-4.5-haiku": "Sparkie",
-                "claude-4.5-haiku": "Sparkie",
-                "llama3.3-70b-instruct": "Flame",
-                "llama-3.3-70b-instruct": "Flame",
-                "big-pickle": "Ember",
-                "minimax-m2.5-free": "Atlas",
-                "trinity-large-preview-free": "Trinity",
-                "trinity-large-preview": "Trinity",
+                "MiniMax-M2.7": "Sparkie",
+                "minimax-m2.5-free": "Sparkie",
                 "Agent Loop": "Sparkie",
               }
               const modelSlug = message.model.split("/").pop() || message.model

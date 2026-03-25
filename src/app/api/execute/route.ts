@@ -14,7 +14,7 @@ function sseEvent(type: string, data: string): string {
 // ── Phase 6: Workbench Helper Preamble ──────────────────────────────────────
 // Pre-loaded into every E2B session. Gives Sparkie the same ergonomics as SureThing:
 // run_composio_tool(slug, args), invoke_llm(query), upload_file(path)
-function buildWorkbenchPreamble(composioApiKey: string, entityId: string): string {
+function buildWorkbenchPreamble(composioApiKey: string, minimaxApiKey: string, entityId: string): string {
   const base = 'https://backend.composio.dev/api/v3'
   const lines = [
     'import json, urllib.request, urllib.parse, urllib.error',
@@ -24,6 +24,7 @@ function buildWorkbenchPreamble(composioApiKey: string, entityId: string): strin
     '',
     'COMPOSIO_KEY = ' + JSON.stringify(composioApiKey),
     'COMPOSIO_BASE = ' + JSON.stringify(base),
+    'MINIMAX_KEY = ' + JSON.stringify(minimaxApiKey),
     'ENTITY_ID = ' + JSON.stringify(entityId),
     '',
     'def run_composio_tool(tool_slug, arguments):',
@@ -47,27 +48,23 @@ function buildWorkbenchPreamble(composioApiKey: string, entityId: string): strin
     '    except Exception as e:',
     '        return {"error": str(e)}',
     '',
-    'def invoke_llm(query, model="claude-haiku-4-5"):',
-    '    """Call an LLM for reasoning and analysis. Returns response text."""',
+    'def invoke_llm(query, model="MiniMax-M2.7"):',
+    '    """Call MiniMax M2.7 for reasoning and analysis. Returns response text."""',
     '    payload = json.dumps({',
-    '        "actionName": "ANTHROPIC_MESSAGES_SEND_MESSAGE",',
-    '        "input": {',
-    '            "model": model,',
-    '            "max_tokens": 1024,',
-    '            "messages": [{"role": "user", "content": query}]',
-    '        },',
-    '        "entityId": ENTITY_ID',
+    '        "model": model,',
+    '        "max_tokens": 1024,',
+    '        "messages": [{"role": "user", "content": query}]',
     '    }).encode("utf-8")',
     '    req = urllib.request.Request(',
-    '        COMPOSIO_BASE + "/actions/execute",',
+    '        "https://api.minimax.io/anthropic/v1/messages",',
     '        data=payload,',
-    '        headers={"Content-Type": "application/json", "x-api-key": COMPOSIO_KEY},',
+    '        headers={"Authorization": "Bearer " + MINIMAX_KEY, "Content-Type": "application/json", "anthropic-version": "2023-06-01"},',
     '        method="POST"',
     '    )',
     '    try:',
     '        with urllib.request.urlopen(req, timeout=30) as r:',
     '            resp = json.loads(r.read().decode("utf-8"))',
-    '            content = resp.get("data", {}).get("content", [])',
+    '            content = resp.get("content", [])',
     '            if isinstance(content, list) and len(content) > 0:',
     '                return content[0].get("text", str(resp))',
     '            return str(resp)',
@@ -164,7 +161,8 @@ export async function POST(req: NextRequest) {
           const entityId = `sparkie_user_${userId}`
 
           if (composioApiKey) {
-            const preamble = buildWorkbenchPreamble(composioApiKey, entityId)
+            const minimaxApiKey = process.env.MINIMAX_API_KEY ?? ''
+            const preamble = buildWorkbenchPreamble(composioApiKey, minimaxApiKey, entityId)
             await sbx.runCode(preamble, {
               language: 'python',
               onStdout: (chunk) => emit('status', chunk.line ?? String(chunk)),

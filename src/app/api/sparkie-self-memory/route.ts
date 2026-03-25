@@ -50,6 +50,13 @@ export async function GET(req: NextRequest) {
 
 // POST — Sparkie saves a memory about herself or the user
 export async function POST(req: NextRequest) {
+  // Internal trust — verify SPARKIE_INTERNAL_SECRET header
+  if (process.env.SPARKIE_INTERNAL_SECRET) {
+    const secret = req.headers.get('x-internal-secret') ?? ''
+    if (secret !== process.env.SPARKIE_INTERNAL_SECRET) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+  }
   try {
     const { category = 'self', content, source = 'sparkie' } = await req.json() as {
       category?: string
@@ -95,6 +102,12 @@ export async function POST(req: NextRequest) {
 
 // DELETE — remove a specific memory by id
 export async function DELETE(req: NextRequest) {
+  if (process.env.SPARKIE_INTERNAL_SECRET) {
+    const secret = req.headers.get('x-internal-secret') ?? ''
+    if (secret !== process.env.SPARKIE_INTERNAL_SECRET) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+  }
   const { id } = await req.json() as { id: number }
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
   try {

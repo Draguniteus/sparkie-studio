@@ -47,7 +47,7 @@ async function fetchRepoTree(owner: string, repo: string, token: string): Promis
     if (!res.ok) return []
     const data = await res.json() as { tree: Array<{ path: string; type: string }> }
     return (data.tree ?? [])
-      .filter(f => f.type === 'blob' && f.path.endsWith('.ts') || f.path.endsWith('.tsx'))
+      .filter(f => f.type === 'blob' && (f.path.endsWith('.ts') || f.path.endsWith('.tsx')))
       .map(f => f.path)
       .slice(0, 200) // cap to avoid huge context
   } catch { return [] }

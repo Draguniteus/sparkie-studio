@@ -3838,7 +3838,7 @@ def invoke_llm(query, model='MiniMax-M2.7'):
           const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000'
           const res = await fetch(`${baseUrl}/api/sparkie-self-memory`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET ?? '' },
             body: JSON.stringify({ category: memCat, content: memContent, source: 'sparkie' })
           })
           const data = await res.json() as { ok?: boolean; error?: string }
@@ -4635,7 +4635,7 @@ def invoke_llm(query, model='MiniMax-M2.7'):
           if (userId) {
             await fetch(`${baseUrl}/api/sparkie-self-memory`, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 'Content-Type': 'application/json', 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET ?? '' },
               body: JSON.stringify({ category: 'browser_profiles', content: `Browser profile "${profileName}": ${data.id}`, source: 'sparkie' }),
             }).catch(() => {})
           }
@@ -6807,7 +6807,7 @@ SYNTHESIS RULES:
             // Fire-and-forget auto-memory + proactive worklog entry
             fetch(`https://${process.env.APP_DOMAIN ?? 'sparkie-studio-mhouq.ondigitalocean.app'}/api/sparkie-self-memory`, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 'Content-Type': 'application/json', 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET ?? '' },
               body: JSON.stringify({
                 category: 'self',
                 content: `Completed tool session: ${toolNames.join(', ')}. ${round} round${round>1?'s':''} used. Task: ${lastUserContent.slice(0, 120)}`,

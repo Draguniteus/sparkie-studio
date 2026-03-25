@@ -21,9 +21,7 @@ function stripMarkdown(text: string): string {
 
 // Map model IDs to human-readable tier names
 function modelToTier(model: string): { label: string; color: string } {
-  if (model.includes('qwen3-8b')) return { label: 'Sparkie · Conversational', color: 'text-blue-400' }
-  if (model.includes('qwen2.5-vl')) return { label: 'Vision', color: 'text-amber-400' }
-  if (model.includes('MiniMax')) return { label: 'Flame · Task Execution', color: 'text-honey-400' }
+  if (model.includes('MiniMax')) return { label: 'Sparkie · M2.7', color: 'text-honey-400' }
   return { label: model.slice(0, 24), color: 'text-text-muted' }
 }
 

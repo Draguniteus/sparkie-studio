@@ -79,7 +79,7 @@ async function getLastDeployInfo(): Promise<{ sha: string; status: 'success' | '
   try {
     const res = await query<{ content: string; metadata: Record<string, unknown> }>(
       `SELECT content, metadata FROM sparkie_worklog
-       WHERE type = 'code_push' ORDER BL cyeated_at DESC LIMIT 1`
+       WHERE type = 'code_push' ORDER BY created_at DESC LIMIT 1`
     )
     if (!res.rows[0]) return { sha: 'unknown', status: 'unknown' }
     const meta = (res.rows[0].metadata ?? {}) as { commit_sha?: string; deploy_status?: string }
