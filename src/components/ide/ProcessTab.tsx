@@ -38,7 +38,7 @@ function traceKey(trace: StepTrace, i: number) {
 
 const THOUGHT_ICON_MAP: Record<string, string> = { brain: '🧠', zap: '⚡', flag: '🚩', memory: '💾' }
 
-function ThoughtCard({ text, icon, isNew }: { text: string; icon?: string; isNew?: boolean }) {
+function ThoughtCard({ text, icon, isNew, label }: { text: string; icon?: string; isNew?: boolean; label?: string }) {
   const [visible, setVisible] = useState(!isNew)
   useEffect(() => {
     if (isNew) {
@@ -54,10 +54,16 @@ function ThoughtCard({ text, icon, isNew }: { text: string; icon?: string; isNew
         transform: visible ? 'translateY(0)' : 'translateY(-6px)',
         transition: 'opacity 220ms ease, transform 220ms ease',
       }}
-      className="flex items-start gap-2.5 px-3 py-2 rounded-lg border border-purple-500/20 bg-purple-500/5 text-[11px] border-l-2 border-l-purple-400"
+      className="flex flex-col gap-1 px-3 py-2 rounded-lg border border-purple-500/20 bg-purple-500/5 text-[11px] border-l-2 border-l-purple-400"
     >
-      <span className="text-[13px] shrink-0 mt-px">{emoji}</span>
-      <span className="flex-1 leading-snug text-purple-200/80 italic break-words">{stripMarkdown(text)}</span>
+      <div className="flex items-center gap-2">
+        <span className="text-[13px] shrink-0 mt-px">{emoji}</span>
+        {label && <span className="font-bold text-purple-300 text-[11px]">{label}</span>}
+      </div>
+      {label
+        ? <span className="leading-snug text-purple-200/70 break-words pl-5">{stripMarkdown(text)}</span>
+        : <span className="flex-1 leading-snug text-purple-200/80 italic break-words">{stripMarkdown(text)}</span>
+      }
     </div>
   )
 }
@@ -197,14 +203,63 @@ export function ProcessTab() {
   // Subscribe to thought_step events — insert as thought card BEFORE next tool batch
   useEffect(() => {
     const handler = (e: Event) => {
-      const text = (e as CustomEvent<string>).detail
-      if (!text?.trim()) return
-      const clean = stripMarkdown(text)
-      if (!clean) return
-      setLiveTraces(prev => [
-        ...prev,
-        { type: 'thought', icon: 'brain', label: clean.slice(0, 200), text: clean, status: 'done', timestamp: Date.now() },
-      ])
+      const raw = (e as CustomEvent<string>).detail
+      if (!raw?.trim()) return
+
+      // Parse bold headers — each **Header** starts a new thought card
+      const headerPattern = /\*\*([^*]+)\*\*(?:\s*—?\s*)?/g
+      const segments: Array<{ label?: string; content: string; icon: string }> = []
+      let lastIndex = 0
+      let match
+
+      while ((match = headerPattern.exec(raw)) !== null) {
+        // Content before this header
+        const before = raw.slice(lastIndex, match.index).trim()
+        if (before && segments.length === 0) {
+          // First header — any text before it is a preamble
+          segments.push({ content: before, icon: 'brain' })
+        }
+        const label = match[1].trim()
+        const afterStart = match.index + match[0].length
+        const nextHeader = raw.indexOf('**', afterStart)
+        const content = nextHeader > 0
+          ? raw.slice(afterStart, nextHeader).trim()
+          : raw.slice(afterStart).trim()
+
+        const icon = label.toLowerCase().includes('look') || label.toLowerCase().includes('read') || label.toLowerCase().includes('check')
+          ? 'search' : label.toLowerCase().includes('run') || label.toLowerCase().includes('execut')
+          ? 'rocket' : label.toLowerCase().includes('save') || label.toLowerCase().includes('memory')
+          ? 'memory' : 'brain'
+
+        segments.push({ label, content: content || label, icon })
+        lastIndex = nextHeader > 0 ? nextHeader : raw.length
+      }
+
+      // No headers found — treat entire text as one card
+      if (segments.length === 0) {
+        const clean = stripMarkdown(raw)
+        if (!clean) return
+        setLiveTraces(prev => [
+          ...prev,
+          { type: 'thought', icon: 'brain', label: clean.slice(0, 80), text: clean, status: 'done', timestamp: Date.now() },
+        ])
+        return
+      }
+
+      // Add each parsed segment as a separate thought card
+      setLiveTraces(prev => {
+        const newTraces = segments
+          .filter(s => s.content || s.label)
+          .map(s => ({
+            type: 'thought' as const,
+            icon: s.icon,
+            label: s.label ? `${s.label}${s.content && s.label !== s.content ? ' — ' + s.content.slice(0, 60) : ''}` : s.content.slice(0, 80),
+            text: s.content || s.label || '',
+            status: 'done' as const,
+            timestamp: Date.now(),
+          }))
+        return [...prev, ...newTraces]
+      })
     }
     window.addEventListener('sparkie:thought-step', handler)
     return () => window.removeEventListener('sparkie:thought-step', handler)

@@ -6210,8 +6210,16 @@ Make it feel like walking into your friend's creative space and being genuinely 
     }
 
     // ── "Thinking out loud" — narrate before each tool call so thought_step fires ──
+    // Use bold headers to categorize your reasoning so the UI can show structured thought cards.
     if (!isBuild) {
-      finalSystemContent += `\n\nBefore calling any tool, write ONE sentence narrating what you are about to do and why. Keep it short and direct.`
+      finalSystemContent += `\n\nBefore calling any tool, use a bold header to categorize your reasoning on its own line, then explain. Examples:
+- **Analyzed** — what you understood from the input
+- **Let me take a look at this file** — before reading a file
+- **Let me check the error** — before investigating an error
+- **Let me run this** — before executing terminal/code
+- **Good idea** — when improving something proactively
+- **Let me save this** — before saving memory or worklog
+Keep each header + thought on its own line. Use multiple short bold-header blocks if doing multiple types of reasoning in one turn.`
     }
 
     // Generate requestId for execution trace
