@@ -5874,7 +5874,7 @@ async function handleBuildMode(
 async function tryLLMCall(
   payload: Record<string, unknown>,
   apiKey: string,
-): Promise<{ response: Response }> {
+): Promise<{ response: Response; errorText?: string }> {
   const isStream = payload.stream === true
   const res = await fetch('https://api.minimax.io/anthropic/v1/messages', {
     method: 'POST',
@@ -5886,11 +5886,12 @@ async function tryLLMCall(
     body: JSON.stringify({ ...payload, model: 'MiniMax-M2.7' }),
     signal: AbortSignal.timeout(90000),
   })
+  let errorText: string | undefined
   if (!res.ok) {
-    const txt = await res.text().catch(() => res.status.toString())
-    console.error(`[tryLLMCall] MiniMax error ${res.status}: ${txt.slice(0, 200)}`)
+    errorText = await res.text().catch(() => String(res.status))
+    console.error(`[tryLLMCall] MiniMax error ${res.status}: ${errorText.slice(0, 200)}`)
   }
-  return { response: res }
+  return { response: res, errorText }
 }
 
 // ── POST handler ──────────────────────────────────────────────────────────────
@@ -6287,14 +6288,17 @@ Keep each header + thought on its own line. Use multiple short bold-header block
         if (round % 5 === 0) {
           liveEnqueue({ checkpoint_event: { round, message: `Checkpoint: ${round} rounds completed` } })
         }
-        const { response: loopRes } = await tryLLMCall({
+        const { response: loopRes, errorText } = await tryLLMCall({
           stream: false, temperature: 0.8, max_tokens: 16000,
           tools: [...SPARKIE_TOOLS, ...connectorTools],
           tool_choice: 'auto',
           messages: [{ role: 'system', content: finalSystemContent }, ...loopMessages],
         }, apiKey)
 
-        if (!loopRes.ok) break
+        if (!loopRes.ok) {
+          console.error(`[chat IIFE] loopRes error: ${errorText ?? loopRes.status}`)
+          break
+        }
 
         const loopData = await loopRes.json()
         // Wire real token counts so context health check functions correctly
@@ -7050,14 +7054,13 @@ SYNTHESIS RULES:
         role: 'user' as const,
         content: '⚡ SYSTEM: Write your full response now in plain English. No tools. No XML.',
       }]
-      const { response: synthRes } = await tryLLMCall({
+      const { response: synthRes, errorText: synthErr } = await tryLLMCall({
         stream: true, temperature: 0.8, max_tokens: 16000,
         messages: [{ role: 'system', content: finalSystemContent }, ...finalMessages],
       }, apiKey)
 
       if (!synthRes.ok) {
-        const errTxt = await synthRes.text()
-        const isFreeLimit2 = errTxt.includes('FreeUsageLimitError') || errTxt.includes('free usage') || errTxt.includes('rate limit')
+        const isFreeLimit2 = (synthErr ?? '').includes('FreeUsageLimitError') || (synthErr ?? '').includes('free usage') || (synthErr ?? '').includes('rate limit')
         const friendlyMsg2 = isFreeLimit2 ? "I'm running into a rate limit right now — give me a moment and try again." : 'Something went wrong on my end. Try again in a moment.'
         liveRef.controller?.enqueue(liveEncoder.encode('data: ' + JSON.stringify({ choices: [{ delta: { content: friendlyMsg2 } }] }) + '\n\n'))
         liveRef.controller?.enqueue(liveEncoder.encode('data: [DONE]\n\n'))
@@ -7141,16 +7144,15 @@ SYNTHESIS RULES:
     }
 
     // Final streaming call — use tryLLMCall for fallback resilience
-    const { response: streamRes } = await tryLLMCall({
-      stream: true, temperature: 0.8, max_tokens: 8192,
+    const { response: streamRes, errorText: streamErr } = await tryLLMCall({
+      stream: true, temperature: 0.8, max_tokens: 16000,
       messages: [{ role: 'system', content: finalSystemContent }, ...finalMessages],
     }, apiKey)
 
     if (!streamRes.ok) {
-      const errBody = await streamRes.text()
-      console.error('[chat] LLM error ' + streamRes.status + ':', errBody.slice(0, 500))
+      console.error('[chat] LLM error ' + streamRes.status + ':', (streamErr ?? '').slice(0, 500))
       // Detect specific error types for friendly messaging
-      const isFreeLimit = errBody.includes('FreeUsageLimitError') || errBody.includes('free usage') || errBody.includes('rate limit')
+      const isFreeLimit = (streamErr ?? '').includes('FreeUsageLimitError') || (streamErr ?? '').includes('free usage') || (streamErr ?? '').includes('rate limit')
       const friendlyMsg = isFreeLimit
         ? "I'm running into a rate limit right now — give me a moment and try again."
         : 'Something went wrong on my end. Try again in a moment.'
