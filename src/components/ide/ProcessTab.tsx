@@ -279,6 +279,21 @@ export function ProcessTab() {
     return () => window.removeEventListener('sparkie:rule-fired', handler)
   }, [])
 
+  // memory_recalled — show as a dedicated memory card
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const data = (e as CustomEvent<{ name: string; content: string; resuming?: boolean }>).detail
+      if (!data) return
+      const label = data.resuming ? `Resuming: ${data.name}` : `Memory recalled: ${data.name}`
+      setLiveTraces(prev => [
+        ...prev,
+        { type: 'memory' as const, icon: 'memory', label, text: data.content?.slice(0, 200) ?? '', status: 'done', timestamp: Date.now(), memoryName: data.name },
+      ])
+    }
+    window.addEventListener('sparkie:memory-recalled', handler)
+    return () => window.removeEventListener('sparkie:memory-recalled', handler)
+  }, [])
+
   // checkpoint_event — show round milestone card
   useEffect(() => {
     const handler = (e: Event) => {

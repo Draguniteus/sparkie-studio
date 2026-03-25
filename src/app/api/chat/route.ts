@@ -5567,7 +5567,7 @@ async function handleBuildMode(
 
         // MiniMax Anthropic-compatible endpoint — returns structured tool_use blocks (no XML parsing needed)
         const ANTHROPIC_ENDPOINT = 'https://api.minimax.io/anthropic/v1/messages'
-        const buildBaseUrl = process.env.NEXTAUTH_URL || 'https://sparkie-studio-fymtq.ondigitalocean.app'
+        const buildBaseUrl = process.env.NEXTAUTH_URL || process.env.APP_DOMAIN || 'https://sparkie-studio-mhouq.ondigitalocean.app'
         const WRITE_FILE_TOOL = {
           name: 'write_file',
           description: 'Write a complete file to the project. Call once per file. You will be called again for each remaining file.',
