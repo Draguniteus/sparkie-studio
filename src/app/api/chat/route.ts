@@ -6291,7 +6291,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
         const { response: loopRes, errorText } = await tryLLMCall({
           stream: false, temperature: 0.8, max_tokens: 16000,
           tools: [...SPARKIE_TOOLS, ...connectorTools],
-          tool_choice: 'auto',
+          tool_choice: { type: 'auto' },
           messages: [{ role: 'system', content: finalSystemContent }, ...loopMessages],
         }, apiKey)
 
