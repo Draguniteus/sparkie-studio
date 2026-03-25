@@ -5526,6 +5526,7 @@ async function handleBuildMode(
     messages: Array<{ role: string; content: string }>
     currentFiles?: string
     userProfile?: { name?: string; role?: string; goals?: string }
+    sessionCookie?: string
   },
   userId: string | null,
 ): Promise<Response> {
@@ -5564,6 +5565,80 @@ async function handleBuildMode(
         const lastUserMsg = (messages as Array<{ role: string; content: string }>)
           .filter(m => m.role === 'user')
           .slice(-1)
+
+        // ── Build Checkpoint / Resume ────────────────────────────────────────
+        // Check for an active build topic matching this request; resume if found
+        let buildTopicId: string | null = null
+        const userMsgText = lastUserMsg[0]?.content ?? ''
+        // Derive a fingerprint from the project type (strip generic parts, keep project-specific keywords)
+        const buildFingerprint = userMsgText.toLowerCase()
+          .replace(/^(build me a|build an|build a|create a|create an|make me a|make a|generate a|implement a|write a)\b/gi, '')
+          .replace(/\b(react|nextjs|typescript|html|css|javascript|node|vite|app|project|using|with)\b/g, '')
+          .replace(/[^a-z0-9\s]/g, ' ')
+          .trim().split(/\s+/).filter(w => w.length > 2).slice(0, 12).join(' ')
+
+        const buildBaseUrl2 = process.env.NEXTAUTH_URL || process.env.APP_DOMAIN || 'https://sparkie-studio-mhouq.ondigitalocean.app'
+        if (userId && buildFingerprint.length > 4) {
+          try {
+            const findRes = await fetch(`${buildBaseUrl2}/api/topics`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', cookie: parsedBody.sessionCookie ?? '' },
+              body: JSON.stringify({ action: 'find_build', fingerprint: buildFingerprint }),
+            })
+            if (findRes.ok) {
+              const findData = await findRes.json() as { found: boolean; topic?: { id: string; original_request: string; last_state: string; last_round: number; step_count: number; name: string } }
+              if (findData.found && findData.topic) {
+                buildTopicId = findData.topic.id
+                const savedState = findData.topic.last_state
+                if (savedState) {
+                  try {
+                    const checkpoint = JSON.parse(savedState) as {
+                      agentMessages?: Array<{ role: string; content: unknown }>
+                      fullBuildRaw?: string
+                      turn?: number
+                    }
+                    if (checkpoint.agentMessages?.length) {
+                      agentMessages = checkpoint.agentMessages
+                      fullBuildRaw = checkpoint.fullBuildRaw ?? ''
+                      send('build_resuming', {
+                        topicId: buildTopicId,
+                        topicName: findData.topic.name,
+                        originalRequest: findData.topic.original_request,
+                        resumedAtTurn: checkpoint.turn ?? 0,
+                        totalFilesSoFar: (fullBuildRaw.match(/---FILE:/g) || []).length,
+                      })
+                    }
+                  } catch {
+                    // Corrupted checkpoint — start fresh
+                  }
+                }
+              }
+            }
+          } catch {}
+        }
+
+        // If no existing build topic found, create one for this fresh build
+        if (userId && !buildTopicId && buildFingerprint.length > 4) {
+          try {
+            const projName = userMsgText.replace(/^(build me a|build an|build a|create a|create an|make me a|make a|generate a|implement a|write a)\b/gi, '').slice(0, 60).trim() || 'Untitled Project'
+            const createRes = await fetch(`${buildBaseUrl2}/api/topics`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', cookie: parsedBody.sessionCookie ?? '' },
+              body: JSON.stringify({
+                action: 'create',
+                name: projName,
+                fingerprint: buildFingerprint,
+                summary: `Building: ${projName}`,
+                topic_type: 'build',
+                original_request: userMsgText.slice(0, 500),
+              }),
+            })
+            if (createRes.ok) {
+              const createData = await createRes.json() as { id?: string }
+              if (createData.id) buildTopicId = createData.id
+            }
+          } catch {}
+        }
 
         // MiniMax Anthropic-compatible endpoint — returns structured tool_use blocks (no XML parsing needed)
         const ANTHROPIC_ENDPOINT = 'https://api.minimax.io/anthropic/v1/messages'
@@ -5824,6 +5899,17 @@ async function handleBuildMode(
           // Inject all tool results as a single user message (Anthropic format)
           agentMessages = [...agentMessages, { role: 'user', content: toolResults }]
 
+          // Checkpoint every 5 turns so the build can be resumed after page refresh
+          if (buildTopicId && turn % 5 === 0 && turn > 0) {
+            const checkpointState = JSON.stringify({ agentMessages, fullBuildRaw, turn })
+            fetch(`${buildBaseUrl2}/api/topics`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', cookie: parsedBody.sessionCookie ?? '' },
+              body: JSON.stringify({ action: 'update_state', id: buildTopicId, last_state: checkpointState, last_round: turn, step_count: turn }),
+            }).catch(() => {})
+            send('checkpoint', { turn, totalFiles: (fullBuildRaw.match(/---FILE:/g) || []).length })
+          }
+
           if (stopReason === 'end_turn' || stopReason === 'stop_sequence') {
             console.log(`[BUILD] Agent finished at turn ${turn} (stop_reason=${stopReason})`)
             break
@@ -5835,6 +5921,25 @@ async function handleBuildMode(
         console.log(`[BUILD] Complete: ${fileCount} file(s), ${fullBuildRaw.length} chars total`)
         if (fileCount === 0) {
           console.log('[BUILD] WARNING: No files produced')
+        }
+
+        // Final checkpoint then archive on success
+        // Note: turn variable = MAX_TURNS after loop completes, or early exit value
+        const finalTurn = turn < MAX_TURNS ? turn : MAX_TURNS - 1
+        if (buildTopicId) {
+          const finalCheckpoint = JSON.stringify({ agentMessages, fullBuildRaw, turn: finalTurn })
+          const archivePayload = JSON.stringify({ action: 'update_state', id: buildTopicId, last_state: finalCheckpoint, last_round: finalTurn, step_count: fileCount })
+          fetch(`${buildBaseUrl2}/api/topics`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', cookie: parsedBody.sessionCookie ?? '' },
+            body: archivePayload,
+          }).catch(() => {})
+          // Archive the build topic now that it's complete
+          fetch(`${buildBaseUrl2}/api/topics`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', cookie: parsedBody.sessionCookie ?? '' },
+            body: JSON.stringify({ action: 'archive', id: buildTopicId }),
+          }).catch(() => {})
         }
 
         send('done', {})
@@ -6011,7 +6116,8 @@ export async function POST(req: NextRequest) {
     // When mode === 'build', skip the agent loop and run the IDE build pipeline.
     // This reduces bundle size and keeps chat history in one thread.
     if (mode === 'build') {
-      return handleBuildMode(body, userId)
+      const sessionCookie = req.headers.get('cookie') ?? ''
+      return handleBuildMode({ ...body, sessionCookie }, userId)
     }
 
     const host = req.headers.get('host') ?? 'localhost:3000'

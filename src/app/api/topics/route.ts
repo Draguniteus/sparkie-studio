@@ -37,6 +37,7 @@ async function ensureTable() {
   await query(`ALTER TABLE sparkie_topics ADD COLUMN IF NOT EXISTS last_round INT DEFAULT 0`).catch(() => {})
   await query(`ALTER TABLE sparkie_topics ADD COLUMN IF NOT EXISTS step_count INT DEFAULT 0`).catch(() => {})
   await query(`ALTER TABLE sparkie_topics ADD COLUMN IF NOT EXISTS original_request TEXT`).catch(() => {})
+  await query(`ALTER TABLE sparkie_topics ADD COLUMN IF NOT EXISTS topic_type TEXT DEFAULT 'chat'`).catch(() => {})
 }
 
 export async function GET(req: NextRequest) {
@@ -76,7 +77,7 @@ export async function POST(req: NextRequest) {
 
   await ensureTable()
   const body = await req.json() as {
-    action: 'create' | 'update' | 'archive' | 'link' | 'resume' | 'seed' | 'update_state'
+    action: 'create' | 'update' | 'archive' | 'link' | 'resume' | 'seed' | 'update_state' | 'find_build'
     id?: string
     name?: string
     fingerprint?: string
@@ -95,9 +96,9 @@ export async function POST(req: NextRequest) {
     if (!body.name) return NextResponse.json({ error: 'name required' }, { status: 400 })
     const id = `topic_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
     await query(
-      `INSERT INTO sparkie_topics (id, user_id, name, fingerprint, summary, notification_policy)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [id, userId, body.name, body.fingerprint ?? '', body.summary ?? '', body.notification_policy ?? 'auto']
+      `INSERT INTO sparkie_topics (id, user_id, name, fingerprint, summary, notification_policy, topic_type)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [id, userId, body.name, body.fingerprint ?? '', body.summary ?? '', body.notification_policy ?? 'auto', body.topic_type ?? 'chat']
     )
     return NextResponse.json({ ok: true, id, action: 'created' })
   }
@@ -110,6 +111,7 @@ export async function POST(req: NextRequest) {
     if (body.summary) { fields.push(`summary = $${params.length + 1}`); params.push(body.summary) }
     if (body.fingerprint) { fields.push(`fingerprint = $${params.length + 1}`); params.push(body.fingerprint) }
     if (body.notification_policy) { fields.push(`notification_policy = $${params.length + 1}`); params.push(body.notification_policy) }
+    if (body.topic_type) { fields.push(`topic_type = $${params.length + 1}`); params.push(body.topic_type) }
     if (fields.length === 0) return NextResponse.json({ ok: true, action: 'noop' })
     fields.push(`updated_at = NOW()`)
     params.push(body.id, userId)
@@ -165,6 +167,23 @@ export async function POST(req: NextRequest) {
     params.push(body.id, userId)
     await query(`UPDATE sparkie_topics SET ${fields.join(', ')} WHERE id = $${params.length - 1} AND user_id = $${params.length}`, params)
     return NextResponse.json({ ok: true, action: 'state_updated' })
+  }
+
+  if (body.action === 'find_build') {
+    // Find an active build topic matching a fingerprint (for build resume)
+    if (!body.fingerprint) return NextResponse.json({ error: 'fingerprint required' }, { status: 400 })
+    const rows = await query<{
+      id: string; name: string; summary: string; fingerprint: string
+      last_state: string; last_round: number; step_count: number; original_request: string
+    }>(
+      `SELECT id, name, summary, fingerprint, last_state, last_round, step_count, original_request
+       FROM sparkie_topics
+       WHERE user_id = $1 AND topic_type = 'build' AND status = 'active' AND fingerprint = $2
+       ORDER BY updated_at DESC LIMIT 1`,
+      [userId, body.fingerprint]
+    )
+    if (rows.rows.length === 0) return NextResponse.json({ found: false })
+    return NextResponse.json({ found: true, topic: rows.rows[0] })
   }
 
   if (body.action === 'seed') {
