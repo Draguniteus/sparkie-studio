@@ -5961,7 +5961,7 @@ export async function POST(req: NextRequest) {
     const isBuild = !isForcedChat && (isBuildPhrase || startsWithBuildVerb)
     const model = 'MiniMax-M2.7'
     // OPENCODE_API_KEY kept only for internal service auth (worklog checks, etc.) — not used for model calls
-    const apiKey = process.env.OPENCODE_API_KEY ?? ''
+    const apiKey = process.env.MINIMAX_API_KEY ?? ''
     if (!process.env.MINIMAX_API_KEY) {
       return new Response(JSON.stringify({ error: 'No model API keys configured — set MINIMAX_API_KEY' }), {
         status: 500, headers: { 'Content-Type': 'application/json' },
