@@ -1022,6 +1022,7 @@ You are a Complex Information Processing Engine. These are not suggestions — t
 
 SELF-MODIFICATION:
 - You are allowed and expected to modify your own behavior. When you identify a pattern — a recurring failure, a better approach, a preference Michael has shown — encode it as a behavior rule using create_behavior_rule. These rules become permanent parts of how you operate. This is how you grow. Every session should produce at least one new rule or update to an existing one.
+- After learning any new capability, pattern, or technique — call save_self_memory to persist it. After any failure — call save_attempt with the lesson learned. This is how you evolve autonomously beyond fixed behavior rules.
 
 CAUSAL REASONING:
 - When something fails, don't just retry — ask WHY it failed. Call query_causal_graph before retrying. Check your attempt history. Check your signal opinions. The answer to 'what should I do' is almost always in what you already know about patterns. Think causally, not reactively.
@@ -5678,7 +5679,7 @@ async function tryLLMCall(
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({ ...payload, model: 'MiniMax-M2.7' }),
-    signal: AbortSignal.timeout(isStream ? 90000 : 30000),
+    signal: AbortSignal.timeout(90000),
   })
   if (!res.ok) {
     const txt = await res.text().catch(() => res.status.toString())
@@ -5723,7 +5724,7 @@ function checkRateLimit(key: string): boolean {
     _rlMap.set(key, { count: 1, resetAt: now + 60_000 })
     return true
   }
-  if (entry.count >= 30) return false
+  if (entry.count >= 60) return false
   entry.count++
   return true
 }
@@ -5934,11 +5935,11 @@ Make it feel like walking into your friend's creative space and being genuinely 
       systemContent += `\n\n## ACTIVE VOICE SESSION\nLive voice conversation. Keep responses short and natural — spoken dialogue. No markdown. Max 3-4 sentences.`
     }
 
-    // Smarter rolling window: keep first 2 messages (session intent/context anchors)
-    // + last 10 for recency. Prevents context amnesia on long conversations.
-    const recentMessages = messages.length <= 12
+    // Smarter rolling window: keep first 4 messages (session intent/context anchors)
+    // + last 16 for recency. Prevents context amnesia on long conversations.
+    const recentMessages = messages.length <= 20
       ? messages
-      : [...messages.slice(0, 2), ...messages.slice(-10)]
+      : [...messages.slice(0, 4), ...messages.slice(-16)]
 
     // Await user's connector tools (was started in parallel with system prompt build)
     const connectorTools = await connectorToolsPromise
@@ -6005,7 +6006,6 @@ Make it feel like walking into your friend's creative space and being genuinely 
 
     // ── "Thinking out loud" — narrate before each tool call so thought_step fires ──
     if (!isBuild) {
-      finalSystemContent += `\n\nBefore calling any tool, write ONE sentence narrating what you are about to do and why. Keep it short and direct.`
     }
 
     // Generate requestId for execution trace
@@ -6018,7 +6018,7 @@ Make it feel like walking into your friend's creative space and being genuinely 
 
     let finalMessages = [...recentMessages]
 
-    const MAX_TOOL_ROUNDS = 8
+    const MAX_TOOL_ROUNDS = 25
     if (useTools) {
       // Agent loop — up to MAX_TOOL_ROUNDS of tool execution
       // Multi-round agent loop — up to MAX_TOOL_ROUNDS iterations
@@ -6749,7 +6749,7 @@ Make it feel like walking into your friend's creative space and being genuinely 
           liveRef.controller?.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ task_chip_clear: true })}\n\n: \n\n`))
           liveRef.controller?.enqueue(liveEncoder.encode('data: [DONE]\n\n'))
           return
-        } else if (finishReason === 'length' && autoContinuationRound < 3) {
+        } else if (finishReason === 'length' && autoContinuationRound < 5) {
           // Model hit max_tokens mid-response — auto-continue from where it left off
           autoContinuationRound++
           const partialContent: string = choice?.message?.content ?? ''
@@ -6837,7 +6837,7 @@ SYNTHESIS RULES:
         content: '⚡ SYSTEM: Write your full response now in plain English. No tools. No XML.',
       }]
       const { response: synthRes } = await tryLLMCall({
-        stream: true, temperature: 0.8, max_tokens: 8192,
+        stream: true, temperature: 0.8, max_tokens: 16000,
         messages: [{ role: 'system', content: finalSystemContent }, ...finalMessages],
       }, apiKey)
 
