@@ -5983,6 +5983,10 @@ async function tryLLMCall(
   apiKey: string,
 ): Promise<{ response: Response; errorText?: string }> {
   const isStream = payload.stream === true
+  // Debug log: show message count, tool count, and first message role to help trace 400 errors
+  const msgs = payload.messages as Array<{ role: string; content?: unknown; tool_calls?: unknown }>
+  const tools = payload.tools as Array<{ function?: { name?: string } }>
+  console.log(`[tryLLMCall] → messages=${msgs?.length ?? 0} tools=${tools?.length ?? 0} firstMsg=${msgs?.[0]?.role ?? '?'}`)
   const res = await fetch('https://api.minimax.io/anthropic/v1/messages', {
     method: 'POST',
     headers: {
@@ -6437,21 +6441,27 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           liveEnqueue({ checkpoint_event: { round, message: `Checkpoint: ${round} rounds completed` } })
         }
 
-        // Sanitize messages: remove any tool_calls blocks with empty function names
-        // This prevents MiniMax 400 "function name empty" errors from corrupted conversation history
+        // Strip ALL tool_calls from assistant messages before sending to MiniMax.
+        // MiniMax uses the tools[] array to know what's available — tool_call entries
+        // in messages are only needed for multi-round tool execution context, but they
+        // can carry corruption (empty names/args) that triggers 400 errors. Safer to omit.
+        // Tool results from prior rounds are preserved as simple {role:"tool"} messages.
         const sanitizedMessages = loopMessages.map((msg: Record<string, unknown>) => {
-          if (msg.role === 'assistant' && Array.isArray(msg.tool_calls)) {
-            const validCalls = (msg.tool_calls as Array<{ id?: string; function?: { name?: string; arguments?: string }; type?: string }>).filter(
-              tc => tc?.function?.name?.trim()
-            )
-            return { ...msg, tool_calls: validCalls }
+          if (msg.role === 'assistant') {
+            return { ...msg, tool_calls: undefined, content: msg.content }
+          }
+          if (msg.role === 'tool') {
+            return { ...msg, tool_calls: undefined }
           }
           return msg
         })
 
-        // Sanitize tools: remove any with empty names (guards against corrupted connector tool definitions)
+        // Sanitize tools: remove any with empty/null/invalid function names or missing arguments schema
         const validTools = [...SPARKIE_TOOLS, ...connectorTools].filter(
-          t => t?.function?.name?.trim()
+          (t) =>
+            t?.function?.name?.trim() &&
+            t.function.parameters &&
+            typeof t.function.parameters === 'object'
         )
 
         const { response: loopRes, errorText } = await tryLLMCall({
@@ -7224,15 +7234,13 @@ SYNTHESIS RULES:
       // Mirrors the non-useTools synthesis path but writes to liveRef instead of returning.
       // Nudge prevents synthesis from calling tools again or emitting XML
 
-      // Sanitize finalMessages before synthesis call — remove ANY tool_call where
-      // function is null/undefined, name is empty, or arguments are missing/empty.
-      // MiniMax 400 "function name or parameters is empty" comes from these edge cases.
+      // Strip ALL tool_calls from synthesis messages too (same reason as agent loop)
       const synthSanitized = finalMessages.map((msg: Record<string, unknown>) => {
-        if (msg.role === 'assistant' && Array.isArray(msg.tool_calls)) {
-          const validCalls = (msg.tool_calls as Array<{ id?: string; function?: { name?: string; arguments?: string }; type?: string }>).filter(
-            (tc) => tc?.function?.name?.trim() && String(tc.function.arguments ?? '').trim()
-          )
-          return { ...msg, tool_calls: validCalls }
+        if (msg.role === 'assistant') {
+          return { ...msg, tool_calls: undefined, content: msg.content }
+        }
+        if (msg.role === 'tool') {
+          return { ...msg, tool_calls: undefined }
         }
         return msg
       })
