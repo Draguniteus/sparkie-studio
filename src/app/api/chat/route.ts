@@ -5669,7 +5669,8 @@ async function handleBuildMode(
 
           const content = turnResponse.content ?? []
           const stopReason = turnResponse.stop_reason
-          const allToolCalls = content.filter(b => b.type === 'tool_use')
+          // Defensive: skip tool_use blocks with empty names to prevent stuck loops
+          const allToolCalls = content.filter(b => b.type === 'tool_use' && b.name?.trim())
           const writeFileBlocks = allToolCalls.filter(b => b.name === 'write_file')
           const githubBlocks = allToolCalls.filter(b => b.name === 'get_github')
           const terminalBlocks = allToolCalls.filter(b => b.name === 'execute_terminal')
@@ -6326,11 +6327,29 @@ Keep each header + thought on its own line. Use multiple short bold-header block
         if (round % 5 === 0) {
           liveEnqueue({ checkpoint_event: { round, message: `Checkpoint: ${round} rounds completed` } })
         }
+
+        // Sanitize messages: remove any tool_calls blocks with empty function names
+        // This prevents MiniMax 400 "function name empty" errors from corrupted conversation history
+        const sanitizedMessages = loopMessages.map((msg: Record<string, unknown>) => {
+          if (msg.role === 'assistant' && Array.isArray(msg.tool_calls)) {
+            const validCalls = (msg.tool_calls as Array<{ id?: string; function?: { name?: string; arguments?: string }; type?: string }>).filter(
+              tc => tc?.function?.name?.trim()
+            )
+            return { ...msg, tool_calls: validCalls }
+          }
+          return msg
+        })
+
+        // Sanitize tools: remove any with empty names (guards against corrupted connector tool definitions)
+        const validTools = [...SPARKIE_TOOLS, ...connectorTools].filter(
+          t => t?.function?.name?.trim()
+        )
+
         const { response: loopRes, errorText } = await tryLLMCall({
           stream: false, temperature: 0.8, max_tokens: 16000,
-          tools: [...SPARKIE_TOOLS, ...connectorTools],
+          tools: validTools,
           tool_choice: { type: 'auto' },
-          messages: [{ role: 'system', content: finalSystemContent }, ...loopMessages],
+          messages: [{ role: 'system', content: finalSystemContent }, ...sanitizedMessages],
         }, apiKey)
 
         if (!loopRes.ok) {
@@ -6348,10 +6367,17 @@ Keep each header + thought on its own line. Use multiple short bold-header block
 
         if (finishReason === 'tool_calls' && choice?.message?.tool_calls) {
           usedTools = true
-          const toolCalls = choice.message.tool_calls as Array<{
+          const rawToolCalls = choice.message.tool_calls as Array<{
             id: string
             function: { name: string; arguments: string }
           }>
+          // Defensive: skip any tool calls with empty names (MiniMax sometimes returns these)
+          const toolCalls = rawToolCalls.filter(tc => tc?.function?.name?.trim())
+          if (toolCalls.length === 0 && rawToolCalls.length > 0) {
+            // All tool calls had empty names — abort this round to avoid infinite loop
+            console.warn('[chat] All tool calls had empty names, skipping round')
+            break
+          }
 
           // Emit thought_step: model's reasoning text before calling tools (if any)
           const thinkingText: string = (choice.message.content ?? '').trim()
