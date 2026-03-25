@@ -2645,7 +2645,7 @@ Categories:
 - procedure: HOW Sparkie completed a complex task successfully (steps taken, tools used, order) — save AFTER complex multi-step task completions
 Rules: Only USER facts + Sparkie execution procedures. Only NEW, specific, worth-remembering. Max 6. If nothing, return [].`,
           },
-          { role: 'user', content: conversation.slice(0, 3000) }
+          { role: 'user', content: conversation.slice(0, 8000) }
         ],
       }),
       signal: AbortSignal.timeout(10000),
@@ -6282,6 +6282,44 @@ Keep each header + thought on its own line. Use multiple short bold-header block
         }).catch(() => {})
       }
 
+      // ── Memory injection: sparkie_self_memory + user_memories ─────────────────
+      // Injected before every LLM call so Sparkie has persistent context without
+      // needing to proactively call read_memory. This makes her genuinely memory-aware.
+      if (!isBuild && userId) {
+        try {
+          const [selfMemRows, userMemRows] = await Promise.all([
+            query<{ category: string; content: string }>(
+              `SELECT category, content FROM sparkie_self_memory ORDER BY created_at DESC LIMIT 10`
+            ),
+            query<{ category: string; content: string }>(
+              `SELECT category, content FROM user_memories WHERE user_id = $1 ORDER BY created_at DESC LIMIT 8`,
+              [userId]
+            ),
+          ])
+
+          const selfLines: string[] = []
+          if (selfMemRows.rows.length > 0) {
+            selfLines.push(`\n## SPARKIE'S LEARNED KNOWLEDGE (persist across sessions)`)
+            for (const m of selfMemRows.rows) {
+              selfLines.push(`- [${m.category}] ${m.content}`)
+            }
+          }
+
+          const userLines: string[] = []
+          if (userMemRows.rows.length > 0) {
+            userLines.push(`\n## ABOUT MICHAEL (from memory)`)
+            for (const m of userMemRows.rows) {
+              userLines.push(`- [${m.category}] ${m.content}`)
+            }
+          }
+
+          const memBlock = [...selfLines, ...userLines].join('\n')
+          if (memBlock) {
+            finalSystemContent += memBlock
+          }
+        } catch {}
+      }
+
       let autoContinuationRound = 0
       while (round < MAX_TOOL_ROUNDS) {
         round++
@@ -6910,8 +6948,8 @@ Keep each header + thought on its own line. Use multiple short bold-header block
               messageLength: lastUserMsgLen,
               usedTools: usedTools,
             }).catch(() => {})
-            const snap = messages.slice(-6).map((m: { role: string; content: string }) =>
-              `${m.role === 'user' ? 'User' : 'Sparkie'}: ${(typeof m.content === 'string' ? m.content : '').slice(0, 400)}`
+            const snap = messages.slice(-20).map((m: { role: string; content: string }) =>
+              `${m.role === 'user' ? 'User' : 'Sparkie'}: ${(typeof m.content === 'string' ? m.content : '').slice(0, 600)}`
             ).join('\n')
             extractAndSaveMemories(userId, snap, apiKey)
             // Extract deferred intents from the user's message
@@ -7185,8 +7223,8 @@ SYNTHESIS RULES:
         messageLength: lastUserMsgContent.length,
         usedTools: false,
       }).catch(() => {})
-      const snap = messages.slice(-6).map((m: { role: string; content: string }) =>
-        `${m.role === 'user' ? 'User' : 'Sparkie'}: ${(typeof m.content === 'string' ? m.content : '').slice(0, 400)}`
+      const snap = messages.slice(-20).map((m: { role: string; content: string }) =>
+        `${m.role === 'user' ? 'User' : 'Sparkie'}: ${(typeof m.content === 'string' ? m.content : '').slice(0, 600)}`
       ).join('\n')
       extractAndSaveMemories(userId, snap, apiKey)
       // Write message batch to worklog (fire-and-forget)
