@@ -118,7 +118,7 @@ async function executeDueTasks(userId: string, host: string, proto: string, cook
         // (e.g. scrape 100 pages, process each, aggregate) instead of capping
         // at ~10 rounds per single chat session.
         const MAX_PASSES = 4
-        const PASS_TIMEOUT_MS = 50_000
+        const PASS_TIMEOUT_MS = 95_000
         const internalSecret = process.env.SPARKIE_INTERNAL_SECRET ?? ''
 
         // ── Skill auto-trigger ────────────────────────────────────────────
