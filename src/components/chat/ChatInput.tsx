@@ -1460,6 +1460,11 @@ export function ChatInput() {
       let filesCreated = 0
       const createdFileNames = new Set<string>()
       let lastThinkingText = '⚡ Initializing agent...'
+      // build_resuming state — populated when backend finds a checkpoint
+      let isResuming = false
+      let resumeCheckpointFiles = ''
+      let resumeTurn = 0
+      let resumeTotalFiles = 0
 
       while (true) {
         const { done, value } = await reader.read()
@@ -1482,6 +1487,51 @@ export function ChatInput() {
               lastThinkingText = parsed.text
               updateMessage(chatId, thinkingMsgId, { content: lastThinkingText, isStreaming: true })
               addWorklogEntry({ type: 'thinking', content: parsed.text, status: 'running' })
+            } else if (parsed.event === 'build_resuming') {
+              // Backend found a checkpoint and is resuming a previous build
+              isResuming = true
+              resumeTurn = parsed.resumedAtTurn ?? 0
+              resumeTotalFiles = parsed.totalFilesSoFar ?? 0
+              const resumeMsg = `🔄 Resuming build — ${resumeTotalFiles} file${resumeTotalFiles !== 1 ? 's' : ''} already written (paused at turn ${resumeTurn})`
+              lastThinkingText = resumeMsg
+              updateMessage(chatId, thinkingMsgId, { content: resumeMsg, isStreaming: true })
+              addWorklogEntry({ type: 'thinking', content: `Resuming from turn ${resumeTurn} — ${resumeTotalFiles} files already created`, status: 'running' })
+              // Restore project name if provided (projectName is local, just update the local var)
+              if (parsed.topicName) {
+                projectName = String(parsed.topicName)
+              }
+              // Parse checkpoint's fullBuildRaw and restore all files into the file tree
+              try {
+                const checkpointState = JSON.parse(parsed.last_state || '{}') as {
+                  fullBuildRaw?: string
+                }
+                resumeCheckpointFiles = checkpointState.fullBuildRaw ?? ''
+                if (resumeCheckpointFiles) {
+                  // Parse and upsert all files from the checkpoint
+                  const cp = parseAIResponse(resumeCheckpointFiles, projectName)
+                  for (const folder of (cp.folders ?? [])) {
+                    upsertFile(`${folder}/.gitkeep`, '', 'plaintext')
+                  }
+                  for (const file of cp.files) {
+                    if (!createdFileNames.has(file.name)) {
+                      createdFileNames.add(file.name)
+                      const fileId = upsertFile(file.name, file.content, getLanguageFromFilename(file.name))
+                      if (filesCreated === 0) setActiveFile(fileId)
+                      addLiveCodeFile(file.name)
+                      window.dispatchEvent(new CustomEvent('sparkie_step_trace', { detail: { icon: 'file', label: `[resumed] ${file.name}`, status: 'done' } }))
+                      const chatTitle = useAppStore.getState().chats.find(c => c.id === chatId)?.title || 'New Chat'
+                      addAsset({ name: file.name, language: getLanguageFromFilename(file.name), content: file.content, chatId, chatTitle, fileId, assetType: detectAssetTypeFromName(file.name), source: 'agent' as const })
+                      filesCreated++
+                    }
+                  }
+                  // Append checkpoint content to fullBuild so new deltas continue correctly
+                  fullBuild = resumeCheckpointFiles
+                  // Sync liveCode display with checkpoint files
+                  appendLiveCode(resumeCheckpointFiles)
+                }
+              } catch {
+                // Corrupted checkpoint — continue without prior files
+              }
             } else if (parsed.event === 'delta' && parsed.content) {
               fullBuild += parsed.content
               appendLiveCode(parsed.content)

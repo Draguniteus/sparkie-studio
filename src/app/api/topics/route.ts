@@ -50,8 +50,8 @@ export async function GET(req: NextRequest) {
 
   if (topicId) {
     const [topicRes, linksRes] = await Promise.all([
-      query<{ id: string; name: string; fingerprint: string; summary: string; notification_policy: string; status: string; created_at: string; updated_at: string }>(
-        `SELECT id, name, fingerprint, summary, notification_policy, status, created_at, updated_at FROM sparkie_topics WHERE id = $1 AND user_id = $2`,
+      query<{ id: string; name: string; fingerprint: string; summary: string; notification_policy: string; status: string; created_at: string; updated_at: string; topic_type: string; last_round: number; step_count: number; original_request: string }>(
+        `SELECT id, name, fingerprint, summary, notification_policy, status, created_at, updated_at, topic_type, last_round, step_count, original_request FROM sparkie_topics WHERE id = $1 AND user_id = $2`,
         [topicId, userId]
       ),
       query<{ id: number; source_type: string; source_id: string; summary: string; created_at: string }>(
@@ -63,8 +63,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ topic: topicRes.rows[0], links: linksRes.rows })
   }
 
-  const res = await query<{ id: string; name: string; fingerprint: string; summary: string; notification_policy: string; status: string; updated_at: string }>(
-    `SELECT id, name, fingerprint, summary, notification_policy, status, updated_at FROM sparkie_topics WHERE user_id = $1 AND status = 'active' ORDER BY updated_at DESC LIMIT 30`,
+  const res = await query<{ id: string; name: string; fingerprint: string; summary: string; notification_policy: string; status: string; updated_at: string; topic_type: string; last_round: number; step_count: number; original_request: string }>(
+    `SELECT id, name, fingerprint, summary, notification_policy, status, updated_at, topic_type, last_round, step_count, original_request FROM sparkie_topics WHERE user_id = $1 AND status = 'active' ORDER BY updated_at DESC LIMIT 30`,
     [userId]
   )
   return NextResponse.json({ topics: res.rows })
@@ -90,6 +90,7 @@ export async function POST(req: NextRequest) {
     last_round?: number
     step_count?: number
     original_request?: string
+    topic_type?: string
   }
 
   if (body.action === 'create') {

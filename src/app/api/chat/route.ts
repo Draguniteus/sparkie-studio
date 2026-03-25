@@ -5538,6 +5538,17 @@ async function handleBuildMode(
       }
       const heartbeat = () => { try { controller.enqueue(encoder.encode(': heartbeat\n\n')) } catch {} }
 
+      // agentMessages is declared early so the checkpoint/restore code (which runs before the
+      // main loop) can assign to it. It holds the full conversation history for the agent loop.
+      // Default: a single user message. Checkpoint restore overrides this if a saved state exists.
+      const lastUserMsg = (parsedBody.messages as Array<{ role: string; content: string }>)
+        .filter(m => m.role === 'user')
+        .slice(-1)
+      let agentMessages: Array<{ role: string; content: unknown }> = [
+        { role: 'user', content: lastUserMsg[0]?.content ?? '' },
+      ]
+      let fullBuildRaw = ''
+
       try {
         const apiKey = process.env.MINIMAX_API_KEY
         if (!apiKey) {
@@ -5560,11 +5571,6 @@ async function handleBuildMode(
         }
 
         send('thinking', { text: '⚡ Analyzing request…' })
-
-        // Only send the last user message — conversation history biases the model
-        const lastUserMsg = (messages as Array<{ role: string; content: string }>)
-          .filter(m => m.role === 'user')
-          .slice(-1)
 
         // ── Build Checkpoint / Resume ────────────────────────────────────────
         // Check for an active build topic matching this request; resume if found
@@ -5606,6 +5612,7 @@ async function handleBuildMode(
                         originalRequest: findData.topic.original_request,
                         resumedAtTurn: checkpoint.turn ?? 0,
                         totalFilesSoFar: (fullBuildRaw.match(/---FILE:/g) || []).length,
+                        last_state: savedState,
                       })
                     }
                   } catch {
@@ -5692,11 +5699,6 @@ async function handleBuildMode(
           },
         }
 
-        let fullBuildRaw = ''
-        // Anthropic messages format — tool results use content array, not role:'tool'
-        let agentMessages: Array<{ role: string; content: unknown }> = [
-          { role: 'user', content: lastUserMsg[0]?.content ?? '' },
-        ]
         const MAX_TURNS = 25
 
         for (let turn = 0; turn < MAX_TURNS; turn++) {
@@ -5924,11 +5926,10 @@ async function handleBuildMode(
         }
 
         // Final checkpoint then archive on success
-        // Note: turn variable = MAX_TURNS after loop completes, or early exit value
-        const finalTurn = turn < MAX_TURNS ? turn : MAX_TURNS - 1
+        // Note: turn is only accessible inside the for-loop block; use MAX_TURNS as the completed value
         if (buildTopicId) {
-          const finalCheckpoint = JSON.stringify({ agentMessages, fullBuildRaw, turn: finalTurn })
-          const archivePayload = JSON.stringify({ action: 'update_state', id: buildTopicId, last_state: finalCheckpoint, last_round: finalTurn, step_count: fileCount })
+          const finalCheckpoint = JSON.stringify({ agentMessages, fullBuildRaw, turn: MAX_TURNS })
+          const archivePayload = JSON.stringify({ action: 'update_state', id: buildTopicId, last_state: finalCheckpoint, last_round: MAX_TURNS, step_count: fileCount })
           fetch(`${buildBaseUrl2}/api/topics`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', cookie: parsedBody.sessionCookie ?? '' },

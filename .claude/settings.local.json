@@ -18,7 +18,28 @@
       "WebFetch(domain:www.hyperbrowser.ai)",
       "Bash(find src:*)",
       "Bash(find src/components/layout -name IDEPanelInner*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(find C:/Users/user/Desktop/sparkie-studio/src -name *emory* -o -name *Memory*)",
+      "Bash(find C:/Users/user/Desktop/sparkie-studio/src -name *Process* -o -name *process*)",
+      "Bash(doctl apps:*)",
+      "Bash(curl -s -X POST https://sparkie-studio-mhouq.ondigitalocean.app/api/admin/memory-cleanup -H \"x-admin-secret: sparkie-migrate-2026\" -H \"Content-Type: application/json\")",
+      "Bash(python -m json.tool)",
+      "Bash(curl -s -X POST https://sparkie-studio-mhouq.ondigitalocean.app/api/admin/memory-cleanup -H 'x-admin-secret: sparkie-migrate-2026' -H 'Content-Type: application/json')",
+      "Bash(awk 'NR>=225 && NR<=2148 {print}' /c/Users/user/Desktop/sparkie-studio/src/app/api/chat/route.ts)",
+      "Bash(awk 'NR>=1 && NR<=100 {print}')",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" https://sparkie-studio-mhouq.ondigitalocean.app/api/health)",
+      "Bash(curl -s -X POST https://sparkie-studio-mhouq.ondigitalocean.app/api/admin/memory-cleanup -H 'x-admin-secret: $NEXTAUTH_SECRET')",
+      "Bash(python:*)",
+      "Bash(set PYTHONIOENCODING=utf-8)",
+      "Bash(awk 'NR>=44 && NR<=220 {count++} END {print \"\"BUILD_SYSTEM_PROMPT: \"\" count \"\" lines\"\"}' src/app/api/chat/route.ts)",
+      "Read(//c/Users/user/Desktop/sparkie-studio/NR>=222 && /^`;$/**)",
+      "Bash(awk:*)",
+      "Bash(curl -s -X POST https://sparkie-studio-mhouq.ondigitalocean.app/api/admin/memory-cleanup -H \"x-admin-secret: sparkie-migrate-2026\")",
+      "Bash(curl -s -X POST https://sparkie-studio-mhouq.ondigitalocean.app/api/admin/memory-cleanup -H 'x-admin-secret: sparkie-migrate-2026')",
+      "WebFetch(domain:www.minimax.io)",
+      "Bash(npm run:*)",
+      "Bash(set \"NEXT_TELEMETRY_DISABLED=1\")",
+      "Bash(npx next:*)"
     ]
   }
 }

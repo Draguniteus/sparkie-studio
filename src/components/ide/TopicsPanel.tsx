@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Layers, RefreshCw, Loader2, ChevronRight, Archive, Link2, Calendar } from 'lucide-react'
+import { Layers, RefreshCw, Loader2, ChevronRight, Archive, Link2, Calendar, Rocket } from 'lucide-react'
 
 interface Topic {
   id: string
@@ -11,6 +11,10 @@ interface Topic {
   notification_policy: string
   status: string
   updated_at: string
+  topic_type?: string
+  last_round?: number
+  step_count?: number
+  original_request?: string
 }
 
 interface TopicLink {
@@ -160,7 +164,111 @@ export function TopicsPanel() {
           <div className="flex items-center gap-2 px-4 py-4 text-xs text-text-muted">
             <Loader2 size={11} className="animate-spin" /> Loading topics...
           </div>
-        ) : topics.length === 0 ? (
+        ) : (
+          <>
+            {/* Active Builds section */}
+            {(() => {
+              const buildTopics = topics.filter(t => t.topic_type === 'build')
+              if (buildTopics.length === 0) return null
+              return (
+                <div className="border-b border-hive-border/60">
+                  <div className="px-3 py-2 flex items-center gap-2">
+                    <Rocket size={11} className="text-orange-400 shrink-0" />
+                    <span className="text-[10px] font-semibold text-orange-400 uppercase tracking-widest">Active Builds</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-400/15 text-orange-400 font-medium">{buildTopics.length}</span>
+                  </div>
+                  {buildTopics.map(topic => (
+                    <button
+                      key={topic.id}
+                      onClick={() => setSelected(topic)}
+                      className="w-full text-left px-3 py-2.5 hover:bg-hive-hover transition-colors flex items-start gap-2.5 border-t border-hive-border/30"
+                    >
+                      <div className="w-7 h-7 rounded-lg bg-orange-400/10 flex items-center justify-center shrink-0 mt-0.5">
+                        <Rocket size={11} className="text-orange-400" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] font-semibold text-text-primary truncate">{topic.name}</span>
+                          {(topic.last_round ?? 0) > 0 && (
+                            <span className="text-[8px] px-1 py-0.5 rounded bg-orange-400/20 text-orange-300 font-medium shrink-0">
+                              {topic.last_round} rounds
+                            </span>
+                          )}
+                        </div>
+                        {topic.original_request ? (
+                          <p className="text-[10px] text-text-muted leading-snug truncate mt-0.5 italic">
+                            &ldquo;{topic.original_request.slice(0, 60)}{topic.original_request.length > 60 ? '…' : ''}&rdquo;
+                          </p>
+                        ) : topic.summary ? (
+                          <p className="text-[10px] text-text-muted leading-snug truncate mt-0.5">{topic.summary}</p>
+                        ) : null}
+                        <div className="flex items-center gap-1.5 mt-1">
+                          {(topic.step_count ?? 0) > 0 && (
+                            <span className="text-[9px] text-text-muted">{topic.step_count} files written</span>
+                          )}
+                          {(topic.step_count ?? 0) > 0 && (topic.last_round ?? 0) > 0 && (
+                            <span className="text-text-muted/40">·</span>
+                          )}
+                          <Calendar size={8} className="text-text-muted/50 shrink-0" />
+                          <span className="text-[9px] text-text-muted">{timeAgo(topic.updated_at)}</span>
+                        </div>
+                      </div>
+                      <ChevronRight size={11} className="text-text-muted shrink-0 mt-2" />
+                    </button>
+                  ))}
+                  <p className="px-3 pb-2 text-[9px] text-text-muted/50 italic">
+                    Say &ldquo;continue building [project]&rdquo; to resume
+                  </p>
+                </div>
+              )
+            })()}
+
+            {/* Chat Topics section */}
+            {(() => {
+              const chatTopics = topics.filter(t => t.topic_type !== 'build')
+              if (chatTopics.length === 0) return null
+              return (
+                <div className="divide-y divide-hive-border/40">
+                  <div className="px-3 py-2 flex items-center gap-2">
+                    <Layers size={11} className="text-honey-500 shrink-0" />
+                    <span className="text-[10px] font-semibold text-text-muted uppercase tracking-widest">Topics</span>
+                  </div>
+                  {chatTopics.map(topic => (
+                    <button
+                      key={topic.id}
+                      onClick={() => setSelected(topic)}
+                      className="w-full text-left px-3 py-2.5 hover:bg-hive-hover transition-colors flex items-start gap-2.5"
+                    >
+                      <div className="w-7 h-7 rounded-lg bg-honey-500/10 flex items-center justify-center shrink-0 mt-0.5">
+                        <Layers size={11} className="text-honey-500" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] font-semibold text-text-primary truncate">{topic.name}</span>
+                          {topic.notification_policy === 'immediate' && (
+                            <span className="text-[8px] px-1 py-0.5 rounded bg-honey-500/20 text-honey-400 font-bold shrink-0">LIVE</span>
+                          )}
+                        </div>
+                        {topic.summary ? (
+                          <p className="text-[10px] text-text-muted leading-snug truncate mt-0.5">{topic.summary}</p>
+                        ) : topic.fingerprint ? (
+                          <p className="text-[10px] text-text-muted/60 leading-snug truncate mt-0.5 italic">{topic.fingerprint}</p>
+                        ) : null}
+                        <div className="flex items-center gap-1.5 mt-1">
+                          <Calendar size={8} className="text-text-muted/50 shrink-0" />
+                          <span className="text-[9px] text-text-muted">{timeAgo(topic.updated_at)}</span>
+                        </div>
+                      </div>
+                      <ChevronRight size={11} className="text-text-muted shrink-0 mt-2" />
+                    </button>
+                  ))}
+                </div>
+              )
+            })()}
+          </>
+        )}
+
+        {topics.length > 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center px-6 py-10 gap-3">
             <div className="w-12 h-12 rounded-2xl bg-honey-500/8 flex items-center justify-center">
               <Layers size={18} className="text-honey-500/60" />
@@ -172,38 +280,6 @@ export function TopicsPanel() {
               </p>
             </div>
             <p className="text-[10px] text-text-muted/50 italic">e.g. &quot;Create a topic for the Sparkie Studio deployment project&quot;</p>
-          </div>
-        ) : (
-          <div className="divide-y divide-hive-border/40">
-            {topics.map(topic => (
-              <button
-                key={topic.id}
-                onClick={() => setSelected(topic)}
-                className="w-full text-left px-3 py-2.5 hover:bg-hive-hover transition-colors flex items-start gap-2.5"
-              >
-                <div className="w-7 h-7 rounded-lg bg-honey-500/10 flex items-center justify-center shrink-0 mt-0.5">
-                  <Layers size={11} className="text-honey-500" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[11px] font-semibold text-text-primary truncate">{topic.name}</span>
-                    {topic.notification_policy === 'immediate' && (
-                      <span className="text-[8px] px-1 py-0.5 rounded bg-honey-500/20 text-honey-400 font-bold shrink-0">LIVE</span>
-                    )}
-                  </div>
-                  {topic.summary ? (
-                    <p className="text-[10px] text-text-muted leading-snug truncate mt-0.5">{topic.summary}</p>
-                  ) : topic.fingerprint ? (
-                    <p className="text-[10px] text-text-muted/60 leading-snug truncate mt-0.5 italic">{topic.fingerprint}</p>
-                  ) : null}
-                  <div className="flex items-center gap-1 mt-1">
-                    <Calendar size={8} className="text-text-muted/50 shrink-0" />
-                    <span className="text-[9px] text-text-muted">{timeAgo(topic.updated_at)}</span>
-                  </div>
-                </div>
-                <ChevronRight size={11} className="text-text-muted shrink-0 mt-2" />
-              </button>
-            ))}
           </div>
         )}
 
