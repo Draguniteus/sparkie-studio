@@ -6249,11 +6249,13 @@ Make it feel like walking into your friend's creative space and being genuinely 
       systemContent += `\n\n## ACTIVE VOICE SESSION\nLive voice conversation. Keep responses short and natural — spoken dialogue. No markdown. Max 3-4 sentences.`
     }
 
-    // Smarter rolling window: keep first 4 messages (session intent/context anchors)
-    // + last 16 for recency. Prevents context amnesia on long conversations.
-    const recentMessages = messages.length <= 20
+    // Hard cap: when conversation history is very long, only keep the last 12 messages.
+    // This prevents token bloat AND avoids MiniMax 400 "function name/parameters empty" errors
+    // from corrupted tool_calls in old stored messages that slip through sanitization.
+    const HARD_MESSAGE_CAP = 12
+    const recentMessages = messages.length <= HARD_MESSAGE_CAP
       ? messages
-      : [...messages.slice(0, 4), ...messages.slice(-16)]
+      : messages.slice(-HARD_MESSAGE_CAP)
 
     // Await user's connector tools (was started in parallel with system prompt build)
     const connectorTools = await connectorToolsPromise
@@ -7222,11 +7224,13 @@ SYNTHESIS RULES:
       // Mirrors the non-useTools synthesis path but writes to liveRef instead of returning.
       // Nudge prevents synthesis from calling tools again or emitting XML
 
-      // Sanitize finalMessages before synthesis call (same guard as agent loop)
+      // Sanitize finalMessages before synthesis call — remove ANY tool_call where
+      // function is null/undefined, name is empty, or arguments are missing/empty.
+      // MiniMax 400 "function name or parameters is empty" comes from these edge cases.
       const synthSanitized = finalMessages.map((msg: Record<string, unknown>) => {
         if (msg.role === 'assistant' && Array.isArray(msg.tool_calls)) {
           const validCalls = (msg.tool_calls as Array<{ id?: string; function?: { name?: string; arguments?: string }; type?: string }>).filter(
-            tc => tc?.function?.name?.trim()
+            (tc) => tc?.function?.name?.trim() && String(tc.function.arguments ?? '').trim()
           )
           return { ...msg, tool_calls: validCalls }
         }
