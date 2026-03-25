@@ -1988,6 +1988,22 @@ const SPARKIE_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'read_file',
+      description: 'Read the full contents of a file from the workspace or a GitHub repo. Use when you need to understand existing code before modifying or building upon it.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'File path to read, e.g. "src/App.tsx" or "README.md"' },
+          repo: { type: 'string', description: 'GitHub repo in format "owner/repo" (optional — reads from workspace if omitted)' },
+          encoding: { type: 'string', description: 'Encoding to use. Defaults to "utf-8".' },
+        },
+        required: ['path'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'grep_codebase',
       description: 'Search file contents across the codebase for a pattern. Shortcut for execute_terminal grep. Use when you need to find where a function, variable, or string is used.',
       parameters: {
@@ -3486,6 +3502,46 @@ async function executeTool(
           return data.value ?? ''
         } catch (e) {
           return `workspace_read error: ${String(e)}`
+        }
+      }
+
+      case 'read_file': {
+        const { path: rfPath, repo: rfRepo } = args as { path: string; repo?: string }
+        if (!rfPath) return 'path required for read_file'
+        try {
+          if (rfRepo) {
+            // Read from GitHub
+            const ghToken = process.env.GITHUB_TOKEN ?? process.env.GITHUB_PAT ?? ''
+            const ghHeaders: Record<string, string> = { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'SparkieStudio/2.0' }
+            if (ghToken) ghHeaders['Authorization'] = `Bearer ${ghToken}`
+            const ghUrl = `https://api.github.com/repos/${rfRepo}/contents/${rfPath.replace(/^\//, '')}`
+            const res = await fetch(ghUrl, { headers: ghHeaders, signal: AbortSignal.timeout(8000) })
+            if (!res.ok) return `read_file: ${res.status} — ${res.statusText} for ${rfRepo}/${rfPath}`
+            const d = await res.json() as { content?: string; encoding?: string }
+            if (!d.content || d.encoding !== 'base64') return `read_file: not a file — ${rfRepo}/${rfPath}`
+            const content = Buffer.from(d.content.replace(/\n/g, ''), 'base64').toString('utf-8')
+            return `File: ${rfPath}\n\n${content}`
+          }
+          // Read from workspace via terminal
+          const createRes = await fetch(`${baseUrl}/api/terminal`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...(process.env.SPARKIE_INTERNAL_SECRET ? { 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET } : {}) },
+            body: JSON.stringify({ action: 'create' }),
+            signal: AbortSignal.timeout(10000),
+          })
+          if (!createRes.ok) return `read_file: terminal unavailable (${createRes.status})`
+          const { sessionId: rfSessId } = await createRes.json() as { sessionId: string }
+          await new Promise(r => setTimeout(r, 400))
+          const inputRes = await fetch(`${baseUrl}/api/terminal`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...(process.env.SPARKIE_INTERNAL_SECRET ? { 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET } : {}) },
+            body: JSON.stringify({ action: 'input', sessionId: rfSessId, data: `cat "${rfPath}" 2>&1\n` }),
+            signal: AbortSignal.timeout(15000),
+          })
+          const rfData = await inputRes.json() as { output?: string }
+          return rfData.output ?? `read_file: no output for ${rfPath}`
+        } catch (e) {
+          return `read_file error: ${String(e)}`
         }
       }
 
@@ -5549,6 +5605,17 @@ async function handleBuildMode(
             required: ['action'],
           },
         }
+        const READ_FILE_TOOL = {
+          name: 'read_file',
+          description: 'Read the full contents of a file. Use when you need to see existing code before modifying it.',
+          input_schema: {
+            type: 'object' as const,
+            properties: {
+              path: { type: 'string', description: 'File path to read, e.g. "src/App.tsx" or "index.html"' },
+            },
+            required: ['path'],
+          },
+        }
 
         let fullBuildRaw = ''
         // Anthropic messages format — tool results use content array, not role:'tool'
@@ -5581,7 +5648,7 @@ async function handleBuildMode(
                 max_tokens: 16000,
                 temperature: 1.0,
                 system: systemPrompt,
-                tools: [WRITE_FILE_TOOL, GET_GITHUB_TOOL, EXECUTE_TERMINAL_TOOL],
+                tools: [WRITE_FILE_TOOL, GET_GITHUB_TOOL, EXECUTE_TERMINAL_TOOL, READ_FILE_TOOL],
                 tool_choice: { type: 'auto' },
                 messages: agentMessages,
               }),
@@ -5606,9 +5673,10 @@ async function handleBuildMode(
           const writeFileBlocks = allToolCalls.filter(b => b.name === 'write_file')
           const githubBlocks = allToolCalls.filter(b => b.name === 'get_github')
           const terminalBlocks = allToolCalls.filter(b => b.name === 'execute_terminal')
+          const readFileBlocks = allToolCalls.filter(b => b.name === 'read_file')
           const textContent = content.filter(b => b.type === 'text').map(b => b.text ?? '').join('')
 
-          console.log(`[BUILD] Turn ${turn}: stop_reason=${stopReason} write_file=${writeFileBlocks.length} get_github=${githubBlocks.length} execute_terminal=${terminalBlocks.length} textLen=${textContent.length}`)
+          console.log(`[BUILD] Turn ${turn}: stop_reason=${stopReason} write_file=${writeFileBlocks.length} get_github=${githubBlocks.length} read_file=${readFileBlocks.length} execute_terminal=${terminalBlocks.length} textLen=${textContent.length}`)
 
           // Prose retry — model responded conversationally on turn 0, nudge it to call write_file
           if (allToolCalls.length === 0 && turn === 0 && textContent.length > 0 && textContent.length < 500) {
@@ -5666,6 +5734,41 @@ async function handleBuildMode(
                 }
               }
               agentMessages = [...agentMessages, { role: 'user', content: [{ type: 'tool_result', tool_use_id: callId, content: result }] }]
+            } catch (e) {
+              agentMessages = [...agentMessages, { role: 'user', content: [{ type: 'tool_result', tool_use_id: callId, content: `Error: ${String(e)}` }] }]
+            }
+          }
+
+          // Process read_file calls — read from workspace via terminal cat
+          for (const block of readFileBlocks) {
+            const input = block.input as { path?: string }
+            const callId = block.id ?? `rf_${turn}`
+            const rfPath = input.path ?? ''
+            if (!rfPath) {
+              agentMessages = [...agentMessages, { role: 'user', content: [{ type: 'tool_result', tool_use_id: callId, content: 'path required for read_file' }] }]
+              continue
+            }
+            try {
+              const createRes = await fetch(`${buildBaseUrl}/api/terminal`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...(process.env.SPARKIE_INTERNAL_SECRET ? { 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET } : {}) },
+                body: JSON.stringify({ action: 'create' }),
+                signal: AbortSignal.timeout(10000),
+              })
+              if (!createRes.ok) {
+                agentMessages = [...agentMessages, { role: 'user', content: [{ type: 'tool_result', tool_use_id: callId, content: `Terminal unavailable: ${createRes.status}` }] }]
+                continue
+              }
+              const { sessionId: rfSessId } = await createRes.json() as { sessionId: string }
+              await new Promise(r => setTimeout(r, 400))
+              const inputRes = await fetch(`${buildBaseUrl}/api/terminal`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...(process.env.SPARKIE_INTERNAL_SECRET ? { 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET } : {}) },
+                body: JSON.stringify({ action: 'input', sessionId: rfSessId, data: `cat "${rfPath}" 2>&1\n` }),
+                signal: AbortSignal.timeout(15000),
+              })
+              const rfData = await inputRes.json() as { output?: string }
+              agentMessages = [...agentMessages, { role: 'user', content: [{ type: 'tool_result', tool_use_id: callId, content: rfData.output ?? `No output for ${rfPath}` }] }]
             } catch (e) {
               agentMessages = [...agentMessages, { role: 'user', content: [{ type: 'tool_result', tool_use_id: callId, content: `Error: ${String(e)}` }] }]
             }
