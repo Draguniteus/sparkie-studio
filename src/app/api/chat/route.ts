@@ -6211,6 +6211,7 @@ Make it feel like walking into your friend's creative space and being genuinely 
 
     // ── "Thinking out loud" — narrate before each tool call so thought_step fires ──
     if (!isBuild) {
+      finalSystemContent += `\n\nBefore calling any tool, write ONE sentence narrating what you are about to do and why. Keep it short and direct.`
     }
 
     // Generate requestId for execution trace
