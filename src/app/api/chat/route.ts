@@ -6560,16 +6560,10 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           ;({ response: loopRes, errorText } = await tryLLMCall(llmPayload(coreTools), apiKey))
         }
 
-        if (!loopRes.ok && loopRes.status === 400 && coreTools.length > 0) {
-          console.warn(`[chat] 400 error with ${coreTools.length} core tools — retrying with 0 tools (stripped prompt)`)
-          // Use stripped base systemContent (no injected blocks) for 0-tools fallback
+        if (!loopRes.ok && loopRes.status === 400) {
+          // 0-tools synthesis: immediate fallback — do NOT wait for binary search
+          console.warn(`[chat] 400 with core tools — falling back to 0-tools synthesis`)
           ;({ response: loopRes, errorText } = await tryLLMCall(llmPayload([], systemContent), apiKey))
-          if (!loopRes.ok && loopRes.status === 400) {
-            // Fire-and-forget diagnostic — run after retries so it doesn't block recovery
-            findBadTool(validTools, finalSystemContent, sanitizedMessages, apiKey)
-              .then(badTool => console.error(`[chat] 400 diagnostic — bad tool: ${badTool?.function?.name ?? 'unknown'}`))
-              .catch(() => console.error(`[chat] 400 diagnostic failed`))
-          }
         }
 
         if (!loopRes.ok) {
