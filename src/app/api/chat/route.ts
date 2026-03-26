@@ -7283,7 +7283,8 @@ SYNTHESIS RULES:
 - If you hit the round limit without a clean stop, still give a full answer from what you have
 - Structure your response clearly — use headers, bullets, or code blocks as appropriate
 - For any IMAGE_URL:/AUDIO_URL:/VIDEO_URL: results, the media block will be appended — DO NOT repeat the URL in text
-- Never say "I ran out of rounds" or expose internal loop mechanics — just deliver the answer`
+- Never say "I ran out of rounds" or expose internal loop mechanics — just deliver the answer
+- NEVER use emojis, ASCII art, or decorative symbols — plain text only`
 
         // Auto-persist key learnings to self-memory after tool rounds complete
         // This ensures the Memory tab always has fresh data without Sparkie needing to explicitly call save_self_memory
@@ -7342,7 +7343,7 @@ SYNTHESIS RULES:
 
       finalMessages = [...synthSanitized, {
         role: 'user' as const,
-        content: '⚡ SYSTEM: Write your full response now in plain English. No tools. No XML.',
+        content: '⚡ SYSTEM: Write your full response now in plain English. No tools. No XML. No emojis. No ASCII art. Pure text only.',
       }]
       const { response: synthRes, errorText: synthErr } = await tryLLMCall({
         stream: true, temperature: 0.8, max_tokens: 16000,
