@@ -6464,10 +6464,9 @@ Keep each header + thought on its own line. Use multiple short bold-header block
         })
 
         // Use ONLY SPARKIE_TOOLS — do NOT include connectorTools.
-        // The connector tools (Gmail, Twitter, etc.) from Composio have unreliable schemas
-        // that trigger MiniMax 400 "function name or parameters is empty" errors.
-        // All connector actions are already covered by dedicated Sparkie tools
-        // (GMAIL_*, TWITTER_*, etc.) plus composio_execute as a fallback.
+        // Deduplicate by function name: keep first occurrence only.
+        // MiniMax rejects requests with duplicate function names.
+        const seen = new Set<string>()
         const allTools = SPARKIE_TOOLS
         const validTools: typeof allTools = []
         for (const t of allTools) {
@@ -6476,8 +6475,16 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           const paramsType = typeof params
           const isObject = paramsType === 'object' && params !== null && !Array.isArray(params)
           const hasObjectType = isObject && (params as Record<string, unknown>).type === 'object'
-          if (!name || !isObject || !hasObjectType) {
-            console.warn(`[tool-filter] REMOVING tool "${name ?? '(empty)'}" paramsType=${paramsType} isObject=${isObject} hasObjectType=${hasObjectType}`)
+          if (!name) {
+            console.warn(`[tool-filter] REMOVING tool with empty name`)
+            continue
+          }
+          if (seen.has(name)) {
+            console.warn(`[tool-filter] REMOVING duplicate tool "${name}"`)
+            continue
+          }
+          if (!isObject || !hasObjectType) {
+            console.warn(`[tool-filter] REMOVING tool "${name}" paramsType=${paramsType} isObject=${isObject} hasObjectType=${hasObjectType}`)
             continue
           }
           const p = params as { required?: string[]; properties?: Record<string, unknown> }
@@ -6492,6 +6499,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
             }
             if (!requiredOk) continue
           }
+          seen.add(name)
           validTools.push(t)
         }
         console.log(`[tool-filter] ${allTools.length} total → ${validTools.length} valid (removed ${allTools.length - validTools.length})`)
