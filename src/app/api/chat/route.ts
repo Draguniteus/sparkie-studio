@@ -2226,7 +2226,7 @@ const SPARKIE_TOOLS = [
         type: 'object',
         properties: {
           sql: { type: 'string', description: 'SQL statement: INSERT, UPDATE, or DELETE. Never use SELECT here — use query_database instead.' },
-          params: { type: 'array', items: {}, description: 'Optional parameter values for parameterized query ($1, $2, ...)' },
+          params: { type: 'array', items: { type: 'string' }, description: 'Optional parameter values for parameterized query ($1, $2, ...)' },
         },
         required: ['sql'],
       },
@@ -6012,6 +6012,34 @@ async function tryLLMCall(
   return { response: res, errorText }
 }
 
+// Binary-search diagnostic: finds which tool in the list caused a MiniMax 400 error
+async function findBadTool(
+  allTools: Array<{ function?: { name?: string } }>,
+  systemContent: string,
+  messages: Array<{ role: string; content?: unknown }>,
+  apiKey: string,
+): Promise<{ function?: { name?: string } } | null> {
+  if (allTools.length === 0) return null
+  const mid = Math.floor(allTools.length / 2)
+  const firstHalf = allTools.slice(0, mid)
+  const testPayload = {
+    stream: false, temperature: 0.8, max_tokens: 16000,
+    tools: firstHalf,
+    messages: [{ role: 'system', content: systemContent }, ...messages],
+  }
+  const { response } = await tryLLMCall(testPayload, apiKey)
+  if (response.ok) {
+    // Problem is in the second half
+    const rest = await findBadTool(allTools.slice(mid), systemContent, messages, apiKey)
+    if (!rest) return null
+    const idx = allTools.slice(mid).indexOf(rest)
+    return idx >= 0 ? allTools[mid + idx] : null
+  } else {
+    // Problem is in first half — recurse
+    return await findBadTool(firstHalf, systemContent, messages, apiKey)
+  }
+}
+
 // ── POST handler ──────────────────────────────────────────────────────────────
 
 // ── Simple in-memory rate limiter (30 req/min per user) ──────────────────────
@@ -6522,7 +6550,6 @@ Keep each header + thought on its own line. Use multiple short bold-header block
         const llmPayload = (tools: typeof validTools) => ({
           stream: false, temperature: 0.8, max_tokens: 16000,
           tools,
-          tool_choice: { type: 'auto' },
           messages: [{ role: 'system', content: finalSystemContent }, ...sanitizedMessages],
         })
 
@@ -6531,6 +6558,10 @@ Keep each header + thought on its own line. Use multiple short bold-header block
         if (!loopRes.ok && loopRes.status === 400 && validTools.length > 0) {
           console.warn(`[chat] 400 error with ${validTools.length} tools — retrying with ${coreTools.length} core tools`)
           ;({ response: loopRes, errorText } = await tryLLMCall(llmPayload(coreTools), apiKey))
+          if (!loopRes.ok && loopRes.status === 400) {
+            const badTool = await findBadTool(validTools, finalSystemContent, sanitizedMessages, apiKey)
+            console.error(`[chat] 400 caused by tool: ${badTool?.function?.name ?? 'unknown'} (binary-search diagnostic)`)
+          }
         }
 
         if (!loopRes.ok && loopRes.status === 400 && coreTools.length > 0) {
