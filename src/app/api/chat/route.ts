@@ -6263,7 +6263,7 @@ Make it feel like walking into your friend's creative space and being genuinely 
     // Hard cap: when conversation history is very long, only keep the last 12 messages.
     // This prevents token bloat AND avoids MiniMax 400 "function name/parameters empty" errors
     // from corrupted tool_calls in old stored messages that slip through sanitization.
-    const HARD_MESSAGE_CAP = 12
+    const HARD_MESSAGE_CAP = 30
     const recentMessages = messages.length <= HARD_MESSAGE_CAP
       ? messages
       : messages.slice(-HARD_MESSAGE_CAP)
