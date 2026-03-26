@@ -6001,6 +6001,13 @@ async function tryLLMCall(
   if (!res.ok) {
     errorText = await res.text().catch(() => String(res.status))
     console.error(`[tryLLMCall] MiniMax error ${res.status}: ${errorText.slice(0, 200)}`)
+    // Log every tool's name and params type when error occurs — helps identify the bad tool
+    if (tools) {
+      for (const t of tools) {
+        const params = (t?.function as Record<string, unknown> | undefined)?.parameters
+        console.error(`  tool: "${t?.function?.name}" paramsType=${typeof params} params=${JSON.stringify(params)?.slice(0, 100)}`)
+      }
+    }
   }
   return { response: res, errorText }
 }
@@ -6456,13 +6463,36 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           return msg
         })
 
-        // Sanitize tools: remove any with empty/null/invalid function names or missing arguments schema
-        const validTools = [...SPARKIE_TOOLS, ...connectorTools].filter(
-          (t) =>
-            t?.function?.name?.trim() &&
-            t.function.parameters &&
-            typeof t.function.parameters === 'object'
-        )
+        // Strict tool validation: remove any tool with malformed schema that MiniMax rejects.
+        // MiniMax error 2013: "function name or parameters is empty" — requires type:"object" in parameters.
+        const allTools = [...SPARKIE_TOOLS, ...connectorTools]
+        const validTools: typeof allTools = []
+        for (const t of allTools) {
+          const name = t?.function?.name?.trim()
+          const params = t?.function?.parameters
+          const paramsType = typeof params
+          const isObject = paramsType === 'object' && params !== null && !Array.isArray(params)
+          const hasObjectType = isObject && (params as Record<string, unknown>).type === 'object'
+          if (!name || !isObject || !hasObjectType) {
+            console.warn(`[tool-filter] REMOVING tool "${name ?? '(empty)'}" paramsType=${paramsType} isObject=${isObject} hasObjectType=${hasObjectType}`)
+            continue
+          }
+          // Check required fields actually exist in properties
+          const p = params as { required?: string[]; properties?: Record<string, unknown> }
+          if (p.required && p.properties) {
+            let requiredOk = true
+            for (const req of p.required) {
+              if (!(req in p.properties)) {
+                console.warn(`[tool-filter] REMOVING tool "${name}" — required field "${req}" missing from properties`)
+                requiredOk = false
+                break
+              }
+            }
+            if (!requiredOk) continue
+          }
+          validTools.push(t)
+        }
+        console.log(`[tool-filter] ${allTools.length} total → ${validTools.length} valid (removed ${allTools.length - validTools.length})`)
 
         const { response: loopRes, errorText } = await tryLLMCall({
           stream: false, temperature: 0.8, max_tokens: 16000,
