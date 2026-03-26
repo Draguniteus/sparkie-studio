@@ -1284,10 +1284,18 @@ export function ChatInput() {
               setStreaming(false)
               return
             }
-            // reasoning_chunk — animate word-by-word in the Live Activity sidebar ticker
+            // reasoning_chunk — accumulate into fullContent (synthesis may send only reasoning_chunk, no delta.content)
             if (parsed.reasoning_chunk) {
               // Dispatch immediately so Live Activity shows word-by-word in real time during stream
               window.dispatchEvent(new CustomEvent('sparkie:live-chunk', { detail: parsed.reasoning_chunk as string }))
+              if (!fullContent) {
+                addWorklogEntry({ type: 'result', content: 'Analyzed', status: 'done' })
+              }
+              fullContent += parsed.reasoning_chunk as string
+              clearTimeout(streamFlushRef.current)
+              streamFlushRef.current = setTimeout(() => {
+                updateMessage(chatId, assistantMsgId, { content: fullContent })
+              }, 16) as unknown as number
             }
             const delta = parsed.choices?.[0]?.delta
             if (delta?.content) {
