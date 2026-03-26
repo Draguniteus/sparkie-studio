@@ -6463,9 +6463,12 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           return msg
         })
 
-        // Strict tool validation: remove any tool with malformed schema that MiniMax rejects.
-        // MiniMax error 2013: "function name or parameters is empty" — requires type:"object" in parameters.
-        const allTools = [...SPARKIE_TOOLS, ...connectorTools]
+        // Use ONLY SPARKIE_TOOLS — do NOT include connectorTools.
+        // The connector tools (Gmail, Twitter, etc.) from Composio have unreliable schemas
+        // that trigger MiniMax 400 "function name or parameters is empty" errors.
+        // All connector actions are already covered by dedicated Sparkie tools
+        // (GMAIL_*, TWITTER_*, etc.) plus composio_execute as a fallback.
+        const allTools = SPARKIE_TOOLS
         const validTools: typeof allTools = []
         for (const t of allTools) {
           const name = t?.function?.name?.trim()
@@ -6477,7 +6480,6 @@ Keep each header + thought on its own line. Use multiple short bold-header block
             console.warn(`[tool-filter] REMOVING tool "${name ?? '(empty)'}" paramsType=${paramsType} isObject=${isObject} hasObjectType=${hasObjectType}`)
             continue
           }
-          // Check required fields actually exist in properties
           const p = params as { required?: string[]; properties?: Record<string, unknown> }
           if (p.required && p.properties) {
             let requiredOk = true
