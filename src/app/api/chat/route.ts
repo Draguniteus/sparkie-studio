@@ -3808,7 +3808,7 @@ def invoke_llm(query, model='MiniMax-M2.7'):
     req = urllib.request.Request(
         'https://api.minimax.io/v1/text/chatcompletion_v2',
         data=json.dumps({'model': model, 'stream': False, 'max_tokens': 4000, 'messages': [{'role': 'user', 'content': query}]}).encode(),
-        headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ${miniKey}'},
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {miniKey}"},
         method='POST',
     )
     with urllib.request.urlopen(req, timeout=30) as r:
@@ -6016,7 +6016,7 @@ async function tryLLMCall(
 async function findBadTool(
   allTools: Array<{ function?: { name?: string } }>,
   systemContent: string,
-  messages: Array<{ role: string; content?: unknown }>,
+  messages: Array<Record<string, unknown>>,
   apiKey: string,
 ): Promise<{ function?: { name?: string } } | null> {
   if (allTools.length === 0) return null
