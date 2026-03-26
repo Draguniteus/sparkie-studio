@@ -6504,12 +6504,39 @@ Keep each header + thought on its own line. Use multiple short bold-header block
         }
         console.log(`[tool-filter] ${allTools.length} total → ${validTools.length} valid (removed ${allTools.length - validTools.length})`)
 
-        const { response: loopRes, errorText } = await tryLLMCall({
+        // Essential tool names — these are kept in fallback retry on 400 error
+        const CORE_TOOL_NAMES = new Set([
+          'save_memory', 'read_memory', 'delete_memory', 'list_memories',
+          'schedule_task', 'read_pending_tasks', 'get_scheduled_tasks',
+          'get_current_time', 'search_web', 'get_weather',
+          'browser_navigate', 'browser_screenshot', 'get_github',
+          'send_card_to_user', 'composio_execute', 'composio_discover',
+        ])
+
+        const coreTools = validTools.filter(t => CORE_TOOL_NAMES.has(t?.function?.name as string))
+
+        let loopRes: Response
+        let errorText: string | undefined
+
+        // Try with all valid tools first; on 400 (tool error), retry with core tools only
+        const llmPayload = (tools: typeof validTools) => ({
           stream: false, temperature: 0.8, max_tokens: 16000,
-          tools: validTools,
+          tools,
           tool_choice: { type: 'auto' },
           messages: [{ role: 'system', content: finalSystemContent }, ...sanitizedMessages],
-        }, apiKey)
+        })
+
+        ;({ response: loopRes, errorText } = await tryLLMCall(llmPayload(validTools), apiKey))
+
+        if (!loopRes.ok && loopRes.status === 400 && validTools.length > 0) {
+          console.warn(`[chat] 400 error with ${validTools.length} tools — retrying with ${coreTools.length} core tools`)
+          ;({ response: loopRes, errorText } = await tryLLMCall(llmPayload(coreTools), apiKey))
+        }
+
+        if (!loopRes.ok && loopRes.status === 400 && coreTools.length > 0) {
+          console.warn(`[chat] 400 error with ${coreTools.length} core tools — retrying with 0 tools`)
+          ;({ response: loopRes, errorText } = await tryLLMCall(llmPayload([]), apiKey))
+        }
 
         if (!loopRes.ok) {
           console.error(`[chat IIFE] loopRes error: ${errorText ?? loopRes.status}`)
