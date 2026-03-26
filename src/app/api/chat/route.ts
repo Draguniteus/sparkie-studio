@@ -6547,10 +6547,10 @@ Keep each header + thought on its own line. Use multiple short bold-header block
         let errorText: string | undefined
 
         // Try with all valid tools first; on 400 (tool error), retry with core tools only
-        const llmPayload = (tools: typeof validTools) => ({
+        const llmPayload = (tools: typeof validTools, systemOverride?: string) => ({
           stream: false, temperature: 0.8, max_tokens: 16000,
           tools,
-          messages: [{ role: 'system', content: finalSystemContent }, ...sanitizedMessages],
+          messages: [{ role: 'system', content: systemOverride ?? finalSystemContent }, ...sanitizedMessages],
         })
 
         ;({ response: loopRes, errorText } = await tryLLMCall(llmPayload(validTools), apiKey))
@@ -6558,15 +6558,18 @@ Keep each header + thought on its own line. Use multiple short bold-header block
         if (!loopRes.ok && loopRes.status === 400 && validTools.length > 0) {
           console.warn(`[chat] 400 error with ${validTools.length} tools — retrying with ${coreTools.length} core tools`)
           ;({ response: loopRes, errorText } = await tryLLMCall(llmPayload(coreTools), apiKey))
-          if (!loopRes.ok && loopRes.status === 400) {
-            const badTool = await findBadTool(validTools, finalSystemContent, sanitizedMessages, apiKey)
-            console.error(`[chat] 400 caused by tool: ${badTool?.function?.name ?? 'unknown'} (binary-search diagnostic)`)
-          }
         }
 
         if (!loopRes.ok && loopRes.status === 400 && coreTools.length > 0) {
-          console.warn(`[chat] 400 error with ${coreTools.length} core tools — retrying with 0 tools`)
-          ;({ response: loopRes, errorText } = await tryLLMCall(llmPayload([]), apiKey))
+          console.warn(`[chat] 400 error with ${coreTools.length} core tools — retrying with 0 tools (stripped prompt)`)
+          // Use stripped base systemContent (no injected blocks) for 0-tools fallback
+          ;({ response: loopRes, errorText } = await tryLLMCall(llmPayload([], systemContent), apiKey))
+          if (!loopRes.ok && loopRes.status === 400) {
+            // Fire-and-forget diagnostic — run after retries so it doesn't block recovery
+            findBadTool(validTools, finalSystemContent, sanitizedMessages, apiKey)
+              .then(badTool => console.error(`[chat] 400 diagnostic — bad tool: ${badTool?.function?.name ?? 'unknown'}`))
+              .catch(() => console.error(`[chat] 400 diagnostic failed`))
+          }
         }
 
         if (!loopRes.ok) {
