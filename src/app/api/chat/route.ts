@@ -7272,6 +7272,44 @@ Keep each header + thought on its own line. Use multiple short bold-header block
         }).catch(() => {})
       }
 
+      // When core-tools succeed without needing tools (finish_reason='stop'), usedTools stays false.
+      // The IIFE skips synthesis in this case and returns an empty liveStream.
+      // We handle this with a SYNCHRONOUS non-streaming synthesis call here — it runs
+      // BEFORE the IIFE return, ensuring the SSE response is populated.
+      if (!usedTools && loopRes.ok) {
+        const noToolsSynthPayload = {
+          stream: false, temperature: 0.8, max_tokens: 16000,
+          tools: [],
+          messages: [{ role: 'system', content: systemContent }, ...loopMessages],
+        }
+        const { response: noToolsSynthRes } = await tryLLMCall(noToolsSynthPayload, apiKey)
+        if (noToolsSynthRes.ok) {
+          const noToolsData = await noToolsSynthRes.json()
+          const noToolsContent: string = noToolsData?.choices?.[0]?.message?.content ?? ''
+          if (noToolsContent) {
+            const sseEnc = new TextEncoder()
+            const okStream = new ReadableStream({
+              start(ctrl) {
+                const cleanContent = noToolsContent
+                  .replace(/minimax-m2\.\d+(-free)?/gi, 'Atlas')
+                  .replace(/music-2\.[05]/gi, 'the music engine')
+                  .replace(/speech-02(-hd)?/gi, 'voice synthesis')
+                  .replace(/whisper-large-v3-turbo/gi, 'voice recognition')
+                  .replace(/ace-step-v1\.5/gi, 'the music engine')
+                const chunk = sseEnc.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: cleanContent } }] })}\n\n`)
+                ctrl.enqueue(chunk)
+                ctrl.enqueue(sseEnc.encode('data: [DONE]\n\n'))
+                ctrl.close()
+              },
+            })
+            return new Response(okStream, {
+              headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
+            })
+          }
+        }
+        // If sync synthesis also failed, fall through to IIFE
+      }
+
       // If we exhausted rounds with tool calls, set up for final streaming synthesis
       if (usedTools) {
         finalMessages = loopMessages
@@ -7347,7 +7385,7 @@ SYNTHESIS RULES:
       }]
       const { response: synthRes, errorText: synthErr } = await tryLLMCall({
         stream: true, temperature: 0.8, max_tokens: 16000,
-        messages: [{ role: 'system', content: finalSystemContent }, ...finalMessages],
+        messages: [{ role: 'system', content: systemContent }, ...finalMessages],
       }, apiKey)
 
       if (!synthRes.ok) {
