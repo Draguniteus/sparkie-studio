@@ -1615,7 +1615,7 @@ const SPARKIE_TOOLS = [
           payload: {
             type: 'object',
             description: 'The data needed to execute the action — e.g. { to, subject, body } for email, { text } for tweet',
-            additionalProperties: true,
+            additionalProperties: {},
           },
         },
         required: ['action', 'label', 'payload'],
@@ -2273,7 +2273,7 @@ const SPARKIE_TOOLS = [
           type: { type: 'string', description: 'Entry type: "code_push", "task_executed", "memory_learned", "tool_call", "ai_response", "decision"' },
           message: { type: 'string', description: 'Human-readable summary of what happened' },
           conclusion: { type: 'string', description: 'One-sentence inner-monologue outcome: what you observed, decided, or learned. E.g. "Patched auth bug — deploy is live" or "User wants dark mode — saved preference". Always include.' },
-          metadata: { type: 'object', additionalProperties: true, description: 'Optional structured metadata: commit, files_read, tools_called, reasoning, confidence, outcome' },
+          metadata: { type: 'object', additionalProperties: {}, description: 'Optional structured metadata: commit, files_read, tools_called, reasoning, confidence, outcome' },
         },
         required: ['type', 'message', 'conclusion'],
       },
