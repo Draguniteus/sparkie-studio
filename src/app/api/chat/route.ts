@@ -7277,6 +7277,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
       // We handle this with a SYNCHRONOUS non-streaming synthesis call here — it runs
       // BEFORE the IIFE return, ensuring the SSE response is populated.
       if (!usedTools && loopRes.ok) {
+        console.log(`[chat] !usedTools path — doing sync synthesis (${loopMessages.length} msgs)`)
         const noToolsSynthPayload = {
           stream: false, temperature: 0.8, max_tokens: 16000,
           tools: [],
