@@ -5993,6 +5993,10 @@ const anthropicTools = rawTools?.map((t) => {
   return t
 })
   console.log(`[tryLLMCall] → messages=${msgs?.length ?? 0} tools=${anthropicTools?.length ?? 0} firstMsg=${msgs?.[0]?.role ?? '?'}`)
+  // DEBUG: log exact body being sent
+  const bodyObj = { ...payload, tools: anthropicTools, model: 'MiniMax-M2.7' }
+  const bodyStr = JSON.stringify(bodyObj)
+  console.log(`[tryLLMCall] BODY_PREVIEW firstTool=${bodyStr.substring(bodyStr.indexOf('"tools"'), bodyStr.indexOf('"tools"') + 1000)}`)
   const res = await fetch('https://api.minimax.io/anthropic/v1/messages', {
     method: 'POST',
     headers: {
