@@ -5986,10 +5986,10 @@ async function tryLLMCall(
   // Debug log: show message count, tool count, and first message role to help trace 400 errors
   const msgs = payload.messages as Array<{ role: string; content?: unknown; tool_calls?: unknown }>
   const rawTools = payload.tools as Array<Record<string, unknown>>
-// Transform to Anthropic input_schema format
+  // Transform to Anthropic input_schema format
 const anthropicTools = rawTools?.map((t) => {
-  const fn = t.function
-  if (fn?.parameters) return { ...t, function: { ...fn, input_schema: fn.parameters, parameters: undefined }
+  const fn = t.function as Record<string, unknown> | undefined
+  if (fn?.parameters) return { ...t, function: { ...fn, input_schema: fn.parameters, parameters: undefined } }
   return t
 })
   console.log(`[tryLLMCall] → messages=${msgs?.length ?? 0} tools=${anthropicTools?.length ?? 0} firstMsg=${msgs?.[0]?.role ?? '?'}`)
@@ -6008,10 +6008,11 @@ const anthropicTools = rawTools?.map((t) => {
     errorText = await res.text().catch(() => String(res.status))
     console.error(`[tryLLMCall] MiniMax error ${res.status}: ${errorText.slice(0, 200)}`)
     // Log every tool's name and params type when error occurs — helps identify the bad tool
-    if (tools) {
-      for (const t of tools) {
-        const params = (t?.function as Record<string, unknown> | undefined)?.parameters
-        console.error(`  tool: "${t?.function?.name}" paramsType=${typeof params} params=${JSON.stringify(params)?.slice(0, 100)}`)
+    if (anthropicTools) {
+      for (const t of anthropicTools) {
+        const fn = t?.function as Record<string, unknown> | undefined
+        const params = fn?.parameters
+        console.error(`  tool: "${fn?.name}" paramsType=${typeof params} params=${JSON.stringify(params)?.slice(0, 100)}`)
       }
     }
   }
