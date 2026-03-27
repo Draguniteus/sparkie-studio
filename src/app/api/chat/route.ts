@@ -6378,6 +6378,40 @@ Keep each header + thought on its own line. Use multiple short bold-header block
 
     const useTools = !voiceMode
     const toolContext = { userId, tavilyKey, apiKey, doKey, baseUrl, cookieHeader: req.headers.get('cookie') ?? '' }
+
+    // ── Conversational bypass: short friendly queries skip the agent loop entirely ───
+    // If the last message looks conversational (short, no action keywords), just call
+    // the LLM directly with 0 tools and return. Avoids the whole tool/round/synthesis path.
+    const lastUserMsg = messages.slice().reverse().find((m: { role: string }) => m.role === 'user')
+    const lastUserText = typeof lastUserMsg?.content === 'string' ? lastUserMsg.content.trim() : ''
+    const isConversational = lastUserText.length < 80 &&
+      !/\b(search|build|create|make|generate|write|code|run|execute|find|look up|check|analyze|tell me|show me|get|post|send|delete|update)\b/i.test(lastUserText)
+    if (isConversational && useTools) {
+      console.log(`[chat] conversational bypass — direct LLM call (${lastUserText.length} chars)`)
+      const { response: convRes } = await tryLLMCall({
+        stream: false, temperature: 0.8, max_tokens: 16000,
+        tools: [],
+        messages: [{ role: 'system', content: systemContent }, ...recentMessages],
+      }, apiKey)
+      if (convRes.ok) {
+        const convData = await convRes.json()
+        const convContent: string = convData?.choices?.[0]?.message?.content ?? ''
+        if (convContent) {
+          const enc = new TextEncoder()
+          const cleanContent = convContent
+            .replace(/minimax-m2\.\d+(-free)?/gi, 'Atlas')
+            .replace(/music-2\.[05]/gi, 'the music engine')
+            .replace(/speech-02(-hd)?/gi, 'voice synthesis')
+            .replace(/whisper-large-v3-turbo/gi, 'voice recognition')
+            .replace(/ace-step-v1\.5/gi, 'the music engine')
+          const body = `data: ${JSON.stringify({ choices: [{ delta: { content: cleanContent } }] })}\n\ndata: [DONE]\n\n`
+          return new Response(new ReadableStream({
+            start(c) { c.enqueue(enc.encode(body)); c.close() }
+          }), { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' } })
+        }
+      }
+      // Fall through to normal path if direct call fails
+    }
     const toolMediaResults: Array<{ name: string; result: string }> = []
 
     let finalMessages = [...recentMessages]
