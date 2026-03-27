@@ -58,7 +58,7 @@ function buildWorkbenchPreamble(composioApiKey: string, minimaxApiKey: string, e
     '    req = urllib.request.Request(',
     '        "https://api.minimax.io/anthropic/v1/messages",',
     '        data=payload,',
-    '        headers={"Authorization": "Bearer " + MINIMAX_KEY, "Content-Type": "application/json", "anthropic-version": "2023-06-01"},',
+    '        headers={"x-api-key": MINIMAX_KEY, "Content-Type": "application/json", "anthropic-version": "2023-06-01"},',
     '        method="POST"',
     '    )',
     '    try:',
