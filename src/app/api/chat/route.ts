@@ -6454,8 +6454,8 @@ Keep each header + thought on its own line. Use multiple short bold-header block
       // This is what makes ProcessTab show live spinners instead of a burst at the end.
       void (async () => { try {
       // Declared at IIFE body level so it's in scope for the sync synthesis block
-      let loopRes: Response
-      let errorText: string | undefined
+      let loopRes: Response | undefined = undefined
+      let errorText: string | undefined = undefined
 
       // ── Topics: emit resumption event if we matched an active topic ────────────
       if (activeTopicId && activeTopicName) {
@@ -7300,7 +7300,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
       // When core-tools succeed without needing tools (finish_reason='stop'), usedTools stays false.
       // The IIFE skips synthesis in this case and returns an empty liveStream.
       // Handle this with a SYNCHRONOUS non-streaming synthesis call — runs BEFORE the IIFE return.
-      if (!usedTools && loopRes.ok) {
+      if (!usedTools && loopRes?.ok) {
         console.log(`[chat] !usedTools path — doing sync synthesis (${loopMessages.length} msgs)`)
         const noToolsSynthPayload = {
           stream: false, temperature: 0.8, max_tokens: 16000,
