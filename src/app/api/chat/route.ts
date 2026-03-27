@@ -5981,16 +5981,12 @@ async function tryLLMCall(
   const isStream = payload.stream === true
   // Debug log: show message count, tool count, and first message role to help trace 400 errors
   const msgs = payload.messages as Array<{ role: string; content?: unknown; tool_calls?: unknown }>
-  const rawTools = payload.tools as Array<Record<string, unknown>>
-  // Transform to Anthropic input_schema format
-const anthropicTools = rawTools?.map((t) => {
-  const fn = t.function as Record<string, unknown> | undefined
-  if (fn?.parameters) return { ...t, function: { ...fn, input_schema: fn.parameters, parameters: undefined } }
-  return t
-})
-  console.log(`[tryLLMCall] → messages=${msgs?.length ?? 0} tools=${anthropicTools?.length ?? 0} firstMsg=${msgs?.[0]?.role ?? '?'}`)
+  const rawTools = (payload.tools as Array<Record<string, unknown>> | undefined) ?? []
+  // Do NOT transform parameters → input_schema. MiniMax expects OpenAI format: parameters (not input_schema).
+  // Error 2013 "parameters is empty" means MiniMax validates the 'parameters' field directly.
+  console.log(`[tryLLMCall] → messages=${msgs?.length ?? 0} tools=${rawTools?.length ?? 0} firstMsg=${msgs?.[0]?.role ?? '?'}`)
   // DEBUG: log exact body being sent (extract tools array portion)
-  const bodyObj = { ...payload, tools: anthropicTools, model: 'MiniMax-M2.7' }
+  const bodyObj = { ...payload, tools: rawTools, model: 'MiniMax-M2.7' }
   const bodyStr = JSON.stringify(bodyObj)
   // Use indexOf (not lastIndexOf) to find the FIRST "tools": which is the actual tools array
   const toolsIdx = bodyStr.indexOf('"tools":')
@@ -6003,19 +5999,19 @@ const anthropicTools = rawTools?.map((t) => {
       'x-api-key': apiKey,
       'anthropic-version': '2023-06-01',
     },
-    body: JSON.stringify({ ...payload, tools: anthropicTools, model: 'MiniMax-M2.7' }),
+    body: JSON.stringify({ ...payload, tools: rawTools, model: 'MiniMax-M2.7' }),
     signal: AbortSignal.timeout(90000),
   })
   let errorText: string | undefined
   if (!res.ok) {
     errorText = await res.text().catch(() => String(res.status))
     console.error(`[tryLLMCall] MiniMax error ${res.status}: ${errorText.slice(0, 200)}`)
-    // Log every tool's name and input_schema when error occurs — helps identify the bad tool
-    if (anthropicTools) {
-      for (const t of anthropicTools) {
+    // Log every tool's name and parameters when error occurs — helps identify the bad tool
+    if (rawTools?.length) {
+      for (const t of rawTools) {
         const fn = t?.function as Record<string, unknown> | undefined
-        const inputSchema = fn?.input_schema
-        console.error(`  tool: "${fn?.name}" inputSchemaType=${typeof inputSchema} schema=${JSON.stringify(inputSchema)?.slice(0, 120)}`)
+        const params = fn?.parameters
+        console.error(`  tool: "${fn?.name}" parametersType=${typeof params} schema=${JSON.stringify(params)?.slice(0, 120)}`)
       }
     }
   }
