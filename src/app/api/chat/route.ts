@@ -7263,19 +7263,9 @@ Keep each header + thought on its own line. Use multiple short bold-header block
         }
       }
 
-      // ── Topics: update last_round + step_count after agent loop ─────────────────
-      if (activeTopicId && usedTools && round > 0) {
-        fetch(`${baseUrl}/api/topics`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', cookie: req.headers.get('cookie') ?? '' },
-          body: JSON.stringify({ action: 'update_state', id: activeTopicId, last_round: round, step_count: round }),
-        }).catch(() => {})
-      }
-
       // When core-tools succeed without needing tools (finish_reason='stop'), usedTools stays false.
       // The IIFE skips synthesis in this case and returns an empty liveStream.
-      // We handle this with a SYNCHRONOUS non-streaming synthesis call here — it runs
-      // BEFORE the IIFE return, ensuring the SSE response is populated.
+      // Handle this with a SYNCHRONOUS non-streaming synthesis call — runs BEFORE the IIFE return.
       if (!usedTools && loopRes.ok) {
         console.log(`[chat] !usedTools path — doing sync synthesis (${loopMessages.length} msgs)`)
         const noToolsSynthPayload = {
@@ -7308,7 +7298,15 @@ Keep each header + thought on its own line. Use multiple short bold-header block
             })
           }
         }
-        // If sync synthesis also failed, fall through to IIFE
+      }
+
+      // ── Topics: update last_round + step_count after agent loop ─────────────────
+      if (activeTopicId && usedTools && round > 0) {
+        fetch(`${baseUrl}/api/topics`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', cookie: req.headers.get('cookie') ?? '' },
+          body: JSON.stringify({ action: 'update_state', id: activeTopicId, last_round: round, step_count: round }),
+        }).catch(() => {})
       }
 
       // If we exhausted rounds with tool calls, set up for final streaming synthesis
