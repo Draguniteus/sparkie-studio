@@ -2504,11 +2504,9 @@ const SPARKIE_TOOLS = [
   ...SPARKIE_TOOLS_S4,
   ...SPARKIE_TOOLS_S5,
   // ── Block 4 / 3B: New tools added in overhaul ─────────────────────────────
-  { type: 'function', function: { name: 'delete_memory', description: 'Delete a specific memory by ID. Use when a memory is contradicted by new information, outdated, or wrong. Get the ID from read_memory or list_memories first.', parameters: { type: 'object', properties: { id: { type: 'number', description: 'Memory entry ID from read_memory or list_memories' }, source: { type: 'string', description: '"self" (Sparkie self-memory, default) or "user" (user memories)' } }, required: ['id'] } } },
+  // NOTE: delete_memory, manage_email, transcribe_audio, manage_calendar_event,
+  // manage_topic, link_to_topic removed here — they are defined in sprint files.
   { type: 'function', function: { name: 'list_memories', description: 'List all memories in a given category or source. Use to audit what Sparkie knows before deleting or updating entries. Returns id, category, and content preview for each entry.', parameters: { type: 'object', properties: { category: { type: 'string', description: 'Filter by category name (optional). e.g. "work_rule", "api_behavior", "contact"' }, source: { type: 'string', description: '"self" (default), "user", or "all"' }, limit: { type: 'number', description: 'Max entries to return (default 20, max 50)' } }, required: [] } } },
-  { type: 'function', function: { name: 'manage_email', description: 'Archive, label, delete (trash), star, or mark as read/unread a Gmail message. Use to organize the inbox after reading. Never delete without explicit instruction.', parameters: { type: 'object', properties: { action: { type: 'string', description: '"archive" | "label" | "delete" | "star" | "unstar" | "read" | "unread"' }, message_id: { type: 'string', description: 'Gmail message ID from read_email or inbox list' }, label_name: { type: 'string', description: 'Label to apply (required for action=label)' } }, required: ['action', 'message_id'] } } },
-  { type: 'function', function: { name: 'transcribe_audio', description: 'Transcribe an audio file (MP3, WAV, M4A, OGG) to text using Deepgram nova-2 model with smart formatting. Use for voice notes, audio summaries, or any audio-to-text task. Returns the full transcript.', parameters: { type: 'object', properties: { url: { type: 'string', description: 'Direct URL to the audio file to transcribe' } }, required: ['url'] } } },
-  { type: 'function', function: { name: 'manage_calendar_event', description: 'Create, update, or cancel/delete a Google Calendar event. For create: title and start_time are required. For update/cancel: event_id is required.', parameters: { type: 'object', properties: { action: { type: 'string', description: '"create" | "update" | "cancel" | "delete"' }, event_id: { type: 'string', description: 'Event ID (for update/cancel/delete)' }, title: { type: 'string', description: 'Event title' }, description: { type: 'string', description: 'Event description' }, start_time: { type: 'string', description: 'ISO 8601 start datetime with timezone, e.g. "2026-03-26T14:00:00-05:00"' }, end_time: { type: 'string', description: 'ISO 8601 end datetime. Defaults to start_time + 1 hour.' }, attendees: { type: 'array', items: { type: 'string' }, description: 'List of attendee email addresses' } }, required: ['action'] } } },
   { type: 'function', function: { name: 'send_card_to_user', description: 'Send a beautiful HITL card to the user in chat instead of plain text. Use for: email drafts (type=email_draft), tasks (type=task), calendar events (type=calendar_event), contacts (type=contact), memory saves (type=memory), deploy confirmations (type=deploy), reminders (type=reminder), GitHub PRs (type=github_pr), reports (type=report), media (type=media), images (type=image), permission requests (type=permission), confirmations (type=confirmation), browser actions (type=browser_action). Always prefer cards over plain text for structured content.', parameters: { type: 'object', properties: { type: { type: 'string', description: 'Card type: email_draft | calendar_event | memory | contact | task | deploy | reminder | github_pr | report | media | image | permission | confirmation | browser_action' }, title: { type: 'string', description: 'Card header title (e.g. "Email Draft", "Memory Saved")' }, subtitle: { type: 'string', description: 'Secondary header text (e.g. email subject, event name)' }, to: { type: 'string', description: 'Recipient badge (for email/contact cards)' }, body: { type: 'string', description: 'Main body text (email body, event description, memory content, etc.)' }, fields: { type: 'array', items: { type: 'object', properties: { label: { type: 'string' }, value: { type: 'string' } }, required: ['label', 'value'] }, description: 'Key-value fields to display (e.g. date, attendees, commit SHA)' }, items: { type: 'array', items: { type: 'string' }, description: 'Bullet list items (e.g. tasks to approve, permissions requested)' }, actions: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, label: { type: 'string' }, icon: { type: 'string' }, variant: { type: 'string', description: '"primary" | "secondary" | "danger"' } }, required: ['id', 'label'] }, description: 'Action buttons on the card' }, preview_url: { type: 'string', description: 'Image URL to show as preview (for image/media cards)' }, text: { type: 'string', description: 'Short text shown above the card in chat' }, metadata: { type: 'object', description: 'Any extra data to attach to the card' } }, required: ['type', 'title', 'actions'] } } },
   // ── Block 7: File upload access ───────────────────────────────────────────
   { type: 'function', function: { name: 'read_uploaded_file', description: 'Read the content of a file that the user has uploaded in this session. Returns text for text/code/JSON files, or image data URL for images. Use when the user uploads a file and asks you to read, analyze, or process it.', parameters: { type: 'object', properties: { file_id: { type: 'string', description: 'The file ID returned from the upload (included automatically in user message context when a file is attached)' } }, required: ['file_id'] } } },
@@ -2520,8 +2518,6 @@ const SPARKIE_TOOLS = [
   { type: 'function', function: { name: 'browser_fill', description: 'Fill in a form field on a web page. Use for search boxes, login fields, text inputs, or any form input. Powered by Hyperbrowser browser-use agent.', parameters: { type: 'object', properties: { url: { type: 'string', description: 'The URL of the page with the form' }, selector: { type: 'string', description: 'CSS selector for the input field (preferred if known)' }, value: { type: 'string', description: 'The value to type into the field' }, description: { type: 'string', description: 'Natural language description of the field, e.g. "the email input" or "the search box"' }, profile_id: { type: 'string', description: 'Optional: Hyperbrowser profile ID for authenticated sessions' } }, required: ['url', 'value'] } } },
   { type: 'function', function: { name: 'browser_create_profile', description: 'Create a persistent browser profile for authenticated sessions. Once created, use the profile ID with browser_use_profile to log into websites and have credentials persist between sessions. Powered by Hyperbrowser.', parameters: { type: 'object', properties: { name: { type: 'string', description: 'Name for the profile, e.g. "gmail-michael" or "linkedin-auth"' } }, required: [] } } },
   { type: 'function', function: { name: 'browser_use_profile', description: 'Use a previously created browser profile to complete a browser task. The profile persists cookies and login state, so this can log in, fill forms, and interact with authenticated pages. Use for tasks like "log into Gmail and forward the last email" or "post to LinkedIn". Powered by Hyperbrowser browser-use agent.', parameters: { type: 'object', properties: { profile_id: { type: 'string', description: 'The Hyperbrowser profile ID (from browser_create_profile or memory)' }, task: { type: 'string', description: 'Natural language task to perform, e.g. "Navigate to https://gmail.com and read the first unread email"' }, url: { type: 'string', description: 'Optional starting URL for the task' } }, required: ['profile_id', 'task'] } } },
-      { type: 'function', function: { name: 'manage_topic', description: 'Create, update, list, get, or archive a topic (persistent context cluster for ongoing projects). Actions: create (name, fingerprint?, summary?, notification_policy?), update (id, name?, summary?, fingerprint?, notification_policy?), list (), get (id), archive (id). Returns topic id on create.', parameters: { type: 'object', properties: { action: { type: 'string', enum: ['create', 'update', 'list', 'get', 'archive'] }, id: { type: 'string' }, name: { type: 'string' }, fingerprint: { type: 'string' }, summary: { type: 'string' }, notification_policy: { type: 'string', enum: ['immediate', 'defer', 'auto'] } }, required: ['action'] } } },
-      { type: 'function', function: { name: 'link_to_topic', description: 'Associate a signal (email, task, worklog, calendar event) to a topic so it is tracked under that context cluster. source_type: email|task|worklog|calendar. source_id: the relevant ID. summary: one-line description of the signal.', parameters: { type: 'object', properties: { topic_id: { type: 'string' }, source_type: { type: 'string', enum: ['email', 'task', 'worklog', 'calendar'] }, source_id: { type: 'string' }, summary: { type: 'string' } }, required: ['topic_id', 'source_type', 'source_id'] } } },
 ]
 
 // ── One-time DDL init guard ───────────────────────────────────────────────────────
@@ -4358,8 +4354,8 @@ def invoke_llm(query, model='MiniMax-M2.7'):
 
       case 'delete_memory': {
         if (!userId) return 'Not authenticated'
-        const { id: memId, source: memSource = 'self' } = args as { id: number; source?: string }
-        if (!memId) return 'delete_memory: id is required'
+        const { memory_id: memId, source: memSource = 'self' } = args as { memory_id: number; source?: string }
+        if (!memId) return 'delete_memory: memory_id is required'
         try {
           if (memSource === 'user') {
             await query('DELETE FROM user_memories WHERE id = $1 AND user_id = $2', [memId, userId])
@@ -4437,8 +4433,8 @@ def invoke_llm(query, model='MiniMax-M2.7'):
       }
 
       case 'transcribe_audio': {
-        const { url: audioUrl } = args as { url: string }
-        if (!audioUrl) return 'transcribe_audio: url is required'
+        const { audio_url: audioUrl } = args as { audio_url: string }
+        if (!audioUrl) return 'transcribe_audio: audio_url is required'
         const DEEPGRAM_KEY = process.env.DEEPGRAM_API_KEY ?? ''
         if (!DEEPGRAM_KEY) return 'transcribe_audio: DEEPGRAM_API_KEY not configured'
         try {
@@ -4457,23 +4453,23 @@ def invoke_llm(query, model='MiniMax-M2.7'):
 
       case 'manage_calendar_event': {
         if (!userId) return 'Not authenticated'
-        const { action: calAction, event_id, title, description, start_time, end_time, attendees } = args as {
+        const { action: calAction, event_id, title, description, start_datetime, end_datetime, attendees } = args as {
           action: 'create' | 'update' | 'cancel' | 'delete'
           event_id?: string
           title?: string
           description?: string
-          start_time?: string
-          end_time?: string
+          start_datetime?: string
+          end_datetime?: string
           attendees?: string[]
         }
         try {
           if (calAction === 'create') {
-            if (!title || !start_time) return 'manage_calendar_event create: title and start_time required'
-            const calArgs: Record<string, unknown> = { title, start_time, end_time: end_time ?? start_time }
+            if (!title || !start_datetime) return 'manage_calendar_event create: title and start_datetime required'
+            const calArgs: Record<string, unknown> = { title, start_datetime, end_datetime: end_datetime ?? start_datetime }
             if (description) calArgs.description = description
             if (attendees?.length) calArgs.attendees = attendees
             const result = await executeConnectorTool('GOOGLECALENDAR_CREATE_EVENT', calArgs, userId)
-            writeWorklog(userId, 'task_executed', `📅 Created calendar event: "${title}" at ${start_time}`, { decision_type: 'action', signal_priority: 'P2', conclusion: `Calendar event created: ${title}` }).catch(() => {})
+            writeWorklog(userId, 'task_executed', `📅 Created calendar event: "${title}" at ${start_datetime}`, { decision_type: 'action', signal_priority: 'P2', conclusion: `Calendar event created: ${title}` }).catch(() => {})
             return `✅ Calendar event created: "${title}"\n${result}`
           } else if (calAction === 'cancel' || calAction === 'delete') {
             if (!event_id) return 'manage_calendar_event cancel: event_id required'
@@ -4484,8 +4480,8 @@ def invoke_llm(query, model='MiniMax-M2.7'):
             const upArgs: Record<string, unknown> = { event_id }
             if (title) upArgs.title = title
             if (description) upArgs.description = description
-            if (start_time) upArgs.start_time = start_time
-            if (end_time) upArgs.end_time = end_time
+            if (start_datetime) upArgs.start_datetime = start_datetime
+            if (end_datetime) upArgs.end_datetime = end_datetime
             const result = await executeConnectorTool('GOOGLECALENDAR_UPDATE_EVENT', upArgs, userId)
             return `✅ Calendar event updated: ${event_id}\n${result}`
           }
@@ -5993,10 +5989,13 @@ const anthropicTools = rawTools?.map((t) => {
   return t
 })
   console.log(`[tryLLMCall] → messages=${msgs?.length ?? 0} tools=${anthropicTools?.length ?? 0} firstMsg=${msgs?.[0]?.role ?? '?'}`)
-  // DEBUG: log exact body being sent
+  // DEBUG: log exact body being sent (extract tools array portion)
   const bodyObj = { ...payload, tools: anthropicTools, model: 'MiniMax-M2.7' }
   const bodyStr = JSON.stringify(bodyObj)
-  console.log(`[tryLLMCall] BODY_PREVIEW firstTool=${bodyStr.substring(bodyStr.lastIndexOf('"tools"'), bodyStr.lastIndexOf('"tools"') + 1000)}`)
+  // Use indexOf (not lastIndexOf) to find the FIRST "tools": which is the actual tools array
+  const toolsIdx = bodyStr.indexOf('"tools":')
+  const previewStart = toolsIdx >= 0 ? toolsIdx : 0
+  console.log(`[tryLLMCall] BODY_PREVIEW firstTool=${bodyStr.substring(previewStart, previewStart + 1200)}`)
   const res = await fetch('https://api.minimax.io/anthropic/v1/messages', {
     method: 'POST',
     headers: {
@@ -6011,12 +6010,12 @@ const anthropicTools = rawTools?.map((t) => {
   if (!res.ok) {
     errorText = await res.text().catch(() => String(res.status))
     console.error(`[tryLLMCall] MiniMax error ${res.status}: ${errorText.slice(0, 200)}`)
-    // Log every tool's name and params type when error occurs — helps identify the bad tool
+    // Log every tool's name and input_schema when error occurs — helps identify the bad tool
     if (anthropicTools) {
       for (const t of anthropicTools) {
         const fn = t?.function as Record<string, unknown> | undefined
-        const params = fn?.parameters
-        console.error(`  tool: "${fn?.name}" paramsType=${typeof params} params=${JSON.stringify(params)?.slice(0, 100)}`)
+        const inputSchema = fn?.input_schema
+        console.error(`  tool: "${fn?.name}" inputSchemaType=${typeof inputSchema} schema=${JSON.stringify(inputSchema)?.slice(0, 120)}`)
       }
     }
   }
@@ -6584,6 +6583,17 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           // 0-tools synthesis: immediate fallback — do NOT wait for binary search
           console.warn(`[chat] 400 with core tools — falling back to 0-tools synthesis`)
           ;({ response: loopRes, errorText } = await tryLLMCall(llmPayload([], systemContent), apiKey))
+          // Fire-and-forget diagnostic: binary-search the tool list to find which tool caused the 400
+          // Result is logged server-side only — does not block the user's response
+          findBadTool(validTools, finalSystemContent, sanitizedMessages.slice(0, 5), apiKey)
+            .then((badTool) => {
+              if (badTool?.function?.name) {
+                console.error(`[findBadTool] PROBLEMATIC TOOL: "${badTool.function.name}" — remove or fix its schema`)
+              } else {
+                console.error(`[findBadTool] no single bad tool found — 400 may be systemic (e.g. max_tokens, schema format)`)
+              }
+            })
+            .catch((e) => console.error(`[findBadTool] diagnostic error: ${String(e)}`))
         }
 
         if (!loopRes.ok) {

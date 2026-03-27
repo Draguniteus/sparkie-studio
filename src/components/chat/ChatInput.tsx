@@ -994,16 +994,26 @@ export function ChatInput() {
     // Questions starting with question words — ALWAYS chat
     if (/^(is |are |was |were |why |who |when |where )/i.test(t)) return true
 
-    // Explicit edit commands on existing code
-    const EDIT_PHRASE = /\b(edit|update|upgrade|change|switch|swap|replace|rename|remove|delete|adjust|alter|amend|convert|modify|revise|refactor|rewrite|redo|refine|restyle|recolor|resize|transform|overhaul|patch|correct|improve|fix|tweak|tune|undo|revert|rollback)\b/i
-    if (EDIT_PHRASE.test(t)) {
-      // Emotional override: "I had broken you trying to update you" etc.
-      const EMOTIONAL_OVERRIDE = /\b(i('m| am| was| feel)|you('re| are| were)|we('re| are)|broken you|proud of|upset|sorry|happy|excited|love|miss|wow|amazing|incredible|beautiful|great job|well done|thank|glad|grateful)\b/i
-      const hasCodeTarget = /\b(app|page|button|color|navbar|footer|header|component|style|css|html|code|script|file|function|api|endpoint|route|database|model|feature|modal|form|input|layout|theme|icon|image|logo|animation|widget|card|sidebar|menu|dropdown|table|chart|graph|dashboard)\b/i
-      if (EMOTIONAL_OVERRIDE.test(t) && !hasCodeTarget.test(t)) return null // ambiguous → LLM
-      // Comms override
-      if (/\b(send|compose|draft|email|tweet|post|message|dm|text)\b/i.test(t) && /\b(email|tweet|post|message|dm)\b/i.test(t)) return true
-      return false
+    // ── EMOTIONAL_OVERRIDE: relational / personal context — checked FIRST ──────────
+    // These always escalate to LLM, before any build-signal detection
+    const EMOTIONAL_OVERRIDE = /\b(i('m| am| feel| want| need| wish| 'd | 've| was| hope| 'll)|you('re| are| were| 'd| 've| 'll)|we('re| 'd| 've| 'll)|broken you|proud|upset|sorry|happy|miss|love|wow|amazing|beautiful|great job|well done|thank|glad|grateful|I wish|it should|should change|want to change|need to change|trying to change|i had)\b/i
+    if (EMOTIONAL_OVERRIDE.test(t)) return null // ambiguous → LLM
+
+    // ── Short messages (<=3 words) → chat, EXCEPT explicit build commands ─────────
+    if (wordCount <= 3) {
+      // Explicit build: "build it", "make app", "create tool" (single verb + target)
+      if (/^(build|create|make|write|generate)\s+\w+/i.test(t)) return false
+      return true
+    }
+
+    // ── Explicit edit commands on existing code — requires SPECIFIC grammar ─────────
+    // Must have: verb + (the|my|this|that|a|an) + target word
+    // DO NOT match: standalone "change", "edit", "update", "can you change", "I want to change"
+    const EDIT_PHRASE_STRICT = /\b(edit|update|upgrade|change|switch|swap|replace|rename|remove|delete|adjust|alter|amend|convert|modify|revise|refactor|rewrite|redo|refine|restyle|recolor|resize|transform|overhaul|patch|correct|improve|fix|tweak|tune|undo|revert|rollback)\s+(the|my|this|that|a|an)\s+\w+/i
+    if (EDIT_PHRASE_STRICT.test(t)) {
+      // Comms override: "update the email", "change the tweet" → chat
+      if (/\b(send|compose|draft|email|tweet|post|message|dm|text)\b/i.test(t)) return true
+      return false // build
     }
 
     // ── Tier 3: AMBIGUOUS → LLM ─────────────────────────────────────────────
