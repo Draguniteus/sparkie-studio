@@ -1457,7 +1457,7 @@ const SPARKIE_TOOLS = [
     function: {
       name: 'get_radio_playlist',
       description: 'Get the current Sparkie Radio playlist.',
-      parameters: { type: 'object', properties: {}, required: [] },
+      parameters: { type: 'object', properties: {} },
     },
   },
   {
@@ -1729,7 +1729,7 @@ const SPARKIE_TOOLS = [
     function: {
       name: 'get_outreach_status',
       description: 'Check the status of Sparkie proactive outreach — recent outreach_log entries and heartbeat/proactive worklog entries. Use to verify that morning briefs, inbox checks, and task completions are firing correctly.',
-      parameters: { type: 'object', properties: {}, required: [] },
+      parameters: { type: 'object', properties: {} },
     },
   },
   {
@@ -1737,7 +1737,7 @@ const SPARKIE_TOOLS = [
     function: {
       name: 'self_diagnose',
       description: 'Run a full system health check: verifies all env vars (internal auth, API keys), skills seeded, pending tasks, REAL score, and deploy status. Returns a pass/warn/fail report. Use when asked "are you healthy?", "what\'s broken?", or at conversation start if something seems off.',
-      parameters: { type: 'object', properties: {}, required: [] },
+      parameters: { type: 'object', properties: {} },
     },
   },
   {
@@ -1745,7 +1745,7 @@ const SPARKIE_TOOLS = [
     function: {
       name: 'check_deployment',
       description: 'DEPRECATED — use trigger_deploy instead. Check the status of the latest Sparkie Studio deployment.',
-      parameters: { type: 'object', properties: {}, required: [] },
+      parameters: { type: 'object', properties: {} },
     },
   },
   {
@@ -2440,7 +2440,7 @@ const SPARKIE_TOOLS = [
     function: {
       name: 'get_user_emotional_state',
       description: 'Get the detected emotional state of Michael based on his last message — energy, focus, mood, urgency. Use to calibrate your response style.',
-      parameters: { type: 'object', properties: {}, required: [] },
+      parameters: { type: 'object', properties: {} },
     },
   },
   {
@@ -2448,7 +2448,7 @@ const SPARKIE_TOOLS = [
     function: {
       name: 'run_self_reflection',
       description: 'Manually trigger today\'s self-reflection engine. Reviews last 24h of activity, produces insights, writes to Dream Journal. Usually runs automatically at 1am UTC.',
-      parameters: { type: 'object', properties: {}, required: [] },
+      parameters: { type: 'object', properties: {} },
     },
   },
   {
@@ -6378,40 +6378,6 @@ Keep each header + thought on its own line. Use multiple short bold-header block
 
     const useTools = !voiceMode
     const toolContext = { userId, tavilyKey, apiKey, doKey, baseUrl, cookieHeader: req.headers.get('cookie') ?? '' }
-
-    // ── Conversational bypass: short friendly queries skip the agent loop entirely ───
-    // If the last message looks conversational (short, no action keywords), just call
-    // the LLM directly with 0 tools and return. Avoids the whole tool/round/synthesis path.
-    const lastUserMsg = messages.slice().reverse().find((m: { role: string }) => m.role === 'user')
-    const lastUserText = typeof lastUserMsg?.content === 'string' ? lastUserMsg.content.trim() : ''
-    const isConversational = lastUserText.length < 80 &&
-      !/\b(search|build|create|make|generate|write|code|run|execute|find|look up|check|analyze|tell me|show me|get|post|send|delete|update)\b/i.test(lastUserText)
-    if (isConversational && useTools) {
-      console.log(`[chat] conversational bypass — direct LLM call (${lastUserText.length} chars)`)
-      const { response: convRes } = await tryLLMCall({
-        stream: false, temperature: 0.8, max_tokens: 16000,
-        tools: [],
-        messages: [{ role: 'system', content: systemContent }, ...recentMessages],
-      }, apiKey)
-      if (convRes.ok) {
-        const convData = await convRes.json()
-        const convContent: string = convData?.choices?.[0]?.message?.content ?? ''
-        if (convContent) {
-          const enc = new TextEncoder()
-          const cleanContent = convContent
-            .replace(/minimax-m2\.\d+(-free)?/gi, 'Atlas')
-            .replace(/music-2\.[05]/gi, 'the music engine')
-            .replace(/speech-02(-hd)?/gi, 'voice synthesis')
-            .replace(/whisper-large-v3-turbo/gi, 'voice recognition')
-            .replace(/ace-step-v1\.5/gi, 'the music engine')
-          const body = `data: ${JSON.stringify({ choices: [{ delta: { content: cleanContent } }] })}\n\ndata: [DONE]\n\n`
-          return new Response(new ReadableStream({
-            start(c) { c.enqueue(enc.encode(body)); c.close() }
-          }), { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' } })
-        }
-      }
-      // Fall through to normal path if direct call fails
-    }
     const toolMediaResults: Array<{ name: string; result: string }> = []
 
     let finalMessages = [...recentMessages]
@@ -6553,6 +6519,15 @@ Keep each header + thought on its own line. Use multiple short bold-header block
             continue
           }
           const p = params as { required?: string[]; properties?: Record<string, unknown> }
+          // Reject tools with empty properties — MiniMax may consider "parameters is empty" an error
+          if (p.properties && Object.keys(p.properties).length === 0) {
+            console.warn(`[tool-filter] REMOVING tool "${name}" — empty properties`)
+            continue
+          }
+          // Reject tools with empty required array — MiniMax may reject "required is empty"
+          if (Array.isArray(p.required) && p.required.length === 0) {
+            delete p.required
+          }
           if (p.required && p.properties) {
             let requiredOk = true
             for (const req of p.required) {
