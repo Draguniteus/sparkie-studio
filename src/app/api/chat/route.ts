@@ -6453,6 +6453,9 @@ Keep each header + thought on its own line. Use multiple short bold-header block
       // IIFE: wrap the entire agent loop so we can return liveStream BEFORE tools run
       // This is what makes ProcessTab show live spinners instead of a burst at the end.
       void (async () => { try {
+      // Declared at IIFE body level so it's in scope for the sync synthesis block
+      let loopRes: Response
+      let errorText: string | undefined
 
       // ── Topics: emit resumption event if we matched an active topic ────────────
       if (activeTopicId && activeTopicName) {
@@ -6576,9 +6579,6 @@ Keep each header + thought on its own line. Use multiple short bold-header block
         ])
 
         const coreTools = validTools.filter(t => CORE_TOOL_NAMES.has(t?.function?.name as string))
-
-        let loopRes: Response
-        let errorText: string | undefined
 
         // Try with all valid tools first; on 400 (tool error), retry with core tools only
         const llmPayload = (tools: typeof validTools, systemOverride?: string) => ({
