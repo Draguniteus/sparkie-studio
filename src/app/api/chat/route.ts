@@ -5985,8 +5985,14 @@ async function tryLLMCall(
   const isStream = payload.stream === true
   // Debug log: show message count, tool count, and first message role to help trace 400 errors
   const msgs = payload.messages as Array<{ role: string; content?: unknown; tool_calls?: unknown }>
-  const tools = payload.tools as Array<{ function?: { name?: string } }>
-  console.log(`[tryLLMCall] → messages=${msgs?.length ?? 0} tools=${tools?.length ?? 0} firstMsg=${msgs?.[0]?.role ?? '?'}`)
+  const rawTools = payload.tools as Array<Record<string, unknown>>
+// Transform to Anthropic input_schema format
+const anthropicTools = rawTools?.map((t) => {
+  const fn = t.function
+  if (fn?.parameters) return { ...t, function: { ...fn, input_schema: fn.parameters, parameters: undefined }
+  return t
+})
+  console.log(`[tryLLMCall] → messages=${msgs?.length ?? 0} tools=${anthropicTools?.length ?? 0} firstMsg=${msgs?.[0]?.role ?? '?'}`)
   const res = await fetch('https://api.minimax.io/anthropic/v1/messages', {
     method: 'POST',
     headers: {
@@ -5994,7 +6000,7 @@ async function tryLLMCall(
       'Authorization': `Bearer ${apiKey}`,
       'anthropic-version': '2023-06-01',
     },
-    body: JSON.stringify({ ...payload, model: 'MiniMax-M2.7' }),
+    body: JSON.stringify({ ...payload, tools: anthropicTools, model: 'MiniMax-M2.7' }),
     signal: AbortSignal.timeout(90000),
   })
   let errorText: string | undefined
