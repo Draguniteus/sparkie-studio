@@ -39,7 +39,17 @@
       "WebFetch(domain:www.minimax.io)",
       "Bash(npm run:*)",
       "Bash(set \"NEXT_TELEMETRY_DISABLED=1\")",
-      "Bash(npx next:*)"
+      "Bash(npx next:*)",
+      "Bash(curl -s https://sparkie-studio-mhouq.ondigitalocean.app/api/chat/route.ts)",
+      "Bash(name or parameters is empty\"\\).:*)",
+      "Bash(grep -n \"name: ''''\\\\|name: \"\"\"\"\\\\|parameters: null\\\\|parameters: undefined\" /c/Users/user/Desktop/sparkie-studio/src/lib/sprint5-tools.ts /c/Users/user/Desktop/sparkie-studio/src/lib/sprint4-tools.ts /c/Users/user/Desktop/sparkie-studio/src/lib/sprint3-tools.ts /c/Users/user/Desktop/sparkie-studio/src/lib/sprint2-tools.ts)",
+      "Bash(ls \"C:\\\\Users\\\\user\\\\Desktop\\\\sparkie-studio\\\\src\\\\lib\\\\sprint\"*-tools.ts)",
+      "Bash(gh run:*)",
+      "Bash(emoji\" rule only lived in the MAX_TOOL_ROUNDS section. Added to both the:*)",
+      "Bash(curl -s -X POST https://api.minimax.io/anthropic/v1/messages -H \"Content-Type: application/json\" -H \"Authorization: Bearer $MINIMAX_API_KEY\" -H \"anthropic-version: 2023-06-01\" -d '{\"\"\"\"model\"\"\"\":\"\"\"\"MiniMax-M2.7\"\"\"\",\"\"\"\"max_tokens\"\"\"\":10,\"\"\"\"messages\"\"\"\":[{\"\"\"\"role\"\"\"\":\"\"\"\"user\"\"\"\",\"\"\"\"content\"\"\"\":\"\"\"\"hi\"\"\"\"}],\"\"\"\"tools\"\"\"\":[{\"\"\"\"name\"\"\"\":\"\"\"\"get_weather\"\"\"\",\"\"\"\"description\"\"\"\":\"\"\"\"Get weather\"\"\"\",\"\"\"\"parameters\"\"\"\":{\"\"\"\"type\"\"\"\":\"\"\"\"object\"\"\"\",\"\"\"\"properties\"\"\"\":{\"\"\"\"city\"\"\"\":{\"\"\"\"type\"\"\"\":\"\"\"\"string\"\"\"\"}},\"\"\"\"required\"\"\"\":[\"\"\"\"city\"\"\"\"]}}]}')",
+      "Bash(node -e \":*)",
+      "Bash(node:*)",
+      "Skill(claude-api)"
     ]
   }
 }
