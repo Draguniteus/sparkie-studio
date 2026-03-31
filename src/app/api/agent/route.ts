@@ -189,6 +189,8 @@ async function executeDueTasks(userId: string, host: string, proto: string, cook
 
         let finalOutput = ''
         let passCount = 0
+        let consecutiveErrors = 0
+        const MAX_CONSECUTIVE_ERRORS = 3
 
         while (passCount < MAX_PASSES) {
           passCount++
@@ -211,8 +213,13 @@ async function executeDueTasks(userId: string, host: string, proto: string, cook
             })
 
             if (!chatRes.ok) {
-              console.error('[orchestrator] pass', passCount, 'HTTP', chatRes.status)
-              break
+              consecutiveErrors++
+              console.error('[orchestrator] pass', passCount, 'HTTP', chatRes.status, `(${consecutiveErrors} consecutive errors)`)
+              if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                console.error(`[orchestrator] stopping after ${MAX_CONSECUTIVE_ERRORS} consecutive errors`)
+                break
+              }
+              continue
             }
 
             // Parse SSE stream — collect content chunks and detect tool-limit signal
@@ -235,10 +242,16 @@ async function executeDueTasks(userId: string, host: string, proto: string, cook
               } catch { /* skip malformed chunks */ }
             }
           } catch (fetchErr) {
-            console.error('[orchestrator] pass', passCount, 'error:', fetchErr)
-            break
+            consecutiveErrors++
+            console.error('[orchestrator] pass', passCount, 'error:', fetchErr, `(${consecutiveErrors} consecutive errors)`)
+            if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+              console.error(`[orchestrator] stopping after ${MAX_CONSECUTIVE_ERRORS} consecutive errors`)
+              break
+            }
+            continue
           }
 
+          consecutiveErrors = 0 // Reset on successful response
           if (!passOutput) break
 
           finalOutput = passOutput // last non-empty pass wins
