@@ -5985,21 +5985,13 @@ async function tryLLMCall(
   // Do NOT transform parameters → input_schema. MiniMax expects OpenAI format: parameters (not input_schema).
   // Error 2013 "parameters is empty" means MiniMax validates the 'parameters' field directly.
   console.log(`[tryLLMCall] → messages=${msgs?.length ?? 0} tools=${rawTools?.length ?? 0} firstMsg=${msgs?.[0]?.role ?? '?'}`)
-  // DEBUG: log exact body being sent (extract tools array portion)
-  const bodyObj = { ...payload, tools: rawTools, model: 'MiniMax-M2.7' }
-  const bodyStr = JSON.stringify(bodyObj)
-  // Use indexOf (not lastIndexOf) to find the FIRST "tools": which is the actual tools array
-  const toolsIdx = bodyStr.indexOf('"tools":')
-  const previewStart = toolsIdx >= 0 ? toolsIdx : 0
-  console.log(`[tryLLMCall] BODY_PREVIEW firstTool=${bodyStr.substring(previewStart, previewStart + 1200)}`)
-  const res = await fetch('https://api.minimax.io/anthropic/v1/messages', {
+  const res = await fetch('https://api.minimax.io/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
+      'Authorization': `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({ ...payload, tools: rawTools, model: 'MiniMax-M2.7' }),
+    body: JSON.stringify(payload),
     signal: AbortSignal.timeout(90000),
   })
   let errorText: string | undefined
@@ -6563,6 +6555,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
 
         // Try with all valid tools first; on 400 (tool error), retry with core tools only
         const llmPayload = (tools: typeof validTools, systemOverride?: string) => ({
+          model: 'MiniMax-M2.7',
           stream: false, temperature: 0.8, max_tokens: 16000,
           tools,
           messages: [{ role: 'system', content: systemOverride ?? finalSystemContent }, ...sanitizedMessages],
@@ -6579,17 +6572,6 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           // 0-tools synthesis: immediate fallback — do NOT wait for binary search
           console.warn(`[chat] 400 with core tools — falling back to 0-tools synthesis`)
           ;({ response: loopRes, errorText } = await tryLLMCall(llmPayload([], systemContent), apiKey))
-          // Fire-and-forget diagnostic: binary-search the tool list to find which tool caused the 400
-          // Result is logged server-side only — does not block the user's response
-          findBadTool(validTools, finalSystemContent, sanitizedMessages.slice(0, 5), apiKey)
-            .then((badTool) => {
-              if (badTool?.function?.name) {
-                console.error(`[findBadTool] PROBLEMATIC TOOL: "${badTool.function.name}" — remove or fix its schema`)
-              } else {
-                console.error(`[findBadTool] no single bad tool found — 400 may be systemic (e.g. max_tokens, schema format)`)
-              }
-            })
-            .catch((e) => console.error(`[findBadTool] diagnostic error: ${String(e)}`))
         }
 
         if (!loopRes.ok) {

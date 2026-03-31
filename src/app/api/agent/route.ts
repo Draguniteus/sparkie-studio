@@ -189,6 +189,8 @@ async function executeDueTasks(userId: string, host: string, proto: string, cook
 
         let finalOutput = ''
         let passCount = 0
+        let consecutiveErrors = 0
+        const MAX_CONSECUTIVE_ERRORS = 3
 
         while (passCount < MAX_PASSES) {
           passCount++
@@ -212,8 +214,15 @@ async function executeDueTasks(userId: string, host: string, proto: string, cook
 
             if (!chatRes.ok) {
               console.error('[orchestrator] pass', passCount, 'HTTP', chatRes.status)
-              break
+              consecutiveErrors++
+              if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                console.error(`[orchestrator] stopping after ${MAX_CONSECUTIVE_ERRORS} consecutive errors`)
+                break
+              }
+              continue
             }
+
+            consecutiveErrors = 0
 
             // Parse SSE stream — collect content chunks and detect tool-limit signal
             const text = await chatRes.text()
@@ -236,7 +245,11 @@ async function executeDueTasks(userId: string, host: string, proto: string, cook
             }
           } catch (fetchErr) {
             console.error('[orchestrator] pass', passCount, 'error:', fetchErr)
-            break
+            consecutiveErrors++
+            if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+              console.error(`[orchestrator] stopping after ${MAX_CONSECUTIVE_ERRORS} consecutive errors`)
+              break
+            }
           }
 
           if (!passOutput) break
