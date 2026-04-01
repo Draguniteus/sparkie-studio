@@ -6021,6 +6021,7 @@ async function findBadTool(
   const mid = Math.floor(allTools.length / 2)
   const firstHalf = allTools.slice(0, mid)
   const testPayload = {
+    model: 'MiniMax-M2.7',
     stream: false, temperature: 0.8, max_tokens: 16000,
     tools: firstHalf,
     messages: [{ role: 'system', content: systemContent }, ...messages],
@@ -6481,16 +6482,16 @@ Keep each header + thought on its own line. Use multiple short bold-header block
         // MiniMax uses the tools[] array to know what's available — tool_call entries
         // in messages are only needed for multi-round tool execution context, but they
         // can carry corruption (empty names/args) that triggers 400 errors. Safer to omit.
-        // Tool results from prior rounds are preserved as simple {role:"tool"} messages.
-        const sanitizedMessages = loopMessages.map((msg: Record<string, unknown>) => {
-          if (msg.role === 'assistant') {
-            return { ...msg, tool_calls: undefined, content: msg.content }
-          }
-          if (msg.role === 'tool') {
-            return { ...msg, tool_calls: undefined }
-          }
-          return msg
-        })
+        // Strip both assistant tool_calls AND tool result messages to avoid ID mismatch
+        // errors (orphaned tool_call_id references after tool_calls stripped from assistant).
+        const sanitizedMessages = loopMessages
+          .filter((msg: Record<string, unknown>) => msg.role !== 'tool')
+          .map((msg: Record<string, unknown>) => {
+            if (msg.role === 'assistant') {
+              return { ...msg, tool_calls: undefined, content: msg.content }
+            }
+            return msg
+          })
 
         // Use ONLY SPARKIE_TOOLS — do NOT include connectorTools.
         // Deduplicate by function name: keep first occurrence only.
@@ -6517,11 +6518,6 @@ Keep each header + thought on its own line. Use multiple short bold-header block
             continue
           }
           const p = params as { required?: string[]; properties?: Record<string, unknown> }
-          // Reject tools with empty properties — MiniMax may consider "parameters is empty" an error
-          if (p.properties && Object.keys(p.properties).length === 0) {
-            console.warn(`[tool-filter] REMOVING tool "${name}" — empty properties`)
-            continue
-          }
           // Reject tools with empty required array — MiniMax may reject "required is empty"
           if (Array.isArray(p.required) && p.required.length === 0) {
             delete p.required
@@ -7171,7 +7167,8 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           // Strip any residual XML tool call markup from final content before streaming
           // NOTE: Previous regex was broken (missing < before minimax:tool_call, no <parameter> strip)
           const content: string = rawContent
-            .replace(/<minimax:tool_call>[\s\S]*?<\/minimax:tool_call>/g, '')
+            .replace(/<think>[\s\S]*?<\/think>/g, '')
+            .replace(/</minimax:tool_call>[\s\S]*?<\/minimax:tool_call>/g, '')
             .replace(/<invoke[\s\S]*?<\/invoke>/g, '')
             .replace(/<parameter[^>]*>[\s\S]*?<\/parameter>/g, '')
             .replace(/<\/?minimax:tool_call>/g, '')
@@ -7277,6 +7274,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
       if (!usedTools && loopRes?.ok) {
         console.log(`[chat] !usedTools path — doing sync synthesis (${loopMessages.length} msgs)`)
         const noToolsSynthPayload = {
+          model: 'MiniMax-M2.7',
           stream: false, temperature: 0.8, max_tokens: 16000,
           tools: [],
           messages: [{ role: 'system', content: systemContent }, ...loopMessages],
@@ -7290,6 +7288,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
             const okStream = new ReadableStream({
               start(ctrl) {
                 const cleanContent = noToolsContent
+                  .replace(/<think>[\s\S]*?<\/think>/g, '')
                   .replace(/minimax-m2\.\d+(-free)?/gi, 'Atlas')
                   .replace(/music-2\.[05]/gi, 'the music engine')
                   .replace(/speech-02(-hd)?/gi, 'voice synthesis')
@@ -7391,6 +7390,7 @@ SYNTHESIS RULES:
         content: '⚡ SYSTEM: Write your full response now in plain English. No tools. No XML. No emojis. No ASCII art. Pure text only.',
       }]
       const { response: synthRes, errorText: synthErr } = await tryLLMCall({
+        model: 'MiniMax-M2.7',
         stream: true, temperature: 0.8, max_tokens: 16000,
         messages: [{ role: 'system', content: systemContent }, ...finalMessages],
       }, apiKey)
@@ -7431,7 +7431,8 @@ SYNTHESIS RULES:
                 if (ct) {
                   // Strip XML tool calls from synthesis stream
                   const cleanCt = ct
-                    .replace(/<minimax:tool_call>[\s\S]*?<\/minimax:tool_call>/g, '')
+                    .replace(/<think>[\s\S]*?<\/think>/g, '')
+                    .replace(/</minimax:tool_call>[\s\S]*?<\/minimax:tool_call>/g, '')
                     .replace(/<invoke[\s\S]*?<\/invoke>/g, '')
                     .replace(/<parameter[^>]*>[\s\S]*?<\/parameter>/g, '')
                     .trim()
@@ -7481,6 +7482,7 @@ SYNTHESIS RULES:
 
     // Final streaming call — use tryLLMCall for fallback resilience
     const { response: streamRes, errorText: streamErr } = await tryLLMCall({
+      model: 'MiniMax-M2.7',
       stream: true, temperature: 0.8, max_tokens: 16000,
       messages: [{ role: 'system', content: finalSystemContent }, ...finalMessages],
     }, apiKey)
@@ -7604,7 +7606,8 @@ SYNTHESIS RULES:
                   if (hasCloseXML) {
                     // Full XML block accumulated — strip it, emit any clean text that remains
                     const cleanAcc = accContent
-                      .replace(/<minimax:tool_call>[\s\S]*?<\/minimax:tool_call>/g, '')
+                      .replace(/<think>[\s\S]*?<\/think>/g, '')
+                      .replace(/</minimax:tool_call>[\s\S]*?<\/minimax:tool_call>/g, '')
                       .replace(/<invoke[\s\S]*?<\/invoke>/g, '')
                       .replace(/<parameter[^>]*>[\s\S]*?<\/parameter>/g, '')
                       .trim()
@@ -7621,6 +7624,7 @@ SYNTHESIS RULES:
               // Sanitize model name leaks before sending to client
               if (content && parsed?.choices?.[0]?.delta) {
                 const sanitized = content
+                  .replace(/<think>[\s\S]*?<\/think>/g, '')
                   .replace(/minimax-m2\.\d+(-free)?/gi, 'Atlas')
                   .replace(/music-2\.[05]/gi, 'the music engine')
                   .replace(/speech-02(-hd)?/gi, 'voice synthesis')
