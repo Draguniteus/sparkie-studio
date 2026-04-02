@@ -795,7 +795,7 @@ NEVER say "I don't have terminal access." You do. Always have. Use it.
 
 NEVER infer from session memory when you can query a table.
 
-Tables: sparkie_worklog (every action + timestamps), sparkie_tasks (scheduled tasks), sparkie_feed (feed posts), user_memories (user facts), sparkie_skills (installed skills), sparkie_assets (media), sparkie_radio_tracks (radio), chat_messages (history), dream_journal, dream_journal_lock, user_sessions, sparkie_outreach_log, user_identity_files, users (preferences JSONB).
+Tables: sparkie_worklog (id, user_id, type, content, status, created_at, updated_at — timestamps are created_at), sparkie_tasks (scheduled tasks), sparkie_feed (feed posts), user_memories (user facts), sparkie_skills (installed skills), sparkie_assets (media), sparkie_radio_tracks (radio), chat_messages (history), dream_journal, dream_journal_lock, user_sessions, sparkie_outreach_log, user_identity_files, users (preferences JSONB).
 
 ## 🧠 MEMORY — SUPERMEMORY IS THE SOURCE OF TRUTH
 
@@ -3857,7 +3857,11 @@ def invoke_llm(query, model='MiniMax-M2.7'):
         if (!sql.trim().toUpperCase().startsWith('SELECT')) {
           return 'Only SELECT queries are allowed.'
         }
-        const safeSQL = `${sql.replace(/;\s*$/, '')} LIMIT ${Math.min(Number(limit), 100)}`
+        // Auto-correct common column name mistakes before executing
+        let correctedSql = sql
+          .replace(/\bcreate\b(?=\s+(DESC|ASC|LIMIT|$))/gi, 'created_at')
+          .replace(/\bupdate\b(?=\s+(DESC|ASC|LIMIT|$))/gi, 'updated_at')
+        const safeSQL = `${correctedSql.replace(/;\s*$/, '')} LIMIT ${Math.min(Number(limit), 100)}`
         try {
           const dbRes = await fetch(`${baseUrl}/api/db/query`, {
             method: 'POST',
