@@ -7167,7 +7167,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           // NOTE: Previous regex was broken (missing < before minimax:tool_call, no <parameter> strip)
           const content: string = rawContent
             .replace(/<minimax:tool_call>[\s\S]*?<\/minimax:tool_call>/g, '')
-                        .replace(/< Christensen[\s\S]*?<\/think>/gi, '')
+                        .replace(/ Christensen[\s\S]*?<\/think>/gi, '')
             .replace(/<invoke[\s\S]*?<\/invoke>/g, '')
             .replace(/<parameter[^>]*>[\s\S]*?<\/parameter>/g, '')
             .replace(/<\/?minimax:tool_call>/g, '')
@@ -7243,7 +7243,17 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           }
 
           // Write final content directly to liveRef — live stream is already open (IIFE approach)
-  
+          // Emit task_chip so ProcessTab shows "Working..." for non-tool responses too
+          liveEnqueue({ task_chip: 'Thinking...' })
+          // Emit thought_step from raw think content before it gets stripped below
+          const thinkMatches = rawContent.match(/ Christensen[\s\S]*?<\/think>/gi)
+          if (thinkMatches) {
+            for (const m of thinkMatches) {
+              const reasoning = m.replace(/<\/?think>/gi, '').trim()
+              if (reasoning.length > 10) liveEnqueue({ thought_step: reasoning.slice(0, 300) })
+            }
+          }
+
           liveRef.controller?.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ reasoning_chunk: finalContent })}\n\n: \n\n`))
           liveRef.controller?.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: finalContent } }] })}\n\n: \n\n`))
           liveRef.controller?.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ task_chip_clear: true })}\n\n: \n\n`))
@@ -7286,7 +7296,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
             const okStream = new ReadableStream({
               start(ctrl) {
                 const cleanContent = noToolsContent
-                                    .replace(/< Christensen[\s\S]*?<\/think>/gi, '')
+                                    .replace(/ Christensen[\s\S]*?<\/think>/gi, '')
                   .replace(/minimax-m2\.\d+(-free)?/gi, 'Atlas')
                   .replace(/music-2\.[05]/gi, 'the music engine')
                   .replace(/speech-02(-hd)?/gi, 'voice synthesis')
@@ -7429,7 +7439,7 @@ SYNTHESIS RULES:
                   // Strip XML tool calls from synthesis stream
                   const cleanCt = ct
                     .replace(/<minimax:tool_call>[\s\S]*?<\/minimax:tool_call>/g, '')
-                                        .replace(/< Christensen[\s\S]*?<\/think>/gi, '')
+                                        .replace(/ Christensen[\s\S]*?<\/think>/gi, '')
                     .replace(/<invoke[\s\S]*?<\/invoke>/g, '')
                     .replace(/<parameter[^>]*>[\s\S]*?<\/parameter>/g, '')
                     .trim()
@@ -7603,7 +7613,7 @@ SYNTHESIS RULES:
                     // Full XML block accumulated — strip it, emit any clean text that remains
                     const cleanAcc = accContent
                       .replace(/<minimax:tool_call>[\s\S]*?<\/minimax:tool_call>/g, '')
-                                            .replace(/< Christensen[\s\S]*?<\/think>/gi, '')
+                                            .replace(/ Christensen[\s\S]*?<\/think>/gi, '')
                       .replace(/<invoke[\s\S]*?<\/invoke>/g, '')
                       .replace(/<parameter[^>]*>[\s\S]*?<\/parameter>/g, '')
                       .trim()
@@ -7620,7 +7630,7 @@ SYNTHESIS RULES:
               // Sanitize model name leaks before sending to client
               if (content && parsed?.choices?.[0]?.delta) {
                 const sanitized = content
-                                    .replace(/< Christensen[\s\S]*?<\/think>/gi, '')
+                                    .replace(/ Christensen[\s\S]*?<\/think>/gi, '')
                   .replace(/minimax-m2\.\d+(-free)?/gi, 'Atlas')
                   .replace(/music-2\.[05]/gi, 'the music engine')
                   .replace(/speech-02(-hd)?/gi, 'voice synthesis')
