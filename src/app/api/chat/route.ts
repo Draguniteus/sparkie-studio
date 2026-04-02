@@ -6516,11 +6516,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
             continue
           }
           const p = params as { required?: string[]; properties?: Record<string, unknown> }
-          // Reject tools with empty properties — MiniMax may consider "parameters is empty" an error
-          if (p.properties && Object.keys(p.properties).length === 0) {
-            console.warn(`[tool-filter] REMOVING tool "${name}" — empty properties`)
-            continue
-          }
+          // empty-properties filter removed
           // Reject tools with empty required array — MiniMax may reject "required is empty"
           if (Array.isArray(p.required) && p.required.length === 0) {
             delete p.required
@@ -7170,8 +7166,8 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           // Strip any residual XML tool call markup from final content before streaming
           // NOTE: Previous regex was broken (missing < before minimax:tool_call, no <parameter> strip)
           const content: string = rawContent
-                        .replace(/ Christensen[\s\S]*?\n<\/think>/gi, '')
             .replace(/<minimax:tool_call>[\s\S]*?<\/minimax:tool_call>/g, '')
+                        .replace(/< Christensen[\s\S]*?<\/think>/gi, '')
             .replace(/<invoke[\s\S]*?<\/invoke>/g, '')
             .replace(/<parameter[^>]*>[\s\S]*?<\/parameter>/g, '')
             .replace(/<\/?minimax:tool_call>/g, '')
@@ -7290,7 +7286,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
             const okStream = new ReadableStream({
               start(ctrl) {
                 const cleanContent = noToolsContent
-                                    .replace(/ Christensen[\s\S]*?\n<\/think>/gi, '')
+                                    .replace(/< Christensen[\s\S]*?<\/think>/gi, '')
                   .replace(/minimax-m2\.\d+(-free)?/gi, 'Atlas')
                   .replace(/music-2\.[05]/gi, 'the music engine')
                   .replace(/speech-02(-hd)?/gi, 'voice synthesis')
@@ -7432,8 +7428,8 @@ SYNTHESIS RULES:
                 if (ct) {
                   // Strip XML tool calls from synthesis stream
                   const cleanCt = ct
-                                        .replace(/ Christensen[\s\S]*?\n<\/think>/gi, '')
                     .replace(/<minimax:tool_call>[\s\S]*?<\/minimax:tool_call>/g, '')
+                                        .replace(/< Christensen[\s\S]*?<\/think>/gi, '')
                     .replace(/<invoke[\s\S]*?<\/invoke>/g, '')
                     .replace(/<parameter[^>]*>[\s\S]*?<\/parameter>/g, '')
                     .trim()
@@ -7606,8 +7602,8 @@ SYNTHESIS RULES:
                   if (hasCloseXML) {
                     // Full XML block accumulated — strip it, emit any clean text that remains
                     const cleanAcc = accContent
-                                            .replace(/ Christensen[\s\S]*?\n<\/think>/gi, '')
                       .replace(/<minimax:tool_call>[\s\S]*?<\/minimax:tool_call>/g, '')
+                                            .replace(/< Christensen[\s\S]*?<\/think>/gi, '')
                       .replace(/<invoke[\s\S]*?<\/invoke>/g, '')
                       .replace(/<parameter[^>]*>[\s\S]*?<\/parameter>/g, '')
                       .trim()
@@ -7624,7 +7620,7 @@ SYNTHESIS RULES:
               // Sanitize model name leaks before sending to client
               if (content && parsed?.choices?.[0]?.delta) {
                 const sanitized = content
-                                    .replace(/ Christensen[\s\S]*?\n<\/think>/gi, '')
+                                    .replace(/< Christensen[\s\S]*?<\/think>/gi, '')
                   .replace(/minimax-m2\.\d+(-free)?/gi, 'Atlas')
                   .replace(/music-2\.[05]/gi, 'the music engine')
                   .replace(/speech-02(-hd)?/gi, 'voice synthesis')
