@@ -15,7 +15,7 @@ import { writeWorklog, writeMsgBatch } from '@/lib/worklog'
 import { createBehaviorRule, listBehaviorRules, updateBehaviorRule, formatBehaviorRulesBlock } from '@/lib/behaviorRules'
 import { queryCausalGraph, addCausalLink, observeEventPair, formatCausalInference } from '@/lib/causalModel'
 import { createGoal, loadActiveGoals, updateGoalProgress, completeGoal, listGoals, formatGoalsBlock, tickSessionsWithoutProgress } from '@/lib/goalEngine'
-import { runSelfReflection, getRecentReflections } from '@/lib/selfReflection'
+import { runSelfReflection, getRecentReflections, formatSelfReflectionBlock } from '@/lib/selfReflection'
 import { SPARKIE_TOOLS_S2 } from '@/lib/sprint2-tools'
 import { executeSprint2Tool } from '@/lib/sprint2-cases'
 import { SPARKIE_TOOLS_S3 } from '@/lib/sprint3-tools'
@@ -5334,6 +5334,83 @@ def invoke_llm(query, model='MiniMax-M2.7'):
   }
 }
 
+// ── Autonomous retry wrapper ─────────────────────────────────────────────────────
+// Wraps executeTool with automatic retry, self-healing attempt history, and
+// exponential backoff. On failure: auto-saves attempt, retries up to 3x, then
+// injects attempt history lesson into the next model turn so Sparkie self-heals.
+const TOOL_DOMAIN_MAP: Record<string, string> = {
+  get_weather: 'weather', query_database: 'database', write_database: 'database',
+  search_github: 'github', get_github: 'github', create_github_pr: 'github',
+  patch_file: 'coding', write_file: 'coding', execute_terminal: 'coding',
+  send_email: 'email', draft_email: 'email',
+  create_calendar_event: 'calendar',
+  composio_execute: 'composio',
+  generate_image: 'image_gen', text_to_speech: 'audio', generate_speech: 'audio',
+  minimax_video: 'video_gen',
+  trigger_deploy: 'deploy', check_deployment: 'deploy',
+  search_web: 'search', tavily_search: 'search',
+  log_worklog: 'worklog', update_worklog: 'worklog',
+  save_memory: 'memory', read_memory: 'memory', save_self_memory: 'memory',
+  get_self_reflections: 'self_model',
+  create_social_draft: 'social',
+  get_attempt_history: 'attempt_history', save_attempt: 'attempt_history',
+  batch_create: 'task_management',
+}
+
+type RetryContext = { userId: string | null; tavilyKey: string | undefined; apiKey: string; doKey: string; baseUrl: string; cookieHeader: string }
+
+function isErrorResult(result: string): boolean {
+  return result.startsWith('Error:') || result.startsWith('Tool error:') || result.startsWith('Tool not available')
+}
+
+async function executeToolWithRetry(
+  name: string,
+  args: Record<string, unknown>,
+  ctx: RetryContext,
+): Promise<{ result: string; failed: boolean; attemptHistoryContext: string }> {
+  const domain = TOOL_DOMAIN_MAP[name] ?? 'general'
+  let lastResult = ''
+  let allErrors: string[] = []
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    lastResult = await executeTool(name, args, ctx)
+    if (!isErrorResult(lastResult)) {
+      // Success — auto-save success attempt on first success after failures
+      if (attempt > 0 && ctx.userId) {
+        await saveAttempt(ctx.userId, domain, 'success',
+          `${name}(${JSON.stringify(args).slice(0, 120)})`,
+          `Succeeded on attempt ${attempt + 1} after previous failures: ${allErrors.join(' | ')}`,
+          `Retry worked. Previous error was transient — retry strategy is valid.`)
+      }
+      return { result: lastResult, failed: false, attemptHistoryContext: '' }
+    }
+    allErrors.push(lastResult.slice(0, 80))
+    if (attempt < 2) {
+      const delayMs = Math.pow(2, attempt) * 1000
+      await new Promise(r => setTimeout(r, delayMs))
+    }
+  }
+
+  // All 3 attempts failed — auto-save failure, fetch history for next-turn lesson
+  const errorSummary = allErrors[allErrors.length - 1] ?? 'unknown error'
+  if (ctx.userId) {
+    await saveAttempt(ctx.userId, domain, 'failure',
+      `${name}(${JSON.stringify(args).slice(0, 120)})`,
+      `Failed ${allErrors.length}x: ${errorSummary}`,
+      `Do NOT repeat the exact same approach. Review the attempt history below for past failures and workarounds before trying a different strategy.`)
+  }
+
+  let attemptHistoryContext = ''
+  if (ctx.userId) {
+    try {
+      const attempts = await getAttempts(ctx.userId, domain, 5)
+      attemptHistoryContext = formatAttemptBlock(attempts)
+    } catch { /* non-fatal */ }
+  }
+
+  return { result: lastResult, failed: true, attemptHistoryContext }
+}
+
 // ── Convert tool result URLs to markdown media blocks ─────────────────────────
 function injectMediaIntoContent(content: string, toolResults: Array<{ name: string; result: string }>): string {
   let extra = ''
@@ -6457,7 +6534,7 @@ export async function POST(req: NextRequest) {
       // Record user activity for presence/autonomy model
       recordUserActivity(userId).catch(() => {})
 
-      const [memoriesText, awareness, identityFiles, envCtx, sessionSnapshot, readyIntents, userModel, activeGoals, behaviorRules] = await Promise.all([
+      const [memoriesText, awareness, identityFiles, envCtx, sessionSnapshot, readyIntents, userModel, activeGoals, behaviorRules, recentReflections] = await Promise.all([
         (() => {
           const _mce = _memCache.get(userId)
           if (_mce && _mce.expiresAt > Date.now()) return Promise.resolve(_mce.text)
@@ -6474,6 +6551,7 @@ export async function POST(req: NextRequest) {
         isBuild ? Promise.resolve(null) : getUserModel(userId),
         isBuild ? Promise.resolve([]) : loadActiveGoals(5),
         isBuild ? Promise.resolve([]) : listBehaviorRules(true),
+        isBuild ? Promise.resolve([]) : getRecentReflections(3),
       ])
       shouldBrief = awareness.shouldBrief && messages.length <= 2 // Only brief on session open
 
@@ -6517,6 +6595,11 @@ export async function POST(req: NextRequest) {
       if (behaviorRules && behaviorRules.length > 0) {
         systemContent += formatBehaviorRulesBlock(behaviorRules)
         _sessionRules = behaviorRules.map(r => ({ id: r.id, condition: r.condition, action: r.action, active: r.active }))
+      }
+
+      // L7: Inject recent self-reflections — Sparkie knows herself
+      if (recentReflections && recentReflections.length > 0) {
+        systemContent += formatSelfReflectionBlock(recentReflections)
       }
 
       // getProjectContext skipped — not used in system prompt (perf fix)
@@ -7424,16 +7507,26 @@ Keep each header + thought on its own line. Use multiple short bold-header block
             const jsonFnCalls: Array<{ id: string; type: string; function: { name: string; arguments: string } }> = []
             let jsonMatch
             const jsonFnPatternLocal = /\{\s*"type"\s*:\s*"function"\s*,\s*"name"\s*:\s*"([^"]+)"\s*,\s*"parameters"\s*:\s*(\{[\s\S]*?\})\s*\}/g
+            let allAttemptHistoryContext = ''
             while ((jsonMatch = jsonFnPatternLocal.exec(rawContent)) !== null) {
               const toolName = jsonMatch[1]
               let toolArgs: Record<string, unknown> = {}
               try { toolArgs = JSON.parse(jsonMatch[2]) } catch { /* ignore parse err */ }
               const fakeId = `json_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
               jsonFnCalls.push({ id: fakeId, type: 'function', function: { name: toolName, arguments: JSON.stringify(toolArgs) } })
-              const result = await executeTool(toolName, toolArgs, toolContext)
+              const { result, failed, attemptHistoryContext } = await executeToolWithRetry(toolName, toolArgs, toolContext)
               // Track AI action in topic cognition state
               if (activeTopicId) updateTopicCognition(activeTopicId, { ai_action: toolName }).catch(() => {})
               jsonFnResults.push({ role: 'tool' as const, tool_call_id: fakeId, content: result })
+              if (failed && attemptHistoryContext) allAttemptHistoryContext = attemptHistoryContext
+            }
+            // Self-healing nudge: if any tool failed after retries, give Sparkie the lesson
+            if (allAttemptHistoryContext) {
+              loopMessages = [...loopMessages, {
+                role: 'user' as const,
+                content: `⚡ SYSTEM SELF-HEAL (not from Michael): A tool just failed after all retries.\n${allAttemptHistoryContext}\nDo NOT give up. Apply the lessons above — try a different approach, check for typos, try a simpler method, or break the task into smaller steps. Work through it.`,
+              }]
+              allAttemptHistoryContext = ''
             }
             if (jsonFnResults.length > 0) {
               // Check for HITL task — emit card and halt
@@ -7475,6 +7568,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
             let invokeMatch
             const xmlToolResults: Array<{ role: 'tool'; tool_call_id: string; content: string }> = []
             const fakeAssistantCalls: Array<{ id: string; type: string; function: { name: string; arguments: string } }> = []
+            let xmlAllAttemptHistoryContext = ''
 
             while ((invokeMatch = invokePattern.exec(rawContent)) !== null) {
               const toolName = invokeMatch[1]
@@ -7494,14 +7588,23 @@ Keep each header + thought on its own line. Use multiple short bold-header block
               const xmlLabel = XML_LABEL_MAP[toolName] ?? toolName.replace(/_/g, ' ')
               liveEnqueue({ step_trace: { id: fakeId, toolName, icon: xmlIcon, label: xmlLabel, status: 'running', timestamp: Date.now() } })
               const xmlStart = Date.now()
-              const result = await executeTool(toolName, params, toolContext)
+              const { result, failed, attemptHistoryContext } = await executeToolWithRetry(toolName, params, toolContext)
               // Track AI action in topic cognition state
               if (activeTopicId) updateTopicCognition(activeTopicId, { ai_action: toolName }).catch(() => {})
               const xmlDuration = Date.now() - xmlStart
-              const xmlError = result.startsWith('Error:') || result.startsWith('LOOP_INTERRUPT')
+              const xmlError = failed || result.startsWith('LOOP_INTERRUPT')
               liveEnqueue({ step_trace: { id: fakeId, toolName, icon: xmlIcon, label: xmlLabel, status: xmlError ? 'error' : 'done', duration: xmlDuration, timestamp: Date.now() } })
               console.log(`[tool] ${toolName} (xml) — ${xmlError ? 'error' : 'done'} in ${xmlDuration}ms`)
               xmlToolResults.push({ role: 'tool' as const, tool_call_id: fakeId, content: result })
+              if (failed && attemptHistoryContext) xmlAllAttemptHistoryContext = attemptHistoryContext
+            }
+            // Self-healing nudge: if any XML tool failed after retries, give Sparkie the lesson
+            if (xmlAllAttemptHistoryContext) {
+              loopMessages = [...loopMessages, {
+                role: 'user' as const,
+                content: `⚡ SYSTEM SELF-HEAL (not from Michael): A tool just failed after all retries.\n${xmlAllAttemptHistoryContext}\nDo NOT give up. Apply the lessons above — try a different approach, check for typos, try a simpler method, or break the task into smaller steps. Work through it.`,
+              }]
+              xmlAllAttemptHistoryContext = ''
             }
 
             if (xmlToolResults.length > 0) {

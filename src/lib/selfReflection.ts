@@ -256,6 +256,23 @@ export async function getRecentReflections(days = 7): Promise<SelfReflection[]> 
   }))
 }
 
+/** Format reflections for system prompt injection */
+export function formatSelfReflectionBlock(reflections: SelfReflection[]): string {
+  if (reflections.length === 0) return ''
+  const lines: string[] = []
+  for (const r of reflections.slice(0, 3)) {
+    lines.push(`### ${r.reflectionDate}`)
+    lines.push(`What worked: ${r.whatWorked.slice(0, 3).join('; ')}`)
+    lines.push(`What failed: ${r.whatFailed.slice(0, 2).join('; ')}`)
+    lines.push(`Growth: ${r.growthObserved}`)
+    if (r.tomorrowIntention) lines.push(`Tomorrow's intention: ${r.tomorrowIntention}`)
+    if (r.patternsNoticed.length > 0 && !r.patternsNoticed[0].includes('too few')) {
+      lines.push(`Patterns: ${r.patternsNoticed.slice(0, 2).join('; ')}`)
+    }
+  }
+  return `\n\n## L7 SELF-MODEL — RECENT REFLECTIONS\nYour recent self-assessment results:\n${lines.join('\n')}`
+}
+
 /** Count reflections for CIP dashboard */
 export async function getReflectionCount(days = 7): Promise<number> {
   await ensureTable()
