@@ -153,12 +153,14 @@ app.prepare().then(() => {
 
   function proactiveClientsAdd(ws, userId) {
     __proactiveClients.push({ ws, userId })
+    global.__proactiveClients = __proactiveClients
     console.log('[proactive] client connected: userId=' + userId + ', total=' + __proactiveClients.length)
   }
 
   function proactiveClientsRemove(ws) {
-    __proactiveClients = __proactiveClients.filter(function(c) { return c.ws !== ws })
-    global.__proactiveClients = __proactiveClients
+    const idx = __proactiveClients.findIndex(function(c) { return c.ws === ws })
+    if (idx !== -1) __proactiveClients.splice(idx, 1)
+    // Don't reassign __proactiveClients — mutate in place so API route references stay valid
     console.log('[proactive] client disconnected, total=' + __proactiveClients.length)
   }
 

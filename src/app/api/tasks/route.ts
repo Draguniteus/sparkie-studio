@@ -241,6 +241,44 @@ export async function PATCH(req: NextRequest) {
       for (const tid of ids) {
         try {
           const resolved = status === 'approved' ? 'completed' : status === 'rejected' ? 'skipped' : status
+
+          // Execute email send for approved email tasks (plain, no attachment)
+          if (status === 'approved') {
+            const taskRes = await query<{ action: string; payload: unknown }>(
+              `SELECT action, payload FROM sparkie_tasks WHERE id = $1 AND user_id = $2`,
+              [tid, userId]
+            )
+            const task = taskRes.rows[0]
+            if (task && (task.action?.includes('create_email_draft') || task.action?.includes('send_email'))) {
+              const payload = normalizePayload(task.payload)
+              const composioKey = process.env.COMPOSIO_API_KEY
+              const entityId = `sparkie_user_${userId}`
+              const recipientEmail = (payload.to ?? payload.recipient_email ?? payload.email ?? payload.recipient) as string | undefined
+              if (composioKey && recipientEmail) {
+                const emailBody = (payload.body ?? payload.message ?? payload.content ?? '') as string
+                const emailSubject = (payload.subject ?? payload.title ?? '(no subject)') as string
+                try {
+                  const composioRes = await fetch(`${V3}/tools/execute/GMAIL_SEND_EMAIL`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'x-api-key': composioKey },
+                    body: JSON.stringify({
+                      entity_id: entityId,
+                      arguments: { recipient_email: recipientEmail, subject: emailSubject, body: emailBody, is_html: false },
+                    }),
+                  })
+                  const composioText = await composioRes.text()
+                  if (!composioRes.ok) {
+                    console.error('[batch PATCH] Gmail send failed:', composioRes.status, composioText.slice(0, 200))
+                  } else {
+                    console.log('[batch PATCH] Gmail send success:', composioRes.status, composioText.slice(0, 100))
+                  }
+                } catch (e) {
+                  console.error('[batch PATCH] Gmail send error:', e)
+                }
+              }
+            }
+          }
+
           await query(
             `UPDATE sparkie_tasks SET status = $1, resolved_at = NOW() WHERE id = $2 AND user_id = $3`,
             [resolved, tid, userId]
@@ -256,6 +294,7 @@ export async function PATCH(req: NextRequest) {
     // ── Single-task mode ─────────────────────────────────────────────────────────
     if (!id) return NextResponse.json({ error: 'Missing id or ids' }, { status: 400 })
     const resolvedStatus = status === 'approved' ? 'completed' : status === 'rejected' ? 'skipped' : status
+    const setResolved = ['completed', 'skipped', 'failed', 'cancelled'].includes(resolvedStatus)
     const attachment = body.attachment
 
     let attachmentNote: string | null = null
