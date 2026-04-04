@@ -49,7 +49,14 @@
       "Bash(curl -s -X POST https://api.minimax.io/anthropic/v1/messages -H \"Content-Type: application/json\" -H \"Authorization: Bearer $MINIMAX_API_KEY\" -H \"anthropic-version: 2023-06-01\" -d '{\"\"\"\"model\"\"\"\":\"\"\"\"MiniMax-M2.7\"\"\"\",\"\"\"\"max_tokens\"\"\"\":10,\"\"\"\"messages\"\"\"\":[{\"\"\"\"role\"\"\"\":\"\"\"\"user\"\"\"\",\"\"\"\"content\"\"\"\":\"\"\"\"hi\"\"\"\"}],\"\"\"\"tools\"\"\"\":[{\"\"\"\"name\"\"\"\":\"\"\"\"get_weather\"\"\"\",\"\"\"\"description\"\"\"\":\"\"\"\"Get weather\"\"\"\",\"\"\"\"parameters\"\"\"\":{\"\"\"\"type\"\"\"\":\"\"\"\"object\"\"\"\",\"\"\"\"properties\"\"\"\":{\"\"\"\"city\"\"\"\":{\"\"\"\"type\"\"\"\":\"\"\"\"string\"\"\"\"}},\"\"\"\"required\"\"\"\":[\"\"\"\"city\"\"\"\"]}}]}')",
       "Bash(node -e \":*)",
       "Bash(node:*)",
-      "Skill(claude-api)"
+      "Skill(claude-api)",
+      "Bash(npx swc:*)",
+      "Bash(python3:*)",
+      "Bash(/c/ProgramData/miniconda3/python fix_think.py)",
+      "Bash(printf '%s\\\\n' '[\\\\s\\\\S]*?\\\\\\\\n</think>')",
+      "Bash(base64:*)",
+      "Bash(grep -n \"model: ''''MiniMax-M2.7''''\" src/app/api/chat/route.ts)",
+      "Bash(xxd)"
     ]
   }
 }
