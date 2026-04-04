@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { CheckCircle2, Clock, Loader2, XCircle, RefreshCw, Calendar, Mail, Zap, StopCircle, HelpCircle, PauseCircle, PlayCircle } from 'lucide-react'
+import { CheckCircle2, Clock, Loader2, XCircle, RefreshCw, Calendar, Mail, Zap, StopCircle, HelpCircle, PauseCircle, PlayCircle, CheckSquare, Square, Trash2 } from 'lucide-react'
 
 interface SparkieTask {
   id: string
@@ -64,6 +64,8 @@ export function TaskQueuePanel() {
   const [filter, setFilter] = useState<'all' | 'pending' | 'ai' | 'human'>('all')
   const [actioning, setActioning] = useState<string | null>(null)
   const [sseConnected, setSseConnected] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [batchActioning, setBatchActioning] = useState<'approved' | 'rejected' | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const sseRef = useRef<EventSource | null>(null)
 
@@ -158,6 +160,38 @@ export function TaskQueuePanel() {
     }
   }
 
+  const handleBatchAction = async (action: 'approved' | 'rejected') => {
+    if (selectedIds.size === 0) return
+    setBatchActioning(action)
+    try {
+      await fetch('/api/tasks', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: [...selectedIds], status: action }),
+      })
+      setSelectedIds(new Set())
+      await fetchTasks()
+    } finally {
+      setBatchActioning(null)
+    }
+  }
+
+  const toggleSelect = (taskId: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(taskId)) next.delete(taskId)
+      else next.add(taskId)
+      return next
+    })
+  }
+
+  const selectAllPending = () => {
+    const pending = tasks.filter(t => t.status === 'pending' && t.executor === 'human').map(t => t.id)
+    setSelectedIds(new Set(pending))
+  }
+
+  const deselectAll = () => setSelectedIds(new Set())
+
   const filtered = tasks.filter(t => {
     if (filter === 'pending') return t.status === 'pending'
     if (filter === 'ai') return t.executor === 'ai'
@@ -225,6 +259,40 @@ export function TaskQueuePanel() {
         ))}
       </div>
 
+      {/* Batch action bar — shown when pending human tasks are selected */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-amber-500/10 border-b border-amber-500/20 shrink-0">
+          <span className="text-[10px] font-semibold text-amber-400">
+            {selectedIds.size} selected
+          </span>
+          <div className="flex items-center gap-1.5 ml-auto">
+            <button
+              onClick={() => handleBatchAction('approved')}
+              disabled={!!batchActioning}
+              className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold bg-green-500/20 text-green-400 border border-green-500/30 hover:bg-green-500/30 transition-colors disabled:opacity-50"
+            >
+              <CheckCircle2 className="w-3 h-3" />
+              {batchActioning === 'approved' ? 'Approving…' : `Approve All`}
+            </button>
+            <button
+              onClick={() => handleBatchAction('rejected')}
+              disabled={!!batchActioning}
+              className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors disabled:opacity-50"
+            >
+              <XCircle className="w-3 h-3" />
+              {batchActioning === 'rejected' ? 'Rejecting…' : `Reject All`}
+            </button>
+            <button
+              onClick={deselectAll}
+              className="p-1 rounded text-text-muted hover:text-text-secondary transition-colors"
+              title="Deselect all"
+            >
+              <Square className="w-3 h-3" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Task list */}
       <div className="flex-1 overflow-y-auto">
         {loading ? (
@@ -255,7 +323,20 @@ export function TaskQueuePanel() {
               return (
                 <div key={task.id} className={`px-3 py-2.5 hover:bg-white/[0.02] transition-colors ${cfg.bg}`}>
                   <div className="flex items-start gap-2">
-                    <Icon className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${cfg.color} ${task.status === 'in_progress' ? 'animate-spin' : ''}`} />
+                    {isPendingHuman ? (
+                      <button
+                        onClick={() => toggleSelect(task.id)}
+                        className={`mt-0.5 shrink-0 transition-colors ${selectedIds.has(task.id) ? 'text-amber-400' : 'text-text-muted hover:text-amber-400'}`}
+                        title={selectedIds.has(task.id) ? 'Deselect' : 'Select'}
+                      >
+                        {selectedIds.has(task.id)
+                          ? <CheckSquare className="w-3.5 h-3.5" />
+                          : <Square className="w-3.5 h-3.5" />
+                        }
+                      </button>
+                    ) : (
+                      <Icon className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${cfg.color} ${task.status === 'in_progress' ? 'animate-spin' : ''}`} />
+                    )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         {actionIcon(task.action)}

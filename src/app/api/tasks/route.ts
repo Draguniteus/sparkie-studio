@@ -222,20 +222,41 @@ export async function PATCH(req: NextRequest) {
 
     await ensureTable()
     const body = await req.json() as {
-      id: string
+      id?: string
+      ids?: string[]
       status: string
       attachment?: { name: string; filename?: string; dataUrl?: string; base64Data?: string; mimeType?: string; mimetype?: string; s3key?: string }
     }
-    const { id, status, attachment } = body
-    if (!id || !status) return NextResponse.json({ error: 'Missing id or status' }, { status: 400 })
+    const { id, ids, status } = body
+    if (!status) return NextResponse.json({ error: 'Missing status' }, { status: 400 })
 
     const validStatuses = ['approved', 'rejected', 'completed', 'failed', 'skipped', 'pending', 'cancelled', 'paused']
     if (!validStatuses.includes(status)) {
       return NextResponse.json({ error: 'Invalid status' }, { status: 400 })
     }
 
+    // ── Batch mode: approve/reject multiple tasks at once ──────────────────────────
+    if (ids && Array.isArray(ids) && ids.length > 0) {
+      const results: { id: string; ok: boolean }[] = []
+      for (const tid of ids) {
+        try {
+          const resolved = status === 'approved' ? 'completed' : status === 'rejected' ? 'skipped' : status
+          await query(
+            `UPDATE sparkie_tasks SET status = $1, resolved_at = NOW() WHERE id = $2 AND user_id = $3`,
+            [resolved, tid, userId]
+          )
+          results.push({ id: tid, ok: true })
+        } catch {
+          results.push({ id: tid, ok: false })
+        }
+      }
+      return NextResponse.json({ ok: true, batch: true, count: results.length, results })
+    }
+
+    // ── Single-task mode ─────────────────────────────────────────────────────────
+    if (!id) return NextResponse.json({ error: 'Missing id or ids' }, { status: 400 })
     const resolvedStatus = status === 'approved' ? 'completed' : status === 'rejected' ? 'skipped' : status
-    const setResolved = ['completed', 'skipped', 'failed', 'cancelled'].includes(resolvedStatus)
+    const attachment = body.attachment
 
     let attachmentNote: string | null = null
     if (status === 'approved') {
