@@ -6,6 +6,7 @@ import { proactiveInboxSweep, proactiveCalendarSweep, deploymentHealthSweep } fr
 import { runTTLDecaySweep } from '@/lib/knowledgeTTL'
 import { writeWorklog } from '@/lib/worklog'
 import { classifySignalImpact } from '@/lib/signalQueue'
+import { getAttempts, formatAttemptBlock } from '@/lib/attemptHistory'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -194,9 +195,40 @@ async function executeDueTasks(userId: string, host: string, proto: string, cook
           skillContext = skillLoads.join('')
         }
 
+        // ── Attempt history injection — learn from past failures before acting ───
+        const DOMAIN_PATTERNS: Array<{ keywords: RegExp; domain: string }> = [
+          { keywords: /\b(github|git push|commit|branch|pr|pull.request|repo)\b/i, domain: 'github' },
+          { keywords: /\b(email|gmail|inbox|send.*mail|draft.*email|reply)\b/i, domain: 'email' },
+          { keywords: /\b(calendar|schedule|event|meeting|google.?calendar)\b/i, domain: 'calendar' },
+          { keywords: /\b(tweet|twitter|post.*social|instagram|tiktok|social.?post)\b/i, domain: 'social' },
+          { keywords: /\b(deploy|do.?deploy|digitalocean|build|rollback)\b/i, domain: 'deploy' },
+          { keywords: /\b(image|gen\.|pollinations|stable.?diffusion|midjourney)\b/i, domain: 'image_gen' },
+          { keywords: /\b(video|hailuo|minimax.?video|generate.?video)\b/i, domain: 'video_gen' },
+          { keywords: /\b(music|suno|ace.?music|generate.?music)\b/i, domain: 'music_gen' },
+          { keywords: /\b(search.?web|tavily|web.?search|look.?up)\b/i, domain: 'search' },
+          { keywords: /\b(database|query|postgres|sql|read.?db)\b/i, domain: 'database' },
+        ]
+        let attemptHistoryContext = ''
+        const detectedDomains = new Set<string>()
+        for (const p of DOMAIN_PATTERNS) {
+          if (p.keywords.test(task.action)) detectedDomains.add(p.domain)
+        }
+        if (detectedDomains.size > 0) {
+          const attemptBlocks = await Promise.all(
+            [...detectedDomains].map(async (domain) => {
+              const attempts = await getAttempts(userId, domain, 5)
+              return formatAttemptBlock(attempts)
+            })
+          )
+          attemptHistoryContext = attemptBlocks.filter(b => b.length > 0).join('\n')
+          if (attemptHistoryContext) {
+            console.log('[orchestrator] Attempt history loaded for domains:', [...detectedDomains].join(', '))
+          }
+        }
+
         const hitlRules = '\n\n⚠️ AUTONOMOUS EXECUTION RULES (always apply):\n- HITL required: NEVER send emails, calendar invites, or social posts without create_task → send_card_to_user approval first.\n- Read before write: Always get_github to read file content before patching or committing.\n- Checkpoint: Use workspace_write to save progress between steps on multi-step tasks.\n- On completion: Output a concise summary of exactly what was accomplished.'
 
-        const taskPrompt = '[AUTONOMOUS TASK EXECUTION]\nTask: ' + task.label + skillContext + hitlRules + '\n\nRunbook: ' + actionRunbook + '\n\nExecute this task now. Be thorough. Use all tools available. When fully done, output a concise summary of what was accomplished.'
+        const taskPrompt = '[AUTONOMOUS TASK EXECUTION]\nTask: ' + task.label + skillContext + (attemptHistoryContext ? '\n\n' + attemptHistoryContext : '') + hitlRules + '\n\nRunbook: ' + actionRunbook + '\n\nExecute this task now. Be thorough. Use all tools available. When fully done, output a concise summary of what was accomplished.'
 
         // Conversation history accumulates across passes
         const conversation: Array<{ role: string; content: string }> = [
