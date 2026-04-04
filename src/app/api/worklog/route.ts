@@ -36,7 +36,10 @@ export async function GET(req: NextRequest) {
     `SELECT id, type, content, metadata, created_at,
             COALESCE(status, 'done') as status,
             decision_type, reasoning, estimated_duration_ms, actual_duration_ms, signal_priority,
-            confidence, COALESCE(depends_on, '[]'::jsonb) as depends_on, side_effect_of, conclusion
+            confidence, COALESCE(depends_on, '[]'::jsonb) as depends_on, side_effect_of, conclusion,
+            metadata->>'icon' as icon,
+            metadata->>'tag' as tag,
+            metadata->>'result_preview' as result_preview
      FROM sparkie_worklog
      WHERE user_id = $1 AND COALESCE(status, 'done') != 'running' ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
     [userId, limit, offset]

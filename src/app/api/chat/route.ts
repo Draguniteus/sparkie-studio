@@ -8,7 +8,7 @@ import { loadIdentityFiles, buildIdentityBlock, updateSessionFile, updateContext
 import { buildEnvironmentalContext, formatEnvContextBlock, recordUserActivity } from '@/lib/environmentalContext'
 import { extractDeferredIntent, saveDeferredIntent, loadReadyDeferredIntents, markDeferredIntentSurfaced } from '@/lib/timeModel'
 import { startTrace, addTraceEntry, detectTraceLoop, endTrace, persistTrace, getTokenStatus, updateTokenEstimate } from '@/lib/executionTrace'
-import { getAttempts, formatAttemptBlock } from '@/lib/attemptHistory'
+import { getAttempts, saveAttempt, formatAttemptBlock } from '@/lib/attemptHistory'
 import { getUserModel, formatUserModelBlock, ingestSessionSignal, detectEmotionalState, formatEmotionalStateBlock } from '@/lib/userModel'
 import { readSessionSnapshot, writeSessionSnapshot } from '@/lib/threadStore'
 import { writeWorklog, writeMsgBatch } from '@/lib/worklog'
@@ -24,6 +24,7 @@ import { SPARKIE_TOOLS_S4 } from '@/lib/sprint4-tools'
 import { executeSprint4Tool } from '@/lib/sprint4-cases'
 import { SPARKIE_TOOLS_S5 } from '@/lib/sprint5-tools'
 import { executeSprint5Tool } from '@/lib/sprint5-cases'
+import { updateTopicCognition } from '@/lib/scheduler'
 import { ingestRepo, getProjectContext, addKnownIssue, resolveKnownIssue, formatProjectContextBlock } from '@/lib/repoIngestion'
 
 export const runtime = 'nodejs'
@@ -2875,6 +2876,36 @@ async function executeTool(
         return 'Image generation is temporarily unavailable. Please try again in a moment.'
       }
 
+      // Alias for text_to_speech — UI maps reference generate_speech
+      case 'generate_speech': {
+        if (!userId) return 'Not authenticated'
+        const { text: ttsText, voice_id = 'English_Graceful_Lady' } = args as { text: string; voice_id?: string }
+        if (!ttsText) return 'generate_speech: text is required'
+        if (ttsText.length > 2000) return 'generate_speech: text must be 2000 characters or fewer'
+        try {
+          const mmKey = process.env.MINIMAX_API_KEY
+          if (!mmKey) return 'generate_speech: MINIMAX_API_KEY not configured'
+          const r = await fetch(`${MINIMAX_BASE}/t2a_v2`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${mmKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'speech-02',
+              text: ttsText,
+              stream: false,
+              voice_setting: { voice_id, speed: 1.0, vol: 1.0, pitch: 0 },
+              audio_setting: { sample_rate: 32000, bitrate: 128000, format: 'mp3' },
+            }),
+          })
+          if (!r.ok) return `generate_speech: MiniMax error ${r.status}`
+          const d = await r.json() as { audio_file?: string; base_resp?: { status_code?: number; status_msg?: string } }
+          if (!d.audio_file) return `generate_speech: No audio returned${d.base_resp?.status_msg ? ' — ' + d.base_resp.status_msg : ''}`
+          await writeWorklog(userId, 'task_executed', `TTS synthesized: "${ttsText.slice(0, 60)}${ttsText.length > 60 ? '...' : ''}"`, { decision_type: 'action', signal_priority: 'P3', conclusion: `Text-to-speech audio generated successfully using voice ${voice_id}` }).catch(() => {})
+          return `AUDIO_URL:data:audio/mp3;base64,${d.audio_file}`
+        } catch (e) {
+          return `generate_speech error: ${String(e)}`
+        }
+      }
+
       case 'generate_video': {
         const prompt = args.prompt as string
         if (!prompt?.trim()) return 'No prompt provided for video generation'
@@ -4199,6 +4230,115 @@ def invoke_llm(query, model='MiniMax-M2.7'):
           return `✅ Worklog entry saved: [${wlType}] ${wlMessage.slice(0, 80)}${wlMessage.length > 80 ? '...' : ''}`
         } catch (e) {
           return `update_worklog error: ${String(e)}`
+        }
+      }
+
+      // ── Social Draft (HITL) ───────────────────────────────────────────────────
+      case 'create_social_draft': {
+        if (!userId) return 'Not authenticated'
+        const { platform, content, media_url } = args as {
+          platform: string; content: string; media_url?: string
+        }
+        if (!platform || !content) return 'create_social_draft: platform and content are required'
+        const validPlatforms = ['twitter', 'linkedin', 'reddit', 'instagram', 'tiktok']
+        if (!validPlatforms.includes(platform)) return `create_social_draft: platform must be one of ${validPlatforms.join(', ')}`
+        try {
+          const taskId = `social_draft_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+          const preview = content.slice(0, 120)
+          // Create a pending HITL task for human approval
+          await query(
+            `INSERT INTO sparkie_tasks (id, user_id, label, executor, action, payload, status, trigger_type, why_human, created_at)
+             VALUES ($1, $2, $3, 'human', 'create_social_draft', $4, 'pending', 'manual', $5, NOW())`,
+            [
+              taskId, userId,
+              `Post to ${platform}: "${preview}${content.length > 120 ? '...' : ''}"`,
+              JSON.stringify({ platform, content, media_url }),
+              `Social draft for ${platform} — requires your approval before publishing`,
+            ]
+          )
+          // Send approval card to user
+          const cardResult = `SPARKIE_CARD:${JSON.stringify({
+            card: {
+              type: 'approval',
+              title: `Post to ${platform.charAt(0).toUpperCase() + platform.slice(1)}?`,
+              subtitle: 'Review and approve this post before publishing',
+              body: content,
+              actions: [
+                { id: `approve_${taskId}`, label: 'Publish Now', variant: 'primary' },
+                { id: `edit_${taskId}`, label: 'Edit Draft', variant: 'secondary' },
+                { id: `cancel_${taskId}`, label: 'Discard', variant: 'danger' },
+              ],
+              metadata: { taskId, platform, type: 'social_draft' },
+            },
+            text: `I've drafted a ${platform} post for your review. Click "Publish Now" to send it live, or "Edit Draft" to make changes first.`,
+          })}`
+          return cardResult
+        } catch (e) {
+          return `create_social_draft error: ${String(e)}`
+        }
+      }
+
+      // ── Worklog Readback ─────────────────────────────────────────────────────
+      case 'log_worklog': {
+        if (!userId) return 'Not authenticated'
+        const { type: wlFilter, limit: wlLimit = 50 } = args as { type?: string; limit?: number }
+        try {
+          const typeFilter = wlFilter && wlFilter !== 'all' ? `AND type = $2` : ''
+          const params = wlFilter && wlFilter !== 'all' ? [userId, wlFilter, wlLimit] : [userId, wlLimit]
+          const res = await query(
+            `SELECT id, type, content, status, decision_type, reasoning, conclusion, metadata, created_at
+             FROM sparkie_worklog WHERE user_id = $1 ${typeFilter}
+             ORDER BY created_at DESC LIMIT $${wlFilter && wlFilter !== 'all' ? '$3' : '$2'}`,
+            params
+          ).catch(() => ({ rows: [] as any[] }))
+          if (!res.rows.length) return `No worklog entries found${wlFilter && wlFilter !== 'all' ? ` for type "${wlFilter}"` : ''}.`
+          const lines = res.rows.slice(0, wlLimit).map((e: any) => {
+            const ts = e.created_at ? new Date(e.created_at).toLocaleString() : 'unknown'
+            const meta = e.metadata ?? {}
+            const icon = meta.icon ? `[${meta.icon}] ` : ''
+            const tag = meta.tag ? `[${meta.tag}] ` : ''
+            const result = e.conclusion ? ` → ${e.conclusion}` : ''
+            const reasoning = e.reasoning ? ` (${e.reasoning})` : ''
+            return `[${ts}] ${icon}${tag}[${e.type}] ${e.content}${reasoning}${result}`
+          })
+          return `Worklog (${res.rows.length} entries${wlFilter && wlFilter !== 'all' ? `, type="${wlFilter}"` : ''}):\n\n${lines.join('\n')}`
+        } catch (e) {
+          return `log_worklog error: ${String(e)}`
+        }
+      }
+
+      // ── Attempt History ──────────────────────────────────────────────────────
+      case 'get_attempt_history': {
+        if (!userId) return 'Not authenticated'
+        const { domain, limit: ahLimit = 5 } = args as { domain: string; limit?: number }
+        if (!domain) return 'get_attempt_history: domain is required (e.g. "minimax_video", "ace_music", "github_push")'
+        try {
+          const attempts = await getAttempts(userId, domain, ahLimit)
+          if (attempts.length === 0) {
+            return `No attempt history for "${domain}" yet. First attempt — no lessons learned yet.`
+          }
+          const block = formatAttemptBlock(attempts)
+          return `Attempt history for "${domain}" (${attempts.length} entries):${block}`
+        } catch (e) {
+          return `get_attempt_history error: ${String(e)}`
+        }
+      }
+
+      case 'save_attempt': {
+        if (!userId) return 'Not authenticated'
+        const { domain, attempt_type, summary, outcome, lesson, ttl_days } = args as {
+          domain: string; attempt_type: string; summary: string; outcome: string; lesson: string; ttl_days?: number
+        }
+        if (!domain || !attempt_type || !summary || !outcome || !lesson) {
+          return 'save_attempt: domain, attempt_type, summary, outcome, and lesson are required'
+        }
+        const validTypes = ['success', 'failure', 'workaround', 'pattern']
+        if (!validTypes.includes(attempt_type)) return `save_attempt: attempt_type must be one of ${validTypes.join(', ')}`
+        try {
+          await saveAttempt(userId, domain, attempt_type as 'success' | 'failure' | 'workaround' | 'pattern', summary, outcome, lesson, ttl_days)
+          return `✅ Attempt recorded for "${domain}": [${attempt_type.toUpperCase()}] ${summary}`
+        } catch (e) {
+          return `save_attempt error: ${String(e)}`
         }
       }
 
@@ -7291,6 +7431,8 @@ Keep each header + thought on its own line. Use multiple short bold-header block
               const fakeId = `json_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
               jsonFnCalls.push({ id: fakeId, type: 'function', function: { name: toolName, arguments: JSON.stringify(toolArgs) } })
               const result = await executeTool(toolName, toolArgs, toolContext)
+              // Track AI action in topic cognition state
+              if (activeTopicId) updateTopicCognition(activeTopicId, { ai_action: toolName }).catch(() => {})
               jsonFnResults.push({ role: 'tool' as const, tool_call_id: fakeId, content: result })
             }
             if (jsonFnResults.length > 0) {
@@ -7353,6 +7495,8 @@ Keep each header + thought on its own line. Use multiple short bold-header block
               liveEnqueue({ step_trace: { id: fakeId, toolName, icon: xmlIcon, label: xmlLabel, status: 'running', timestamp: Date.now() } })
               const xmlStart = Date.now()
               const result = await executeTool(toolName, params, toolContext)
+              // Track AI action in topic cognition state
+              if (activeTopicId) updateTopicCognition(activeTopicId, { ai_action: toolName }).catch(() => {})
               const xmlDuration = Date.now() - xmlStart
               const xmlError = result.startsWith('Error:') || result.startsWith('LOOP_INTERRUPT')
               liveEnqueue({ step_trace: { id: fakeId, toolName, icon: xmlIcon, label: xmlLabel, status: xmlError ? 'error' : 'done', duration: xmlDuration, timestamp: Date.now() } })

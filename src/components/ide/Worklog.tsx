@@ -281,7 +281,7 @@ export function Worklog({ compact = false }: WorklogProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   // Merge DB worklog entries (newest first from API, oldest first in store for timeline)
-  const mergeDbEntries = (entries: { type: string; content: string; status: string; created_at: string; decision_type?: string; reasoning?: string; conclusion?: string; metadata?: Record<string,unknown> }[]) => {
+  const mergeDbEntries = (entries: { type: string; content: string; status: string; created_at: string; decision_type?: string; reasoning?: string; conclusion?: string; metadata?: Record<string,unknown>; icon?: string; tag?: string; result_preview?: string }[]) => {
     const store = useAppStore.getState()
     const existingContents = new Set(store.worklog.map(w => w.content + String(w.created_at ?? w.timestamp)))
     // entries come newest-first from API; reverse so oldest go in first (timeline order)
@@ -297,6 +297,9 @@ export function Worklog({ compact = false }: WorklogProps) {
           conclusion: e.conclusion,
           metadata: e.metadata,
           created_at: e.created_at,
+          icon: e.icon,
+          tag: e.tag,
+          result_preview: e.result_preview,
         })
         existingContents.add(key)
       }
@@ -308,7 +311,7 @@ export function Worklog({ compact = false }: WorklogProps) {
     if (dbLoaded) return
     fetch("/api/worklog?limit=200")
       .then(r => r.json())
-      .then((d: { entries?: { type: string; content: string; status: string; created_at: string; decision_type?: string; reasoning?: string; conclusion?: string; metadata?: Record<string,unknown> }[] }) => {
+      .then((d: { entries?: { type: string; content: string; status: string; created_at: string; decision_type?: string; reasoning?: string; conclusion?: string; metadata?: Record<string,unknown>; icon?: string; tag?: string; result_preview?: string }[] }) => {
         if (d.entries && d.entries.length > 0) mergeDbEntries(d.entries)
         setDbLoaded(true)
       })
@@ -321,7 +324,7 @@ export function Worklog({ compact = false }: WorklogProps) {
     const t = setInterval(() => {
       fetch("/api/worklog?limit=200")
         .then(r => r.json())
-        .then((d: { entries?: { type: string; content: string; status: string; created_at: string; decision_type?: string; reasoning?: string; conclusion?: string; metadata?: Record<string,unknown> }[] }) => {
+        .then((d: { entries?: { type: string; content: string; status: string; created_at: string; decision_type?: string; reasoning?: string; conclusion?: string; metadata?: Record<string,unknown>; icon?: string; tag?: string; result_preview?: string }[] }) => {
           if (d.entries && d.entries.length > 0) mergeDbEntries(d.entries)
         })
         .catch(() => {})
@@ -337,7 +340,7 @@ export function Worklog({ compact = false }: WorklogProps) {
         setTimeout(() => {
           fetch("/api/worklog?limit=200")
             .then(r => r.json())
-            .then((d: { entries?: { type: string; content: string; status: string; created_at: string; decision_type?: string; reasoning?: string; conclusion?: string; metadata?: Record<string,unknown> }[] }) => {
+            .then((d: { entries?: { type: string; content: string; status: string; created_at: string; decision_type?: string; reasoning?: string; conclusion?: string; metadata?: Record<string,unknown>; icon?: string; tag?: string; result_preview?: string }[] }) => {
               if (d.entries && d.entries.length > 0) mergeDbEntries(d.entries)
             })
             .catch(() => {})

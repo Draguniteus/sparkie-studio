@@ -225,11 +225,15 @@ async function proactiveInboxSweep(userId: string): Promise<void> {
   } catch (e) { console.error('[scheduler] proactiveInboxSweep fetch error:', e); return }
 
   // Phase 4: Route each email to matching topic
-  for (const msg of messages.slice(0, 5)) {
+  await Promise.all(messages.slice(0, 5).map(async (msg) => {
     if (msg.id && msg.subject) {
-      routeEmailToTopic(userId, msg.id, msg.subject, msg.from ?? '', msg.snippet ?? '').catch(() => {})
+      try {
+        await routeEmailToTopic(userId, msg.id, msg.subject, msg.from ?? '', msg.snippet ?? '')
+      } catch (e) {
+        console.error('[scheduler] routeEmailToTopic error:', e)
+      }
     }
-  }
+  }))
 
   // 2. Check if we already have a pending inbox task for this user (debounce)
   try {
