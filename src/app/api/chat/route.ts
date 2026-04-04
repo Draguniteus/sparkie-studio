@@ -5228,8 +5228,10 @@ def invoke_llm(query, model='MiniMax-M2.7'):
             const depData = await depRes.json() as { active_deployment?: { phase?: string } }
             const phase = depData?.active_deployment?.phase ?? 'UNKNOWN'
             checks.push({ name: 'deployment', status: phase === 'ACTIVE' ? 'ok' : ['BUILDING','DEPLOYING','PENDING_BUILD'].includes(phase) ? 'warn' : 'fail', detail: `phase=${phase}` })
+          } else if (depRes === null) {
+            checks.push({ name: 'deployment', status: 'warn', detail: `unreachable — DO proxy may be blocking WebSocket/internal calls` })
           } else {
-            checks.push({ name: 'deployment', status: 'warn', detail: `endpoint returned ${depRes?.status ?? 'no response'}` })
+            checks.push({ name: 'deployment', status: 'warn', detail: `endpoint returned ${depRes?.status}` })
           }
         } catch (e) { checks.push({ name: 'deployment', status: 'warn', detail: String(e) }) }
 
@@ -5404,6 +5406,22 @@ async function executeToolWithRetry(
       `${name}(${JSON.stringify(args).slice(0, 120)})`,
       `Failed ${allErrors.length}x: ${errorSummary}`,
       `Do NOT repeat the exact same approach. Review the attempt history below for past failures and workarounds before trying a different strategy.`)
+
+    // Auto-create HITL task so Michael knows this failed and can review/approve a re-attempt
+    const taskId = `auto_fix_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+    const errorMsg = String(lastResult).slice(0, 200)
+    try {
+      await query(
+        `INSERT INTO sparkie_tasks (id, user_id, label, executor, action, payload, status, trigger_type, why_human, created_at)
+         VALUES ($1, $2, $3, 'human', 'system_error', $4, 'pending', 'auto', $5, NOW())`,
+        [
+          taskId, ctx.userId,
+          `Fix needed: ${name} failing with "${errorMsg}"`,
+          JSON.stringify({ tool: name, args, domain, error: errorMsg, retry_count: 3 }),
+          `Autonomous fix attempts exhausted — needs your review. Tool: ${name}, Error: ${errorMsg}`,
+        ]
+      )
+    } catch { /* non-fatal — don't let task creation failure break the self-heal nudge */ }
   }
 
   let attemptHistoryContext = ''

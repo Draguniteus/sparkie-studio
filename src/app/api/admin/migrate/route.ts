@@ -113,10 +113,13 @@ CREATE TABLE IF NOT EXISTS sparkie_topics (
   notification_policy TEXT DEFAULT 'auto',
   status              TEXT DEFAULT 'active',
   created_at          TIMESTAMPTZ DEFAULT NOW(),
-  updated_at          TIMESTAMPTZ DEFAULT NOW()
+  updated_at          TIMESTAMPTZ DEFAULT NOW(),
+  cognition_state     JSONB DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_sparkie_topics_user_id ON sparkie_topics(user_id);
 CREATE INDEX IF NOT EXISTS idx_sparkie_topics_status ON sparkie_topics(status);
+-- Ensure cognition_state exists even if table was created before this migration was updated
+ALTER TABLE sparkie_topics ADD COLUMN IF NOT EXISTS cognition_state JSONB DEFAULT '{}';
 
 CREATE TABLE IF NOT EXISTS sparkie_topic_threads (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
