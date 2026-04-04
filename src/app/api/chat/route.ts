@@ -4564,13 +4564,58 @@ def invoke_llm(query, model='MiniMax-M2.7'):
         // Block 3: Sparkie calls this to render a beautiful inline card in chat
         // Returns SPARKIE_CARD: prefix which the agent loop detects and emits as SSE
         const { type: cardType, title: cardTitle, subtitle: cardSubtitle, to: cardTo, body: cardBody,
-                fields: cardFields, items: cardItems, actions: cardActions, metadata: cardMeta, preview_url: cardPreview, text: cardText } =
+                fields: cardFields, items: cardItems, actions: cardActions, metadata: cardMeta,
+                preview_url: cardPreview, text: cardText, file_path: cardFilePath } =
           args as {
-            type: string; title: string; subtitle?: string; to?: string; body?: string
+            type?: string; title?: string; subtitle?: string; to?: string; body?: string
             fields?: Array<{ label: string; value: string }>; items?: string[]
             actions?: Array<{ id: string; label: string; icon?: string; variant?: string }>
-            metadata?: Record<string, unknown>; preview_url?: string; text?: string
+            metadata?: Record<string, unknown>; preview_url?: string; text?: string; file_path?: string
           }
+
+        // When file_path is provided, load skill from sparkie_skills and parse YAML+JSON
+        if (cardFilePath && (!cardType || !cardTitle)) {
+          const skillRes = await query<{ content: string }>(
+            `SELECT content FROM sparkie_skills WHERE name = $1 LIMIT 1`,
+            [cardFilePath]
+          ).catch(() => ({ rows: [] } as { rows: Array<{ content: string }> }))
+          if (!skillRes.rows[0]) return `send_card_to_user: skill "${cardFilePath}" not found in sparkie_skills`
+          const skillContent = skillRes.rows[0].content
+
+          // Parse YAML frontmatter + JSON body (A2UI / CTA skill format)
+          const frontmatterMatch = skillContent.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/)
+          if (!frontmatterMatch) return `send_card_to_user: skill "${cardFilePath}" must have YAML frontmatter followed by JSON body`
+          const [, rawFrontmatter, rawBody] = frontmatterMatch
+          const frontmatter: Record<string, unknown> = {}
+          for (const line of rawFrontmatter.split('\n')) {
+            const [key, ...rest] = line.split(':')
+            if (key && rest.length > 0) {
+              frontmatter[key.trim()] = rest.join(':').trim()
+            }
+          }
+          const jsonBody = JSON.parse(rawBody)
+          const skillType = (frontmatter.type as string) ?? 'report'
+          const skillTitle = (frontmatter.title as string) ?? cardFilePath
+
+          const parsedCardData = {
+            type: skillType,
+            title: skillTitle,
+            subtitle: (frontmatter.subtitle as string) ?? jsonBody.title ?? jsonBody.headline,
+            body: jsonBody.body ?? jsonBody.summary ?? jsonBody.text,
+            fields: jsonBody.fields,
+            items: jsonBody.items ?? jsonBody.components,
+            actions: (jsonBody.actions ?? []).map((a: { id?: string; type?: string; label?: string; variant?: string }, i: number) => ({
+              id: a.id ?? `action_${i}`,
+              label: a.label ?? a.type ?? 'View',
+              icon: a.type,
+              variant: (a.variant ?? (i === 0 ? 'primary' : 'secondary')) as 'primary' | 'secondary' | 'danger',
+            })),
+            metadata: { ...cardMeta, ...jsonBody, source: cardFilePath },
+            previewUrl: jsonBody.previewUrl ?? jsonBody.imageUrl,
+          }
+          return `SPARKIE_CARD:${JSON.stringify({ card: parsedCardData, text: cardText ?? '' })}`
+        }
+
         if (!cardType || !cardTitle) return 'send_card_to_user: type and title are required'
         const cardData = {
           type: cardType, title: cardTitle, subtitle: cardSubtitle, to: cardTo, body: cardBody,
