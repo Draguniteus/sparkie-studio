@@ -141,25 +141,42 @@ app.prepare().then(() => {
   })
 
   // ATTACHED mode: ws integrates with http.Server connection tracking.
-  // The path option means ws only handles /api/terminal-ws upgrades.
-  const wss = new WebSocketServer({ server, path: '/api/terminal-ws' })
+  // Two WebSocket servers: /api/terminal-ws (terminal) + /api/proactive-ws (proactive push)
+  const wssTerminal = new WebSocketServer({ server, path: '/api/terminal-ws' })
+  const wssProactive = new WebSocketServer({ server, path: '/api/proactive-ws' })
 
-  // prependListener ensures we can reject non-terminal paths BEFORE
+  // Global registry for proactive WebSocket clients — shared with Next.js API routes
+  // via global.__proactiveClients. API routes push events to this Set.
+  // eslint-disable-next-line no-var
+  var __proactiveClients = global.__proactiveClients || []
+  if (!global.__proactiveClients) global.__proactiveClients = __proactiveClients
+
+  function proactiveClientsAdd(ws, userId) {
+    __proactiveClients.push({ ws, userId })
+    console.log('[proactive] client connected: userId=' + userId + ', total=' + __proactiveClients.length)
+  }
+
+  function proactiveClientsRemove(ws) {
+    __proactiveClients = __proactiveClients.filter(function(c) { return c.ws !== ws })
+    global.__proactiveClients = __proactiveClients
+    console.log('[proactive] client disconnected, total=' + __proactiveClients.length)
+  }
+
+  // prependListener ensures we can reject non-WS paths BEFORE
   // ws or Next.js get a chance to handle them.
   server.prependListener('upgrade', (req, socket, head) => {
     const { pathname } = parse(req.url, true)
-    console.log('[upgrade] path:', pathname)
 
-    if (pathname !== '/api/terminal-ws') {
+    if (pathname !== '/api/terminal-ws' && pathname !== '/api/proactive-ws') {
       // Not our path — destroy and let no other handler run
       socket.destroy()
       return
     }
-    // Fall through — ws's attached listener handles /api/terminal-ws
+    // Fall through — the appropriate ws attached listener handles it
   })
 
   // ws connection event fires after the 101 handshake is complete.
-  wss.on('connection', (ws, req) => {
+  wssTerminal.on('connection', (ws, req) => {
     const { query } = parse(req.url, true)
     const sessionId = query && query.sessionId
     console.log('[WS] connection sessionId:', sessionId)
@@ -249,10 +266,40 @@ app.prepare().then(() => {
       '| socket.writable:', sock ? sock.writable : 'N/A')
   })
 
+  // ── Proactive push WebSocket (/api/proactive-ws) ─────────────────────────────
+  wssProactive.on('connection', async (ws, req) => {
+    const { query } = parse(req.url, true)
+    const userId = query && query.userId ? String(query.userId) : undefined
+    console.log('[proactive-ws] connection userId:', userId)
+
+    if (!userId) {
+      ws.close(1008, 'Missing userId')
+      return
+    }
+
+    proactiveClientsAdd(ws, userId)
+
+    // Send ack
+    try { ws.send(JSON.stringify({ type: 'connected', data: 'Proactive stream ready' })) } catch (_) {}
+
+    // Heartbeat: ping every 30s to keep DO proxy connection alive
+    const pingInterval = setInterval(() => {
+      if (ws.readyState === /* OPEN */ 1) {
+        try { ws.ping() } catch (_) {}
+      } else {
+        clearInterval(pingInterval)
+      }
+    }, 30_000)
+
+    ws.on('close', () => { proactiveClientsRemove(ws); clearInterval(pingInterval) })
+    ws.on('error', () => { proactiveClientsRemove(ws); clearInterval(pingInterval) })
+  })
+
   server.listen(port, () => {
     console.log(`\n🔥 SPARKIE STUDIO RUNTIME — ${new Date().toISOString()}`)
     console.log(`> Sparkie Studio ready on http://localhost:${port}`)
     console.log(`> WebSocket terminal on ws://localhost:${port}/api/terminal-ws`)
+    console.log(`> WebSocket proactive push on ws://localhost:${port}/api/proactive-ws`)
     startKeepalive(port)
   })
 })

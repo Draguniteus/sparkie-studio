@@ -56,7 +56,9 @@
       "Bash(printf '%s\\\\n' '[\\\\s\\\\S]*?\\\\\\\\n</think>')",
       "Bash(base64:*)",
       "Bash(grep -n \"model: ''''MiniMax-M2.7''''\" src/app/api/chat/route.ts)",
-      "Bash(xxd)"
+      "Bash(xxd)",
+      "Bash(node -e \"require\\(''''./src/lib/proactiveEvents''''\\)\")",
+      "Bash(echo \"exit: $?\")"
     ]
   }
 }

@@ -8,6 +8,22 @@ import { writeWorklog } from '@/lib/worklog'
 import { classifySignalImpact } from '@/lib/signalQueue'
 import { getAttempts, formatAttemptBlock } from '@/lib/attemptHistory'
 
+// ── Push proactive events to WebSocket clients via server.js global registry ─────
+// server.js maintains global.__proactiveClients = Array<{ ws: WebSocket, userId: string }>
+declare global {
+  // eslint-disable-next-line no-var
+  var __proactiveClients: Array<{ ws: unknown; userId: string }> | undefined
+}
+
+function pushProactiveEvent(userId: string, event: { type: string; subtype: string; data: Record<string, unknown>; timestamp: number }): void {
+  const clients: Array<{ ws: { readyState: number; send: (d: string) => void } | null; userId: string }> = global.__proactiveClients ?? []
+  for (const c of clients) {
+    if (c.userId === userId && c.ws && c.ws.readyState === 1 /* OPEN */) {
+      try { c.ws.send(JSON.stringify(event)) } catch (e) { console.error('[proactive push error]', e) }
+    }
+  }
+}
+
 export const runtime = 'nodejs'
 export const maxDuration = 60
 
@@ -556,6 +572,8 @@ export async function POST(req: NextRequest) {
     // ── 1. Execute due AI tasks ─────────────────────────────────────────────
     const executed = await executeDueTasks(userId, host, proto, cookieHeader)
     if (executed.length > 0) {
+      // Push via WebSocket for real-time delivery to connected clients
+      pushProactiveEvent(userId, { type: 'proactive', subtype: 'task_completed', data: { tasks: executed }, timestamp: Date.now() })
       return NextResponse.json({ type: 'task_completed', message: 'task_completed', tasks: executed, trigger: true })
     }
 
@@ -564,6 +582,7 @@ export async function POST(req: NextRequest) {
       const inbox = await checkInbox(userId)
       if (inbox.newCount > 0) {
         await query('INSERT INTO sparkie_outreach_log (user_id, type) VALUES ($1, $2)', [userId, 'inbox_check'])
+        pushProactiveEvent(userId, { type: 'proactive', subtype: 'inbox_check', data: { newCount: inbox.newCount, senders: inbox.senders, subjects: inbox.subjects }, timestamp: Date.now() })
         return NextResponse.json({ type: 'inbox_check', message: 'inbox_check', trigger: true, ...inbox })
       }
     }
@@ -592,6 +611,11 @@ export async function POST(req: NextRequest) {
 
         await query('INSERT INTO sparkie_outreach_log (user_id, type) VALUES ($1, $2)', [userId, 'morning_brief'])
 
+        pushProactiveEvent(userId, { type: 'proactive', subtype: 'morning_brief', data: {
+          calendarEvents: cal.events, calendarConflicts: cal.conflicts,
+          pendingTasks: pendingHumanResult.rows, inboxNewCount: inbox.newCount,
+          inboxSenders: inbox.senders, deployPhase: deploy.phase,
+        }, timestamp: Date.now() })
         return NextResponse.json({
           type: 'morning_brief', message: 'morning_brief', trigger: true,
           calendarEvents: cal.events,
@@ -618,6 +642,7 @@ export async function POST(req: NextRequest) {
           )
           const memoryHints = memories.rows.map((r) => r.content).join('; ')
           await query('INSERT INTO sparkie_outreach_log (user_id, type) VALUES ($1, $2)', [userId, 'checkin'])
+          pushProactiveEvent(userId, { type: 'proactive', subtype: 'checkin', data: { daysSince: Math.floor(daysSince), memoryHints }, timestamp: Date.now() })
           return NextResponse.json({
             type: 'checkin', message: 'checkin', trigger: true,
             daysSince: Math.floor(daysSince), memoryHints
