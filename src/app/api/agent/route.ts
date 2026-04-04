@@ -7,12 +7,13 @@ import { runTTLDecaySweep } from '@/lib/knowledgeTTL'
 import { writeWorklog } from '@/lib/worklog'
 import { classifySignalImpact } from '@/lib/signalQueue'
 import { getAttempts, formatAttemptBlock } from '@/lib/attemptHistory'
+import type { WebSocket } from 'ws'
 
 // ── Push proactive events to WebSocket clients via server.js global registry ─────
 // server.js maintains global.__proactiveClients = Array<{ ws: WebSocket, userId: string }>
 declare global {
   // eslint-disable-next-line no-var
-  var __proactiveClients: Array<{ ws: unknown; userId: string }> | undefined
+  var __proactiveClients: Array<{ ws: WebSocket | null; userId: string }> | undefined
 }
 
 function pushProactiveEvent(userId: string, event: { type: string; subtype: string; data: Record<string, unknown>; timestamp: number }): void {
