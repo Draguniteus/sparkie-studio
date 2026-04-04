@@ -104,6 +104,20 @@ async function routeEmailToTopic(
                        : bestMatch.policy === 'defer'     ? 'P3'
                        : 'P2'
 
+    // For 'defer' policy: write deferred worklog entry but do NOT surface SSE notification
+    if (bestMatch.policy === 'defer') {
+      await writeWorklog(userId, 'email_deferred', `📬 Email deferred — routed to "${bestMatch.name}" silently: ${subject.slice(0, 80)}`, {
+        decision_type: 'skip',
+        reasoning: `Topic "${bestMatch.name}" has defer policy. Email silently linked without notification.`,
+        signal_priority: 'P3',
+        topic_id: bestMatch.id,
+        email_id: emailId,
+        status: 'done',
+        conclusion: `Email deferred — linked without notification`,
+      })
+      return bestMatch.id
+    }
+
     await writeWorklog(userId, 'decision', `📎 Email routed to topic "${bestMatch.name}": ${subject.slice(0, 80)}`, {
       decision_type: 'proactive',
       reasoning: `Email matched topic fingerprint/aliases with score ${bestMatch.score}. Notification policy: ${bestMatch.policy}.`,
@@ -155,13 +169,47 @@ async function proactiveInboxSweep(userId: string): Promise<void> {
     ]
     const SKIP_LABELS = new Set(['CATEGORY_PROMOTIONS', 'CATEGORY_UPDATES', 'CATEGORY_SOCIAL', 'SPAM', 'TRASH'])
 
-    messages = rawMessages.filter(m => {
-      // Skip emails in promotional/social/spam label categories
-      if (m.labelIds?.some(l => SKIP_LABELS.has(l))) return false
-      const text = `${m.subject ?? ''} ${m.from ?? ''} ${m.snippet ?? ''}`
-      if (SKIP_PATTERNS.some(p => p.test(text))) return false
-      return true
-    }).slice(0, 5)
+    const triageResults: Array<{ msg: { subject: string; from: string; snippet: string; id: string }; decision: 'process' | 'skip'; reason?: string }> = []
+
+    for (const m of rawMessages.slice(0, 10)) {
+      const subject = m.subject ?? ''
+      const from = m.from ?? ''
+      const snippet = m.snippet ?? ''
+      const text = `${subject} ${from} ${snippet}`
+
+      const isMarketing = SKIP_PATTERNS.some(p => p.test(text)) || m.labelIds?.some(l => SKIP_LABELS.has(l))
+      const isEngagement = /\b(linkedin|add.*network|endorse|puzzle|quiz|follow.*up|connection.*request)\b/i.test(text)
+
+      if (isMarketing || isEngagement) {
+        triageResults.push({
+          msg: m,
+          decision: 'skip',
+          reason: isMarketing
+            ? `${from.split('@')[0] || from} is sending marketing fluff. Not worth Michael's attention.`
+            : `${from.split('@')[0] || from} is trying engagement bait. Skip.`,
+        })
+      } else {
+        triageResults.push({ msg: m, decision: 'process' })
+      }
+    }
+
+    // Write worklog entries for skipped emails (personality-injected triage)
+    for (const result of triageResults) {
+      if (result.decision === 'skip' && result.msg.id) {
+        const senderName = result.msg.from.split('@')[0] || result.msg.from
+        await writeWorklog(userId, 'email_triage',
+          `Just received an email from ${senderName}`,
+          {
+            reasoning: result.reason,
+            status: 'skipped',
+            decision_type: 'skip',
+            metadata: { emailId: result.msg.id, subject: result.msg.subject, from: result.msg.from, tag: 'marketing' },
+          }
+        ).catch(() => {})
+      }
+    }
+
+    messages = triageResults.filter(r => r.decision === 'process').map(r => r.msg).slice(0, 5)
 
     emailsJson = JSON.stringify(messages)
     // Write a proactive entry even when inbox is empty — the act of checking IS proactive
@@ -1071,4 +1119,60 @@ async function crossSignalPatternAnalysis(): Promise<void> {
       ).catch(() => {})
     }
   } catch { /* non-fatal */ }
+}
+
+/**
+ * Update compressed cognition layers (L2-L6) for a topic.
+ * Called after each topic-relevant interaction to maintain context continuity.
+ */
+export async function updateTopicCognition(
+  topicId: string,
+  update: {
+    L2?: string
+    L3?: string
+    L5?: string
+    ai_action?: string
+    user_action?: string
+    waiting_for?: string
+  }
+) {
+  try {
+    type L6Chain = { ai?: string[]; user?: string[]; waiting?: string[] }
+    type CognitionState = {
+      L2_factual_history?: string; L3_live_state?: string; L5_user_intent?: string
+      L6_action_chain?: L6Chain; [key: string]: unknown
+    }
+    const current = await query<{ cognition_state: Record<string, unknown> }>(
+      `SELECT cognition_state FROM sparkie_topics WHERE id = $1`,
+      [topicId]
+    )
+    const state = (current.rows[0]?.cognition_state ?? {}) as CognitionState
+
+    if (update.L2) state.L2_factual_history = update.L2
+    if (update.L3) state.L3_live_state = update.L3
+    if (update.L5) state.L5_user_intent = update.L5
+
+    if (update.ai_action) {
+      state.L6_action_chain = state.L6_action_chain ?? {}
+      state.L6_action_chain.ai = state.L6_action_chain.ai ?? []
+      state.L6_action_chain.ai.push(update.ai_action)
+    }
+    if (update.user_action) {
+      state.L6_action_chain = state.L6_action_chain ?? {}
+      state.L6_action_chain.user = state.L6_action_chain.user ?? []
+      state.L6_action_chain.user.push(update.user_action)
+    }
+    if (update.waiting_for) {
+      state.L6_action_chain = state.L6_action_chain ?? {}
+      state.L6_action_chain.waiting = state.L6_action_chain.waiting ?? []
+      state.L6_action_chain.waiting.push(update.waiting_for)
+    }
+
+    await query(
+      `UPDATE sparkie_topics SET cognition_state = $1, updated_at = NOW() WHERE id = $2`,
+      [JSON.stringify(state), topicId]
+    )
+  } catch (e) {
+    console.error('[scheduler] updateTopicCognition failed:', e)
+  }
 }

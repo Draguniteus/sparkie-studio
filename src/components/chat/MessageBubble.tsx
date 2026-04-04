@@ -475,7 +475,27 @@ function MessageBubbleInner({ message, userAvatarUrl }: Props) {
           ) : isSparkieCard && message.sparkieCard ? (
             <div>
               {message.content && <p className="text-sm text-text-secondary mb-1">{message.content}</p>}
-              <SparkieCard card={message.sparkieCard} />
+              <SparkieCard
+                card={message.sparkieCard}
+                onAction={async (actionId, cardType) => {
+                  const taskId = message.sparkieCard?.metadata?.taskId as string | undefined
+                  // email_draft and calendar_event: call /api/cards to execute via HITL
+                  if ((cardType === 'email_draft' || cardType === 'calendar_event') && taskId) {
+                    try {
+                      await fetch('/api/cards', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ actionId, cardType, metadata: { taskId } }),
+                      })
+                    } catch { /* silent */ }
+                  }
+                  // cta: open URL in browser
+                  if (cardType === 'cta') {
+                    const url = message.sparkieCard?.metadata?.url as string | undefined
+                    if (url) window.open(url, '_blank')
+                  }
+                }}
+              />
             </div>
           ) : isPendingTask && message.pendingTask ? (
             <div>

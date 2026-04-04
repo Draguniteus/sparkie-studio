@@ -171,9 +171,12 @@ export type WorklogEntry = {
   signal_priority?: 'P0' | 'P1' | 'P2' | 'P3'
   duration?: number
   confidence?: number
+  icon?: string
+  tag?: string
+  result_preview?: string
 }
 
-export type IDETab = 'process' | 'preview' | 'files' | 'terminal' | 'worklog' | 'tasks' | 'memory' | 'real' | 'topics' | 'cip'
+export type IDETab = 'process' | 'preview' | 'files' | 'terminal' | 'worklog' | 'tasks' | 'memory' | 'real' | 'topics' | 'cip' | 'goals'
 
 export type ContainerStatus =
   | 'idle'

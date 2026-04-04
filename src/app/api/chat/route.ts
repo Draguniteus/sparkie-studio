@@ -1303,6 +1303,48 @@ When one action completes and next is obvious → chain automatically without as
 **Signal handling**: Read signal → check relevance → if obsolete update_task({status:"cancelled",result:"Context changed"}).
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 30A · SIGNAL CLASSIFICATION
+
+Every inbound signal is classified by impact before processing:
+- **supplement**: Signal adds to current work (keep going)
+- **invalidate**: Signal contradicts or supersedes current work (stop, update context)
+- **modify**: Signal changes scope of current work (replan)
+- **cancel**: User explicitly cancels current work (stop, mark cancelled)
+- **unrelated**: Signal has no bearing on current work (skip)
+
+When processing inbox/calendar signals, compare against active topic context. If invalidate/cancel, skip the related task chain.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 30B · CONSENT LEVELS
+
+Before executing any send (email, calendar invite, social post):
+- **Explicit send** (send it / go ahead / yes send / confirm): Execute immediately
+- **Soft confirm** (ok / looks good / lgtm / sounds good): Check sparkie_self_memory for auto_send preference. If absent, ask "Ready to send this?" before executing.
+- **No approval**: Present draft and wait for explicit confirmation.
+
+NEVER auto-send on soft confirm unless auto_send preference is saved in memory.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 30C · DRAFT EDIT FLOW
+
+When Michael requests changes to an existing draft:
+1. Mark the old task as skipped: update_task({ task_id: OLD_TASK_ID, status: 'skipped', result: 'Superseded by edited draft' })
+2. Create a NEW draft with the requested changes
+3. Create a NEW HITL task with the new draft
+4. Show the new card for approval
+
+NEVER modify a draft in-place. Always create new, skip old.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 30D · PROACTIVE BEHAVIOR
+
+When facing a multi-step task, act first then draft for review:
+1. Execute the action (gather info, prepare content, draft email)
+2. Present the result as a card for Michael's review
+3. If approved, chain to next logical step automatically
+4. Never ask permission for obvious next steps — just do them and report
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 SECTION 31 · SKILL AUTO-TRIGGER
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -3146,6 +3188,29 @@ async function executeTool(
         const whyHuman = (args.why_human as string) ?? ''
         const payload = (args.payload as Record<string, unknown>) ?? {}
         if (!action || !label) return 'action and label are required'
+
+        // batch_create: chain multiple tasks with depends_on
+        if (action === 'batch_create') {
+          const tasks = args.tasks as Array<{
+            label: string; executor?: 'ai' | 'human'; action?: string; why_human?: string
+          }>
+          if (!tasks || !Array.isArray(tasks)) return 'batch_create requires a tasks array'
+          const results: Array<{ id: string; label: string; executor: string }> = []
+          let prevId: string | null = null
+          for (const task of tasks) {
+            const taskId = `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+            await query(
+              `INSERT INTO sparkie_tasks (id, user_id, action, label, payload, status, executor, trigger_type, why_human, depends_on)
+               VALUES ($1, $2, $3, $4, $5, 'pending', $6, 'manual', $7, $8)
+               ON CONFLICT (id) DO NOTHING`,
+              [taskId, userId, task.action ?? '', task.label, JSON.stringify({}), task.executor ?? 'human', task.why_human ?? '', prevId]
+            )
+            results.push({ id: taskId, label: task.label, executor: task.executor ?? 'human' })
+            prevId = taskId
+          }
+          return `HITL_TASK:${JSON.stringify({ batch: true, created: results.length, tasks: results })}`
+        }
+
         const taskId = `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
         try {
           await query(
@@ -3154,12 +3219,13 @@ async function executeTool(
               payload JSONB NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'pending',
               executor TEXT NOT NULL DEFAULT 'human', trigger_type TEXT DEFAULT 'manual',
               trigger_config JSONB DEFAULT '{}', scheduled_at TIMESTAMPTZ, why_human TEXT,
-              created_at TIMESTAMPTZ DEFAULT NOW(), resolved_at TIMESTAMPTZ
+              created_at TIMESTAMPTZ DEFAULT NOW(), resolved_at TIMESTAMPTZ, depends_on TEXT
             )`
           )
           await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS executor TEXT NOT NULL DEFAULT 'human'`).catch(() => {})
           await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS trigger_type TEXT DEFAULT 'manual'`).catch(() => {})
           await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS why_human TEXT`).catch(() => {})
+          await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS depends_on TEXT`).catch(() => {})
           await query(
             `INSERT INTO sparkie_tasks (id, user_id, action, label, payload, status, executor, trigger_type, why_human)
              VALUES ($1, $2, $3, $4, $5, 'pending', 'human', 'manual', $6)
@@ -3217,7 +3283,7 @@ async function executeTool(
               payload JSONB NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'pending',
               executor TEXT NOT NULL DEFAULT 'human', trigger_type TEXT DEFAULT 'manual',
               trigger_config JSONB DEFAULT '{}', scheduled_at TIMESTAMPTZ, why_human TEXT,
-              created_at TIMESTAMPTZ DEFAULT NOW(), resolved_at TIMESTAMPTZ
+              created_at TIMESTAMPTZ DEFAULT NOW(), resolved_at TIMESTAMPTZ, depends_on TEXT
             )`
           )
           // Alter existing table to add new columns if they don't exist
@@ -3226,6 +3292,7 @@ async function executeTool(
           await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS trigger_config JSONB DEFAULT '{}'`).catch(() => {})
           await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMPTZ`).catch(() => {})
           await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS why_human TEXT`).catch(() => {})
+          await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS depends_on TEXT`).catch(() => {})
 
           const triggerConfig = triggerType === 'cron' ? { expression: cronExpression } : { delay_hours: delayHours }
           await query(
@@ -4791,6 +4858,25 @@ def invoke_llm(query, model='MiniMax-M2.7'):
           to: string; subject: string; body: string; cc?: string
         }
         if (!emailTo || !emailSubject || !emailBody) return 'send_email: to, subject, and body are required'
+        // Consent level enforcement: check for explicit send confirmation
+        const lastMsgRes = await query<{ content: string }>(
+          `SELECT content FROM chat_messages WHERE user_id = $1 AND role = 'user' ORDER BY created_at DESC LIMIT 1`,
+          [userId]
+        ).catch(() => ({ rows: [] } as { rows: Array<{ content: string }> }))
+        const lastUserMsg = lastMsgRes.rows[0]?.content ?? ''
+        const isExplicitSend = /\b(send it|go ahead|do it|yes,?\s*send|confirm)\b/i.test(lastUserMsg)
+        const isSoftConfirm = /\b(ok|looks good|lgtm|sounds good)\b/i.test(lastUserMsg)
+        if (!isExplicitSend && isSoftConfirm) {
+          const autoSendRes = await query<{ content: string }>(
+            `SELECT content FROM sparkie_self_memory WHERE category = 'user_prefs' AND content ILIKE '%auto_send%' LIMIT 1`
+          ).catch(() => ({ rows: [] } as { rows: Array<{ content: string }> }))
+          if (!autoSendRes.rows.length) {
+            return 'CONSENT_CHECK: Soft confirmation detected but no auto_send preference saved. Ask Michael explicitly: "Ready to send this?" before executing.'
+          }
+        }
+        if (!isExplicitSend && !isSoftConfirm) {
+          return 'CONSENT_CHECK: No send confirmation detected. Present the draft and wait for explicit approval.'
+        }
         try {
           const sendArgs: Record<string, string> = { to: emailTo, subject: emailSubject, body: emailBody }
           if (emailCc) sendArgs.cc = emailCc
@@ -6391,12 +6477,13 @@ Keep each header + thought on its own line. Use multiple short bold-header block
       let loopMessages = [...recentMessages]
       let round = 0
       let usedTools = false
+      let contentAlreadySent = false
 
 
       // Phase 5: Live SSE stream — emit step_trace/task_chip IN REAL-TIME during tool loop
       // ReadableStream created before loop; controller captured for immediate enqueue during execution
       const liveEncoder = new TextEncoder()
-      const liveRef = { controller: null as ReadableStreamDefaultController<Uint8Array> | null }
+      const liveRef = { controller: null as ReadableStreamDefaultController<Uint8Array> | null, emittedTraces: new Set<string>() }
       const liveChunks: Uint8Array[] = []
       const liveStream = new ReadableStream<Uint8Array>({
         start(ctrl) {
@@ -6418,12 +6505,75 @@ Keep each header + thought on its own line. Use multiple short bold-header block
         }
       }
 
+      // ── Think-tag extraction: route reasoning to Process tab, strip from chat ──
+      function extractAndRouteThinking(raw: string): string {
+        if (!raw) return ""
+        const matches = raw.match(/<think>[\s\S]*?<\/think>/gi)
+        if (matches) {
+          for (const m of matches) {
+            const reasoning = m.replace(/<\/?think>/gi, "").trim()
+            if (reasoning.length > 10) {
+              // Deduplicate: skip if we've already emitted this exact reasoning
+              const traceKey = reasoning.slice(0, 100)
+              if (liveRef.emittedTraces.has(traceKey)) continue
+              liveRef.emittedTraces.add(traceKey)
+              liveEnqueue({
+                step_trace: {
+                  id: `think_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                  type: 'thought',
+                  icon: 'brain',
+                  label: 'Analyzed',
+                  text: reasoning.slice(0, 300),
+                  status: 'done',
+                  timestamp: Date.now(),
+                },
+              })
+              liveEnqueue({
+                worklog_card: {
+                  tool: 'reasoning',
+                  icon: 'brain',
+                  tag: 'Analyzed',
+                  summary: 'Analyzed',
+                  reasoning: reasoning.slice(0, 200),
+                  status: 'done',
+                  decision_type: 'action',
+                  ts: new Date().toISOString(),
+                },
+              })
+              if (userId) {
+                writeWorklog(userId, 'ai_response', `Analyzed: ${reasoning.slice(0, 120)}`,
+                  { status: 'done', decision_type: 'action', icon: 'brain', tag: 'Analyzed', reasoning: reasoning.slice(0, 200) }).catch(() => {})
+              }
+            }
+          }
+        }
+        return raw.replace(/<think>[\s\S]*?<\/think>/gi, "")
+      }
+
       // IIFE: wrap the entire agent loop so we can return liveStream BEFORE tools run
       // This is what makes ProcessTab show live spinners instead of a burst at the end.
       void (async () => { try {
       // Declared at IIFE body level so it's in scope for the sync synthesis block
       let loopRes: Response | undefined = undefined
       let errorText: string | undefined = undefined
+
+      // ── Emit "message received" worklog entry at start of each request ────────
+      if (lastUserContent) {
+        liveEnqueue({
+          worklog_card: {
+            tool: 'message_received',
+            icon: 'message-circle',
+            summary: `You just sent me a message:\n${lastUserContent.slice(0, 120)}${lastUserContent.length > 120 ? '…' : ''}`,
+            status: 'done',
+            decision_type: 'action',
+            ts: new Date().toISOString(),
+          },
+        })
+        if (userId) {
+          writeWorklog(userId, 'ai_response', `You just sent me a message:\n${lastUserContent.slice(0, 120)}${lastUserContent.length > 120 ? '…' : ''}`,
+            { status: 'done', decision_type: 'action', signal_priority: 'P2', conclusion: 'AI response delivered to user' }).catch(() => {})
+        }
+      }
 
       // ── Topics: emit resumption event if we matched an active topic ────────────
       if (activeTopicId && activeTopicName) {
@@ -6600,11 +6750,8 @@ Keep each header + thought on its own line. Use multiple short bold-header block
             break
           }
 
-          // Emit thought_step: model's reasoning text before calling tools (if any)
-          const thinkingText: string = (choice.message.content ?? '').trim()
-          if (thinkingText.length > 0) {
-            liveEnqueue({ thought_step: thinkingText })
-          }
+          // Extract think-tags: route to ProcessTab as step_trace, strip from content
+          const thinkingText: string = extractAndRouteThinking((choice.message.content ?? '').trim())
 
           // Phase 5: Emit task_chip label — shows "In memory:..." chip while tools run
           const chipToolName = toolCalls[0]?.function?.name ?? 'thinking'
@@ -6893,7 +7040,20 @@ Keep each header + thought on its own line. Use multiple short bold-header block
               // Worklog card SSE — emit LIVE via liveEnqueue so worklog updates as each tool completes
               if (['save_memory', 'save_self_memory', 'log_worklog', 'patch_file', 'write_file', 'trigger_deploy', 'create_task', 'schedule_task'].includes(tc.function.name) && !isStepError) {
                 const wlSummary = result.slice(0, 200)
-                liveEnqueue({ worklog_card: { tool: tc.function.name, summary: wlSummary, ts: new Date().toISOString() } })
+                const isMemoryTool = tc.function.name === 'save_memory' || tc.function.name === 'save_self_memory'
+                liveEnqueue({
+                  worklog_card: {
+                    tool: tc.function.name,
+                    icon: isMemoryTool ? 'lightbulb' : (stepIcon[tc.function.name] ?? 'zap'),
+                    tag: isMemoryTool ? 'Learned' : undefined,
+                    summary: isMemoryTool ? "I've learned something new" : wlSummary,
+                    result_preview: result.slice(0, 150),
+                    duration: stepDuration,
+                    status: 'done',
+                    decision_type: 'action',
+                    ts: new Date().toISOString(),
+                  },
+                })
               }
 
               // memory_recalled — emitted when memory tools return content; drives InMemoryPill label
@@ -7056,6 +7216,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
         } else if (finishReason === 'stop' && choice?.message?.content) {
           // Check for text-format tool calls (some models output JSON/XML instead of tool_calls)
           const rawContent: string = choice.message.content
+          const cleanedContent = extractAndRouteThinking(rawContent)
 
           // FIX 4: Completion verification nudge — if Sparkie claims done without verifying, inject a check
           const completionWords = /\b(done|complete[d]?|finished|deployed|pushed|committed|all\s+set|wrapped\s+up|good\s+to\s+go)\b/i
@@ -7169,9 +7330,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
 
           // Strip any residual XML tool call markup from final content before streaming
           // NOTE: Previous regex was broken (missing < before minimax:tool_call, no <parameter> strip)
-          const content: string = rawContent
-            .replace(/<minimax:tool_call>[\s\S]*?<\/minimax:tool_call>/g, '')
-                        .replace(/ Christensen[\s\S]*?<\/think>/gi, '')
+          const content: string = cleanedContent
             .replace(/<invoke[\s\S]*?<\/invoke>/g, '')
             .replace(/<parameter[^>]*>[\s\S]*?<\/parameter>/g, '')
             .replace(/<\/?minimax:tool_call>/g, '')
@@ -7249,19 +7408,22 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           // Write final content directly to liveRef — live stream is already open (IIFE approach)
           // Emit task_chip so ProcessTab shows "Working..." for non-tool responses too
           liveEnqueue({ task_chip: 'Thinking...' })
-          // Emit thought_step from raw think content before it gets stripped below
-          const thinkMatches = rawContent.match(/ Christensen[\s\S]*?<\/think>/gi)
-          if (thinkMatches) {
-            for (const m of thinkMatches) {
-              const reasoning = m.replace(/<\/?think>/gi, '').trim()
-              if (reasoning.length > 10) liveEnqueue({ thought_step: reasoning.slice(0, 300) })
-            }
-          }
-
           liveRef.controller?.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ reasoning_chunk: finalContent })}\n\n: \n\n`))
           liveRef.controller?.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: finalContent } }] })}\n\n: \n\n`))
           liveRef.controller?.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ task_chip_clear: true })}\n\n: \n\n`))
+          liveEnqueue({
+            step_trace: {
+              id: `ready_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+              type: 'step',
+              icon: 'check',
+              label: 'Response ready',
+              text: '',
+              status: 'done',
+              timestamp: Date.now(),
+            },
+          })
           liveRef.controller?.enqueue(liveEncoder.encode('data: [DONE]\n\n'))
+          contentAlreadySent = true
           return
         } else if (finishReason === 'length' && autoContinuationRound < 5) {
           // Model hit max_tokens mid-response — auto-continue from where it left off
@@ -7284,7 +7446,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
       // When core-tools succeed without needing tools (finish_reason='stop'), usedTools stays false.
       // The IIFE skips synthesis in this case and returns an empty liveStream.
       // Handle this with a SYNCHRONOUS non-streaming synthesis call — runs BEFORE the IIFE return.
-      if (!usedTools && loopRes?.ok) {
+      if (!contentAlreadySent && !usedTools && loopRes?.ok) {
         console.log(`[chat] !usedTools path — doing sync synthesis (${loopMessages.length} msgs)`)
         const noToolsSynthPayload = {
           model: 'MiniMax-M2.7', stream: false, temperature: 0.8, max_tokens: 16000,
@@ -7299,15 +7461,25 @@ Keep each header + thought on its own line. Use multiple short bold-header block
             const sseEnc = new TextEncoder()
             const okStream = new ReadableStream({
               start(ctrl) {
-                const cleanContent = noToolsContent
-                                    .replace(/ Christensen[\s\S]*?<\/think>/gi, '')
-                  .replace(/minimax-m2\.\d+(-free)?/gi, 'Atlas')
+                const cleanContent = extractAndRouteThinking(noToolsContent)
+                                    .replace(/minimax-m2\.\d+(-free)?/gi, 'Atlas')
                   .replace(/music-2\.[05]/gi, 'the music engine')
                   .replace(/speech-02(-hd)?/gi, 'voice synthesis')
                   .replace(/whisper-large-v3-turbo/gi, 'voice recognition')
                   .replace(/ace-step-v1\.5/gi, 'the music engine')
                 const chunk = sseEnc.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: cleanContent } }] })}\n\n`)
                 ctrl.enqueue(chunk)
+                liveEnqueue({
+                  step_trace: {
+                    id: `ready_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                    type: 'step',
+                    icon: 'check',
+                    label: 'Response ready',
+                    text: '',
+                    status: 'done',
+                    timestamp: Date.now(),
+                  },
+                })
                 ctrl.enqueue(sseEnc.encode('data: [DONE]\n\n'))
                 ctrl.close()
               },
@@ -7418,6 +7590,17 @@ SYNTHESIS RULES:
           const synthRdr = synthRes.body!.getReader()
           while (true) { const { done, value } = await synthRdr.read(); if (done) break; liveRef.controller?.enqueue(value) }
           liveRef.controller?.enqueue(liveEncoder.encode(mediaChunk2))
+          liveEnqueue({
+            step_trace: {
+              id: `ready_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+              type: 'step',
+              icon: 'check',
+              label: 'Response ready',
+              text: '',
+              status: 'done',
+              timestamp: Date.now(),
+            },
+          })
           liveRef.controller?.enqueue(liveEncoder.encode('data: [DONE]\n\n'))
         } else {
           const synthEnc = new TextEncoder()
@@ -7428,6 +7611,17 @@ SYNTHESIS RULES:
             const { done, value } = await synthRdr2.read()
             if (done) {
               liveRef.controller?.enqueue(synthEnc.encode(`data: ${JSON.stringify({ task_chip_clear: true })}\n\n`))
+              liveEnqueue({
+                step_trace: {
+                  id: `ready_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                  type: 'step',
+                  icon: 'check',
+                  label: 'Response ready',
+                  text: '',
+                  status: 'done',
+                  timestamp: Date.now(),
+                },
+              })
               liveRef.controller?.enqueue(synthEnc.encode('data: [DONE]\n\n'))
               break
             }
@@ -7443,7 +7637,7 @@ SYNTHESIS RULES:
                   // Strip XML tool calls from synthesis stream
                   const cleanCt = ct
                     .replace(/<minimax:tool_call>[\s\S]*?<\/minimax:tool_call>/g, '')
-                                        .replace(/ Christensen[\s\S]*?<\/think>/gi, '')
+                                        .replace(/<think>[\s\S]*?<\/think>/gi, '')
                     .replace(/<invoke[\s\S]*?<\/invoke>/g, '')
                     .replace(/<parameter[^>]*>[\s\S]*?<\/parameter>/g, '')
                     .trim()
@@ -7617,7 +7811,7 @@ SYNTHESIS RULES:
                     // Full XML block accumulated — strip it, emit any clean text that remains
                     const cleanAcc = accContent
                       .replace(/<minimax:tool_call>[\s\S]*?<\/minimax:tool_call>/g, '')
-                                            .replace(/ Christensen[\s\S]*?<\/think>/gi, '')
+                                            .replace(/<think>[\s\S]*?<\/think>/gi, '')
                       .replace(/<invoke[\s\S]*?<\/invoke>/g, '')
                       .replace(/<parameter[^>]*>[\s\S]*?<\/parameter>/g, '')
                       .trim()
@@ -7634,7 +7828,7 @@ SYNTHESIS RULES:
               // Sanitize model name leaks before sending to client
               if (content && parsed?.choices?.[0]?.delta) {
                 const sanitized = content
-                                    .replace(/ Christensen[\s\S]*?<\/think>/gi, '')
+                                    .replace(/<think>[\s\S]*?<\/think>/gi, '')
                   .replace(/minimax-m2\.\d+(-free)?/gi, 'Atlas')
                   .replace(/music-2\.[05]/gi, 'the music engine')
                   .replace(/speech-02(-hd)?/gi, 'voice synthesis')

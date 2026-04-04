@@ -32,6 +32,7 @@ function getNodeStyle(type: string, status?: string, decisionType?: string) {
     code_push:       "bg-blue-500 shadow-blue-500/40",
     email_processed: "bg-blue-400 shadow-blue-400/40",
     email_skipped:   "bg-slate-500",
+    email_triage:    "bg-slate-500",
     tool_call:       "bg-amber-500/70",
     decision:        "bg-amber-500/70",
     task_executed:   "bg-emerald-500 shadow-emerald-500/40",
@@ -159,6 +160,33 @@ function MessageEntry({ entry, isSent }: { entry: WorklogEntry; isSent: boolean 
   )
 }
 
+// ── Icon emoji map for worklog entry icons ───────────────────────────────────
+const ICON_EMOJI: Record<string, string> = {
+  brain: "🧠",
+  check: "✅",
+  code: "💻",
+  bug: "🐛",
+  mail: "✉️",
+  send: "📤",
+  alert: "⚠️",
+  memory: "🧩",
+  search: "🔍",
+  file: "📄",
+  rocket: "🚀",
+  lightbulb: "💡",
+  sparkles: "✨",
+  hourglass: "⏳",
+  done: "🎉",
+  error: "❌",
+  warning: "⚡",
+  info: "ℹ️",
+  arrow: "➡️",
+}
+
+function getIconEmoji(icon?: string): string {
+  return icon ? (ICON_EMOJI[icon] ?? `【${icon}】`) : ""
+}
+
 // ── Standard timeline entry (tool_call, code_push, result, error, etc.) ─────
 function StandardEntry({ entry }: { entry: WorklogEntry }) {
   const isRunning = entry.status === "running"
@@ -169,9 +197,9 @@ function StandardEntry({ entry }: { entry: WorklogEntry }) {
     error: "Error", task_executed: "Task done", decision: "Decision",
     heartbeat: "Heartbeat", auth_check: "Auth", thinking: "Thinking",
     action: "Executing", code: "Writing code", signal_skipped: "Skipped",
-    hold: "Held", ai_response: "Response",
+    hold: "Held", ai_response: "Response", email_triage: "Email triage",
   }
-  const label = typeLabel[entry.type] ?? entry.type.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ")
+  const label = entry.tag ?? typeLabel[entry.type] ?? entry.type.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ")
 
   const textColors: Record<string, string> = {
     result:       "text-emerald-400",
@@ -188,6 +216,9 @@ function StandardEntry({ entry }: { entry: WorklogEntry }) {
       <div className="flex items-start gap-2">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap">
+            {entry.icon && (
+              <span className="text-[12px]" title={entry.icon}>{getIconEmoji(entry.icon)}</span>
+            )}
             <span className={`text-[10px] font-semibold uppercase tracking-wider ${tc}`}>{label}</span>
             {entry.signal_priority && entry.signal_priority !== "P3" && (
               <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold ${
@@ -205,7 +236,12 @@ function StandardEntry({ entry }: { entry: WorklogEntry }) {
           <p className="text-xs text-text-secondary mt-0.5 break-words leading-relaxed">
             {entry.content}
           </p>
-          {entry.reasoning && (
+          {entry.result_preview && (
+            <p className="text-[10px] text-emerald-300/80 mt-1 pl-2 border-l border-emerald-500/30 leading-relaxed bg-emerald-500/5 rounded-r-sm">
+              → {entry.result_preview}
+            </p>
+          )}
+          {entry.reasoning && !entry.result_preview && (
             <p className="text-[10px] text-text-muted italic mt-1 pl-2 border-l border-white/10 leading-relaxed opacity-70">
               &ldquo;{entry.reasoning}&rdquo;
             </p>
@@ -311,6 +347,32 @@ export function Worklog({ compact = false }: WorklogProps) {
     window.addEventListener("sparkie_step_trace", handler)
     return () => window.removeEventListener("sparkie_step_trace", handler)
   }, [addWorklogEntry, dbLoaded])
+
+  // Real-time worklog_card events from liveEnqueue
+  useEffect(() => {
+    const handler = (ev: Event) => {
+      const card = (ev as CustomEvent<{
+        tool?: string; icon?: string; summary?: string; result_preview?: string;
+        duration?: number; status?: string; decision_type?: string; tag?: string;
+        reasoning?: string; ts?: string
+      }>).detail
+      if (!card?.tool) return
+      addWorklogEntry({
+        type: card.tool,
+        content: card.summary ?? '',
+        icon: card.icon,
+        tag: card.tag,
+        result_preview: card.result_preview,
+        duration: card.duration,
+        status: (card.status as WorklogEntry['status']) ?? 'done',
+        decision_type: card.decision_type as WorklogEntry['decision_type'],
+        reasoning: card.reasoning,
+        created_at: card.ts,
+      })
+    }
+    window.addEventListener("sparkie_worklog_card", handler)
+    return () => window.removeEventListener("sparkie_worklog_card", handler)
+  }, [addWorklogEntry])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })

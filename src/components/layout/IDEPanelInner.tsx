@@ -16,6 +16,7 @@ import { RealScorePanel } from "@/components/ide/RealScorePanel"
 import { ProcessTab } from "@/components/ide/ProcessTab"
 import { TopicsPanel } from "@/components/ide/TopicsPanel"
 import { CIPStatusPanel } from "@/components/ide/CIPStatusPanel"
+import { GoalsPanel } from "@/components/ide/GoalsPanel"
 
 
 const WORKLOG_FILTERS = ['all', 'thinking', 'action', 'result', 'error', 'code'] as const
@@ -222,6 +223,7 @@ export function IDEPanelInner() {
     { id: 'process',  label: 'Process'  },
     { id: 'preview',  label: 'Preview'  },
     { id: 'worklog',  label: 'Worklog'  },
+    { id: 'goals',    label: 'Goals'    },
     { id: 'memory',   label: 'Memory'   },
     { id: 'real',     label: 'REAL'     },
     { id: 'cip',      label: 'C.I.P.'   },
@@ -270,6 +272,9 @@ export function IDEPanelInner() {
       <div className="flex-1 overflow-hidden">
         {ideTab === 'worklog' && (
           <WorklogPanel />
+        )}
+        {ideTab === 'goals' && (
+          <GoalsPanel />
         )}
         {ideTab === 'memory' && (
           <MemoryTab />

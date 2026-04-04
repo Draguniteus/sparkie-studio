@@ -5,6 +5,7 @@ import { query } from '@/lib/db'
 import { proactiveInboxSweep, proactiveCalendarSweep, deploymentHealthSweep } from '@/lib/scheduler'
 import { runTTLDecaySweep } from '@/lib/knowledgeTTL'
 import { writeWorklog } from '@/lib/worklog'
+import { classifySignalImpact } from '@/lib/signalQueue'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -27,6 +28,7 @@ async function ensureTables() {
   await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS executor TEXT NOT NULL DEFAULT 'human'`).catch(() => {})
   await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS trigger_type TEXT DEFAULT 'manual'`).catch(() => {})
   await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMPTZ`).catch(() => {})
+  await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS depends_on TEXT`).catch(() => {})
 }
 
 /**
@@ -90,6 +92,13 @@ function nextCronTime(expression: string, after: Date = new Date()): Date {
 
 /** Execute due AI tasks for a given userId — shared by POST and GET handlers */
 async function executeDueTasks(userId: string, host: string, proto: string, cookieHeader: string) {
+  // Build work context from active topics for signal classification
+  const activeTopics = await query<{ id: string; name: string; cognition_state: Record<string, unknown> }>(
+    `SELECT id, name, cognition_state FROM sparkie_topics WHERE user_id = $1 AND status = 'active' LIMIT 10`,
+    [userId]
+  )
+  const workContext = activeTopics.rows.map(t => t.name).join(' ')
+
   const dueTasks = await query<{
     id: string; label: string; action: string; trigger_type: string; trigger_config: Record<string, unknown>
   }>(
@@ -106,6 +115,13 @@ async function executeDueTasks(userId: string, host: string, proto: string, cook
   const executed: Array<{ id: string; label: string; result: string }> = []
 
   for (const task of dueTasks.rows) {
+    // Classify signal impact before executing — skip if context was invalidated
+    const impactSignal = { id: 'pre_exec', type: 'tool_result' as const, priority: 'P2' as const, payload: { taskId: task.id, topicId: activeTopics.rows[0]?.id }, created_at: Date.now(), stale_after: Date.now() + 600000, userId }
+    const impact = classifySignalImpact(impactSignal, workContext)
+    if (impact === 'cancel' || impact === 'invalidate') {
+      await query(`UPDATE sparkie_tasks SET status = 'skipped' WHERE id = $1`, [task.id]).catch(() => {})
+      continue
+    }
     try {
       await query(`UPDATE sparkie_tasks SET status = 'in_progress' WHERE id = $1`, [task.id])
 
@@ -697,6 +713,36 @@ export async function GET(req: NextRequest) {
         // 4. Execute any due AI tasks for this user
         const executed = await executeDueTasks(userId, host, proto, '')
         if (executed.length > 0) sweepsRun.push(`${executed.length}_tasks`)
+
+        // 4b. L6 proactive work queue — process queued AI actions from topic cognition
+        try {
+          const topicsWithWork = await query<{ id: string; name: string; cognition_state: Record<string, unknown> }>(
+            `SELECT id, name, cognition_state FROM sparkie_topics
+             WHERE user_id = $1 AND status = 'active'
+             AND cognition_state IS NOT NULL
+             AND jsonb_object_keys(COALESCE(cognition_state->'L6_action_chain', '{}')) && ARRAY['ai']`,
+            [userId]
+          )
+          for (const topic of topicsWithWork.rows) {
+            const chain = (topic.cognition_state?.L6_action_chain as { ai?: string[]; user?: string[]; waiting?: string[] }) ?? {}
+            const aiActions = chain.ai ?? []
+            if (aiActions.length > 0) {
+              const nextAction = aiActions[0]
+              const taskId = `l6_task_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+              await query(
+                `INSERT INTO sparkie_tasks (id, user_id, action, label, payload, status, executor, trigger_type, depends_on)
+                 VALUES ($1, $2, $3, $4, '{}', 'pending', 'ai', 'manual', NULL)`,
+                [taskId, userId, nextAction, `L6 queued: ${nextAction.slice(0, 80)}`]
+              ).catch(() => {})
+              const remaining = aiActions.slice(1)
+              await query(
+                `UPDATE sparkie_topics SET cognition_state = jsonb_set(cognition_state, '{L6_action_chain,ai}', $1), updated_at = NOW() WHERE id = $2`,
+                [JSON.stringify(remaining), topic.id]
+              ).catch(() => {})
+              sweepsRun.push('l6_queue')
+            }
+          }
+        } catch (e) { console.error('[agent-cron] L6 queue error:', e) }
 
         // 5. Log the cron sweep to worklog so it's visible in Sparkie's brain
         await writeWorklog(

@@ -42,6 +42,8 @@ const CARD_THEMES: Record<string, {
   permission:     { gradient: 'from-red-950/80 via-orange-950/60 to-red-900/40',      border: 'border-red-500/25',    headerBg: 'bg-red-950/60',     iconBg: 'bg-red-500/20',     icon: '🔐', accent: 'text-red-300'     },
   confirmation:   { gradient: 'from-green-950/80 via-emerald-950/60 to-green-900/40', border: 'border-green-500/25',  headerBg: 'bg-green-950/60',   iconBg: 'bg-green-500/20',   icon: '💬', accent: 'text-green-300'   },
   browser_action: { gradient: 'from-teal-950/80 via-cyan-950/60 to-teal-900/40',      border: 'border-teal-500/25',   headerBg: 'bg-teal-950/60',    iconBg: 'bg-teal-500/20',    icon: '🌐', accent: 'text-teal-300'    },
+  a2ui:             { gradient: 'from-indigo-950/80 via-purple-950/60 to-indigo-900/40',   border: 'border-indigo-500/25', headerBg: 'bg-indigo-950/60',  iconBg: 'bg-indigo-500/20',  icon: '📊', accent: 'text-indigo-300'  },
+  cta:              { gradient: 'from-amber-950/80 via-orange-950/60 to-amber-900/40',   border: 'border-amber-500/25', headerBg: 'bg-amber-950/60',   iconBg: 'bg-amber-500/20',   icon: '⚡', accent: 'text-amber-300'   },
 }
 
 const DEFAULT_THEME = {
@@ -94,6 +96,154 @@ function ActionButton({ action, onClick, resolved }: {
   )
 }
 
+// ── A2UI Card — renders structured YAML+JSON briefing documents ─────────────────
+interface A2UIComponent {
+  type: string
+  props?: Record<string, unknown>
+  children?: A2UIComponent[]
+}
+
+function A2UIComponent({ component, onAction, resolved }: {
+  component: A2UIComponent
+  onAction?: (actionId: string, cardType: string) => void
+  resolved: boolean
+}) {
+  const { type, props = {}, children = [] } = component
+  switch (type) {
+    case 'Text':
+      return <p className="text-xs text-text-secondary leading-relaxed">{String(props.text ?? '')}</p>
+    case 'Column':
+      return (
+        <div className="flex flex-col gap-2">
+          {children.map((c, i) => <A2UIComponent key={i} component={c} onAction={onAction} resolved={resolved} />)}
+        </div>
+      )
+    case 'Row':
+      return (
+        <div className="flex items-center gap-3 flex-wrap">
+          {children.map((c, i) => <A2UIComponent key={i} component={c} onAction={onAction} resolved={resolved} />)}
+        </div>
+      )
+    case 'Button':
+      return (
+        <button
+          onClick={() => onAction?.(String(props.actionId ?? ''), 'a2ui')}
+          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+            props.variant === 'primary'
+              ? 'bg-honey-500 text-black hover:bg-honey-400'
+              : 'bg-white/5 border border-white/10 text-text-secondary hover:bg-white/10'
+          }`}
+        >
+          {String(props.label ?? '')}
+        </button>
+      )
+    case 'List':
+      return (
+        <ul className="space-y-1">
+          {((props.items as string[]) ?? []).map((item, i) => (
+            <li key={i} className="flex items-start gap-1.5 text-xs text-text-secondary">
+              <span className="text-indigo-300 mt-0.5 shrink-0">•</span>
+              {item}
+            </li>
+          ))}
+        </ul>
+      )
+    case 'Divider':
+      return <div className="h-px bg-white/6 my-2" />
+    case 'Card':
+      return (
+        <div className="rounded-xl border border-indigo-500/20 bg-indigo-950/30 p-3">
+          {children.map((c, i) => <A2UIComponent key={i} component={c} onAction={onAction} resolved={resolved} />)}
+        </div>
+      )
+    default:
+      return null
+  }
+}
+
+function A2UICard({ card, onAction, resolved }: {
+  card: SparkieCardData
+  onAction?: (actionId: string, cardType: string) => void
+  resolved: boolean
+}) {
+  const theme = CARD_THEMES['a2ui'] ?? DEFAULT_THEME
+  const components = (card.metadata?.components as A2UIComponent[]) ?? []
+  return (
+    <div
+      className={`my-2 rounded-2xl overflow-hidden border ${theme.border} bg-gradient-to-b ${theme.gradient} shadow-lg shadow-black/20`}
+      style={{ animation: 'fadeSlideIn 0.25s ease' }}
+    >
+      <div className={`flex items-center gap-3 px-4 py-3 ${theme.headerBg}`}>
+        <div className={`w-8 h-8 rounded-xl ${theme.iconBg} flex items-center justify-center shrink-0 text-base`}>
+          {theme.icon}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className={`text-xs font-bold ${theme.accent} uppercase tracking-wider leading-none mb-0.5`}>{card.title}</p>
+          {card.subtitle && <p className="text-sm font-semibold text-text-primary truncate leading-tight">{card.subtitle}</p>}
+        </div>
+        {resolved && (
+          <span className="shrink-0 flex items-center gap-1 text-[10px] text-green-400 font-semibold">
+            <Check size={10} />{resolved}
+          </span>
+        )}
+      </div>
+      <div className="px-4 pb-4 pt-2">
+        {card.body && <p className="text-xs text-text-secondary leading-relaxed mb-3 whitespace-pre-wrap">{card.body}</p>}
+        <div className="space-y-2">
+          {components.map((comp, i) => <A2UIComponent key={i} component={comp} onAction={onAction} resolved={!!resolved} />)}
+        </div>
+        {!resolved && card.actions.length > 0 && (
+          <div className="flex flex-wrap gap-2 mt-3">
+            {card.actions.map(action => (
+              <ActionButton key={action.id} action={action} resolved={!!resolved} onClick={() => onAction?.(action.id, card.type)} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── CTA Card — call-to-action with action buttons ──────────────────────────────
+function CTACard({ card, onAction, resolved }: {
+  card: SparkieCardData
+  onAction?: (actionId: string, cardType: string) => void
+  resolved: boolean
+}) {
+  const theme = CARD_THEMES['cta'] ?? DEFAULT_THEME
+  return (
+    <div
+      className={`my-2 rounded-2xl overflow-hidden border ${theme.border} bg-gradient-to-b ${theme.gradient} shadow-lg shadow-black/20`}
+      style={{ animation: 'fadeSlideIn 0.25s ease' }}
+    >
+      <div className={`flex items-center gap-3 px-4 py-3 ${theme.headerBg}`}>
+        <div className={`w-8 h-8 rounded-xl ${theme.iconBg} flex items-center justify-center shrink-0 text-base`}>
+          {theme.icon}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className={`text-xs font-bold ${theme.accent} uppercase tracking-wider leading-none mb-0.5`}>{card.title}</p>
+          {card.subtitle && <p className="text-sm font-semibold text-text-primary truncate leading-tight">{card.subtitle}</p>}
+        </div>
+        {resolved && (
+          <span className="shrink-0 flex items-center gap-1 text-[10px] text-green-400 font-semibold">
+            <Check size={10} />{resolved}
+          </span>
+        )}
+      </div>
+      <div className="px-4 pb-4 pt-2">
+        {card.body && <p className="text-xs text-text-secondary leading-relaxed mb-3 whitespace-pre-wrap">{card.body}</p>}
+        {!resolved && card.actions.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {card.actions.map(action => (
+              <ActionButton key={action.id} action={action} resolved={!!resolved} onClick={() => onAction?.(action.id, card.type)} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 interface SparkieCardProps {
   card: SparkieCardData
   onAction?: (actionId: string, cardType: string) => void
@@ -108,6 +258,10 @@ export function SparkieCard({ card, onAction }: SparkieCardProps) {
     setResolved(label)
     onAction?.(actionId, card.type)
   }
+
+  // Route to specialized renderers
+  if (card.type === 'a2ui') return <A2UICard card={card} onAction={onAction} resolved={!!resolved} />
+  if (card.type === 'cta') return <CTACard card={card} onAction={onAction} resolved={!!resolved} />
 
   return (
     <div

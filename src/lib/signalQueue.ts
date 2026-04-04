@@ -101,3 +101,24 @@ export function sortSignals(signals: Signal[]): Signal[] {
   const order: Record<SignalPriority, number> = { P0: 0, P1: 1, P2: 2, P3: 3 }
   return signals.sort((a, b) => order[a.priority] - order[b.priority] || a.created_at - b.created_at)
 }
+
+/**
+ * Classify how an incoming signal impacts the current work context.
+ * Used by the agent sweep loop to decide whether to proceed, skip, or replan.
+ */
+export type SignalImpact = 'supplement' | 'invalidate' | 'modify' | 'cancel' | 'unrelated'
+
+export function classifySignalImpact(signal: Signal, currentWorkContext: string): SignalImpact {
+  if (signal.type === 'user_message') {
+    const content = (signal.payload.content as string) ?? ''
+    if (/\b(cancel|stop|nevermind|forget it)\b/i.test(content)) return 'cancel'
+    if (/\b(change|update|instead|actually)\b/i.test(content)) return 'modify'
+  }
+  if (signal.type === 'email_digest' && currentWorkContext.includes('waiting_for_reply')) {
+    return 'invalidate'
+  }
+  if (signal.payload.topicId && currentWorkContext.includes(signal.payload.topicId as string)) {
+    return 'supplement'
+  }
+  return 'unrelated'
+}

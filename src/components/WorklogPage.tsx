@@ -129,6 +129,26 @@ const TYPE_CONFIG: Record<string, {
     label: 'Auth check',
     actionBadge: () => 'Auth verified',
   },
+  email_triage:     {
+    icon: Mail, color: 'text-slate-400', bg: 'bg-slate-500/6', border: 'border-l-slate-500/30',
+    label: 'Email triage',
+    actionBadge: (m) => m.reasoning ? `"${String(m.reasoning).slice(0, 80)}"` : 'Skipped this one',
+  },
+  cron_sweep:       {
+    icon: RefreshCw, color: 'text-slate-400', bg: 'bg-slate-500/5', border: 'border-l-slate-500/20',
+    label: 'Cron sweep',
+    actionBadge: () => 'Background sweep ran',
+  },
+  hold:             {
+    icon: Loader2, color: 'text-amber-400', bg: 'bg-amber-500/8', border: 'border-l-amber-500/50',
+    label: 'On hold',
+    actionBadge: () => 'Waiting on something',
+  },
+  tool_call:        {
+    icon: Zap, color: 'text-amber-300', bg: 'bg-amber-500/8', border: 'border-l-amber-500/50',
+    label: 'Tool call',
+    actionBadge: () => 'Tool executed',
+  },
 }
 
 const DEFAULT_CONFIG = {
@@ -224,7 +244,7 @@ function EntryCard({ entry }: { entry: WorklogEntry }) {
   const cfg = TYPE_CONFIG[entry.type] ?? DEFAULT_CONFIG
   const Icon = cfg.icon
   const meta = entry.metadata ?? {}
-  const isSkipped = entry.type === 'email_skipped'
+  const isSkipped = entry.type === 'email_skipped' || entry.decision_type === 'skip' || entry.type === 'email_triage'
   const isMemory = entry.type === 'memory_learned' || entry.type === 'memory_updated'
   const isEmail = entry.type === 'email_processed' || entry.type === 'email_skipped'
   const actionBadge = cfg.actionBadge ? cfg.actionBadge(meta, entry.content) : null
@@ -283,6 +303,9 @@ function EntryCard({ entry }: { entry: WorklogEntry }) {
             <span className={`text-[9px] px-2 py-0.5 rounded-full font-medium ${cfg.bg} ${cfg.color}`}>
               {actionBadge}
             </span>
+          )}
+          {(entry.decision_type === 'skip' || entry.type === 'email_triage') && entry.reasoning && (
+            <span className="text-[9px] text-slate-400 italic ml-1">— {entry.reasoning.slice(0, 60)}{entry.reasoning.length > 60 ? '…' : ''}</span>
           )}
           {entry.signal_priority && entry.signal_priority !== 'P3' && (
             <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold ${
