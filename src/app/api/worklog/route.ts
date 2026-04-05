@@ -19,6 +19,17 @@ async function ensureTable() {
   `).catch(() => {})
   // Idempotent: add cost_usd column if table already exists without it
   await query(`ALTER TABLE sparkie_worklog ADD COLUMN IF NOT EXISTS cost_usd NUMERIC(10,6)`).catch(() => {})
+  // Columns migrated from src/lib/worklog.ts ensureTable()
+  await query(`ALTER TABLE sparkie_worklog ADD COLUMN IF NOT EXISTS actual_duration_ms INT`).catch(() => {})
+  await query(`ALTER TABLE sparkie_worklog ADD COLUMN IF NOT EXISTS conclusion TEXT`).catch(() => {})
+  await query(`ALTER TABLE sparkie_worklog ADD COLUMN IF NOT EXISTS status TEXT`).catch(() => {})
+  await query(`ALTER TABLE sparkie_worklog ADD COLUMN IF NOT EXISTS decision_type TEXT`).catch(() => {})
+  await query(`ALTER TABLE sparkie_worklog ADD COLUMN IF NOT EXISTS reasoning TEXT`).catch(() => {})
+  await query(`ALTER TABLE sparkie_worklog ADD COLUMN IF NOT EXISTS estimated_duration_ms INT`).catch(() => {})
+  await query(`ALTER TABLE sparkie_worklog ADD COLUMN IF NOT EXISTS signal_priority INT`).catch(() => {})
+  await query(`ALTER TABLE sparkie_worklog ADD COLUMN IF NOT EXISTS confidence NUMERIC(5,4)`).catch(() => {})
+  await query(`ALTER TABLE sparkie_worklog ADD COLUMN IF NOT EXISTS depends_on JSONB`).catch(() => {})
+  await query(`ALTER TABLE sparkie_worklog ADD COLUMN IF NOT EXISTS side_effect_of TEXT`).catch(() => {})
   await query(`CREATE INDEX IF NOT EXISTS idx_worklog_user_time ON sparkie_worklog(user_id, created_at DESC)`).catch(() => {})
 }
 
@@ -86,17 +97,19 @@ export async function POST(req: NextRequest) {
 
   await ensureTable()
   const id = crypto.randomUUID()
-  const { depends_on, side_effect_of, confidence, status: wlStatus, decision_type, reasoning, estimated_duration_ms, signal_priority, cost_usd, ...restMeta } = (body.metadata ?? {}) as Record<string, unknown>
+  const { depends_on, side_effect_of, confidence, status: wlStatus, decision_type, reasoning, estimated_duration_ms, signal_priority, cost_usd, actual_duration_ms, conclusion, ...restMeta } = (body.metadata ?? {}) as Record<string, unknown>
   await query(
-    `INSERT INTO sparkie_worklog (id, user_id, type, content, metadata, status, decision_type, reasoning, estimated_duration_ms, signal_priority, confidence, depends_on, side_effect_of, cost_usd)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+    `INSERT INTO sparkie_worklog (id, user_id, type, content, metadata, status, decision_type, reasoning, estimated_duration_ms, signal_priority, confidence, depends_on, side_effect_of, cost_usd, actual_duration_ms, conclusion)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
     [id, userId, body.type, body.content, JSON.stringify(restMeta),
      wlStatus ?? 'done', decision_type ?? null, reasoning ?? null,
      estimated_duration_ms ?? null, signal_priority ?? null,
      confidence ?? null,
      depends_on ? JSON.stringify(depends_on) : null,
      side_effect_of ?? null,
-     cost_usd != null ? Number(cost_usd) : null]
+     cost_usd != null ? Number(cost_usd) : null,
+     actual_duration_ms != null ? Number(actual_duration_ms) : null,
+     conclusion ?? null]
   )
   return NextResponse.json({ id, success: true })
 }
