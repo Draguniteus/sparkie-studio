@@ -949,9 +949,10 @@ const _lastDeployPhase: Record<string, string> = {}
 async function ambientPerceptionTick(): Promise<void> {
   _perceptionTickCount++
 
-  // Get users with AI tasks — those are the ones to perceive for
+  // Get all recently active users — not just those with AI tasks
+  // AI-task-only filtering missed conversational users like Michael who don't schedule AI tasks
   const activeUsers = await query<{ user_id: string }>(
-    `SELECT DISTINCT user_id FROM sparkie_tasks WHERE executor = 'ai' AND status IN ('pending', 'in_progress') LIMIT 5`
+    `SELECT DISTINCT user_id FROM user_sessions WHERE last_seen > NOW() - INTERVAL '7 days' ORDER BY last_seen DESC LIMIT 10`
   ).catch(() => ({ rows: [] as { user_id: string }[] }))
 
   for (const { user_id } of activeUsers.rows) {

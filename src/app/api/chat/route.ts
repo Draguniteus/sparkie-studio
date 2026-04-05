@@ -6743,10 +6743,11 @@ Make it feel like walking into your friend's creative space and being genuinely 
     let activeTopicId: string | null = null
     let activeTopicName: string | null = null
     let activeTopicContext: string | null = null
+    let activeTopicRecord: { id: string; name: string; summary: string; fingerprint: string; last_state: string; last_round: number; step_count: number; cognition_state: Record<string, unknown> } | null = null
     if (userId && lastUserContent && !isBuild) {
       try {
-        const topicsRes = await query<{ id: string; name: string; summary: string; fingerprint: string; last_state: string; last_round: number; step_count: number }>(
-          `SELECT id, name, summary, fingerprint, last_state, last_round, step_count FROM sparkie_topics WHERE user_id = $1 AND status = 'active' ORDER BY updated_at DESC LIMIT 20`,
+        const topicsRes = await query<{ id: string; name: string; summary: string; fingerprint: string; last_state: string; last_round: number; step_count: number; cognition_state: Record<string, unknown> }>(
+          `SELECT id, name, summary, fingerprint, last_state, last_round, step_count, cognition_state FROM sparkie_topics WHERE user_id = $1 AND status = 'active' ORDER BY updated_at DESC LIMIT 20`,
           [userId]
         )
         const msgLower = lastUserContent.toLowerCase()
@@ -6756,6 +6757,7 @@ Make it feel like walking into your friend's creative space and being genuinely 
           if (matchCount >= 2) {
             activeTopicId = topic.id
             activeTopicName = topic.name
+            activeTopicRecord = topic
             const contextParts = [`## ACTIVE TOPIC CONTEXT\nTopic: ${topic.name}`, `Summary: ${topic.summary ?? 'No summary yet.'}`]
             if (topic.last_state) contextParts.push(`Last known state: ${topic.last_state}`)
             if (topic.last_round > 0) contextParts.push(`Prior tool rounds: ${topic.last_round}`)
@@ -6764,8 +6766,30 @@ Make it feel like walking into your friend's creative space and being genuinely 
             break
           }
         }
-        if (activeTopicContext) {
+        if (activeTopicContext && activeTopicRecord) {
           finalSystemContent += `\n\n${activeTopicContext}`
+          // AWAKEN DEAD COGNITIVE LAYERS: L2_factual_history, L3_live_state, L5_user_intent
+          // These were stored by updateTopicCognition but NEVER injected back — now they drive cross-session memory
+          const cog = (activeTopicRecord as { cognition_state?: Record<string, unknown> }).cognition_state as {
+            L2_factual_history?: string
+            L3_live_state?: string
+            L5_user_intent?: string
+          } | undefined
+          if (cog) {
+            if (cog.L2_factual_history) {
+              finalSystemContent += `\n\n## Topic History (L2)\n${cog.L2_factual_history}`
+            }
+            if (cog.L3_live_state) {
+              finalSystemContent += `\n\n## Current Topic State (L3)\n${cog.L3_live_state}`
+            }
+            if (cog.L5_user_intent) {
+              finalSystemContent += `\n\n## User's Goal (L5)\n${cog.L5_user_intent}`
+            }
+          }
+          // Also set L5 (user intent) on first identification of this topic — captures what the user wanted
+          if (lastUserContent && activeTopicId) {
+            updateTopicCognition(activeTopicId, { L5: lastUserContent.slice(0, 300) }).catch(() => {})
+          }
         }
       } catch {}
     }
@@ -6837,7 +6861,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
             const reasoning = m.replace(/<\/?think>/gi, "").trim()
             if (reasoning.length > 10) {
               // Deduplicate: skip if we've already emitted this exact reasoning
-              const traceKey = reasoning.slice(0, 100)
+              const traceKey = reasoning.slice(0, 300)
               if (liveRef.emittedTraces.has(traceKey)) continue
               liveRef.emittedTraces.add(traceKey)
               liveEnqueue({
@@ -6846,7 +6870,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
                   type: 'thought',
                   icon: 'brain',
                   label: 'Analyzed',
-                  text: reasoning.slice(0, 300),
+                  text: reasoning.slice(0, 2000),
                   status: 'done',
                   timestamp: Date.now(),
                 },
@@ -6857,14 +6881,14 @@ Keep each header + thought on its own line. Use multiple short bold-header block
                   icon: 'brain',
                   tag: 'Analyzed',
                   summary: 'Analyzed',
-                  reasoning: reasoning.slice(0, 200),
+                  reasoning: reasoning.slice(0, 1000),
                   status: 'done',
                   decision_type: 'action',
                   ts: new Date().toISOString(),
                 },
               })
               if (userId) {
-                writeWorklog(userId, 'ai_response', `Analyzed: ${reasoning.slice(0, 120)}`,
+                writeWorklog(userId, 'ai_response', `Analyzed: ${reasoning.slice(0, 300)}`,
                   { status: 'done', decision_type: 'action', icon: 'brain', tag: 'Analyzed', reasoning: reasoning.slice(0, 200) }).catch(() => {})
               }
             }
@@ -7075,6 +7099,16 @@ Keep each header + thought on its own line. Use multiple short bold-header block
 
           // Extract think-tags: route to ProcessTab as step_trace, strip from content
           const thinkingText: string = extractAndRouteThinking((choice.message.content ?? '').trim())
+
+          // Emit thinking_display so the frontend can show Sparkie's internal monologue in the main chat
+          if (thinkingText.length > 20) {
+            liveEnqueue({
+              thinking_display: {
+                text: thinkingText.slice(0, 2000),
+                timestamp: Date.now(),
+              },
+            })
+          }
 
           // Phase 5: Emit task_chip label — shows "In memory:..." chip while tools run
           const chipToolName = toolCalls[0]?.function?.name ?? 'thinking'
@@ -7395,6 +7429,17 @@ Keep each header + thought on its own line. Use multiple short bold-header block
             console.log(`[parallel] ${toolCalls.length} tools in ${parallelTotalMs}ms`)
           }
 
+          // AWAKEN L2/L3 cognition: update topic factual history and live state after tool execution
+          if (activeTopicId) {
+            const historyEntry = toolCalls.map((tc, i) =>
+              `Called ${tc.function.name} → ${toolResults[i]?.content?.slice(0, 120) ?? 'no result'}`
+            ).join('; ')
+            updateTopicCognition(activeTopicId, {
+              L2: historyEntry,
+              L3: `Executed ${toolCalls.length} tool(s) — results returned, processing`,
+            }).catch(() => {})
+          }
+
           // Fallback asset save: for any media result that came back as a raw data URL
           // (meaning the in-tool DB save failed), try to persist it now.
           if (userId) {
@@ -7474,7 +7519,14 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           }
 
           // Append assistant message + tool results, continue loop
-          loopMessages = [...loopMessages, choice.message, ...toolResults]
+          // Strip thinking tags before sending back to model — prevents token budget corruption and ID confusion
+          const messageForLoop = {
+            ...choice.message,
+            content: choice.message.content
+              ? choice.message.content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
+              : null,
+          }
+          loopMessages = [...loopMessages, messageForLoop, ...toolResults]
 
           // ── Block 11: Checkpoint injection every 5 rounds ─────────────────────
           // At round 5, 10, etc. inject a system nudge reminding Sparkie to checkpoint
@@ -7539,7 +7591,24 @@ Keep each header + thought on its own line. Use multiple short bold-header block
         } else if (finishReason === 'stop' && choice?.message?.content) {
           // Check for text-format tool calls (some models output JSON/XML instead of tool_calls)
           const rawContent: string = choice.message.content
-          const cleanedContent = extractAndRouteThinking(rawContent)
+          const thinkingFromRaw = extractAndRouteThinking(rawContent)
+          const cleanedContent = thinkingFromRaw
+          // Emit thinking_display for non-tool responses too (thinking was already emitted for tool_calls path)
+          if (thinkingFromRaw.length > 20) {
+            liveEnqueue({
+              thinking_display: {
+                text: thinkingFromRaw.slice(0, 2000),
+                timestamp: Date.now(),
+              },
+            })
+          }
+
+          // Update L3 live state — assistant delivered a text response
+          if (activeTopicId) {
+            updateTopicCognition(activeTopicId, {
+              L3: `Delivered text response to user — waiting for next message`,
+            }).catch(() => {})
+          }
 
           // FIX 4: Completion verification nudge — if Sparkie claims done without verifying, inject a check
           const completionWords = /\b(done|complete[d]?|finished|deployed|pushed|committed|all\s+set|wrapped\s+up|good\s+to\s+go)\b/i
@@ -7570,8 +7639,13 @@ Keep each header + thought on its own line. Use multiple short bold-header block
               const fakeId = `json_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
               jsonFnCalls.push({ id: fakeId, type: 'function', function: { name: toolName, arguments: JSON.stringify(toolArgs) } })
               const { result, failed, attemptHistoryContext } = await executeToolWithRetry(toolName, toolArgs, toolContext)
-              // Track AI action in topic cognition state
-              if (activeTopicId) updateTopicCognition(activeTopicId, { ai_action: toolName }).catch(() => {})
+              // Track AI action and factual history in topic cognition state
+              if (activeTopicId) {
+                updateTopicCognition(activeTopicId, {
+                  ai_action: toolName,
+                  L2: `Called ${toolName} → ${result.slice(0, 150)}`,
+                }).catch(() => {})
+              }
               jsonFnResults.push({ role: 'tool' as const, tool_call_id: fakeId, content: result })
               if (failed && attemptHistoryContext) allAttemptHistoryContext = attemptHistoryContext
             }
@@ -7644,8 +7718,13 @@ Keep each header + thought on its own line. Use multiple short bold-header block
               liveEnqueue({ step_trace: { id: fakeId, toolName, icon: xmlIcon, label: xmlLabel, status: 'running', timestamp: Date.now() } })
               const xmlStart = Date.now()
               const { result, failed, attemptHistoryContext } = await executeToolWithRetry(toolName, params, toolContext)
-              // Track AI action in topic cognition state
-              if (activeTopicId) updateTopicCognition(activeTopicId, { ai_action: toolName }).catch(() => {})
+              // Track AI action and factual history in topic cognition state
+              if (activeTopicId) {
+                updateTopicCognition(activeTopicId, {
+                  ai_action: toolName,
+                  L2: `Called ${toolName} → ${result.slice(0, 150)}`,
+                }).catch(() => {})
+              }
               const xmlDuration = Date.now() - xmlStart
               const xmlError = failed || result.startsWith('LOOP_INTERRUPT')
               liveEnqueue({ step_trace: { id: fakeId, toolName, icon: xmlIcon, label: xmlLabel, status: xmlError ? 'error' : 'done', duration: xmlDuration, timestamp: Date.now() } })
@@ -7769,8 +7848,8 @@ Keep each header + thought on its own line. Use multiple short bold-header block
               timestamp: Date.now(),
             },
           })
-          liveRef.controller?.enqueue(liveEncoder.encode('data: [DONE]\n\n'))
           contentAlreadySent = true
+          liveRef.controller?.enqueue(liveEncoder.encode('data: [DONE]\n\n'))
           return
         } else if (finishReason === 'length' && autoContinuationRound < 5) {
           // Model hit max_tokens mid-response — auto-continue from where it left off
