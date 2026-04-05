@@ -120,6 +120,12 @@ CREATE INDEX IF NOT EXISTS idx_sparkie_topics_user_id ON sparkie_topics(user_id)
 CREATE INDEX IF NOT EXISTS idx_sparkie_topics_status ON sparkie_topics(status);
 -- Ensure cognition_state exists even if table was created before this migration was updated
 ALTER TABLE sparkie_topics ADD COLUMN IF NOT EXISTS cognition_state JSONB DEFAULT '{}';
+-- Ensure all topic columns exist — added here so fresh migrations get them too
+ALTER TABLE sparkie_topics ADD COLUMN IF NOT EXISTS last_state TEXT;
+ALTER TABLE sparkie_topics ADD COLUMN IF NOT EXISTS last_round INT DEFAULT 0;
+ALTER TABLE sparkie_topics ADD COLUMN IF NOT EXISTS step_count INT DEFAULT 0;
+ALTER TABLE sparkie_topics ADD COLUMN IF NOT EXISTS original_request TEXT;
+ALTER TABLE sparkie_topics ADD COLUMN IF NOT EXISTS topic_type TEXT DEFAULT 'chat';
 
 CREATE TABLE IF NOT EXISTS sparkie_topic_threads (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),

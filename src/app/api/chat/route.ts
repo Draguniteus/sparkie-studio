@@ -5810,30 +5810,61 @@ async function executeConnectorTool(
     }
   }
 
-  try {
-    const apiKey = process.env.COMPOSIO_API_KEY
-    if (!apiKey) return 'Connector not available'
-    const entity_id = 'sparkie_user_' + userId
-    const res = await fetch(
-      'https://backend.composio.dev/api/v3/tools/execute/' + actionSlug,
-      {
-        method: 'POST',
-        headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entity_id, arguments: args }),
-        signal: AbortSignal.timeout(20000),
+  // Retry loop — identical pattern to executeToolWithRetry
+  let lastFetchError = ''
+  const domain = 'connector_' + actionSlug.toLowerCase()
+  const apiKey = process.env.COMPOSIO_API_KEY
+  if (!apiKey) return 'Connector not available'
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const entity_id = 'sparkie_user_' + userId
+      const res = await fetch(
+        'https://backend.composio.dev/api/v3/tools/execute/' + actionSlug,
+        {
+          method: 'POST',
+          headers: { 'x-api-key': apiKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entity_id, arguments: args }),
+          signal: AbortSignal.timeout(20000),
+        }
+      )
+      if (res.ok) {
+        // Success on retry — record the workaround
+        if (attempt > 0) {
+          await saveAttempt(userId, domain, 'success',
+            `${actionSlug}(${JSON.stringify(args).slice(0, 80)})`,
+            `Succeeded on attempt ${attempt + 1} after: ${lastFetchError}`,
+            `Connector retry worked.`)
+        }
+        const data = await res.json() as Record<string, unknown>
+        return formatConnectorResponse(actionSlug, data)
       }
-    )
-    if (!res.ok) {
-      const errBody = await res.text()
-      // Surface a clean error — the 410 "upgrade to v3" message is gone now
-      return `Action failed (${res.status}): ${errBody.slice(0, 300)}`
+      lastFetchError = `HTTP ${res.status}: ${(await res.text()).slice(0, 100)}`
+      if (attempt < 2) await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 1000))
+    } catch (e) {
+      lastFetchError = String(e)
+      if (attempt < 2) await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 1000))
     }
-    const data = await res.json() as Record<string, unknown>
-    // v3 wraps success in { data: { ... } } — same shape as v1
-    return formatConnectorResponse(actionSlug, data)
-  } catch (e) {
-    return `Connector error: ${String(e)}`
   }
+
+  // All 3 attempts failed — save attempt history + create auto-HITL task
+  await saveAttempt(userId, domain, 'failure',
+    `${actionSlug}(${JSON.stringify(args).slice(0, 80)})`,
+    `Failed 3x: ${lastFetchError}`,
+    `Do NOT retry the same way. Check Composio status, entity_id, and args schema.`)
+
+  const taskId = `auto_fix_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+  await query(
+    `INSERT INTO sparkie_tasks (id, user_id, label, executor, action, payload, status, trigger_type, why_human, created_at)
+     VALUES ($1, $2, $3, 'human', 'system_error', $4, 'pending', 'auto', $5, NOW())`,
+    [
+      taskId, userId,
+      `Connector failed: ${actionSlug} — "${lastFetchError}"`,
+      JSON.stringify({ connector: actionSlug, args, error: lastFetchError, retry_count: 3 }),
+      `Connector tool "${actionSlug}" failed 3x autonomously. Needs your review. Error: ${lastFetchError}`,
+    ]
+  ).catch(() => {})
+
+  return `Connector action '${actionSlug}' failed after 3 attempts: ${lastFetchError}`
 }
 
 function formatConnectorResponse(actionSlug: string, data: Record<string, unknown>): string {
