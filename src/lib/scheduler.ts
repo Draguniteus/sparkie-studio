@@ -1064,7 +1064,27 @@ async function ambientPerceptionTick(): Promise<void> {
       } catch { /* calendar check is best-effort */ }
     }
 
-    // 5. Write perception_tick worklog if findings were detected
+    // 5. Goals drive autonomous work — stale P0/P1 goals auto-generate tasks
+    const staleGoals = await query<{ id: string; title: string; description: string }>(
+      `SELECT id, title, description FROM sparkie_goals
+       WHERE user_id = $1 AND status = 'active' AND priority IN ('P0', 'P1')
+       AND sessions_without_progress >= 2 LIMIT 3`,
+      [user_id]
+    ).catch(() => ({ rows: [] as { id: string; title: string; description: string }[] }))
+    for (const goal of staleGoals.rows) {
+      const taskId = `goal_${goal.id}_${Date.now()}`
+      await query(
+        `INSERT INTO sparkie_tasks (id, user_id, label, executor, action, payload, status, trigger_type, scheduled_at)
+         VALUES ($1, $2, $3, 'ai', 'work_toward_goal', $4, 'pending', 'goal', NOW())`,
+        [taskId, user_id, `Work toward: ${goal.title}`, JSON.stringify({ goal_id: goal.id, description: goal.description })]
+      ).catch(() => {})
+      await writeWorklog(user_id, 'proactive_signal',
+        `🎯 Stale goal auto-generated task: "${goal.title}" (${goal.description?.slice(0, 80)})`,
+        { status: 'done', decision_type: 'proactive', conclusion: `Created autonomous task for stale ${goal.title}` }
+      ).catch(() => {})
+    }
+
+    // 6. Write perception_tick worklog if findings were detected
     if (findings.length > 0) {
       await writeWorklog(user_id, 'proactive_signal',
         `⚡ Ambient perception: ${findings.join(' | ')}`,

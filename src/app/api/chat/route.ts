@@ -5170,70 +5170,86 @@ def invoke_llm(query, model='MiniMax-M2.7'):
       }
 
       case 'self_diagnose': {
-        const checks: Array<{ name: string; status: 'ok' | 'warn' | 'fail'; detail: string }> = []
         const internalSecret = process.env.SPARKIE_INTERNAL_SECRET
 
-        // 1. Auth
-        checks.push({ name: 'SPARKIE_INTERNAL_SECRET', status: internalSecret ? 'ok' : 'fail', detail: internalSecret ? 'set' : 'MISSING — all internal API calls will 401' })
-        checks.push({ name: 'MINIMAX_API_KEY', status: process.env.MINIMAX_API_KEY ? 'ok' : 'fail', detail: process.env.MINIMAX_API_KEY ? 'set' : 'MISSING — build/chat broken' })
-        checks.push({ name: 'COMPOSIO_API_KEY', status: process.env.COMPOSIO_API_KEY ? 'ok' : 'warn', detail: process.env.COMPOSIO_API_KEY ? 'set' : 'not set — Gmail/Calendar/tools disabled' })
-        checks.push({ name: 'SUPERMEMORY_API_KEY', status: process.env.SUPERMEMORY_API_KEY ? 'ok' : 'warn', detail: process.env.SUPERMEMORY_API_KEY ? 'set' : 'not set — Supermemory disabled' })
-        checks.push({ name: 'E2B_API_KEY', status: process.env.E2B_API_KEY ? 'ok' : 'fail', detail: process.env.E2B_API_KEY ? 'set' : 'MISSING — execute_terminal/grep_codebase/find_file will return 500. Fallback: use get_github for file reads, query_database for data.' })
-        checks.push({ name: 'MIGRATE_SECRET', status: process.env.MIGRATE_SECRET ? 'ok' : 'warn', detail: process.env.MIGRATE_SECRET ? 'set' : 'not set — skill bootstrap disabled' })
+        // Run all checks in parallel with a 15s overall timeout
+        const diagnosisPromise = (async () => {
+          // 1. Auth — sync env var checks
+          const authChecks = [
+            { name: 'SPARKIE_INTERNAL_SECRET', status: internalSecret ? 'ok' as const : 'fail' as const, detail: internalSecret ? 'set' : 'MISSING — all internal API calls will 401' },
+            { name: 'MINIMAX_API_KEY', status: process.env.MINIMAX_API_KEY ? 'ok' as const : 'fail' as const, detail: process.env.MINIMAX_API_KEY ? 'set' : 'MISSING — build/chat broken' },
+            { name: 'COMPOSIO_API_KEY', status: process.env.COMPOSIO_API_KEY ? 'ok' as const : 'warn' as const, detail: process.env.COMPOSIO_API_KEY ? 'set' : 'not set — Gmail/Calendar/tools disabled' },
+            { name: 'SUPERMEMORY_API_KEY', status: process.env.SUPERMEMORY_API_KEY ? 'ok' as const : 'warn' as const, detail: process.env.SUPERMEMORY_API_KEY ? 'set' : 'not set — Supermemory disabled' },
+            { name: 'E2B_API_KEY', status: process.env.E2B_API_KEY ? 'ok' as const : 'fail' as const, detail: process.env.E2B_API_KEY ? 'set' : 'MISSING — execute_terminal/grep_codebase/find_file will return 500. Fallback: use get_github for file reads, query_database for data.' },
+            { name: 'MIGRATE_SECRET', status: process.env.MIGRATE_SECRET ? 'ok' as const : 'warn' as const, detail: process.env.MIGRATE_SECRET ? 'set' : 'not set — skill bootstrap disabled' },
+          ]
 
-        // 2. Skills count
-        try {
-          const skillsCount = await query(`SELECT COUNT(*) as cnt FROM sparkie_skills`).catch(() => ({ rows: [{ cnt: '0' }] }))
-          const cnt = parseInt(String((skillsCount.rows[0] as Record<string,unknown>)?.cnt ?? '0'))
-          checks.push({ name: 'skills_seeded', status: cnt >= 8 ? 'ok' : 'warn', detail: `${cnt} skills in DB (expect ≥8)` })
-        } catch (e) { checks.push({ name: 'skills_seeded', status: 'fail', detail: String(e) }) }
+          // 2–4: DB checks run in parallel
+          const [skillsResult, taskCountResult, realScoreResult] = await Promise.all([
+            (async () => {
+              try {
+                const r = await query(`SELECT COUNT(*) as cnt FROM sparkie_skills`).catch(() => ({ rows: [{ cnt: '0' }] }))
+                const cnt = parseInt(String((r.rows[0] as Record<string,unknown>)?.cnt ?? '0'))
+                return { name: 'skills_seeded', status: cnt >= 8 ? 'ok' as const : 'warn' as const, detail: `${cnt} skills in DB (expect ≥8)` }
+              } catch (e) { return { name: 'skills_seeded', status: 'fail' as const, detail: String(e) } }
+            })(),
+            userId ? (async () => {
+              try {
+                const r = await query(`SELECT COUNT(*) as cnt FROM sparkie_tasks WHERE user_id = $1 AND status = 'pending'`, [userId]).catch(() => ({ rows: [{ cnt: '0' }] }))
+                const cnt = parseInt(String((r.rows[0] as Record<string,unknown>)?.cnt ?? '0'))
+                return { name: 'pending_tasks', status: 'ok' as const, detail: `${cnt} task(s) pending` }
+              } catch (e) { return { name: 'pending_tasks', status: 'warn' as const, detail: String(e) } }
+            })() : Promise.resolve({ name: 'pending_tasks', status: 'ok' as const, detail: 'no userId' }),
+            userId ? (async () => {
+              try {
+                const [autoR, proR, secR] = await Promise.all([
+                  query<{ completed: string; failed: string }>(`SELECT COUNT(*) FILTER (WHERE status='completed') AS completed, COUNT(*) FILTER (WHERE status='failed') AS failed FROM sparkie_tasks WHERE user_id=$1 AND executor='ai' AND created_at > NOW() - INTERVAL '7 days'`, [userId]).catch(() => ({ rows: [{ completed: '0', failed: '0' }] })),
+                  query<{ proactive: string; total: string }>(`SELECT COUNT(*) FILTER (WHERE decision_type='proactive') AS proactive, COUNT(*) AS total FROM sparkie_worklog WHERE user_id=$1 AND created_at > NOW() - INTERVAL '7 days'`, [userId]).catch(() => ({ rows: [{ proactive: '0', total: '0' }] })),
+                  query<{ approved: string; total: string }>(`SELECT COUNT(*) FILTER (WHERE status='completed') AS approved, COUNT(*) AS total FROM sparkie_tasks WHERE user_id=$1 AND executor='human' AND created_at > NOW() - INTERVAL '30 days'`, [userId]).catch(() => ({ rows: [{ approved: '0', total: '0' }] })),
+                ])
+                const autoRow = autoR.rows[0] ?? { completed: '0', failed: '0' }
+                const autoTotal = parseInt(autoRow.completed) + parseInt(autoRow.failed)
+                const autoScore = autoTotal === 0 ? 70 : Math.round((parseInt(autoRow.completed) / autoTotal) * 100)
+                const proRow = proR.rows[0] ?? { proactive: '0', total: '0' }
+                const proTotal = parseInt(proRow.total)
+                const proScore = proTotal < 3 ? Math.min(40, proTotal * 10) : Math.min(100, Math.round((parseInt(proRow.proactive) / proTotal) * 250))
+                const secRow = secR.rows[0] ?? { approved: '0', total: '0' }
+                const secTotal = parseInt(secRow.total)
+                const secScore = secTotal === 0 ? 50 : Math.min(100, 70 + Math.round((parseInt(secRow.approved) / secTotal) * 30))
+                const realScore = Math.round(Math.pow([autoScore, proScore, secScore].reduce((p, s) => p * Math.max(s, 1), 1), 1 / 3))
+                return { name: 'REAL_score', status: realScore >= 70 ? 'ok' as const : realScore >= 40 ? 'warn' as const : 'fail' as const, detail: `total=${realScore} autonomous=${autoScore} proactive=${proScore} security=${secScore}` }
+              } catch (e) { return { name: 'REAL_score', status: 'warn' as const, detail: String(e) } }
+            })() : Promise.resolve({ name: 'REAL_score', status: 'ok' as const, detail: 'no userId' }),
+          ])
 
-        // 3. Tasks pending
-        if (userId) {
+          // 5. Deploy status — HTTP with 15s timeout
+          let deployCheck: { name: string; status: 'ok' | 'warn' | 'fail'; detail: string } = { name: 'deployment', status: 'warn', detail: 'timeout' }
           try {
-            const taskCount = await query(`SELECT COUNT(*) as cnt FROM sparkie_tasks WHERE user_id = $1 AND status = 'pending'`, [userId]).catch(() => ({ rows: [{ cnt: '0' }] }))
-            const tcnt = parseInt(String((taskCount.rows[0] as Record<string,unknown>)?.cnt ?? '0'))
-            checks.push({ name: 'pending_tasks', status: 'ok', detail: `${tcnt} task(s) pending` })
-          } catch (e) { checks.push({ name: 'pending_tasks', status: 'warn', detail: String(e) }) }
-        }
+            const depRes = await fetch(`${baseUrl}/api/admin/deploy`, {
+              headers: { 'x-internal-secret': internalSecret ?? '' },
+              signal: AbortSignal.timeout(15000),
+            }).catch(() => null)
+            if (depRes?.ok) {
+              const depData = await depRes.json() as { active_deployment?: { phase?: string } }
+              const phase = depData?.active_deployment?.phase ?? 'UNKNOWN'
+              deployCheck = { name: 'deployment', status: phase === 'ACTIVE' ? 'ok' : ['BUILDING','DEPLOYING','PENDING_BUILD'].includes(phase) ? 'warn' : 'fail', detail: `phase=${phase}` }
+            } else if (depRes === null) {
+              deployCheck = { name: 'deployment', status: 'warn', detail: `unreachable — DO proxy may be blocking WebSocket/internal calls` }
+            } else {
+              deployCheck = { name: 'deployment', status: 'warn', detail: `endpoint returned ${depRes?.status}` }
+            }
+          } catch (e) { deployCheck = { name: 'deployment', status: 'warn', detail: `error — ${String(e).slice(0, 80)}` } }
 
-        // 4. REAL score — compute from DB directly (no HTTP roundtrip needed)
-        if (userId) {
-          try {
-            const [autoR, proR, secR] = await Promise.all([
-              query<{ completed: string; failed: string }>(`SELECT COUNT(*) FILTER (WHERE status='completed') AS completed, COUNT(*) FILTER (WHERE status='failed') AS failed FROM sparkie_tasks WHERE user_id=$1 AND executor='ai' AND created_at > NOW() - INTERVAL '7 days'`, [userId]).catch(() => ({ rows: [{ completed: '0', failed: '0' }] })),
-              query<{ proactive: string; total: string }>(`SELECT COUNT(*) FILTER (WHERE decision_type='proactive') AS proactive, COUNT(*) AS total FROM sparkie_worklog WHERE user_id=$1 AND created_at > NOW() - INTERVAL '7 days'`, [userId]).catch(() => ({ rows: [{ proactive: '0', total: '0' }] })),
-              query<{ approved: string; total: string }>(`SELECT COUNT(*) FILTER (WHERE status='completed') AS approved, COUNT(*) AS total FROM sparkie_tasks WHERE user_id=$1 AND executor='human' AND created_at > NOW() - INTERVAL '30 days'`, [userId]).catch(() => ({ rows: [{ approved: '0', total: '0' }] })),
-            ])
-            const autoRow = autoR.rows[0] ?? { completed: '0', failed: '0' }
-            const autoTotal = parseInt(autoRow.completed) + parseInt(autoRow.failed)
-            const autoScore = autoTotal === 0 ? 70 : Math.round((parseInt(autoRow.completed) / autoTotal) * 100)
-            const proRow = proR.rows[0] ?? { proactive: '0', total: '0' }
-            const proTotal = parseInt(proRow.total)
-            const proScore = proTotal < 3 ? Math.min(40, proTotal * 10) : Math.min(100, Math.round((parseInt(proRow.proactive) / proTotal) * 250))
-            const secRow = secR.rows[0] ?? { approved: '0', total: '0' }
-            const secTotal = parseInt(secRow.total)
-            const secScore = secTotal === 0 ? 50 : Math.min(100, 70 + Math.round((parseInt(secRow.approved) / secTotal) * 30))
-            const realScore = Math.round(Math.pow([autoScore, proScore, secScore].reduce((p, s) => p * Math.max(s, 1), 1), 1 / 3))
-            checks.push({ name: 'REAL_score', status: realScore >= 70 ? 'ok' : realScore >= 40 ? 'warn' : 'fail', detail: `total=${realScore} autonomous=${autoScore} proactive=${proScore} security=${secScore}` })
-          } catch (e) { checks.push({ name: 'REAL_score', status: 'warn', detail: String(e) }) }
-        }
+          return [authChecks, skillsResult, taskCountResult, realScoreResult, deployCheck].flat() as Array<{ name: string; status: 'ok' | 'warn' | 'fail'; detail: string }>
+        })()
 
-        // 5. Deploy status
-        try {
-          const depRes = await fetch(`${baseUrl}/api/admin/deploy`, {
-            headers: { 'x-internal-secret': internalSecret ?? '' }
-          }).catch(() => null)
-          if (depRes?.ok) {
-            const depData = await depRes.json() as { active_deployment?: { phase?: string } }
-            const phase = depData?.active_deployment?.phase ?? 'UNKNOWN'
-            checks.push({ name: 'deployment', status: phase === 'ACTIVE' ? 'ok' : ['BUILDING','DEPLOYING','PENDING_BUILD'].includes(phase) ? 'warn' : 'fail', detail: `phase=${phase}` })
-          } else if (depRes === null) {
-            checks.push({ name: 'deployment', status: 'warn', detail: `unreachable — DO proxy may be blocking WebSocket/internal calls` })
-          } else {
-            checks.push({ name: 'deployment', status: 'warn', detail: `endpoint returned ${depRes?.status}` })
-          }
-        } catch (e) { checks.push({ name: 'deployment', status: 'warn', detail: String(e) }) }
+        // 15s overall timeout for the entire diagnosis
+        const checks = await Promise.race([
+          diagnosisPromise,
+          new Promise<Array<{ name: string; status: 'ok' | 'warn' | 'fail'; detail: string }>>((resolve) =>
+            setTimeout(() => resolve([{ name: 'self_diagnose', status: 'warn' as const, detail: 'timed out after 15s — some checks could not complete' }]), 15000)
+          ),
+        ])
 
         const okCount = checks.filter(c => c.status === 'ok').length
         const warnCount = checks.filter(c => c.status === 'warn').length
@@ -5380,6 +5396,15 @@ async function executeToolWithRetry(
   let lastResult = ''
   let allErrors: string[] = []
 
+  // Load attempt history BEFORE first execution — so Sparkie knows past failures before trying
+  let priorHistoryContext = ''
+  if (ctx.userId) {
+    try {
+      const attempts = await getAttempts(ctx.userId, domain, 3)
+      priorHistoryContext = formatAttemptBlock(attempts)
+    } catch { /* non-fatal */ }
+  }
+
   for (let attempt = 0; attempt < 3; attempt++) {
     lastResult = await executeTool(name, args, ctx)
     if (!isErrorResult(lastResult)) {
@@ -5390,7 +5415,7 @@ async function executeToolWithRetry(
           `Succeeded on attempt ${attempt + 1} after previous failures: ${allErrors.join(' | ')}`,
           `Retry worked. Previous error was transient — retry strategy is valid.`)
       }
-      return { result: lastResult, failed: false, attemptHistoryContext: '' }
+      return { result: lastResult, failed: false, attemptHistoryContext: priorHistoryContext }
     }
     allErrors.push(lastResult.slice(0, 80))
     if (attempt < 2) {
@@ -5432,7 +5457,9 @@ async function executeToolWithRetry(
     } catch { /* non-fatal */ }
   }
 
-  return { result: lastResult, failed: true, attemptHistoryContext }
+  // Merge prior history (3 attempts, context before this tool run) with fresh history (5 attempts, including this failure)
+  const combinedHistory = [priorHistoryContext, attemptHistoryContext].filter(Boolean).join('\n')
+  return { result: lastResult, failed: true, attemptHistoryContext: combinedHistory }
 }
 
 // ── Convert tool result URLs to markdown media blocks ─────────────────────────
@@ -7849,6 +7876,8 @@ Keep each header + thought on its own line. Use multiple short bold-header block
             },
           })
           contentAlreadySent = true
+          // Fire-and-forget: self-reflect after each session so Sparkie learns from every interaction
+          if (userId) runSelfReflection(userId).catch(() => {})
           liveRef.controller?.enqueue(liveEncoder.encode('data: [DONE]\n\n'))
           return
         } else if (finishReason === 'length' && autoContinuationRound < 5) {
