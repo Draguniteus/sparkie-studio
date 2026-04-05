@@ -391,13 +391,14 @@ async function checkInbox(userId: string): Promise<{
     if (!connData.items?.length) return { newCount: 0, filteredCount: 0, senders: [], subjects: [], emailIds: [], lastChecked: new Date().toISOString() }
 
     // Fetch recent emails (last 10 from inbox)
-    const execRes = await fetch('https://backend.composio.dev/api/v2/actions/GMAIL_FETCH_EMAILS/execute', {
+    const execRes = await fetch('https://backend.composio.dev/api/v3/tools/execute/GMAIL_FETCH_EMAILS', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': COMPOSIO_API_KEY },
       body: JSON.stringify({
-        entityId: 'sparkie_user_' + userId,
-        input: { max_results: 10, label_ids: ['INBOX'], include_spam_trash: false }
-      })
+        entity_id: 'sparkie_user_' + userId,
+        arguments: { max_results: 10, label_ids: ['INBOX'], include_spam_trash: false }
+      }),
+      signal: AbortSignal.timeout(20000),
     })
     if (!execRes.ok) return { newCount: 0, filteredCount: 0, senders: [], subjects: [], emailIds: [], lastChecked: new Date().toISOString() }
 
@@ -467,12 +468,12 @@ async function checkCalendarConflicts(userId: string): Promise<{
     const todayEnd = new Date()
     todayEnd.setHours(23, 59, 59, 999)
 
-    const execRes = await fetch('https://backend.composio.dev/api/v2/actions/GOOGLECALENDAR_LIST_EVENTS/execute', {
+    const execRes = await fetch('https://backend.composio.dev/api/v3/tools/execute/GOOGLECALENDAR_LIST_EVENTS', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': COMPOSIO_API_KEY },
       body: JSON.stringify({
-        entityId: 'sparkie_user_' + userId,
-        input: {
+        entity_id: 'sparkie_user_' + userId,
+        arguments: {
           calendar_id: 'primary',
           time_min: todayStart.toISOString(),
           time_max: todayEnd.toISOString(),
@@ -778,7 +779,9 @@ export async function GET(req: NextRequest) {
             `SELECT id, name, cognition_state FROM sparkie_topics
              WHERE user_id = $1 AND status = 'active'
              AND cognition_state IS NOT NULL
-             AND jsonb_object_keys(COALESCE(cognition_state->'L6_action_chain', '{}')) && ARRAY['ai']`,
+             AND EXISTS (
+               SELECT 1 FROM jsonb_object_keys(COALESCE(cognition_state->'L6_action_chain', '{}')) AS k(k) WHERE k = 'ai'
+             )`,
             [userId]
           )
           for (const topic of topicsWithWork.rows) {

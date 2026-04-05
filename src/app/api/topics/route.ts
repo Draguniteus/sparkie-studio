@@ -162,7 +162,7 @@ export async function POST(req: NextRequest) {
     const fields: string[] = []
     if (body.last_state !== undefined) { fields.push(`last_state = $${params.length + 1}`); params.push(body.last_state) }
     if (body.last_round !== undefined) { fields.push(`last_round = $${params.length + 1}`); params.push(body.last_round) }
-    if (body.step_count !== undefined) { fields.push(`step_count = step_count + $${params.length + 1}`); params.push(body.step_count) }
+    if (body.step_count !== undefined) { fields.push(`step_count = $${params.length + 1}`); params.push(body.step_count) }
     if (body.original_request !== undefined) { fields.push(`original_request = $${params.length + 1}`); params.push(body.original_request) }
     if (fields.length === 0) return NextResponse.json({ ok: true, action: 'noop' })
     fields.push(`updated_at = NOW()`)

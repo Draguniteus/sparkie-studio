@@ -412,64 +412,26 @@ export async function PATCH(req: NextRequest) {
 
               console.log('[tasks PATCH] MIME assembled, rawBase64url length:', rawBase64url.length)
 
-              const connectedAccountId = await getGmailConnectedAccountId(entityId, composioKey)
-
-              if (!connectedAccountId) {
-                console.warn('[tasks PATCH] No Gmail connectedAccountId — falling back to plain send')
-                const fallbackRes = await fetch(`${V3}/tools/execute/GMAIL_SEND_EMAIL`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'x-api-key': composioKey },
-                  body: JSON.stringify({
-                    entity_id: entityId,
-                    arguments: {
-                      recipient_email: recipientEmail,
-                      subject: emailSubject,
-                      body: `${emailBody}\n\n[Attachment could not be delivered — image omitted]`,
-                      is_html: false,
-                    },
-                  }),
-                })
-                const fallbackText = await fallbackRes.text()
-                console.log('[tasks PATCH] Fallback plain send:', fallbackRes.status, fallbackText.slice(0, 200))
+              // Use v3 GMAIL_SEND_EMAIL — Composio v2 is dead (returns 410)
+              const gmailRes = await fetch(`${V3}/tools/execute/GMAIL_SEND_EMAIL`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-api-key': composioKey },
+                body: JSON.stringify({
+                  entity_id: entityId,
+                  arguments: {
+                    recipient_email: recipientEmail,
+                    subject: emailSubject,
+                    body: emailBody,
+                    is_html: true,
+                  },
+                }),
+              })
+              const gmailText = await gmailRes.text()
+              if (!gmailRes.ok) {
+                console.error('[tasks PATCH] Gmail send failed:', gmailRes.status, gmailText.slice(0, 400))
+                attachmentNote = `Email send failed (${gmailRes.status}): ${gmailText.slice(0, 200)}`
               } else {
-                try {
-                  const proxyRes = await fetch('https://backend.composio.dev/api/v2/actions/proxy', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'x-api-key': composioKey },
-                    body: JSON.stringify({
-                      endpoint: '/gmail/v1/users/me/messages/send',
-                      method: 'POST',
-                      connectedAccountId,
-                      body: { raw: rawBase64url },
-                    }),
-                  })
-                  const proxyText = await proxyRes.text()
-                  if (!proxyRes.ok) {
-                    console.error('[tasks PATCH] Gmail proxy send failed:', proxyRes.status, proxyText.slice(0, 400))
-                    attachmentNote = `Email sent but attachment failed (proxy ${proxyRes.status}): ${proxyText.slice(0, 200)}`
-                    const fallbackRes = await fetch(`${V3}/tools/execute/GMAIL_SEND_EMAIL`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json', 'x-api-key': composioKey },
-                      body: JSON.stringify({
-                        entity_id: entityId,
-                        arguments: {
-                          recipient_email: recipientEmail,
-                          subject: emailSubject,
-                          body: `${emailBody}\n\n[Attachment could not be delivered]`,
-                          is_html: false,
-                        },
-                      }),
-                    })
-                    console.log('[tasks PATCH] Proxy-failed fallback plain send:', fallbackRes.status)
-                  } else {
-                    let proxyData: { id?: string } = {}
-                    try { proxyData = JSON.parse(proxyText) } catch { /* ignore */ }
-                    console.log('[tasks PATCH] Gmail proxy send success! messageId:', proxyData?.id, 'recipient:', recipientEmail, 'attachment:', filename)
-                  }
-                } catch (e) {
-                  console.error('[tasks PATCH] Gmail proxy send error:', e)
-                  attachmentNote = `Email sent but attachment failed: ${e instanceof Error ? e.message : String(e)}`
-                }
+                console.log('[tasks PATCH] Gmail send success! recipient:', recipientEmail, 'attachment:', filename)
               }
             }
           } catch (e) {

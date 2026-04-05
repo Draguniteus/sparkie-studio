@@ -77,6 +77,28 @@ export function GoalsPanel() {
     await loadGoals()
   }
 
+  async function attemptFixGoal(id: string) {
+    // Call check_goal_progress to diagnose and attempt self-fix
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: 'Please run the check_goal_progress tool to check if our memory tools (read_memory, list_memories) are working correctly, and if there are any issues with the sparkie_self_memory table, fix them. Report what you find.' }],
+          topicId: 'system-goal-fix',
+          stream: false,
+        }),
+      })
+      if (res.ok) {
+        // Goal was likely fixed — mark complete
+        await completeGoal(id)
+        return
+      }
+    } catch { /* fall through to refresh */ }
+    // Refresh to show current state
+    await loadGoals()
+  }
+
   function toggleExpand(id: string) {
     setExpanded(prev => {
       const next = new Set(prev)
@@ -178,12 +200,22 @@ export function GoalsPanel() {
                   )}
                   <div className="flex items-center gap-2">
                     {goal.status !== 'completed' && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); completeGoal(goal.id) }}
-                        className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 transition-colors"
-                      >
-                        Mark complete
-                      </button>
+                      <>
+                        {goal.type === 'fix' && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); attemptFixGoal(goal.id) }}
+                            className="text-[10px] px-2 py-0.5 rounded-full bg-orange-500/15 border border-orange-500/30 text-orange-400 hover:bg-orange-500/25 transition-colors"
+                          >
+                            Attempt fix
+                          </button>
+                        )}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); completeGoal(goal.id) }}
+                          className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25 transition-colors"
+                        >
+                          Mark complete
+                        </button>
+                      </>
                     )}
                     <span className="text-[9px] text-text-muted">
                       Created {new Date(goal.createdAt).toLocaleDateString()}

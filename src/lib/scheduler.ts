@@ -145,13 +145,12 @@ async function proactiveInboxSweep(userId: string): Promise<void> {
   try {
     const entityId = `sparkie_user_${userId}`
     // Exclude trash, spam, and promotions from sweep — Block 10 inbox scoring
-    const emailRes = await fetch(`${COMPOSIO_BASE}/actions/execute`, {
+    const emailRes = await fetch(`${COMPOSIO_BASE}/tools/execute/GMAIL_FETCH_EMAILS`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': COMPOSIO_KEY },
       body: JSON.stringify({
-        actionName: 'GMAIL_FETCH_EMAILS',
-        input: { query: 'is:unread -in:trash -in:spam -in:promotions -label:SPAM -label:TRASH -label:DELETED', max_results: 10 },
-        entityId,
+        entity_id: entityId,
+        arguments: { query: 'is:unread -in:trash -in:spam -in:promotions -label:SPAM -label:TRASH -label:DELETED', max_results: 10 },
       }),
       signal: AbortSignal.timeout(10000),
     })
@@ -271,13 +270,12 @@ async function proactiveCalendarSweep(userId: string): Promise<void> {
   const in24h = new Date(now.getTime() + 24 * 60 * 60 * 1000)
   try {
     const entityId = `sparkie_user_${userId}`
-    const calRes = await fetch(`${COMPOSIO_BASE}/actions/execute`, {
+    const calRes = await fetch(`${COMPOSIO_BASE}/tools/execute/GOOGLECALENDAR_LIST_EVENTS`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': COMPOSIO_KEY },
       body: JSON.stringify({
-        actionName: 'GOOGLECALENDAR_LIST_EVENTS',
-        input: { timeMin: now.toISOString(), timeMax: in24h.toISOString(), maxResults: 5 },
-        entityId,
+        entity_id: entityId,
+        arguments: { timeMin: now.toISOString(), timeMax: in24h.toISOString(), maxResults: 5 },
       }),
       signal: AbortSignal.timeout(10000),
     })
@@ -1039,13 +1037,12 @@ async function ambientPerceptionTick(): Promise<void> {
         const now = new Date()
         const in45min = new Date(now.getTime() + 45 * 60 * 1000)
         const entityId = `sparkie_user_${user_id}`
-        const calRes = await fetch(`${COMPOSIO_BASE}/actions/execute`, {
+        const calRes = await fetch(`${COMPOSIO_BASE}/tools/execute/GOOGLECALENDAR_LIST_EVENTS`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-api-key': COMPOSIO_KEY },
           body: JSON.stringify({
-            actionName: 'GOOGLECALENDAR_LIST_EVENTS',
-            input: { timeMin: now.toISOString(), timeMax: in45min.toISOString(), maxResults: 3 },
-            entityId,
+            entity_id: entityId,
+            arguments: { timeMin: now.toISOString(), timeMax: in45min.toISOString(), maxResults: 3 },
           }),
           signal: AbortSignal.timeout(8000),
         })
