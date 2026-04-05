@@ -1185,6 +1185,12 @@ export function ChatInput() {
               window.dispatchEvent(new CustomEvent('sparkie:decision', { detail: parsed.decision_event }))
               continue
             }
+            // thinking_display — show Sparkie's reasoning inline in main chat before response
+            if (parsed.thinking_display) {
+              const thinkData = parsed.thinking_display as { text: string; timestamp: number }
+              window.dispatchEvent(new CustomEvent('sparkie:thinking-display', { detail: thinkData }))
+              continue
+            }
             // Code block start
             if (parsed.code_block_start) {
               window.dispatchEvent(new CustomEvent('sparkie:code-block', { detail: parsed.code_block_start }))

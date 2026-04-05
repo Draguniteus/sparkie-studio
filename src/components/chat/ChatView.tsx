@@ -29,6 +29,7 @@ export function ChatView() {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [traceOpen, setTraceOpen] = useState(false)
   const [streamTraces, setStreamTraces] = useState<StepTrace[]>([])
+  const [thinkingDisplay, setThinkingDisplay] = useState<string | null>(null)
 
   useEffect(() => {
     // rAF: batch scroll to the paint cycle — prevents forced layout on every SSE token
@@ -62,6 +63,26 @@ export function ChatView() {
     }
   }, [longTaskLabel])
 
+  // thinking_display — render Sparkie's reasoning as italic gray text before response
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const data = (e as CustomEvent<{ text: string; timestamp: number }>).detail
+      if (!data?.text?.trim()) return
+      setThinkingDisplay(data.text)
+      // Auto-clear when streaming ends (longTaskLabel goes away)
+    }
+    window.addEventListener('sparkie:thinking-display', handler)
+    return () => window.removeEventListener('sparkie:thinking-display', handler)
+  }, [])
+
+  // Clear thinking display when longTaskLabel clears (streaming ends)
+  useEffect(() => {
+    if (!longTaskLabel && thinkingDisplay) {
+      const t = setTimeout(() => setThinkingDisplay(null), 2000)
+      return () => clearTimeout(t)
+    }
+  }, [longTaskLabel, thinkingDisplay])
+
   // Clear stale traces when a brand-new tool session starts (first 'running' trace of new message)
   // Detects new session by checking if all existing traces are already settled (done/error)
   useEffect(() => {
@@ -84,7 +105,7 @@ export function ChatView() {
 
   if (!chat) return null
 
-  const hasActivity = !!longTaskLabel || streamTraces.length > 0
+  const hasActivity = !!longTaskLabel || streamTraces.length > 0 || !!thinkingDisplay
 
   return (
     <div className="flex-1 flex flex-col h-full">
@@ -134,6 +155,12 @@ export function ChatView() {
       )}
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 md:px-4 py-3 md:py-4 space-y-3 md:space-y-4">
+        {/* Sparkie's thinking — shown as italic muted text before response */}
+        {thinkingDisplay && (
+          <div className="text-sm italic text-text-muted/70 pl-2 border-l-2 border-purple-500/30 leading-relaxed">
+            {thinkingDisplay}
+          </div>
+        )}
         {chat.messages.filter(msg => msg.isStreaming || msg.content || msg.pendingTask).map((msg) => (
           <MessageBubble key={msg.id} message={msg} userAvatarUrl={userAvatarUrl} />
         ))}
