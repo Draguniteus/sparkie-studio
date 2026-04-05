@@ -179,10 +179,23 @@ export function Sidebar() {
         {/* Header */}
         <div className="h-11 flex items-center justify-between px-3 border-b border-hive-border shrink-0">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-honey-500/20 flex items-center justify-center">
-              <Sparkles size={14} className="text-honey-500" />
+            <div className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
+              streamActive
+                ? 'bg-purple-500/20'
+                : 'bg-honey-500/20'
+            }`}>
+              <Sparkles size={14} className={
+                streamActive ? 'text-purple-400' : 'text-honey-500'
+              } />
             </div>
-            <span className="font-semibold text-sm text-honey-500 tracking-tight">Sparkie Studio</span>
+            <span className={`font-semibold text-sm tracking-tight transition-all ${
+              streamActive
+                ? 'bg-gradient-to-r from-purple-300 via-honey-300 to-purple-300 bg-clip-text text-transparent'
+                : 'text-honey-500'
+            }`}
+            style={streamActive ? { backgroundSize: '200% 100%', animation: 'goldShimmer 4s linear infinite' } : undefined}>
+              Sparkie Studio
+            </span>
           </div>
           <button
             onClick={toggleSidebar}
@@ -198,7 +211,9 @@ export function Sidebar() {
             onClick={handleOpenChat}
             className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl transition-all border font-medium text-sm ${
               !['assets','images','radio','connectors','corner','journal','feed','skills','worklog'].includes(activeTab)
-                ? 'bg-honey-500/15 border-honey-500/40 text-honey-500 shadow-[0_0_12px_-4px_rgba(245,158,11,0.4)]'
+                ? streamActive
+                  ? 'bg-purple-500/15 border-purple-500/40 text-purple-300 shadow-[0_0_16px_-4px_rgba(168,85,247,0.4)]'
+                  : 'bg-honey-500/15 border-honey-500/40 text-honey-500 shadow-[0_0_12px_-4px_rgba(245,158,11,0.4)]'
                 : 'bg-hive-elevated border-hive-border text-text-secondary hover:bg-hive-hover hover:text-honey-400 hover:border-honey-500/20'
             }`}
           >
@@ -287,9 +302,18 @@ export function Sidebar() {
 
           {/* Streaming cognitive ticker — Block 10a/10c */}
           {streamActive && streamText && (
-            <div className="mb-2 px-2 py-2 rounded-lg bg-purple-500/8 border border-purple-500/20">
-              <div className="flex items-center gap-1.5 mb-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse shrink-0" />
+            <div className="mb-2 px-2.5 py-2 rounded-xl bg-purple-950/40 border border-purple-500/25 glow-sparkie-avatar">
+              <div className="flex items-center gap-2 mb-1">
+                {/* Mini avatar */}
+                <div className="w-3.5 h-3.5 rounded-full overflow-hidden border border-purple-500/30 shrink-0">
+                  <img src="/sparkie-avatar.jpg" alt="Sparkie" className="w-full h-full object-cover" />
+                </div>
+                {/* Thinking dots */}
+                <div className="thinking-dots flex gap-0.5 items-center">
+                  <span style={{ width: 4, height: 4, background: '#C084FC' }} />
+                  <span style={{ width: 4, height: 4, background: '#C084FC' }} />
+                  <span style={{ width: 4, height: 4, background: '#C084FC' }} />
+                </div>
                 <span className="text-[9px] font-semibold text-purple-300 uppercase tracking-wider">Sparkie thinking</span>
               </div>
               <p className="text-[10px] text-purple-200/80 leading-relaxed break-words">{streamText}</p>

@@ -89,6 +89,8 @@ export interface Message {
   chipLabel?: string            // 'In memory:...' label stamped when task_chip_clear fires
   toolTraces?: StepTrace[]     // step traces collected during this response
   aceMetadata?: AceMusicMetadata  // only present when type === 'ace_music'
+  isProactiveNudge?: boolean   // true when Sparkie initiated this message proactively
+  reasoning?: string           // Sparkie's thinking/reasoning shown inside her bubble
 }
 
 export interface Chat {

@@ -148,9 +148,21 @@ export function GoalsPanel() {
         {loading && goals.length === 0 ? (
           <div className="flex items-center justify-center h-24 text-text-muted text-xs">Loading...</div>
         ) : goals.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-24 gap-2 text-text-muted">
-            <Target size={20} className="opacity-30" />
-            <span className="text-xs">No goals yet</span>
+          <div className="flex flex-col items-center justify-center h-24 gap-3">
+            {/* CSS bullseye illustration */}
+            <div className="relative w-10 h-10">
+              <div className="absolute inset-0 rounded-full border-2 border-purple-500/20" />
+              <div className="absolute inset-2 rounded-full border-2 border-purple-500/15" />
+              <div className="absolute inset-4 rounded-full bg-purple-500/10 border border-purple-500/20" />
+              <div className="absolute inset-6 rounded-full bg-purple-500/5" />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="text-purple-400/60 text-sm">◎</span>
+              </div>
+            </div>
+            <div className="text-center">
+              <p className="text-xs text-text-muted">No active goals</p>
+              <p className="text-[10px] text-text-muted/60 mt-0.5">Sparkie creates goals as she works</p>
+            </div>
           </div>
         ) : (
           goals.map(goal => (

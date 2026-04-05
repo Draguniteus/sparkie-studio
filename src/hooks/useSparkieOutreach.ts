@@ -91,7 +91,7 @@ export function useSparkieOutreach(enabled: boolean) {
       }
 
       const triggerMsgId = store.addMessage(chatId, { role: 'user', content: nudge, type: 'text' })
-      const aiMsgId = store.addMessage(chatId, { role: 'assistant', content: '', isStreaming: true, model: store.selectedModel })
+      const aiMsgId = store.addMessage(chatId, { role: 'assistant', content: '', isStreaming: true, model: store.selectedModel, isProactiveNudge: true })
 
       const currentChat = store.chats.find((c) => c.id === chatId)
       const apiMessages = (currentChat?.messages ?? [])

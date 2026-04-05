@@ -360,9 +360,21 @@ function MessageBubbleInner({ message, userAvatarUrl }: Props) {
   return (
     <div className={`flex gap-3 animate-fade-in ${isUser ? "justify-end" : ""}`}>
       {!isUser && (
-        <div className="w-7 h-7 rounded-lg overflow-hidden shrink-0 mt-0.5 border border-honey-500/20">
-          <img src="/sparkie-avatar.jpg" alt="Sparkie" className="w-full h-full object-cover" />
-        </div>
+        <>
+          {message.isProactiveNudge && (
+            <div className="nudge-pill">
+              <Sparkles size={7} />
+              <span>Sparkie reached out</span>
+            </div>
+          )}
+          <div className={`w-7 h-7 rounded-lg overflow-hidden shrink-0 mt-0.5 border ${
+            message.isProactiveNudge
+              ? 'border-purple-400/40 glow-sparkie-working'
+              : 'border-purple-500/30 glow-sparkie-avatar'
+          }`}>
+            <img src="/sparkie-avatar.jpg" alt="Sparkie" className="w-full h-full object-cover" />
+          </div>
+        </>
       )}
 
       <div className={`max-w-[90%] md:max-w-[80%] min-w-0 overflow-hidden ${isUser ? "order-first" : ""}`}>
@@ -394,8 +406,14 @@ function MessageBubbleInner({ message, userAvatarUrl }: Props) {
         <div className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
           isUser
             ? "bg-honey-500/15 text-text-primary rounded-br-md"
-            : "bg-hive-surface text-text-primary rounded-bl-md"
+            : "bg-sparkie-deep text-text-primary rounded-bl-md border border-purple-500/15"
         }`}>
+          {!isUser && message.reasoning && !message.isStreaming && (
+            <div className="reasoning-header flex items-center gap-1.5 mb-0.5">
+              <span>✦</span>
+              <span>Thinking</span>
+            </div>
+          )}
           {isVideo && !message.isStreaming ? (
             <div className="space-y-2">
               <div className="relative group rounded-lg overflow-hidden">
@@ -537,28 +555,26 @@ function MessageBubbleInner({ message, userAvatarUrl }: Props) {
           )}
 
           {message.isStreaming && (
-            <span className="inline-flex gap-0.5 ml-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-honey-500" style={{ animation: "typing 1.2s infinite 0s" }} />
-              <span className="w-1.5 h-1.5 rounded-full bg-honey-500" style={{ animation: "typing 1.2s infinite 0.2s" }} />
-              <span className="w-1.5 h-1.5 rounded-full bg-honey-500" style={{ animation: "typing 1.2s infinite 0.4s" }} />
+            <span className="inline-flex gap-0.5 ml-1.5 mt-0.5">
+              <div className="thinking-dots"><span /><span /><span /></div>
             </span>
           )}
         </div>
 
         {!isUser && !message.isStreaming && !isBuildCard && !isPendingTask && !isSparkieCard && (
-          <div className="flex items-center gap-1 mt-1 ml-1">
+          <div className="flex items-center gap-1 mt-1.5 ml-1">
             <button onClick={copyToClipboard}
-              className="p-1 rounded hover:bg-hive-hover text-text-muted hover:text-text-secondary transition-colors"
+              className="action-btn"
               title={copied ? "Copied!" : "Copy"}>
               {copied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
             </button>
-            <button className="p-1 rounded hover:bg-hive-hover text-text-muted hover:text-text-secondary transition-colors" title="Regenerate">
+            <button className="action-btn" title="Regenerate">
               <RefreshCw size={12} />
             </button>
-            <button className="p-1 rounded hover:bg-hive-hover text-text-muted hover:text-text-secondary transition-colors" title="Good response">
+            <button className="action-btn" title="Loved this">
               <ThumbsUp size={12} />
             </button>
-            <button className="p-1 rounded hover:bg-hive-hover text-text-muted hover:text-text-secondary transition-colors" title="Bad response">
+            <button className="action-btn" title="Needs work">
               <ThumbsDown size={12} />
             </button>
             {message.model && (() => {

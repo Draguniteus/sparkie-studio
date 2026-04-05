@@ -314,8 +314,13 @@ export function MemoryTab() {
 
         {!loading && activeMemories.length === 0 && (
           <div className="flex flex-col items-center justify-center py-12 text-text-muted">
-            <div className="w-12 h-12 rounded-2xl bg-purple-500/10 flex items-center justify-center mb-3">
-              <Brain size={20} className="text-purple-400" />
+            {/* CSS neuron illustration */}
+            <div className="relative w-10 h-10 mb-3">
+              <div className="absolute left-1 top-2 w-2 h-2 rounded-full bg-purple-500/30" />
+              <div className="absolute left-4 top-0 w-2 h-2 rounded-full bg-purple-400/40" />
+              <div className="absolute left-3 top-5 w-2 h-2 rounded-full bg-purple-500/20" />
+              <div className="absolute left-0.5 top-1 w-3 h-px bg-purple-500/25" style={{ transform: 'rotate(-30deg)', transformOrigin: 'left center' }} />
+              <div className="absolute left-2 top-3 w-3 h-px bg-purple-500/20" style={{ transform: 'rotate(20deg)', transformOrigin: 'left center' }} />
             </div>
             <p className="text-xs font-medium text-text-secondary mb-1">
               {tab === 'user' ? 'No memories about Michael yet' : 'No Sparkie memories yet'}

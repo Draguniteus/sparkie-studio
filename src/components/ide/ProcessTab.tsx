@@ -400,12 +400,12 @@ export function ProcessTab() {
         {/* Empty state */}
         {!hasContent && (
           <div className="flex flex-col items-center justify-center h-full gap-3 text-center">
-            <div className="w-10 h-10 rounded-full bg-purple-500/10 border border-purple-500/20 flex items-center justify-center">
-              <Zap size={18} className="text-purple-400/60" />
+            <div className="w-12 h-12 rounded-xl bg-purple-500/8 border border-purple-500/20 flex items-center justify-center animate-pulse glow-sparkie-avatar">
+              <Zap size={20} className="text-purple-400/50" />
             </div>
             <div>
-              <p className="text-xs font-medium text-text-secondary">No activity yet</p>
-              <p className="text-[10px] text-text-muted mt-1">Step traces appear here when Sparkie uses tools</p>
+              <p className="text-xs font-medium text-text-secondary">Sparkie is idle</p>
+              <p className="text-[10px] text-text-muted mt-1">She'll think out loud here when she works</p>
             </div>
           </div>
         )}

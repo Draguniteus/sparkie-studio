@@ -19,30 +19,65 @@ import { CIPStatusPanel } from "@/components/ide/CIPStatusPanel"
 import { GoalsPanel } from "@/components/ide/GoalsPanel"
 
 
-const WORKLOG_FILTERS = ['all', 'thinking', 'action', 'result', 'error', 'code'] as const
+const WORKLOG_FILTERS = ['all', 'background', 'memory', 'email', 'tasks', 'action', 'result'] as const
 type WorklogFilter = typeof WORKLOG_FILTERS[number]
+
+// Map actual entry types to filter categories
+const TYPE_CATEGORY: Record<string, string> = {
+  heartbeat: 'background',
+  signal_skipped: 'background',
+  auth_check: 'background',
+  cron_sweep: 'background',
+  email_processed: 'email',
+  email_skipped: 'email',
+  email_triage: 'email',
+  memory_learned: 'memory',
+  memory_updated: 'memory',
+  memory_forgotten: 'memory',
+  task_executed: 'tasks',
+  create_task: 'tasks',
+  schedule_task: 'tasks',
+  tool_call: 'action',
+  decision: 'action',
+  code_push: 'action',
+  ai_response: 'result',
+  self_assessment: 'result',
+  error: 'result',
+  proactive_check: 'action',
+}
 
 function WorklogPanel() {
   const { worklog } = useAppStore()
   const [filter, setFilter] = useState<WorklogFilter>('all')
-  const allEntries = [...worklog].reverse()
-  const entries = filter === 'all' ? allEntries : allEntries.filter(e => e.type === filter)
+  const [timeFilter, setTimeFilter] = useState<'hour' | 'today' | 'all'>('all')
+  const now = Date.now()
+  const cutoff = timeFilter === 'hour' ? now - 3600000
+    : timeFilter === 'today' ? new Date().setHours(0, 0, 0, 0)
+    : 0
 
-  const typeConfig: Record<string, { icon: string; color: string; bg: string }> = {
-    thinking: { icon: '🧠', color: 'text-text-muted', bg: 'bg-hive-elevated/40' },
-    action:   { icon: '⚡', color: 'text-blue-400',   bg: 'bg-blue-500/5'       },
-    result:   { icon: '✓',  color: 'text-green-400',  bg: 'bg-green-500/5'      },
-    error:    { icon: '✕',  color: 'text-red-400',    bg: 'bg-red-500/5'        },
-    code:     { icon: '{}', color: 'text-honey-500',  bg: 'bg-honey-500/5'      },
-  }
+  const allEntries = [...worklog].reverse().filter(e => {
+    const ts = new Date(e.created_at ?? e.timestamp).getTime()
+    return !cutoff || ts > cutoff
+  })
+  const entries = filter === 'all' ? allEntries : allEntries.filter(e => TYPE_CATEGORY[e.type] === filter)
 
   const filterCounts: Record<WorklogFilter, number> = {
     all: allEntries.length,
-    thinking: allEntries.filter(e => e.type === 'thinking').length,
-    action: allEntries.filter(e => e.type === 'action').length,
-    result: allEntries.filter(e => e.type === 'result').length,
-    error: allEntries.filter(e => e.type === 'error').length,
-    code: allEntries.filter(e => e.type === 'code').length,
+    background: allEntries.filter(e => TYPE_CATEGORY[e.type] === 'background').length,
+    memory: allEntries.filter(e => TYPE_CATEGORY[e.type] === 'memory').length,
+    email: allEntries.filter(e => TYPE_CATEGORY[e.type] === 'email').length,
+    tasks: allEntries.filter(e => TYPE_CATEGORY[e.type] === 'tasks').length,
+    action: allEntries.filter(e => TYPE_CATEGORY[e.type] === 'action').length,
+    result: allEntries.filter(e => TYPE_CATEGORY[e.type] === 'result').length,
+  }
+
+  const typeConfig: Record<string, { icon: string; color: string; bg: string }> = {
+    background: { icon: '·', color: 'text-text-muted', bg: 'bg-hive-elevated/40' },
+    memory:    { icon: '🧠', color: 'text-purple-400',  bg: 'bg-purple-500/5'      },
+    email:    { icon: '✉',  color: 'text-blue-400',   bg: 'bg-blue-500/5'       },
+    tasks:    { icon: '✓',  color: 'text-green-400', bg: 'bg-green-500/5'     },
+    action:   { icon: '⚡', color: 'text-amber-400', bg: 'bg-amber-500/5'      },
+    result:   { icon: '✓',  color: 'text-emerald-400',bg: 'bg-emerald-500/5'   },
   }
 
   return (
@@ -72,6 +107,20 @@ function WorklogPanel() {
           </button>
         ))}
       </div>
+      {/* Time filter */}
+      <div className="flex items-center gap-1 px-3 py-1.5 border-b border-hive-border/40 shrink-0">
+        {(['hour', 'today', 'all'] as const).map(f => (
+          <button
+            key={f}
+            onClick={() => setTimeFilter(f)}
+            className={`px-2 py-0.5 rounded text-[9px] transition-colors ${
+              timeFilter === f ? 'text-text-secondary bg-hive-elevated' : 'text-text-muted hover:text-text-secondary'
+            }`}
+          >
+            {f === 'hour' ? 'Last hour' : f === 'today' ? 'Today' : 'All'}
+          </button>
+        ))}
+      </div>
       <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-1.5 font-mono text-[11px]">
         {entries.length === 0 ? (
           <div className="flex items-center justify-center h-full text-text-muted text-xs">
@@ -79,8 +128,8 @@ function WorklogPanel() {
           </div>
         ) : (
           entries.map((entry) => {
-            const cfg = typeConfig[entry.type] ?? typeConfig.thinking
-            const ts = new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+            const cfg = typeConfig[TYPE_CATEGORY[entry.type]] ?? typeConfig.background
+            const ts = new Date(entry.created_at ?? entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
             return (
               <div key={entry.id} className={`flex items-start gap-2.5 px-3 py-2 rounded-lg ${cfg.bg} border border-white/4`}>
                 <span className={`shrink-0 w-5 text-center ${cfg.color} text-[10px] mt-0.5`}>{cfg.icon}</span>

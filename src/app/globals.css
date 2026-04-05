@@ -229,6 +229,138 @@ html, body {
 }
 
 /* Dream Journal background themes */
+/* ─── Sparkie UI — personality-forward design system ─── */
+
+/* Sparkie purple palette */
+:root {
+  --sparkie-purple: #A855F7;
+  --sparkie-gold: #F5C542;
+  --sparkie-bg-deep: #1E1533;
+  --sparkie-bg-deep-2: #161228;
+  --sparkie-border: rgba(168, 85, 247, 0.25);
+  --sparkie-glow: rgba(168, 85, 247, 0.15);
+  --sparkie-glow-strong: rgba(168, 85, 247, 0.35);
+}
+
+/* Sparkie keyframes */
+@keyframes sparkieGlow {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50%       { opacity: 0.7; transform: scale(1.08); }
+}
+
+@keyframes goldShimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes reasonIn {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes nudgeIn {
+  from { opacity: 0; transform: scale(0.95) translateY(-4px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes particleDrift {
+  0%   { transform: translateY(0px) translateX(0px) scale(1); opacity: 0.6; }
+  33%  { transform: translateY(-8px) translateX(4px) scale(0.9); opacity: 0.9; }
+  66%  { transform: translateY(-4px) translateX(-3px) scale(1.05); opacity: 0.7; }
+  100% { transform: translateY(0px) translateX(0px) scale(1); opacity: 0.6; }
+}
+
+/* Sparkie utility classes */
+@layer utilities {
+  .bg-sparkie-deep {
+    background: linear-gradient(145deg, #1E1533 0%, #161228 50%, #1a1030 100%);
+  }
+
+  .glow-sparkie-avatar {
+    box-shadow:
+      0 0 0 2px rgba(168, 85, 247, 0.3),
+      0 0 16px rgba(168, 85, 247, 0.2),
+      0 0 32px rgba(168, 85, 247, 0.08);
+  }
+
+  .glow-sparkie-working {
+    box-shadow:
+      0 0 0 2px rgba(168, 85, 247, 0.4),
+      0 0 20px rgba(168, 85, 247, 0.3),
+      0 0 40px rgba(245, 197, 66, 0.1);
+    animation: sparkieGlow 2.5s ease-in-out infinite;
+  }
+
+  .reasoning-header {
+    font-size: 10px;
+    font-weight: 500;
+    color: rgba(216, 180, 254, 0.6);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    padding: 2px 0 4px;
+    border-bottom: 1px solid rgba(168, 85, 247, 0.15);
+    margin-bottom: 4px;
+  }
+
+  .nudge-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    background: linear-gradient(90deg, rgba(168, 85, 247, 0.2), rgba(245, 197, 66, 0.15));
+    border: 1px solid rgba(168, 85, 247, 0.3);
+    font-size: 9px;
+    font-weight: 600;
+    color: #D8B4FE;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+    animation: nudgeIn 0.4s ease-out;
+  }
+
+  .action-btn {
+    padding: 4px;
+    border-radius: 6px;
+    color: rgba(160, 160, 160, 0.7);
+    transition: all 0.15s ease;
+  }
+
+  .action-btn:hover {
+    background: rgba(245, 197, 66, 0.1);
+    color: #F5C542;
+  }
+
+  .thinking-dots span {
+    display: inline-block;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #F5C542;
+    animation: typing 1.2s infinite;
+  }
+
+  .thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+  .thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+}
+
+/* ─── Light Theme sparkie overrides ─── */
+[data-theme="light"] .bg-sparkie-deep,
+[data-theme="light"] .bg-\[\#1E1533\] { background-color: #FDF4D9 !important; }
+[data-theme="light"] .bg-\[\#161228\] { background-color: #F5E5C0 !important; }
+[data-theme="light"] .glow-sparkie-avatar,
+[data-theme="light"] .glow-sparkie-working { box-shadow: none !important; }
+[data-theme="light"] .reasoning-header { color: rgba(139, 92, 60, 0.6); border-color: rgba(139, 92, 60, 0.2); }
+[data-theme="light"] .nudge-pill {
+  background: linear-gradient(90deg, rgba(245, 197, 66, 0.2), rgba(200, 140, 50, 0.15));
+  border-color: rgba(245, 197, 66, 0.3);
+  color: #805E00;
+}
+[data-theme="light"] .thinking-dots span { background: #805E00 !important; }
+[data-theme="light"] .nudge-pill { animation: none; }
+
+/* ─── End Sparkie UI ─── */
+
 .journal-theme-starfield {
   background: radial-gradient(ellipse at 20% 50%, rgba(30,60,120,0.4) 0%, transparent 60%),
               radial-gradient(ellipse at 80% 20%, rgba(60,30,120,0.3) 0%, transparent 50%),

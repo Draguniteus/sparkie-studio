@@ -109,7 +109,11 @@ export function ChatView() {
 
   return (
     <div className="flex-1 flex flex-col h-full">
-      <div className="h-11 flex items-center justify-between px-3 md:px-4 border-b border-hive-border shrink-0">
+      <div className={`h-11 flex items-center justify-between px-3 md:px-4 border-b shrink-0 transition-colors ${
+        longTaskLabel
+          ? 'bg-purple-950/30 border-purple-500/20'
+          : 'border-hive-border'
+      }`}>
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-sm font-medium truncate text-text-primary">{chat.title}</span>
         </div>
@@ -135,10 +139,17 @@ export function ChatView() {
       {/* Live InMemoryPill — shows during active streaming */}
       {longTaskLabel && (
         <div className="px-3 md:px-4 pt-1.5 flex items-center">
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gradient-to-r from-purple-600/12 via-blue-600/8 to-purple-500/8 border border-purple-500/25 w-fit max-w-full">
-            <span className="text-[10px] animate-pulse">🧠</span>
-            <span className="text-[10px] text-purple-300/85 font-medium truncate max-w-[280px]">{longTaskLabel}</span>
-            {/* Stop button inline in the pill — click to abort */}
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-sparkie-deep border border-purple-500/25 w-fit max-w-full">
+            {/* Mini avatar */}
+            <div className="w-4 h-4 rounded-full overflow-hidden border border-purple-500/30 shrink-0">
+              <img src="/sparkie-avatar.jpg" alt="Sparkie" className="w-full h-full object-cover" />
+            </div>
+            {/* Thinking dots */}
+            <div className="thinking-dots flex gap-0.5 items-center">
+              <span /><span /><span />
+            </div>
+            <span className="text-[10px] text-purple-200/80 font-medium truncate max-w-[240px]">{longTaskLabel}</span>
+            {/* Stop button */}
             <button
               onClick={() => window.dispatchEvent(new CustomEvent('sparkie_stop_stream'))}
               className="ml-1 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-red-500/15 text-red-400 hover:bg-red-500/25 border border-red-500/20 text-[9px] font-medium transition-all shrink-0"
@@ -151,7 +162,7 @@ export function ChatView() {
       )}
       {/* Thin pulse line for activity */}
       {hasActivity && (
-        <div className="h-px bg-gradient-to-r from-transparent via-purple-500/30 to-transparent animate-pulse" />
+        <div className="h-0.5 bg-gradient-to-r from-transparent via-purple-500/40 to-transparent animate-pulse" />
       )}
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 md:px-4 py-3 md:py-4 space-y-3 md:space-y-4">

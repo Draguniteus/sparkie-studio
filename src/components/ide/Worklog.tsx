@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { Search } from "lucide-react"
 import { useAppStore, WorklogEntry } from "@/store/appStore"
 import { useShallow } from "zustand/react/shallow"
 import { Brain, Loader2, Mail, MessageSquare, Send, Activity, Eye } from "lucide-react"
@@ -278,6 +279,8 @@ export function Worklog({ compact = false }: WorklogProps) {
     useShallow((s) => ({ worklog: s.worklog, isExecuting: s.isExecuting, addWorklogEntry: s.addWorklogEntry }))
   )
   const [dbLoaded, setDbLoaded] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [expandedId, setExpandedId] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   // Merge DB worklog entries (newest first from API, oldest first in store for timeline)
@@ -381,15 +384,34 @@ export function Worklog({ compact = false }: WorklogProps) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [worklog.length])
 
-  if (worklog.length === 0 && !isExecuting) {
+  // Filter entries by search query
+  const filteredWorklog = searchQuery
+    ? worklog.filter((e: WorklogEntry) =>
+        e.content?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (e as any).reasoning?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (e as any).conclusion?.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : worklog
+
+  if (filteredWorklog.length === 0 && !isExecuting) {
     if (compact) return null
+    const noResults = worklog.length > 0 && searchQuery.length > 0
     return (
       <div className="h-full flex flex-col items-center justify-center text-text-muted p-8">
         <div className="w-16 h-16 rounded-2xl bg-purple-500/10 flex items-center justify-center mb-4">
           <Brain size={24} className="text-purple-400" />
         </div>
-        <p className="text-sm font-medium text-text-secondary mb-1">Sparkie's inner monologue</p>
-        <p className="text-xs text-center">Her thoughts, actions, and learnings as she works</p>
+        {noResults ? (
+          <>
+            <p className="text-sm font-medium text-text-secondary mb-1">No results for "{searchQuery}"</p>
+            <button onClick={() => setSearchQuery('')} className="text-xs text-honey-400 hover:text-honey-300 mt-1">Clear search</button>
+          </>
+        ) : (
+          <>
+            <p className="text-sm font-medium text-text-secondary mb-1">Sparkie's inner monologue</p>
+            <p className="text-xs text-center">Her thoughts, actions, and learnings as she works</p>
+          </>
+        )}
       </div>
     )
   }
@@ -398,7 +420,7 @@ export function Worklog({ compact = false }: WorklogProps) {
     // Compact mode: simple list without timeline
     return (
       <div className="p-2 space-y-0.5">
-        {worklog.slice(-10).map((entry: WorklogEntry) => (
+        {filteredWorklog.slice(-10).map((entry: WorklogEntry) => (
           <div key={entry.id} className="flex items-center gap-2 py-0.5">
             <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${getNodeStyle(entry.type, entry.status, entry.decision_type)}`} />
             <span className="text-[10px] text-text-secondary truncate flex-1">{entry.content}</span>
@@ -434,6 +456,20 @@ export function Worklog({ compact = false }: WorklogProps) {
             </div>
           )}
         </div>
+        {/* Search */}
+        <div className="relative mt-2">
+          <Search size={10} className="absolute left-2 top-1/2 -translate-y-1/2 text-text-muted" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Search entries..."
+            className="w-full pl-7 pr-3 py-1.5 rounded-lg bg-hive-elevated border border-hive-border text-[11px] text-text-secondary placeholder:text-text-muted/50 focus:outline-none focus:border-honey-500/40"
+          />
+          {searchQuery && (
+            <button onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-secondary text-[9px]">✕</button>
+          )}
+        </div>
       </div>
 
       {/* Timeline */}
@@ -443,17 +479,18 @@ export function Worklog({ compact = false }: WorklogProps) {
           <div className="absolute left-[5px] top-2 bottom-2 w-px bg-gradient-to-b from-purple-500/30 via-slate-600/20 to-transparent" />
 
           <div className="space-y-0.5">
-            {worklog.map((entry: WorklogEntry, idx: number) => {
+            {filteredWorklog.map((entry: WorklogEntry, idx: number) => {
               const isMemory  = entry.type === "memory_learned" || entry.type === "memory_updated"
               const isProactive = entry.type === "proactive_check" || entry.decision_type === "proactive"
               const isEmail   = entry.type === "email_processed" || entry.type === "email_skipped"
               const isAiResp  = entry.type === "ai_response"
               const isMsgBatch = entry.type === "message_batch"
               const isSelfAssessment = entry.type === "self_assessment"
+              const isExpanded = expandedId === entry.id
               const nodeStyle = getNodeStyle(entry.type, entry.status, entry.decision_type)
 
               // Show timestamp anchor for first entry or when time changes significantly
-              const prevTs = idx > 0 ? new Date((worklog[idx-1].created_at ?? worklog[idx-1].timestamp) as string | Date).getTime() : 0
+              const prevTs = idx > 0 ? new Date((filteredWorklog[idx-1].created_at ?? filteredWorklog[idx-1].timestamp) as string | Date).getTime() : 0
               const currTs = new Date((entry.created_at ?? entry.timestamp) as string | Date).getTime()
               const showTimeAnchor = idx === 0 || Math.abs(currTs - prevTs) > 60_000
 
@@ -466,7 +503,7 @@ export function Worklog({ compact = false }: WorklogProps) {
                       </span>
                     </div>
                   )}
-                  <div className="flex gap-3 group">
+                  <div className="flex gap-3 group cursor-pointer" onClick={() => setExpandedId(isExpanded ? null : entry.id)}>
                     {/* Timeline dot */}
                     <div className="flex flex-col items-center shrink-0">
                       <div className={`w-[11px] h-[11px] rounded-full shadow-sm mt-1 ${nodeStyle}`} />
@@ -483,6 +520,37 @@ export function Worklog({ compact = false }: WorklogProps) {
                        entry.reasoning  ? <MonologueEntry entry={entry} /> :
                                           <StandardEntry entry={entry} />
                       }
+                      {/* Expanded detail panel */}
+                      {isExpanded && (
+                        <div className="mt-2 p-2 rounded-lg bg-hive-elevated border border-hive-border/60 flex flex-col gap-1.5">
+                          {(entry as any).reasoning && (
+                            <div>
+                              <span className="text-[9px] text-purple-400 uppercase font-semibold tracking-wide">Reasoning</span>
+                              <p className="text-[10px] text-purple-200/80 italic leading-relaxed mt-0.5">{(entry as any).reasoning}</p>
+                            </div>
+                          )}
+                          {(entry as any).conclusion && (
+                            <div>
+                              <span className="text-[9px] text-emerald-400 uppercase font-semibold tracking-wide">Conclusion</span>
+                              <p className="text-[10px] text-emerald-300/80 leading-relaxed mt-0.5">✓ {(entry as any).conclusion}</p>
+                            </div>
+                          )}
+                          {(entry as any).metadata && (
+                            <div>
+                              <span className="text-[9px] text-text-muted uppercase font-semibold tracking-wide">Metadata</span>
+                              <pre className="text-[9px] text-text-muted/60 mt-0.5 overflow-x-auto whitespace-pre-wrap leading-relaxed">
+                                {JSON.stringify((entry as any).metadata, null, 2)}
+                              </pre>
+                            </div>
+                          )}
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-[9px] text-text-muted/40">{entry.type}</span>
+                            {(entry as any).duration != null && (
+                              <span className="text-[9px] text-text-muted/40">· {formatDuration((entry as any).duration)}</span>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
