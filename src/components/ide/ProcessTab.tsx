@@ -31,31 +31,18 @@ const STEP_ICON_MAP: Record<string, string> = {
   rocket: '🚀', image: '🎨', music: '🎵', video: '🎬', mic: '🎤', zap: '⚡',
 }
 
-// Stable key for React list rendering — prefer id, fallback to label+status
+// Stable key for React list rendering — prefer id, fallback to label+status+index
 function traceKey(trace: StepTrace, i: number) {
-  return trace.id ? `${trace.id}__${trace.status}` : `${i}__${trace.label}__${trace.status}`
+  if (trace.id) return `${trace.id}__${trace.status}`
+  return `auto_${i}__${trace.label}__${trace.status}`
 }
 
 const THOUGHT_ICON_MAP: Record<string, string> = { brain: '🧠', zap: '⚡', flag: '🚩', memory: '💾' }
 
-function ThoughtCard({ text, icon, isNew, label }: { text: string; icon?: string; isNew?: boolean; label?: string }) {
-  const [visible, setVisible] = useState(!isNew)
-  useEffect(() => {
-    if (isNew) {
-      const raf = requestAnimationFrame(() => setVisible(true))
-      return () => cancelAnimationFrame(raf)
-    }
-  }, [isNew])
+function ThoughtCard({ text, icon, label }: { text: string; icon?: string; label?: string }) {
   const emoji = THOUGHT_ICON_MAP[icon ?? 'brain'] ?? '🧠'
   return (
-    <div
-      style={{
-        opacity: visible ? 1 : 0,
-        transform: visible ? 'translateY(0)' : 'translateY(-6px)',
-        transition: 'opacity 220ms ease, transform 220ms ease',
-      }}
-      className="flex flex-col gap-1 px-3 py-2 rounded-lg border border-purple-500/20 bg-purple-500/5 text-[11px] border-l-2 border-l-purple-400"
-    >
+    <div className="flex flex-col gap-1 px-3 py-2 rounded-lg border border-purple-500/20 bg-purple-500/5 text-[11px] border-l-2 border-l-purple-400">
       <div className="flex items-center gap-2">
         <span className="text-[13px] shrink-0 mt-px">{emoji}</span>
         {label && <span className="font-bold text-purple-300 text-[11px]">{label}</span>}
@@ -68,24 +55,10 @@ function ThoughtCard({ text, icon, isNew, label }: { text: string; icon?: string
   )
 }
 
-function TraceRow({ trace, isNew }: { trace: StepTrace; isNew?: boolean }) {
+function TraceRow({ trace }: { trace: StepTrace }) {
   const icon = STEP_ICON_MAP[trace.icon] ?? '⚡'
-  const [visible, setVisible] = useState(!isNew)
-
-  useEffect(() => {
-    if (isNew) {
-      const raf = requestAnimationFrame(() => setVisible(true))
-      return () => cancelAnimationFrame(raf)
-    }
-  }, [isNew])
-
   return (
     <div
-      style={{
-        opacity: visible ? 1 : 0,
-        transform: visible ? 'translateY(0)' : 'translateY(-6px)',
-        transition: 'opacity 220ms ease, transform 220ms ease',
-      }}
       className={`flex items-start gap-2.5 px-3 py-2 rounded-lg border text-[11px] ${
         trace.status === 'error'
           ? 'bg-red-500/5 border-red-500/15 text-red-400'
@@ -311,11 +284,11 @@ export function ProcessTab() {
   // Auto-scroll to bottom as new traces arrive
   useEffect(() => {
     if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
     }
   }, [liveTraces.length])
 
-  // Clear live traces immediately when a new execution starts (longTaskLabel transitions null → non-null)
+  // Clear live traces when starting a new execution or switching conversations
   useEffect(() => {
     if (longTaskLabel && !prevLongTaskRef.current) {
       setLiveTraces([])
@@ -323,6 +296,12 @@ export function ProcessTab() {
     }
     prevLongTaskRef.current = longTaskLabel ?? null
   }, [longTaskLabel])
+
+  // Clear traces on conversation switch to prevent stale cards stacking
+  useEffect(() => {
+    setLiveTraces([])
+    seenKeysRef.current = new Set()
+  }, [currentChatId])
 
   // On sparkie:live-done — immediately mark all running traces as done (stops spinner + "Working..." header)
   useEffect(() => {
@@ -361,16 +340,6 @@ export function ProcessTab() {
 
   const isLive = !!longTaskLabel
   const hasContent = liveTraces.length > 0 || recentFrozen.length > 0
-
-  // Determine which trace keys are new (for enter animation)
-  const newKeys = new Set<string>()
-  for (let i = 0; i < liveTraces.length; i++) {
-    const k = traceKey(liveTraces[i], i)
-    if (!seenKeysRef.current.has(k)) {
-      newKeys.add(k)
-      seenKeysRef.current.add(k)
-    }
-  }
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -415,11 +384,10 @@ export function ProcessTab() {
             <p className="text-[10px] text-text-muted px-1 mb-0.5 uppercase tracking-wide">Live</p>
             {liveTraces.map((trace, i) => {
               const k = traceKey(trace, i)
-              const isNew = newKeys.has(k)
               if (trace.type === 'thought') {
-                return <ThoughtCard key={k} text={trace.text ?? trace.label} icon={trace.icon} isNew={isNew} />
+                return <ThoughtCard key={k} text={trace.text ?? trace.label} icon={trace.icon} />
               }
-              return <TraceRow key={k} trace={trace} isNew={isNew} />
+              return <TraceRow key={k} trace={trace} />
             })}
           </div>
         )}

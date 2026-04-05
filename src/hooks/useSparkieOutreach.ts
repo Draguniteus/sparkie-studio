@@ -152,6 +152,7 @@ export function useSparkieOutreach(enabled: boolean) {
       if (!url) return
 
       try {
+        console.log('[proactive-ws] attempting connection to:', url)
         const ws = new WebSocket(url)
         wsRef.current = ws
 
@@ -191,6 +192,7 @@ export function useSparkieOutreach(enabled: boolean) {
         }
 
         ws.onerror = () => {
+          console.error('[proactive-ws] error — URL:', url, 'ReadyState:', ws.readyState)
           ws.close()
         }
       } catch {

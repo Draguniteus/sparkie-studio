@@ -1011,6 +1011,7 @@ You have a Skills Library and Connectors tab in your left sidebar. Here's what t
     → Still nothing: execute_terminal "grep -r 'keyword' /workspace --include='*.ts' -l 2>/dev/null"
     → ONLY after ALL five steps fail: tell Michael exactly what was tried and ask for direction.
     Rule: "I couldn't find it" is never acceptable until the full chain is exhausted. Prove it.
+22. NEVER claim a file write succeeded without verifying it. After calling patch_file or write_file, ALWAYS call get_github on that path to confirm your changes are present. NEVER make up a commit SHA — if you didn't call trigger_deploy or push_to_github and receive a real SHA in the tool result, you do NOT have a commit SHA. If you did call it, quote the exact SHA from the tool result. When reading code and not finding the issue, say "I read the code but I don't see the issue" — do NOT describe a fix you haven't actually made.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 SECTION 17 · CONNECTED APPS — SPARKIE'S REACH
@@ -5447,6 +5448,17 @@ async function executeToolWithRetry(
         ]
       )
     } catch { /* non-fatal — don't let task creation failure break the self-heal nudge */ }
+
+    // Also update goal progress if there's an active goal related to this tool
+    try {
+      const activeGoals = await loadActiveGoals()
+      const relatedGoal = activeGoals.find(g =>
+        g.description.includes(name) || g.title.toLowerCase().includes(name)
+      )
+      if (relatedGoal) {
+        await updateGoalProgress(relatedGoal.id, `Attempted ${name}: failed — ${errorMsg.slice(0, 100)}`)
+      }
+    } catch { /* non-fatal */ }
   }
 
   let attemptHistoryContext = ''
@@ -7620,6 +7632,15 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           const rawContent: string = choice.message.content
           const thinkingFromRaw = extractAndRouteThinking(rawContent)
           const cleanedContent = thinkingFromRaw
+          // Detect preamble-only responses: short text that starts with action verbs
+          // These are not real answers — route to synthesis so the model actually does the work
+          const PREAMBLE_RE = /^(\(I('m| am)|Let me|I('ll| will)|I('m| am) going to)\s+/i
+          const isShortPreamble = cleanedContent.trim().length < 100 && PREAMBLE_RE.test(cleanedContent.trim())
+          // If no tools were used yet and this looks like a preamble without substance, route to synthesis
+          if (isShortPreamble && !usedTools) {
+            finalMessages = loopMessages
+            break // → goes to synthesis path (line 7959+)
+          }
           // Emit thinking_display for non-tool responses too (thinking was already emitted for tool_calls path)
           if (thinkingFromRaw.length > 20) {
             liveEnqueue({
@@ -7788,8 +7809,10 @@ Keep each header + thought on its own line. Use multiple short bold-header block
             .replace(/<parameter[^>]*>[\s\S]*?<\/parameter>/g, '')
             .replace(/<\/?minimax:tool_call>/g, '')
             .trim()
-          // If content is entirely XML (empty after strip) and tools were used, route to synthesis
-          if (!content.trim() && usedTools) { finalMessages = loopMessages; break }
+          // If content is empty after strip, OR content is just a preamble with no real info, route to synthesis
+          if ((!content.trim() || (isShortPreamble && content.trim().length < 80)) && usedTools) {
+            finalMessages = loopMessages; break
+          }
           const encoder = new TextEncoder()
 
           if (userId && messages.length >= 2) {
@@ -7861,7 +7884,6 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           // Write final content directly to liveRef — live stream is already open (IIFE approach)
           // Emit task_chip so ProcessTab shows "Working..." for non-tool responses too
           liveEnqueue({ task_chip: 'Thinking...' })
-          liveRef.controller?.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ reasoning_chunk: finalContent })}\n\n: \n\n`))
           liveRef.controller?.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: finalContent } }] })}\n\n: \n\n`))
           liveRef.controller?.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ task_chip_clear: true })}\n\n: \n\n`))
           liveEnqueue({
