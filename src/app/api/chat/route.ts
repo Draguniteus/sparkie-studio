@@ -4992,7 +4992,7 @@ def invoke_llm(query, model='MiniMax-M2.7'):
             method: 'POST',
             headers: { 'x-api-key': HB_KEY, 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
-            signal: AbortSignal.timeout(90000),
+            signal: AbortSignal.timeout(180000), // 180s — matches platform maxDuration, long LLM calls (reasoning + synthesis) can exceed 90s
           })
           if (!res.ok) return `browser_use_profile error: ${res.status} — ${await res.text()}`
           const data = await res.json() as { result?: string; output?: string; finalResult?: string; error?: string }
@@ -5261,7 +5261,14 @@ def invoke_llm(query, model='MiniMax-M2.7'):
         const summary = `Self-diagnosis: ${okCount} OK, ${warnCount} warnings, ${failCount} failures\n\n${lines.join('\n')}`
 
         if (userId) {
+          // Write a summary entry + one entry per non-ok check for detailed audit trail
           writeWorklog(userId, 'self_assessment', `Self-diagnosis: ${okCount}✅ ${warnCount}⚠️ ${failCount}🚨`, { decision_type: 'action', conclusion: `Self-diagnosis complete — ${okCount} checks passed, ${warnCount} warnings, ${failCount} failure(s)` }).catch(() => {})
+          // Per-check entries for warn/fail so findings are visible in worklog
+          for (const check of checks) {
+            if (check.status !== 'ok') {
+              writeWorklog(userId, 'self_assessment', `${icons[check.status]} ${check.name}: ${check.detail}`, { decision_type: 'action', conclusion: `${check.name} — ${check.status}: ${check.detail}` }).catch(() => {})
+            }
+          }
         }
         return summary
       }
@@ -6450,7 +6457,7 @@ async function tryLLMCall(
       'Authorization': `Bearer ${apiKey}`,
     },
     body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(90000),
+    signal: AbortSignal.timeout(180000), // 180s — matches platform maxDuration, long LLM calls (reasoning + synthesis) can exceed 90s
   })
   let errorText: string | undefined
   if (!res.ok) {
@@ -7897,7 +7904,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           // Emit task_chip so ProcessTab shows "Working..." for non-tool responses too
           liveEnqueue({ task_chip: 'Thinking...' })
           liveRef.controller?.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: finalContent } }] })}\n\n: \n\n`))
-          liveRef.controller?.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ task_chip_clear: true })}\n\n: \n\n`))
+          liveEnqueue({ task_chip_clear: true })
           liveEnqueue({
             step_trace: {
               id: `ready_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -8099,7 +8106,7 @@ SYNTHESIS RULES:
           while (true) {
             const { done, value } = await synthRdr2.read()
             if (done) {
-              liveRef.controller?.enqueue(synthEnc.encode(`data: ${JSON.stringify({ task_chip_clear: true })}\n\n`))
+              liveEnqueue({ task_chip_clear: true })
               liveEnqueue({
                 step_trace: {
                   id: `ready_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,

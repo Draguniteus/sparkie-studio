@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
 
     const upstream = await fetch(decodedUrl, {
       headers: fetchHeaders,
-      signal: AbortSignal.timeout(90000), // 90s — large audio files can be 5-10MB
+      signal: AbortSignal.timeout(180000), // 180s — matches platform maxDuration, large audio files can exceed 90s
     })
 
     if (!upstream.ok && upstream.status !== 206) {

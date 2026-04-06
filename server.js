@@ -167,14 +167,19 @@ app.prepare().then(() => {
   // prependListener ensures we can reject non-WS paths BEFORE
   // ws or Next.js get a chance to handle them.
   server.prependListener('upgrade', (req, socket, head) => {
-    const { pathname } = parse(req.url, true)
+    // Use WHATWG URL for reliable parsing across DO proxy URL forms
+    // Handles: /path, //host/path, https://host/path, ws://host/path
+    let pathname = '/'
+    try { pathname = new URL(req.url, 'http://localhost').pathname } catch { pathname = parse(req.url, true).pathname }
 
     if (pathname !== '/api/terminal-ws' && !pathname.startsWith('/api/proactive-ws')) {
+      console.log('[prependListener] rejecting non-WS path:', pathname, 'req.url was:', req.url)
       // Not our path — destroy and let no other handler run
       socket.destroy()
       return
     }
     // Fall through — the appropriate ws attached listener handles it
+    console.log('[prependListener] allowing WS path:', pathname)
   })
 
   // ws connection event fires after the 101 handshake is complete.

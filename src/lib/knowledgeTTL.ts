@@ -36,17 +36,13 @@ export async function setMemoryTTL(memoryId: number, category: string): Promise<
 }
 
 // Heartbeat: find expired entries and flag them for re-verification
-export async function runTTLDecaySweep(userId?: string): Promise<number> {
+// Note: sparkie_self_memory is a global table (no user_id), source = 'sparkie' or 'seed' etc.
+export async function runTTLDecaySweep(_userId?: string): Promise<number> {
   await ensureColumns()
   const res = await query<{ id: number; category: string; content: string }>(
-    userId
-      ? `SELECT id, category, content FROM sparkie_self_memory
-         WHERE source = $1 AND expires_at < NOW() AND stale_flagged = false
-         LIMIT 20`
-      : `SELECT id, category, content FROM sparkie_self_memory
-         WHERE expires_at < NOW() AND stale_flagged = false
-         LIMIT 20`,
-    userId ? [userId] : []
+    `SELECT id, category, content FROM sparkie_self_memory
+     WHERE expires_at < NOW() AND stale_flagged = false
+     LIMIT 20`
   ).catch(() => ({ rows: [] }))
 
   if (res.rows.length === 0) return 0
