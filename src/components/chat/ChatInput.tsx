@@ -1082,7 +1082,6 @@ export function ChatInput() {
     // ── Worklog framing: open IDE + log session start ──
     if (!ideOpen) openIDE()
     setIDETab('worklog')
-    addWorklogEntry({ type: 'action', content: 'Query received — routing...', status: 'running' })
     try {
       const userProfile = useAppStore.getState().userProfile
       chatAbortRef.current?.abort()
@@ -1304,9 +1303,6 @@ export function ChatInput() {
             if (parsed.reasoning_chunk) {
               // Dispatch immediately so Live Activity shows word-by-word in real time during stream
               window.dispatchEvent(new CustomEvent('sparkie:live-chunk', { detail: parsed.reasoning_chunk as string }))
-              if (!fullContent) {
-                addWorklogEntry({ type: 'result', content: 'Analyzed', status: 'done' })
-              }
               fullContent += parsed.reasoning_chunk as string
               clearTimeout(streamFlushRef.current)
               streamFlushRef.current = setTimeout(() => {
@@ -1315,10 +1311,6 @@ export function ChatInput() {
             }
             const delta = parsed.choices?.[0]?.delta
             if (delta?.content) {
-              if (!fullContent) {
-                // First token — Sparkie is now composing her response
-                addWorklogEntry({ type: 'result', content: 'Analyzed', status: 'done' })
-              }
               fullContent += delta.content
               // Feed each token to the Live Activity ticker (strips markdown client-side)
               window.dispatchEvent(new CustomEvent('sparkie:live-chunk', { detail: delta.content }))

@@ -5416,6 +5416,18 @@ async function executeToolWithRetry(
           `Succeeded on attempt ${attempt + 1} after previous failures: ${allErrors.join(' | ')}`,
           `Retry worked. Previous error was transient — retry strategy is valid.`)
       }
+      // Update goal progress on tool success
+      if (ctx.userId) {
+        try {
+          const activeGoals = await loadActiveGoals()
+          const relatedGoal = activeGoals.find(g =>
+            g.description.includes(name) || g.title.toLowerCase().includes(name)
+          )
+          if (relatedGoal) {
+            await updateGoalProgress(relatedGoal.id, `Used ${name} — working`)
+          }
+        } catch { /* non-fatal */ }
+      }
       return { result: lastResult, failed: false, attemptHistoryContext: priorHistoryContext }
     }
     allErrors.push(lastResult.slice(0, 80))
@@ -8143,6 +8155,15 @@ SYNTHESIS RULES:
       } finally {
         try { liveRef.controller?.close() } catch {}
       } })()
+
+      // Auto-update goal progress after synthesis completes (only if tools were used)
+      if (userId && usedTools) {
+        loadActiveGoals(3).then(activeGoals => {
+          if (activeGoals.length > 0) {
+            updateGoalProgress(activeGoals[0].id, 'Completed response — working').catch(() => {})
+          }
+        }).catch(() => {})
+      }
 
       return new Response(liveStream, {
         headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },

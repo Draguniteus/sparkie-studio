@@ -169,7 +169,7 @@ app.prepare().then(() => {
   server.prependListener('upgrade', (req, socket, head) => {
     const { pathname } = parse(req.url, true)
 
-    if (pathname !== '/api/terminal-ws' && pathname !== '/api/proactive-ws') {
+    if (pathname !== '/api/terminal-ws' && !pathname.startsWith('/api/proactive-ws')) {
       // Not our path — destroy and let no other handler run
       socket.destroy()
       return
@@ -270,9 +270,11 @@ app.prepare().then(() => {
 
   // ── Proactive push WebSocket (/api/proactive-ws) ─────────────────────────────
   wssProactive.on('connection', async (ws, req) => {
-    const { query } = parse(req.url, true)
-    const userId = query && query.userId ? String(query.userId) : undefined
-    console.log('[proactive-ws] connection userId:', userId)
+    // DO proxy strips query strings on WebSocket upgrade — userId is now path-based: /api/proactive-ws/<userId>
+    const { pathname } = parse(req.url, true)
+    const pathParts = pathname.split('/').filter(Boolean) // ['api', 'proactive-ws', '<userId>']
+    const userId = pathParts[2] ? String(pathParts[2]) : undefined
+    console.log('[proactive-ws] connection userId:', userId, 'path:', pathname)
 
     if (!userId) {
       ws.close(1008, 'Missing userId')

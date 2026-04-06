@@ -99,7 +99,7 @@ function FrozenCard({ group, index, hasLive }: { group: { chipLabel: string; tra
   const toolTraceLabels = group.traces.filter(t => t.type !== 'thought').map(t => t.label ?? t.toolName ?? '').filter(Boolean)
   const raw = firstMeaningful?.text ?? firstMeaningful?.label ?? toolTraceLabels[0] ?? ''
   const toolSummary = toolTraceLabels.length > 0 ? toolTraceLabels.slice(0, 3).join(' → ') : ''
-  const label = raw.slice(0, 55) || toolSummary.slice(0, 55) || (index === 0 && !hasLive ? 'Last response' : `${index + 1} responses ago`)
+  const label = raw || toolSummary || (index === 0 && !hasLive ? 'Last response' : `${index + 1} responses ago`)
 
   return (
     <div className="rounded-lg border border-hive-border/60 overflow-hidden">
@@ -108,7 +108,7 @@ function FrozenCard({ group, index, hasLive }: { group: { chipLabel: string; tra
         className="w-full flex items-center gap-2 px-3 py-2 bg-hive-elevated/30 hover:bg-hive-elevated/50 transition-colors text-left"
       >
         <ChevronRight size={10} className={`shrink-0 text-text-muted transition-transform ${open ? 'rotate-90' : ''}`} />
-        <span className="text-[10px] text-text-muted flex-1 truncate">{label}</span>
+        <span title={label} className="text-[10px] text-text-muted flex-1 truncate">{label}</span>
         <div className="flex items-center gap-2 shrink-0">
           {errorTraces.length > 0 && (
             <span className="text-[9px] text-red-400">{errorTraces.length} err</span>
@@ -325,7 +325,7 @@ export function ProcessTab() {
 
   // Collect frozen toolTraces from recent assistant messages (last 3)
   const chat = chats.find(c => c.id === currentChatId)
-  const recentFrozen: Array<{ chipLabel: string; traces: StepTrace[] }> = []
+  const recentFrozen: Array<{ chipLabel: string; traces: StepTrace[]; msgId?: string }> = []
   if (chat) {
     const assistantMsgs = [...chat.messages]
       .filter(m => m.role === 'assistant' && m.toolTraces && m.toolTraces.length > 0)
@@ -334,6 +334,7 @@ export function ProcessTab() {
       recentFrozen.push({
         chipLabel: msg.chipLabel ?? 'In memory',
         traces: msg.toolTraces!,
+        msgId: msg.id,
       })
     }
   }
@@ -394,7 +395,7 @@ export function ProcessTab() {
 
         {/* Frozen traces from recent messages — collapsible cards */}
         {recentFrozen.map((group, gi) => (
-          <FrozenCard key={gi} group={group} index={gi} hasLive={liveTraces.length > 0} />
+          <FrozenCard key={group.msgId ?? `frozen-${gi}`} group={group} index={gi} hasLive={liveTraces.length > 0} />
         ))}
 
         {/* Empty state */}

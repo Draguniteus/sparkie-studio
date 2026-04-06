@@ -35,7 +35,8 @@ export function useSparkieOutreach(enabled: boolean) {
     function getWsUrl(userId: string): string {
       if (typeof window === 'undefined') return ''
       const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      return `${proto}//${window.location.host}/api/proactive-ws?userId=${encodeURIComponent(userId)}`
+      // Path-based userId (not query string) — DO proxy strips query strings on WS upgrade
+      return `${proto}//${window.location.host}/api/proactive-ws/${encodeURIComponent(userId)}`
     }
 
     function buildNudge(subtype: string, data: Record<string, unknown>): string {
