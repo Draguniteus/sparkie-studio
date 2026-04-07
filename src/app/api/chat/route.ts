@@ -5203,22 +5203,18 @@ def invoke_llm(query, model='MiniMax-M2.7'):
             })() : Promise.resolve({ name: 'pending_tasks', status: 'ok' as const, detail: 'no userId' }),
             userId ? (async () => {
               try {
-                const [autoR, proR, secR] = await Promise.all([
-                  query<{ completed: string; failed: string }>(`SELECT COUNT(*) FILTER (WHERE status='completed') AS completed, COUNT(*) FILTER (WHERE status='failed') AS failed FROM sparkie_tasks WHERE user_id=$1 AND executor='ai' AND created_at > NOW() - INTERVAL '7 days'`, [userId]).catch(() => ({ rows: [{ completed: '0', failed: '0' }] })),
-                  query<{ proactive: string; total: string }>(`SELECT COUNT(*) FILTER (WHERE decision_type='proactive') AS proactive, COUNT(*) AS total FROM sparkie_worklog WHERE user_id=$1 AND created_at > NOW() - INTERVAL '7 days'`, [userId]).catch(() => ({ rows: [{ proactive: '0', total: '0' }] })),
-                  query<{ approved: string; total: string }>(`SELECT COUNT(*) FILTER (WHERE status='completed') AS approved, COUNT(*) AS total FROM sparkie_tasks WHERE user_id=$1 AND executor='human' AND created_at > NOW() - INTERVAL '30 days'`, [userId]).catch(() => ({ rows: [{ approved: '0', total: '0' }] })),
-                ])
-                const autoRow = autoR.rows[0] ?? { completed: '0', failed: '0' }
-                const autoTotal = parseInt(autoRow.completed) + parseInt(autoRow.failed)
-                const autoScore = autoTotal === 0 ? 70 : Math.round((parseInt(autoRow.completed) / autoTotal) * 100)
-                const proRow = proR.rows[0] ?? { proactive: '0', total: '0' }
-                const proTotal = parseInt(proRow.total)
-                const proScore = proTotal < 3 ? Math.min(40, proTotal * 10) : Math.min(100, Math.round((parseInt(proRow.proactive) / proTotal) * 250))
-                const secRow = secR.rows[0] ?? { approved: '0', total: '0' }
-                const secTotal = parseInt(secRow.total)
-                const secScore = secTotal === 0 ? 50 : Math.min(100, 70 + Math.round((parseInt(secRow.approved) / secTotal) * 30))
-                const realScore = Math.round(Math.pow([autoScore, proScore, secScore].reduce((p, s) => p * Math.max(s, 1), 1), 1 / 3))
-                return { name: 'REAL_score', status: realScore >= 70 ? 'ok' as const : realScore >= 40 ? 'warn' as const : 'fail' as const, detail: `total=${realScore} autonomous=${autoScore} proactive=${proScore} security=${secScore}` }
+                // Call the /api/real-score endpoint so REAL score matches the UI exactly
+                const realScoreRes = await fetch(`${baseUrl}/api/real-score`, {
+                  headers: { cookie: cookieHeader },
+                  signal: AbortSignal.timeout(10000),
+                }).catch(() => null)
+                if (realScoreRes?.ok) {
+                  const realData = await realScoreRes.json() as { total: number; legs: Array<{ id: string; label: string; score: number; signal: string }> }
+                  const r = realData
+                  const detail = `total=${r.total} ` + r.legs.map(l => `${l.id}=${l.score}`).join(' ')
+                  return { name: 'REAL_score', status: r.total >= 70 ? 'ok' as const : r.total >= 40 ? 'warn' as const : 'fail' as const, detail }
+                }
+                return { name: 'REAL_score', status: 'warn' as const, detail: 'could not reach /api/real-score endpoint' }
               } catch (e) { return { name: 'REAL_score', status: 'warn' as const, detail: String(e) } }
             })() : Promise.resolve({ name: 'REAL_score', status: 'ok' as const, detail: 'no userId' }),
           ])
@@ -7659,6 +7655,17 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           if (isShortPreamble && !usedTools) {
             finalMessages = loopMessages
             break // → goes to synthesis path (line 7959+)
+          }
+          // Detect incomplete-action statements: model says "Reading the chat route file:"
+          // or "Let me..." / "Running..." but stops before calling tools — nudge it to continue
+          const looksIncomplete = /:\s*$|\.{3}\s*$|\bLet me\b|\bI will\b|\bI'll now\b|\bRunning\b|\bStarting\b/i.test(cleanedContent)
+          if (looksIncomplete && !usedTools && round < MAX_TOOL_ROUNDS) {
+            // Model expressed intent but didn't call tools — nudge to continue
+            loopMessages = [...loopMessages, choice.message, {
+              role: 'user' as const,
+              content: '⚡ SYSTEM: You said you would do something but stopped. Execute the tool call NOW. Do not describe what you will do — just call the tool.',
+            }]
+            continue
           }
           // Emit thinking_display for non-tool responses too (thinking was already emitted for tool_calls path)
           if (thinkingFromRaw.length > 20) {

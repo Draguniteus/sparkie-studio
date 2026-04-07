@@ -17,6 +17,7 @@ export function useSparkieOutreach(enabled: boolean) {
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastTriggerRef = useRef<string | null>(null)
+  const reconnectAttemptsRef = useRef(0)
 
   useEffect(() => {
     if (!enabled) {
@@ -159,11 +160,12 @@ export function useSparkieOutreach(enabled: boolean) {
 
         ws.onopen = () => {
           console.log('[proactive-ws] connected for userId:', userId)
-          // Clear any reconnect timer
+          // Clear any reconnect timer and reset backoff counter on successful connection
           if (reconnectTimerRef.current) {
             clearTimeout(reconnectTimerRef.current)
             reconnectTimerRef.current = null
           }
+          reconnectAttemptsRef.current = 0
         }
 
         ws.onmessage = async (event) => {
@@ -187,9 +189,13 @@ export function useSparkieOutreach(enabled: boolean) {
         }
 
         ws.onclose = () => {
-          console.log('[proactive-ws] disconnected — reconnecting in 10s')
+          console.log('[proactive-ws] disconnected')
           wsRef.current = null
-          reconnectTimerRef.current = setTimeout(connect, 10_000)
+          // Exponential backoff: 10s, 20s, 40s, 80s, 160s — max 5 minutes
+          const backoffMs = Math.min(10_000 * Math.pow(2, reconnectAttemptsRef.current), 300_000)
+          reconnectAttemptsRef.current++
+          console.log(`[proactive-ws] reconnecting in ${backoffMs / 1000}s (attempt ${reconnectAttemptsRef.current})`)
+          reconnectTimerRef.current = setTimeout(connect, backoffMs)
         }
 
         ws.onerror = () => {

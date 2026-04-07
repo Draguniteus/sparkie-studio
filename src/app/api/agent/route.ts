@@ -152,7 +152,7 @@ async function executeDueTasks(userId: string, host: string, proto: string, cook
         // (e.g. scrape 100 pages, process each, aggregate) instead of capping
         // at ~10 rounds per single chat session.
         const MAX_PASSES = 4
-        const PASS_TIMEOUT_MS = 95_000
+        const PASS_TIMEOUT_MS = 50_000
         const internalSecret = process.env.SPARKIE_INTERNAL_SECRET ?? ''
 
         // ── Skill auto-trigger ────────────────────────────────────────────
@@ -174,12 +174,10 @@ async function executeDueTasks(userId: string, host: string, proto: string, cook
 
         // Auto-detect skills from action content
         const SKILL_TRIGGERS: Array<{ keywords: RegExp; skillName: string }> = [
-          { keywords: /\b(email|gmail|inbox|reply|send.*mail|draft.*email|read.*email)\b/i, skillName: 'email_handling' },
-          { keywords: /\b(github|push|commit|pull.?request|\bpr\b|branch|repo|git push|git ops)\b/i, skillName: 'github_ops' },
-          { keywords: /\b(tweet|twitter|post.*social|instagram|tiktok|social.*media)\b/i, skillName: 'social_posting' },
-          { keywords: /\b(morning.?brief|daily.?brief|daily.?digest)\b/i, skillName: 'morning_brief' },
-          { keywords: /\b(calendar|schedule|event|meeting|google.?calendar)\b/i, skillName: 'calendar_ops' },
-          { keywords: /\b(worklog|work.?log|journal|log.*activity|write.*log)\b/i, skillName: 'worklog' },
+          { keywords: /\b(email|gmail|inbox|reply|send.*mail|draft.*email|read.*email)\b/i, skillName: 'email' },
+          { keywords: /\b(tweet|twitter|post.*social|instagram|tiktok|social.*media)\b/i, skillName: 'social' },
+          { keywords: /\b(calendar|schedule|event|meeting|google.?calendar)\b/i, skillName: 'calendar' },
+          { keywords: /\b(browse|browser|hyperbrowser|scrape|screenshot)\b/i, skillName: 'browser-use' },
         ]
         for (const trigger of SKILL_TRIGGERS) {
           if (trigger.keywords.test(task.action)) {

@@ -141,9 +141,10 @@ app.prepare().then(() => {
   })
 
   // ATTACHED mode: ws integrates with http.Server connection tracking.
-  // Two WebSocket servers: /api/terminal-ws (terminal) + /api/proactive-ws (proactive push)
+  // Two WebSocket servers: /api/terminal-ws (terminal) + /api/proactive-ws (proactive push, noServer mode for path-based userId)
   const wssTerminal = new WebSocketServer({ server, path: '/api/terminal-ws' })
-  const wssProactive = new WebSocketServer({ server, path: '/api/proactive-ws' })
+  // noServer mode: client connects to /api/proactive-ws/<userId> (path-based userId, exact path option won't match)
+  const wssProactive = new WebSocketServer({ noServer: true })
 
   // Global registry for proactive WebSocket clients — shared with Next.js API routes
   // via global.__proactiveClients. API routes push events to this Set.
@@ -172,14 +173,25 @@ app.prepare().then(() => {
     let pathname = '/'
     try { pathname = new URL(req.url, 'http://localhost').pathname } catch { pathname = parse(req.url, true).pathname }
 
-    if (pathname !== '/api/terminal-ws' && !pathname.startsWith('/api/proactive-ws')) {
-      console.log('[prependListener] rejecting non-WS path:', pathname, 'req.url was:', req.url)
-      // Not our path — destroy and let no other handler run
-      socket.destroy()
+    if (pathname === '/api/terminal-ws') {
+      // Let wssTerminal handle it (it has path: '/api/terminal-ws')
+      console.log('[prependListener] allowing terminal WS path:', pathname)
       return
     }
-    // Fall through — the appropriate ws attached listener handles it
-    console.log('[prependListener] allowing WS path:', pathname)
+
+    if (pathname.startsWith('/api/proactive-ws')) {
+      // Manually upgrade for proactive WS — wssProactive uses noServer mode
+      // so it won't auto-handle; we call handleUpgrade explicitly.
+      console.log('[prependListener] upgrading proactive WS path:', pathname)
+      wssProactive.handleUpgrade(req, socket, head, (ws) => {
+        wssProactive.emit('connection', ws, req)
+      })
+      return
+    }
+
+    // Not our path — destroy
+    console.log('[prependListener] rejecting non-WS path:', pathname, 'req.url was:', req.url)
+    socket.destroy()
   })
 
   // ws connection event fires after the 101 handshake is complete.
