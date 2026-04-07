@@ -7724,6 +7724,13 @@ Keep each header + thought on its own line. Use multiple short bold-header block
                 }).catch(() => {})
               }
               jsonFnResults.push({ role: 'tool' as const, tool_call_id: fakeId, content: result })
+              // Per-tool DB worklog entry — meaningful, tool-specific, not just session-level
+              if (toolContext.userId) {
+                writeWorklog(toolContext.userId, 'tool',
+                  `Used ${toolName}: ${result.slice(0, 100)}`,
+                  { status: failed ? 'anomaly' : 'done', tool_name: toolName, conclusion: result.slice(0, 200) }
+                ).catch(() => {})
+              }
               if (failed && attemptHistoryContext) allAttemptHistoryContext = attemptHistoryContext
             }
             // Self-healing nudge: if any tool failed after retries, give Sparkie the lesson
