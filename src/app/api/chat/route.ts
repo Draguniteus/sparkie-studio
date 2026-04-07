@@ -7814,6 +7814,13 @@ Keep each header + thought on its own line. Use multiple short bold-header block
               liveEnqueue({ step_trace: { id: fakeId, toolName, icon: xmlIcon, label: xmlLabel, status: xmlError ? 'error' : 'done', duration: xmlDuration, timestamp: Date.now() } })
               console.log(`[tool] ${toolName} (xml) — ${xmlError ? 'error' : 'done'} in ${xmlDuration}ms`)
               xmlToolResults.push({ role: 'tool' as const, tool_call_id: fakeId, content: result })
+              // Per-tool DB worklog entry for XML-format tool execution
+              if (toolContext.userId) {
+                writeWorklog(toolContext.userId, 'tool',
+                  `Used ${toolName}: ${result.slice(0, 100)}`,
+                  { status: failed ? 'anomaly' : 'done', tool_name: toolName, conclusion: result.slice(0, 200) }
+                ).catch(() => {})
+              }
               if (failed && attemptHistoryContext) xmlAllAttemptHistoryContext = attemptHistoryContext
             }
             // Self-healing nudge: if any XML tool failed after retries, give Sparkie the lesson

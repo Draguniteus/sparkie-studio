@@ -186,7 +186,7 @@ export function formatGoalsBlock(goals: Goal[]): string {
   const lines = top3.map(g =>
     `  [${g.priority}] ${g.title}${g.sessionsWithoutProgress > 0 ? ` — ${g.sessionsWithoutProgress} session(s) without progress` : ''}\n       Progress: ${g.progress || 'Not started'}`
   )
-  return `\n\n## MY OPEN AGENDA THIS SESSION\nThese are your own persistent goals. Check on them. Drive them forward.\n${lines.join('\n')}\n→ After each significant tool call, use check_goal_progress(goal_id, "description of what was done") to log progress — even on success.`
+  return `\n\n## MY OPEN AGENDA THIS SESSION\nThese are your own persistent goals. Check on them. Drive them forward.\n${lines.join('\n')}\n→ After each significant tool call, use check_goal_progress(goal_id, "description of what was done") to log progress — on both success and failure.`
 }
 
 /** Seed starter goals on first deploy */

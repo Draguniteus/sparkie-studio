@@ -100,7 +100,7 @@ function TraceRow({ trace }: { trace: StepTrace }) {
   )
 }
 
-function FrozenCard({ group, index, hasLive }: { group: { chipLabel: string; traces: StepTrace[] }; index: number; hasLive: boolean }) {
+function FrozenCard({ group, index, hasLive, isSettled }: { group: { chipLabel: string; traces: StepTrace[] }; index: number; hasLive: boolean; isSettled?: boolean }) {
   const [open, setOpen] = useState(index === 0 && !hasLive)
   // Count only non-thought traces for the step counter
   const toolTraces = group.traces.filter(t => t.type !== 'thought')
@@ -115,13 +115,13 @@ function FrozenCard({ group, index, hasLive }: { group: { chipLabel: string; tra
   const label = raw || toolSummary || (index === 0 && !hasLive ? 'Last response' : `${index + 1} responses ago`)
 
   return (
-    <div className="rounded-lg border border-hive-border/60 overflow-hidden">
+    <div className={`rounded-lg border overflow-hidden transition-colors duration-500 ${isSettled ? 'border-purple-400/60 bg-purple-500/10' : 'border-hive-border/60 bg-hive-elevated/30'}`}>
       <button
         onClick={() => setOpen(v => !v)}
         className="w-full flex items-center gap-2 px-3 py-2 bg-hive-elevated/30 hover:bg-hive-elevated/50 transition-colors text-left"
       >
         <ChevronRight size={10} className={`shrink-0 text-text-muted transition-transform ${open ? 'rotate-90' : ''}`} />
-        <span title={label} className="text-[10px] text-text-muted flex-1 truncate">{label}</span>
+        <span title={label} className="text-[10px] text-text-muted flex-1">{label}</span>
         <div className="flex items-center gap-2 shrink-0">
           {errorTraces.length > 0 && (
             <span className="text-[9px] text-red-400">{errorTraces.length} err</span>
@@ -165,6 +165,8 @@ export function ProcessTab() {
   const seenKeysRef = useRef<Set<string>>(new Set())
   const scrollRef = useRef<HTMLDivElement>(null)
   const prevLongTaskRef = useRef<string | null>(null)
+  const [settledId, setSettledId] = useState<string | null>(null)
+  const settledTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Subscribe to live step_trace SSE events (id-based upsert for per-tool spinner→checkmark)
   useEffect(() => {
@@ -325,6 +327,26 @@ export function ProcessTab() {
     return () => window.removeEventListener('sparkie:live-done', handler)
   }, [])
 
+  // On task_chip_clear (synthesis done) — flash the most recent FrozenCard as "settled"
+  useEffect(() => {
+    const handler = () => {
+      // Access current chat's frozen traces directly from store (avoids forward-ref issue)
+      const store = useAppStore.getState()
+      const chat = store.chats.find(c => c.id === store.currentChatId)
+      const frozenMsgs = chat?.messages.filter(m => m.role === 'assistant' && m.toolTraces && m.toolTraces.length > 0) ?? []
+      if (frozenMsgs.length > 0) {
+        const mostRecent = frozenMsgs[frozenMsgs.length - 1]?.id
+        if (mostRecent) {
+          setSettledId(mostRecent)
+          if (settledTimerRef.current) clearTimeout(settledTimerRef.current)
+          settledTimerRef.current = setTimeout(() => setSettledId(null), 2000)
+        }
+      }
+    }
+    window.addEventListener('sparkie:task-chip-clear', handler)
+    return () => window.removeEventListener('sparkie:task-chip-clear', handler)
+  }, [])
+
   // Clear live traces 3s after longTaskLabel clears (response done)
   useEffect(() => {
     if (!longTaskLabel && liveTraces.length > 0) {
@@ -408,7 +430,7 @@ export function ProcessTab() {
 
         {/* Frozen traces from recent messages — collapsible cards */}
         {recentFrozen.map((group, gi) => (
-          <FrozenCard key={group.msgId ?? `frozen-${gi}`} group={group} index={gi} hasLive={liveTraces.length > 0} />
+          <FrozenCard key={group.msgId ?? `frozen-${gi}`} group={group} index={gi} hasLive={liveTraces.length > 0} isSettled={settledId === group.msgId} />
         ))}
 
         {/* Empty state */}

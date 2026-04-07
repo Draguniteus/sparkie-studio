@@ -1231,6 +1231,8 @@ export function ChatInput() {
               _setStepTraces([])
               _stepTracesRef.current = []
               useAppStore.getState().setLongTaskLabel(null)
+              // Tell ProcessTab the most recent card is now "settled" (visual highlight)
+              window.dispatchEvent(new CustomEvent('sparkie:task-chip-clear', { detail: { id: assistantMsgId } }))
               continue
             }
             // Hive status update — animated pill only (not written to worklog; step_trace handles real entries)
