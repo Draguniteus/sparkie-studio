@@ -41,17 +41,30 @@ const THOUGHT_ICON_MAP: Record<string, string> = { brain: '🧠', zap: '⚡', fl
 
 function ThoughtCard({ text, icon, label }: { text: string; icon?: string; label?: string }) {
   const emoji = THOUGHT_ICON_MAP[icon ?? 'brain'] ?? '🧠'
+  const preview = stripMarkdown(text).slice(0, 120)
+  const isLong = stripMarkdown(text).length > 120
   return (
-    <div className="flex flex-col gap-1 px-3 py-2 rounded-lg border border-purple-500/20 bg-purple-500/5 text-[11px] border-l-2 border-l-purple-400">
-      <div className="flex items-center gap-2">
+    <details className="group px-3 py-2 rounded-lg border border-purple-500/20 bg-purple-500/5 border-l-2 border-l-purple-400">
+      <summary className="flex items-center gap-2 cursor-pointer list-none">
         <span className="text-[13px] shrink-0 mt-px">{emoji}</span>
-        {label && <span className="font-bold text-purple-300 text-[11px]">{label}</span>}
+        {label
+          ? <span className="font-bold text-purple-300 text-[11px]">{label}</span>
+          : <span className="text-[11px] text-purple-300/70 italic">thinking…</span>
+        }
+        {isLong && (
+          <span className="ml-auto text-[9px] text-purple-400/50 group-open:hidden shrink-0">
+            +{stripMarkdown(text).length - 120} chars
+          </span>
+        )}
+      </summary>
+      <div className="mt-1 pl-5">
+        {isLong ? (
+          <p className="text-[11px] leading-snug text-purple-200/70 break-words">{stripMarkdown(text)}</p>
+        ) : (
+          <p className="text-[11px] leading-snug text-purple-200/70 break-words">{preview}</p>
+        )}
       </div>
-      {label
-        ? <span className="leading-snug text-purple-200/70 break-words pl-5">{stripMarkdown(text)}</span>
-        : <span className="flex-1 leading-snug text-purple-200/80 italic break-words">{stripMarkdown(text)}</span>
-      }
-    </div>
+    </details>
   )
 }
 
@@ -381,12 +394,12 @@ export function ProcessTab() {
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 flex flex-col gap-3">
         {/* Live traces — interleaved thoughts + tool cards */}
         {liveTraces.length > 0 && (
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-3">
             <p className="text-[10px] text-text-muted px-1 mb-0.5 uppercase tracking-wide">Live</p>
             {liveTraces.map((trace, i) => {
               const k = traceKey(trace, i)
               if (trace.type === 'thought') {
-                return <ThoughtCard key={k} text={trace.text ?? trace.label} icon={trace.icon} />
+                return <ThoughtCard key={k} text={trace.text ?? trace.label ?? ''} icon={trace.icon} label={trace.label} />
               }
               return <TraceRow key={k} trace={trace} />
             })}

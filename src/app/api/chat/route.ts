@@ -6005,13 +6005,16 @@ async function handleBuildMode(
         { role: 'user', content: lastUserMsg[0]?.content ?? '' },
       ]
       let fullBuildRaw = ''
+      let streamClosed = false
+      const safeClose = () => { if (!streamClosed) { streamClosed = true; try { controller.close() } catch (_) {} } }
+      const safeEnq = (data: Uint8Array) => { if (!streamClosed) { try { controller.enqueue(data) } catch (_) { streamClosed = true } } }
 
       try {
         const apiKey = process.env.MINIMAX_API_KEY
         if (!apiKey) {
           send('error', { message: 'No MINIMAX_API_KEY configured' })
           send('done', {})
-          try { controller.close() } catch (_) {}
+          safeClose()
           return
         }
 
@@ -6401,7 +6404,7 @@ async function handleBuildMode(
         }
 
         send('done', {})
-        try { controller.close() } catch (_) {}
+        safeClose()
 
         if (userId) {
           query(
@@ -6415,9 +6418,9 @@ async function handleBuildMode(
       } catch (err) {
         console.error('[/api/chat build mode] error:', err)
         try {
-          controller.enqueue(encoder.encode(buildSseEvent('error', { message: String(err) })))
-          controller.enqueue(encoder.encode(buildSseEvent('done', {})))
-          controller.close()
+          safeEnq(encoder.encode(buildSseEvent('error', { message: String(err) })))
+          safeEnq(encoder.encode(buildSseEvent('done', {})))
+          safeClose()
         } catch {}
       }
     },
@@ -6900,7 +6903,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
         // `: \n\n` is an SSE comment — zero-byte flush that prevents nginx/DO proxy buffering
         const chunk = liveEncoder.encode(`data: ${JSON.stringify(eventPayload)}\n\n: \n\n`)
         if (liveRef.controller) {
-          liveRef.controller.enqueue(chunk)
+          try { liveRef.controller.enqueue(chunk) } catch (_) {}
         } else {
           liveChunks.push(chunk)
         }
