@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState } from "react"
+import React, { useState, useEffect } from "react"
 import { Message, PendingTask, StepTrace, AceMusicMetadata } from "@/store/appStore"
 import { TaskApprovalCard } from "@/components/chat/TaskApprovalCard"
 import { useAppStore } from "@/store/appStore"
@@ -317,6 +317,18 @@ function AceMusicPlayer({ message }: { message: Message }) {
 function MessageBubbleInner({ message, userAvatarUrl }: Props) {
   const isUser = message.role === "user"
   const [copied, setCopied] = useState(false)
+  const [thinkingPreview, setThinkingPreview] = useState('')
+
+  // Listen for live thought_step events to show think block preview in bubble
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const text = (e as CustomEvent<string>).detail
+      const firstLine = text.split('\n')[0].trim()
+      setThinkingPreview(firstLine.length > 60 ? firstLine.slice(0, 60) + '…' : firstLine)
+    }
+    window.addEventListener('sparkie:thought-step', handler)
+    return () => window.removeEventListener('sparkie:thought-step', handler)
+  }, [])
 
   const copyToClipboard = () => {
     navigator.clipboard.writeText(message.content)
@@ -384,7 +396,7 @@ function MessageBubbleInner({ message, userAvatarUrl }: Props) {
             <div className="thinking-dots shimmer flex gap-0.5 items-center">
               <span /><span /><span />
             </div>
-            <span className="text-[10px] text-purple-300/85 font-medium">Sparkie is thinking…</span>
+            <span className="text-[10px] text-purple-300/85 font-medium">{thinkingPreview || 'Sparkie is thinking…'}</span>
             <button
               onClick={() => window.dispatchEvent(new CustomEvent('sparkie_pause_stream'))}
               className="flex items-center gap-1 ml-1 px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/25 text-amber-400 hover:bg-amber-500/25 transition-colors"
