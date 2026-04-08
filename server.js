@@ -290,7 +290,7 @@ app.prepare().then(() => {
     // DO proxy strips query strings on WebSocket upgrade — userId is now path-based: /api/proactive-ws/<userId>
     const { pathname } = parse(req.url, true)
     const pathParts = pathname.split('/').filter(Boolean) // ['api', 'proactive-ws', '<userId>']
-    const userId = pathParts[2] ? String(pathParts[2]) : undefined
+    const userId = pathParts[2] ? decodeURIComponent(String(pathParts[2])) : undefined
     console.log('[proactive-ws] connection userId:', userId, 'path:', pathname)
 
     if (!userId) {
@@ -300,8 +300,13 @@ app.prepare().then(() => {
 
     proactiveClientsAdd(ws, userId)
 
-    // Send ack
-    try { ws.send(JSON.stringify({ type: 'connected', data: 'Proactive stream ready' })) } catch (_) {}
+    // Delay ack by 150ms — DO proxy needs time to stabilize WS tunnel before we send bytes
+    // Sending immediately causes "Invalid frame header" on the client
+    setTimeout(() => {
+      if (ws.readyState === 1) {
+        try { ws.send(JSON.stringify({ type: 'connected', data: 'Proactive stream ready' })) } catch (_) {}
+      }
+    }, 150)
 
     // Heartbeat: ping every 30s to keep DO proxy connection alive
     const pingInterval = setInterval(() => {

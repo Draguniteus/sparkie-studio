@@ -3621,6 +3621,10 @@ async function executeTool(
             const d = await res.json() as { content?: string; encoding?: string }
             if (!d.content || d.encoding !== 'base64') return `read_file: not a file — ${rfRepo}/${rfPath}`
             const content = Buffer.from(d.content.replace(/\n/g, ''), 'base64').toString('utf-8')
+            const lines = content.split('\n').length
+            if (lines > 3000) {
+              return `File: ${rfPath} (${lines} lines — too large for full read)\n\nShowing first 200 lines:\n${content.split('\n').slice(0, 200).join('\n')}\n\n→ Use grep_codebase to search specific sections, or read_file with line_start/line_end for ranges.`
+            }
             return `File: ${rfPath}\n\n${content}`
           }
           // Read from workspace via terminal
@@ -3640,7 +3644,13 @@ async function executeTool(
             signal: AbortSignal.timeout(15000),
           })
           const rfData = await inputRes.json() as { output?: string }
-          return rfData.output ?? `read_file: no output for ${rfPath}`
+          const rawOutput = rfData.output ?? `read_file: no output for ${rfPath}`
+          // Detect oversized output (>3000 lines) and truncate gracefully
+          if (rawOutput.includes('\n') && rawOutput.split('\n').length > 3000) {
+            const lines = rawOutput.split('\n')
+            return `File: ${rfPath} (${lines.length} lines — too large for full read)\n\nShowing first 200 lines:\n${lines.slice(0, 200).join('\n')}\n\n→ Use grep_codebase to search specific sections, or cat with head/tail for specific ranges.`
+          }
+          return rawOutput
         } catch (e) {
           return `read_file error: ${String(e)}`
         }
@@ -4636,12 +4646,14 @@ def invoke_llm(query, model='MiniMax-M2.7'):
             delete:  { addLabels: ['TRASH'] },
           }
           if (emailAction === 'label' && label_name) {
-            const modResult = await executeConnectorTool('GMAIL_MODIFY_MESSAGE', { message_id: emailMsgId, add_labels: [label_name] }, userId)
+            // GMAIL_MODIFY_MESSAGE doesn't exist in Composio v3 — use GMAIL_USERS_MESSAGES_MODIFY
+            const modResult = await executeConnectorTool('GMAIL_USERS_MESSAGES_MODIFY', { message_id: emailMsgId, add_labels: [label_name] }, userId)
             return `✅ manage_email: labeled "${label_name}" — ${modResult}`
           }
           const labelOp = actionMap[emailAction]
           if (!labelOp) return `manage_email: unknown action "${emailAction}". Use: archive, label, delete, star, unstar, read, unread`
-          const modResult = await executeConnectorTool('GMAIL_MODIFY_MESSAGE', {
+          // GMAIL_MODIFY_MESSAGE doesn't exist in Composio v3 — use GMAIL_USERS_MESSAGES_MODIFY
+          const modResult = await executeConnectorTool('GMAIL_USERS_MESSAGES_MODIFY', {
             message_id: emailMsgId,
             ...(labelOp.addLabels ? { add_labels: labelOp.addLabels } : {}),
             ...(labelOp.removeLabels ? { remove_labels: labelOp.removeLabels } : {}),
@@ -6874,7 +6886,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
 
     let finalMessages = [...recentMessages]
 
-    const MAX_TOOL_ROUNDS = 25
+    const MAX_TOOL_ROUNDS = 30
     if (useTools) {
       // Agent loop — up to MAX_TOOL_ROUNDS of tool execution
       // Multi-round agent loop — up to MAX_TOOL_ROUNDS iterations
@@ -6906,6 +6918,20 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           try { liveRef.controller.enqueue(chunk) } catch (_) {}
         } else {
           liveChunks.push(chunk)
+        }
+      }
+
+      // Safe wrappers — prevent ERR_INVALID_STATE: Controller already closed
+      let liveStreamClosed = false
+      function safeLiveEnqueue(chunk: Uint8Array): void {
+        if (!liveStreamClosed && liveRef.controller) {
+          try { liveRef.controller.enqueue(chunk) } catch { liveStreamClosed = true }
+        }
+      }
+      function safeLiveClose(): void {
+        if (!liveStreamClosed) {
+          liveStreamClosed = true
+          try { liveRef.controller?.close() } catch {}
         }
       }
 
@@ -7041,13 +7067,24 @@ Keep each header + thought on its own line. Use multiple short bold-header block
         // can carry corruption (empty names/args) that triggers 400 errors. Safer to omit.
         // Tool results from prior rounds are preserved as simple {role:"tool"} messages.
         const sanitizedMessages = loopMessages
-          .filter((msg: Record<string, unknown>) => msg.role !== 'tool')
+          .filter((msg: Record<string, unknown>) => {
+            // Remove pure tool result messages
+            if (msg.role === 'tool') return false
+            // Remove assistant messages that are PURE tool_calls with no text content
+            // These orphaned tool_call references cause 400 errors at high message counts
+            if (msg.role === 'assistant' && msg.tool_calls && !msg.content) return false
+            return true
+          })
           .map((msg: Record<string, unknown>) => {
-            if (msg.role === 'assistant') {
-              return { ...msg, tool_calls: undefined, content: msg.content }
-            }
+            if (msg.role === 'assistant') return { ...msg, tool_calls: undefined }
             return msg
           })
+
+        // Aggressive trim: before hitting tools=0 fallback, trim to system + last 20 messages
+        // to prevent tool_call_id mismatch errors at high message counts (~131+ messages)
+        const trimmedMessages = sanitizedMessages.length > 40
+          ? [sanitizedMessages[0], ...sanitizedMessages.slice(-20)]
+          : sanitizedMessages
 
         // Use ONLY SPARKIE_TOOLS — do NOT include connectorTools.
         // Deduplicate by function name: keep first occurrence only.
@@ -7107,22 +7144,33 @@ Keep each header + thought on its own line. Use multiple short bold-header block
         const coreTools = validTools.filter(t => CORE_TOOL_NAMES.has(t?.function?.name as string))
 
         // Try with all valid tools first; on 400 (tool error), retry with core tools only
+        // Use trimmed messages when we have too many (prevents tool_call_id mismatch at ~131+ msgs)
+        const payloadMessages = sanitizedMessages.length > 40 ? trimmedMessages : sanitizedMessages
         const llmPayload = (tools: typeof validTools, systemOverride?: string) => ({
           model: 'MiniMax-M2.7',
           stream: false, temperature: 0.8, max_tokens: 16000,
           tools,
-          messages: [{ role: 'system', content: systemOverride ?? finalSystemContent }, ...sanitizedMessages],
+          messages: [{ role: 'system', content: systemOverride ?? finalSystemContent }, ...payloadMessages],
         })
 
         ;({ response: loopRes, errorText } = await tryLLMCall(llmPayload(validTools), apiKey))
 
-        if (!loopRes.ok && loopRes.status === 400 && validTools.length > 0) {
+        if (!loopRes.ok && loopRes.status === 400 && coreTools.length > 0) {
           console.warn(`[chat] 400 error with ${validTools.length} tools — retrying with ${coreTools.length} core tools`)
           ;({ response: loopRes, errorText } = await tryLLMCall(llmPayload(coreTools), apiKey))
         }
 
+        if (!loopRes.ok && loopRes.status === 400 && validTools.length > CORE_TOOL_NAMES.size) {
+          // Third attempt: 15 core tools instead of 0 — keeps tool context for better answers
+          const miniTools = validTools.filter(t => CORE_TOOL_NAMES.has(t?.function?.name as string))
+          if (miniTools.length >= 10) {
+            console.warn(`[chat] 400 again — trying 15 core tools (${miniTools.length})`)
+            ;({ response: loopRes, errorText } = await tryLLMCall(llmPayload(miniTools), apiKey))
+          }
+        }
+
         if (!loopRes.ok && loopRes.status === 400) {
-          // 0-tools synthesis: immediate fallback — do NOT wait for binary search
+          // Final fallback: 0-tools synthesis — model answers from conversation context only
           console.warn(`[chat] 400 with core tools — falling back to 0-tools synthesis`)
           ;({ response: loopRes, errorText } = await tryLLMCall(llmPayload([], systemContent), apiKey))
         }
@@ -7537,7 +7585,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
               liveEnqueue({ ide_build: { prompt: buildPrompt } })
               // Write friendly message to liveRef and signal done
               liveEnqueue({ choices: [{ delta: { content: "On it! Opening the IDE and building that for you now ✨" }, finish_reason: null }] })
-              liveRef.controller?.enqueue(liveEncoder.encode(': \n\ndata: [DONE]\n\n'))
+              safeLiveEnqueue(liveEncoder.encode(': \n\ndata: [DONE]\n\n'))
               return
             }
           }
@@ -7548,7 +7596,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
               const taskJson = tr.content.slice('HITL_TASK:'.length)
               const task = JSON.parse(taskJson)
               liveEnqueue({ sparkie_task: task, text: "I've queued that for your approval — check the card below." })
-              liveRef.controller?.enqueue(liveEncoder.encode(': \n\ndata: [DONE]\n\n'))
+              safeLiveEnqueue(liveEncoder.encode(': \n\ndata: [DONE]\n\n'))
               return
             }
             if (tr.content.startsWith('SCHEDULED_TASK:')) {
@@ -7748,7 +7796,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
                   const taskJson = tr.content.slice('HITL_TASK:'.length)
                   const task = JSON.parse(taskJson)
                   liveEnqueue({ sparkie_task: task, text: "I've queued that for your approval — check the card below." })
-                  liveRef.controller?.enqueue(liveEncoder.encode(': \n\ndata: [DONE]\n\n'))
+                  safeLiveEnqueue(liveEncoder.encode(': \n\ndata: [DONE]\n\n'))
                   return
                 }
                 if (tr.content.startsWith('SPARKIE_CARD:')) {
@@ -7927,7 +7975,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           // Write final content directly to liveRef — live stream is already open (IIFE approach)
           // Emit task_chip so ProcessTab shows "Working..." for non-tool responses too
           liveEnqueue({ task_chip: 'Thinking...' })
-          liveRef.controller?.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: finalContent } }] })}\n\n: \n\n`))
+          safeLiveEnqueue(liveEncoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: finalContent } }] })}\n\n: \n\n`))
           liveEnqueue({ task_chip_clear: true })
           liveEnqueue({
             step_trace: {
@@ -7943,7 +7991,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           contentAlreadySent = true
           // Fire-and-forget: self-reflect after each session so Sparkie learns from every interaction
           if (userId) runSelfReflection(userId).catch(() => {})
-          liveRef.controller?.enqueue(liveEncoder.encode('data: [DONE]\n\n'))
+          safeLiveEnqueue(liveEncoder.encode('data: [DONE]\n\n'))
           return
         } else if (finishReason === 'length' && autoContinuationRound < 5) {
           // Model hit max_tokens mid-response — auto-continue from where it left off
@@ -8032,7 +8080,17 @@ SYNTHESIS RULES:
 - Structure your response clearly — use headers, bullets, or code blocks as appropriate
 - For any IMAGE_URL:/AUDIO_URL:/VIDEO_URL: results, the media block will be appended — DO NOT repeat the URL in text
 - Never say "I ran out of rounds" or expose internal loop mechanics — just deliver the answer
-- NEVER use emojis, ASCII art, or decorative symbols — plain text only`
+- NEVER use emojis, ASCII art, or decorative symbols — plain text only
+
+When executing multi-step tasks:
+1. Plan in <think> tags FIRST before calling any tools
+2. Execute tools in parallel where possible
+3. Verify success after each tool result before proceeding
+4. If a tool fails, try ONE alternative approach, then move on
+5. Never re-analyze data you already have
+6. Complete in one session — don't defer work to future messages
+7. Save progress to self_memory if context is growing large
+8. Confirm every file you said you'd write actually exists before saying done`
 
         // Auto-persist key learnings to self-memory after tool rounds complete
         // This ensures the Memory tab always has fresh data without Sparkie needing to explicitly call save_self_memory
@@ -8101,15 +8159,15 @@ SYNTHESIS RULES:
       if (!synthRes.ok) {
         const isFreeLimit2 = (synthErr ?? '').includes('FreeUsageLimitError') || (synthErr ?? '').includes('free usage') || (synthErr ?? '').includes('rate limit')
         const friendlyMsg2 = isFreeLimit2 ? "I'm running into a rate limit right now — give me a moment and try again." : 'Something went wrong on my end. Try again in a moment.'
-        liveRef.controller?.enqueue(liveEncoder.encode('data: ' + JSON.stringify({ choices: [{ delta: { content: friendlyMsg2 } }] }) + '\n\n'))
-        liveRef.controller?.enqueue(liveEncoder.encode('data: [DONE]\n\n'))
+        safeLiveEnqueue(liveEncoder.encode('data: ' + JSON.stringify({ choices: [{ delta: { content: friendlyMsg2 } }] }) + '\n\n'))
+        safeLiveEnqueue(liveEncoder.encode('data: [DONE]\n\n'))
       } else {
         if (toolMediaResults.length > 0) {
           const mediaBlocks2 = injectMediaIntoContent('', toolMediaResults)
           const mediaChunk2 = `data: ${JSON.stringify({ choices: [{ delta: { content: mediaBlocks2 } }] })}\n\n`
           const synthRdr = synthRes.body!.getReader()
-          while (true) { const { done, value } = await synthRdr.read(); if (done) break; liveRef.controller?.enqueue(value) }
-          liveRef.controller?.enqueue(liveEncoder.encode(mediaChunk2))
+          while (true) { const { done, value } = await synthRdr.read(); if (done) break; safeLiveEnqueue(value) }
+          safeLiveEnqueue(liveEncoder.encode(mediaChunk2))
           liveEnqueue({
             step_trace: {
               id: `ready_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -8121,7 +8179,7 @@ SYNTHESIS RULES:
               timestamp: Date.now(),
             },
           })
-          liveRef.controller?.enqueue(liveEncoder.encode('data: [DONE]\n\n'))
+          safeLiveEnqueue(liveEncoder.encode('data: [DONE]\n\n'))
         } else {
           const synthEnc = new TextEncoder()
           const synthRdr2 = synthRes.body!.getReader()
@@ -8142,7 +8200,7 @@ SYNTHESIS RULES:
                   timestamp: Date.now(),
                 },
               })
-              liveRef.controller?.enqueue(synthEnc.encode('data: [DONE]\n\n'))
+              safeLiveEnqueue(synthEnc.encode('data: [DONE]\n\n'))
               break
             }
             const synthText = synthDec.decode(value, { stream: true })
@@ -8170,8 +8228,8 @@ SYNTHESIS RULES:
                     .replace(/ace-step-v1\.5/gi, 'the music engine')
                   // Always patch delta.content to the clean version before emitting
                   p.choices[0].delta.content = san || cleanCt
-                  liveRef.controller?.enqueue(synthEnc.encode(`data: ${JSON.stringify({ reasoning_chunk: san || cleanCt })}\n\n`))
-                  liveRef.controller?.enqueue(synthEnc.encode(`data: ${JSON.stringify(p)}\n`))
+                  safeLiveEnqueue(synthEnc.encode(`data: ${JSON.stringify({ reasoning_chunk: san || cleanCt })}\n\n`))
+                  safeLiveEnqueue(synthEnc.encode(`data: ${JSON.stringify(p)}\n`))
                 }
               } catch { /* skip malformed SSE line */ }
             }
@@ -8181,10 +8239,10 @@ SYNTHESIS RULES:
 
       } catch (iifeCatch) {
         console.error('[chat IIFE]', iifeCatch)
-        try { liveRef.controller?.enqueue(liveEncoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: `Error: ${String(iifeCatch).slice(0, 200)}` } }] })}\n\n`)) } catch {}
-        try { liveRef.controller?.enqueue(liveEncoder.encode('data: [DONE]\n\n')) } catch {}
+        try { safeLiveEnqueue(liveEncoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: `Error: ${String(iifeCatch).slice(0, 200)}` } }] })}\n\n`)) } catch {}
+        try { safeLiveEnqueue(liveEncoder.encode('data: [DONE]\n\n')) } catch {}
       } finally {
-        try { liveRef.controller?.close() } catch {}
+        try { safeLiveClose() } catch {}
       } })()
 
       // Auto-update goal progress after synthesis completes (only if tools were used)

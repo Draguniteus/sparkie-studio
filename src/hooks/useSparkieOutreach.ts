@@ -160,15 +160,18 @@ export function useSparkieOutreach(enabled: boolean) {
 
         ws.onopen = () => {
           console.log('[proactive-ws] connected for userId:', userId)
-          // Clear any reconnect timer and reset backoff counter on successful connection
+          // Clear any reconnect timer on successful connection
+          // DO NOT reset backoff counter here — onopen fires before DO proxy stabilizes,
+          // and a "connect" that immediately gets Invalid frame header should NOT reset backoff
           if (reconnectTimerRef.current) {
             clearTimeout(reconnectTimerRef.current)
             reconnectTimerRef.current = null
           }
-          reconnectAttemptsRef.current = 0
         }
 
         ws.onmessage = async (event) => {
+          // Reset backoff ONLY after a real message is received (not just onopen)
+          reconnectAttemptsRef.current = 0
           if (document.hidden) return // Don't interrupt if tab not visible
           let msg: ProactiveEvent | null = null
           try { msg = JSON.parse(event.data) as ProactiveEvent } catch { return }

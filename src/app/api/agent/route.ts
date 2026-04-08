@@ -151,8 +151,8 @@ async function executeDueTasks(userId: string, host: string, proto: string, cook
         // This lets the model execute 40+ tool calls across a long task
         // (e.g. scrape 100 pages, process each, aggregate) instead of capping
         // at ~10 rounds per single chat session.
-        const MAX_PASSES = 4
-        const PASS_TIMEOUT_MS = 50_000
+        const MAX_PASSES = 2
+        const PASS_TIMEOUT_MS = 25_000 // 25s — two passes fit safely within 60s maxDuration
         const internalSecret = process.env.SPARKIE_INTERNAL_SECRET ?? ''
 
         // ── Skill auto-trigger ────────────────────────────────────────────
