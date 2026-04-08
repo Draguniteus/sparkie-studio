@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Zap, Plus, ExternalLink, CheckCircle2, Loader2, Search, BookOpen, Code2 } from "lucide-react"
+import { Zap, Plus, ExternalLink, CheckCircle2, Loader2, Search, BookOpen, Code2, Palette, Bot, Brain, Music, CreditCard, Mail, Smartphone, Mic, Volume2, Send, FlaskConical, Flame } from "lucide-react"
 
 interface Skill {
   id: number
@@ -18,7 +18,7 @@ const MARKETPLACE_SKILLS = [
     description: "Produces distinctive, production-grade frontend interfaces. Commits to bold design directions — avoids generic AI aesthetics. Use when building components, pages, or full apps.",
     url: "https://clawhub.ai/steipete/frontend-design",
     category: "Design",
-    icon: "🎨",
+    icon: "palette",
     badge: "Popular"
   },
   {
@@ -26,7 +26,7 @@ const MARKETPLACE_SKILLS = [
     description: "Transform Sparkie from task-follower into proactive partner. WAL Protocol, Working Buffer, Autonomous Crons, and battle-tested patterns for overnight autonomous execution.",
     url: "https://clawhub.ai/halthelobster/proactive-agent",
     category: "AI",
-    icon: "🤖",
+    icon: "bot",
     badge: "Free"
   },
   {
@@ -34,7 +34,7 @@ const MARKETPLACE_SKILLS = [
     description: "Captures errors, corrections, and learnings to enable continuous improvement. Activates on failures, hooks into the agent loop, promotes learnings across sessions.",
     url: "https://clawhub.ai/pskoett/self-improving-agent",
     category: "AI",
-    icon: "🧠",
+    icon: "brain",
     badge: "Free"
   },
   {
@@ -42,7 +42,7 @@ const MARKETPLACE_SKILLS = [
     description: "Generate unlimited free music with vocals using ACE-Step 1.5. Full songs, any genre, any language.",
     url: "https://raw.githubusercontent.com/ace-step/ace-step-skills/main/skills/acestep/SKILL.md",
     category: "Music",
-    icon: "🎵",
+    icon: "music",
     badge: "Free"
   },
   {
@@ -50,7 +50,7 @@ const MARKETPLACE_SKILLS = [
     description: "Process payments, create subscriptions, manage customers using the Stripe API.",
     url: "https://raw.githubusercontent.com/stripe/stripe-node/master/README.md",
     category: "Payments",
-    icon: "💳",
+    icon: "credit",
     badge: "Popular"
   },
   {
@@ -58,7 +58,7 @@ const MARKETPLACE_SKILLS = [
     description: "Send transactional and marketing emails via SendGrid with templates and analytics.",
     url: "https://raw.githubusercontent.com/sendgrid/sendgrid-nodejs/main/README.md",
     category: "Email",
-    icon: "📧",
+    icon: "mail",
     badge: "Popular"
   },
   {
@@ -66,7 +66,7 @@ const MARKETPLACE_SKILLS = [
     description: "Send SMS, WhatsApp messages and make phone calls via Twilio's API.",
     url: "https://raw.githubusercontent.com/twilio/twilio-node/main/README.md",
     category: "Messaging",
-    icon: "📱",
+    icon: "smartphone",
     badge: "Popular"
   },
   {
@@ -74,7 +74,7 @@ const MARKETPLACE_SKILLS = [
     description: "Semantic vector search using Supabase pgvector — find similar content by meaning.",
     url: "https://raw.githubusercontent.com/supabase/supabase/master/README.md",
     category: "Database",
-    icon: "🔍",
+    icon: "search",
     badge: "Pro"
   },
   {
@@ -82,7 +82,7 @@ const MARKETPLACE_SKILLS = [
     description: "OpenAI Realtime API for streaming audio conversations with low latency.",
     url: "https://raw.githubusercontent.com/openai/openai-node/master/README.md",
     category: "AI",
-    icon: "🎙️",
+    icon: "mic",
     badge: "New"
   },
   {
@@ -90,7 +90,7 @@ const MARKETPLACE_SKILLS = [
     description: "Ultra-realistic voice synthesis with custom voice cloning via ElevenLabs.",
     url: "https://raw.githubusercontent.com/elevenlabs/elevenlabs-python/main/README.md",
     category: "Voice",
-    icon: "🔊",
+    icon: "volume",
     badge: "Premium"
   },
   {
@@ -98,7 +98,7 @@ const MARKETPLACE_SKILLS = [
     description: "Developer-friendly email API for transactional emails. Clean, fast, elegant.",
     url: "https://raw.githubusercontent.com/resendlabs/resend-node/main/README.md",
     category: "Email",
-    icon: "✉️",
+    icon: "send",
     badge: "Installed"
   },
   {
@@ -106,7 +106,7 @@ const MARKETPLACE_SKILLS = [
     description: "Real-time web search with Brave's independent index. No tracking, no filter bubbles. Sparkie can search the web for any topic on demand.",
     url: "https://api.search.brave.com/app/documentation/web-search/get-started",
     category: "Search",
-    icon: "🦁",
+    icon: "bot",
     badge: "Free"
   },
   {
@@ -114,7 +114,7 @@ const MARKETPLACE_SKILLS = [
     description: "Convert any URL to clean markdown. Sparkie can fetch and read any webpage, article, or docs page as plain text — zero hallucination on current content.",
     url: "https://jina.ai/reader/",
     category: "Research",
-    icon: "📖",
+    icon: "book",
     badge: "Free"
   },
   {
@@ -122,7 +122,7 @@ const MARKETPLACE_SKILLS = [
     description: "Secure cloud code interpreter. Sparkie can run Python, JS, and shell scripts in an isolated sandbox — great for data analysis, file processing, and automation.",
     url: "https://e2b.dev/docs",
     category: "Code",
-    icon: "🧪",
+    icon: "flask",
     badge: "Free"
   },
   {
@@ -130,7 +130,7 @@ const MARKETPLACE_SKILLS = [
     description: "Turn any website into structured data. Sparkie can crawl, scrape, and extract content from any public webpage — even JavaScript-heavy sites.",
     url: "https://docs.firecrawl.dev/introduction",
     category: "Research",
-    icon: "🔥",
+    icon: "flame",
     badge: "Free"
   },
   {
@@ -138,7 +138,7 @@ const MARKETPLACE_SKILLS = [
     description: "Sparkie's own self-repair playbook. Documents the full patch → commit → deploy → verify loop so Sparkie can fix herself autonomously when builds break.",
     url: "https://raw.githubusercontent.com/Draguniteus/sparkie-studio/master/DEVPLAYBOOK.md",
     category: "AI",
-    icon: "⚡",
+    icon: "zap",
     badge: "Free"
   },
 ]
@@ -150,6 +150,27 @@ const BADGE_STYLES: Record<string, string> = {
   Pro: "bg-honey-500/15 text-honey-400 border-honey-500/20",
   Premium: "bg-amber-500/15 text-amber-300 border-amber-500/20",
   Installed: "bg-green-500/20 text-green-300 border-green-500/30",
+}
+
+type SkillIcon = typeof Palette | typeof Bot | typeof Brain | typeof Music | typeof CreditCard | typeof Mail | typeof Smartphone | typeof Search | typeof Mic | typeof Volume2 | typeof Send | typeof BookOpen | typeof FlaskConical | typeof Flame | typeof Zap | typeof Code2
+
+const SKILL_ICON_MAP: Record<string, { icon: SkillIcon; color: string }> = {
+  palette:    { icon: Palette,     color: 'text-pink-400' },
+  bot:        { icon: Bot,         color: 'text-blue-400' },
+  brain:      { icon: Brain,       color: 'text-purple-400' },
+  music:      { icon: Music,       color: 'text-pink-300' },
+  credit:     { icon: CreditCard,  color: 'text-amber-400' },
+  mail:       { icon: Mail,        color: 'text-blue-400' },
+  smartphone: { icon: Smartphone,  color: 'text-emerald-400' },
+  search:     { icon: Search,      color: 'text-purple-400' },
+  mic:        { icon: Mic,          color: 'text-rose-400' },
+  volume:     { icon: Volume2,     color: 'text-orange-400' },
+  send:       { icon: Send,        color: 'text-blue-400' },
+  book:       { icon: BookOpen,    color: 'text-emerald-400' },
+  flask:      { icon: FlaskConical, color: 'text-cyan-400' },
+  flame:      { icon: Flame,       color: 'text-orange-400' },
+  zap:        { icon: Zap,          color: 'text-yellow-400' },
+  code:       { icon: Code2,       color: 'text-blue-400' },
 }
 
 export function SkillsLibrary() {
@@ -264,7 +285,7 @@ export function SkillsLibrary() {
               <div key={skill.name} className="bg-hive-elevated rounded-xl border border-hive-border p-3.5 hover:border-violet-500/20 transition-colors">
                 <div className="flex items-start gap-3">
                   <div className="w-9 h-9 rounded-xl bg-hive-600 flex items-center justify-center text-base shrink-0 border border-hive-border">
-                    {skill.icon}
+                    {(() => { const e = SKILL_ICON_MAP[skill.icon] ?? SKILL_ICON_MAP.code; const Ic = e.icon; return <Ic size={18} className={e.color} /> })()}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 mb-0.5">

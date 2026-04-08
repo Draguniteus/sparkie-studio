@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useCallback } from "react"
 import { useAppStore } from "@/store/appStore"
-import { Globe, RefreshCw, Loader2, ExternalLink } from "lucide-react"
+import { Globe, RefreshCw, Loader2, ExternalLink, AlertTriangle } from "lucide-react"
 
 const PREVIEW_BASE_STYLES = `
   *, *::before, *::after { box-sizing: border-box; }
@@ -92,7 +92,7 @@ const ERROR_OVERLAY_SCRIPT = `<script>
     ].join(';');
     overlay.innerHTML = '<div style=\"max-width:560px;width:100%\">'
       + '<div style=\"display:flex;align-items:center;gap:10px;margin-bottom:12px\">'
-      + '<span style=\"font-size:18px\">⚠️</span>'
+      + '<span style=\"font-size:18px\">&#9888;</span>'
       + '<span style=\"color:#FFC30B;font-size:13px;font-weight:700;letter-spacing:0.05em\">RUNTIME ERROR</span>'
       + '</div>'
       + '<div style=\"background:#1a1a1a;border:1px solid #FFC30B33;border-radius:8px;padding:16px\">'
@@ -135,7 +135,7 @@ class PreviewErrorBoundary extends React.Component<{ children: React.ReactNode }
         <div className="h-full flex flex-col items-center justify-center bg-[#0a0a0a] p-8">
           <div className="max-w-md w-full">
             <div className="flex items-center gap-3 mb-4">
-              <span className="text-lg">⚠️</span>
+              <AlertTriangle size={20} className="text-yellow-400 shrink-0" />
               <span className="text-honey-500 text-sm font-bold tracking-wide">RENDER ERROR</span>
             </div>
             <div className="bg-hive-elevated border border-honey-500/20 rounded-xl p-4 mb-4">

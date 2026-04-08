@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, useCallback } from "react"
 import { useAppStore } from "@/store/appStore"
 import {
   Sparkles, ArrowLeft, X, Filter, Heart, Code2, Mic,
-  Moon, Maximize2, Zap
+  Moon, Maximize2, Zap, Wrench, Radio, Music, Image
 } from "lucide-react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -247,13 +247,21 @@ function DecisionTree({ entries, totalCount }: { entries: WorklogEntry[]; totalC
     }
   }
 
-  const filterBtns: { key: TreeFilter; emoji: string; label: string }[] = [
-    { key: 'all',      emoji: '✦',  label: 'All'      },
-    { key: 'code',     emoji: '⚡', label: 'Code'     },
-    { key: 'creative', emoji: '🎵', label: 'Creative' },
-    { key: 'repairs',  emoji: '🔧', label: 'Repairs'  },
-    { key: 'outreach', emoji: '📡', label: 'Outreach' },
+  const filterBtns: { key: TreeFilter; icon: string; label: string }[] = [
+    { key: 'all',      icon: 'sparkles',  label: 'All'      },
+    { key: 'code',     icon: 'zap',      label: 'Code'     },
+    { key: 'creative', icon: 'music',    label: 'Creative' },
+    { key: 'repairs',  icon: 'wrench',   label: 'Repairs'  },
+    { key: 'outreach', icon: 'radio',   label: 'Outreach' },
   ]
+
+  const DECISION_ICON_MAP: Record<string, { icon: typeof Sparkles | typeof Zap | typeof Music | typeof Wrench | typeof Radio; color: string }> = {
+    sparkles:  { icon: Sparkles,  color: 'text-purple-400' },
+    zap:       { icon: Zap,      color: 'text-yellow-400' },
+    music:     { icon: Music,    color: 'text-pink-400' },
+    wrench:    { icon: Wrench,   color: 'text-orange-400' },
+    radio:     { icon: Radio,    color: 'text-blue-400' },
+  }
 
   return (
     <div className="flex flex-col gap-3">
@@ -275,7 +283,7 @@ function DecisionTree({ entries, totalCount }: { entries: WorklogEntry[]; totalC
                 ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
                 : 'bg-hive-elevated/40 text-text-muted border border-hive-border/40 hover:border-yellow-500/20'
             }`}>
-            {f.emoji} {f.label}
+            {(() => { const e = DECISION_ICON_MAP[f.icon] ?? DECISION_ICON_MAP.sparkles; const Ic = e.icon; return <Ic size={11} className={e.color} /> })()} {f.label}
           </button>
         ))}
       </div>
@@ -412,7 +420,7 @@ function SoundBooth() {
   return (
     <div className="h-full overflow-y-auto p-4 flex flex-col gap-4">
       <div className="flex items-center gap-2">
-        <span className="text-xl">🎵</span>
+        <Music size={20} className="text-pink-400" />
         <div>
           <h2 className="text-sm font-semibold text-text-primary">Sound Booth</h2>
           <p className="text-[10px] text-text-muted">Sparkie's music space</p>
@@ -506,7 +514,7 @@ function GalleryWall() {
 
       <div className="h-full overflow-y-auto p-4 flex flex-col gap-4">
         <div className="flex items-center gap-2">
-          <span className="text-xl">🖼️</span>
+          <Image size={20} className="text-amber-400" />
           <div>
             <h2 className="text-sm font-semibold text-text-primary">Gallery Wall</h2>
             <p className="text-[10px] text-text-muted">Her creations, her story</p>

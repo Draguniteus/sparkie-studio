@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { Zap, Brain, Target, GitBranch, RefreshCw, ChevronDown, ChevronUp } from "lucide-react"
+import { Zap, Brain, Target, GitBranch, RefreshCw, ChevronDown, ChevronUp, Eye, Link, Lightbulb, Moon, AlertTriangle } from "lucide-react"
 
 interface CIPStats {
   goalCount: number
@@ -32,14 +32,24 @@ interface BehaviorRule {
 }
 
 const LAYER_CONFIG = [
-  { id: 'L1', label: 'Perception', desc: '2min ambient cycle', icon: '👁', color: 'text-purple-400', bg: 'bg-purple-500/10' },
-  { id: 'L2', label: 'Self-Modify', desc: 'Behavior rules', icon: '🧠', color: 'text-blue-400', bg: 'bg-blue-500/10' },
-  { id: 'L3', label: 'Causal', desc: 'Why things happen', icon: '🔗', color: 'text-cyan-400', bg: 'bg-cyan-500/10' },
-  { id: 'L4', label: 'Emotional', desc: 'Michael\'s state', icon: '💡', color: 'text-yellow-400', bg: 'bg-yellow-500/10' },
-  { id: 'L5', label: 'Goals', desc: 'Persistent agenda', icon: '🎯', color: 'text-green-400', bg: 'bg-green-500/10' },
-  { id: 'L6', label: 'Parallel', desc: 'Multi-tool execution', icon: '⚡', color: 'text-orange-400', bg: 'bg-orange-500/10' },
-  { id: 'L7', label: 'Self-Model', desc: 'Daily reflection', icon: '🌙', color: 'text-pink-400', bg: 'bg-pink-500/10' },
+  { id: 'L1', label: 'Perception', desc: '2min ambient cycle', icon: 'eye', color: 'text-purple-400', bg: 'bg-purple-500/10' },
+  { id: 'L2', label: 'Self-Modify', desc: 'Behavior rules', icon: 'brain', color: 'text-blue-400', bg: 'bg-blue-500/10' },
+  { id: 'L3', label: 'Causal', desc: 'Why things happen', icon: 'link', color: 'text-cyan-400', bg: 'bg-cyan-500/10' },
+  { id: 'L4', label: 'Emotional', desc: 'Michael\'s state', icon: 'lightbulb', color: 'text-yellow-400', bg: 'bg-yellow-500/10' },
+  { id: 'L5', label: 'Goals', desc: 'Persistent agenda', icon: 'target', color: 'text-green-400', bg: 'bg-green-500/10' },
+  { id: 'L6', label: 'Parallel', desc: 'Multi-tool execution', icon: 'zap', color: 'text-orange-400', bg: 'bg-orange-500/10' },
+  { id: 'L7', label: 'Self-Model', desc: 'Daily reflection', icon: 'moon', color: 'text-pink-400', bg: 'bg-pink-500/10' },
 ]
+
+const CIP_ICON_MAP: Record<string, { icon: typeof Eye | typeof Brain | typeof Link | typeof Lightbulb | typeof Target | typeof Zap | typeof Moon; color: string }> = {
+  eye:     { icon: Eye,         color: 'text-purple-400' },
+  brain:   { icon: Brain,       color: 'text-blue-400' },
+  link:    { icon: Link,        color: 'text-cyan-400' },
+  lightbulb:{ icon: Lightbulb,   color: 'text-yellow-400' },
+  target:  { icon: Target,      color: 'text-green-400' },
+  zap:     { icon: Zap,         color: 'text-orange-400' },
+  moon:    { icon: Moon,        color: 'text-pink-400' },
+}
 
 export function CIPStatusPanel() {
   const [stats, setStats] = useState<CIPStats | null>(null)
@@ -133,7 +143,7 @@ export function CIPStatusPanel() {
                 disabled={seeding}
                 className="mt-2 w-full text-[10px] font-medium py-1 px-2 rounded bg-honey-500/15 border border-honey-500/30 text-honey-400 hover:bg-honey-500/25 transition-colors disabled:opacity-50"
               >
-                {seeding ? 'Bootstrapping…' : '⚡ Bootstrap CIP defaults'}
+                {seeding ? 'Bootstrapping…' : 'Bootstrap CIP defaults'}
               </button>
             )}
           </div>
@@ -164,7 +174,11 @@ export function CIPStatusPanel() {
                   className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-white/5 transition-colors"
                   onClick={() => setExpandedLayer(expandedLayer === layer.id ? null : layer.id)}
                 >
-                  <span className="text-sm shrink-0">{layer.icon}</span>
+                  <span className="shrink-0">{(() => {
+                    const e = CIP_ICON_MAP[layer.icon] ?? CIP_ICON_MAP.zap
+                    const Ic = e.icon
+                    return <Ic size={14} className={e.color} />
+                  })()}</span>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="text-[9px] font-bold text-text-muted">{layer.id}</span>
@@ -192,7 +206,7 @@ export function CIPStatusPanel() {
                               <div className="text-text-muted">{g.progress || 'Not started'}</div>
                             </div>
                             {g.sessionsWithoutProgress > 2 && (
-                              <span className="text-[8px] text-amber-400 shrink-0">⚠ {g.sessionsWithoutProgress}s</span>
+                              <span className="flex items-center gap-0.5 text-[8px] text-amber-400 shrink-0"><AlertTriangle size={9} className="text-amber-400" />{g.sessionsWithoutProgress}s</span>
                             )}
                           </div>
                         ))}

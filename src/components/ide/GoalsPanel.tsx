@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Target, Clock, CheckCircle2, AlertCircle, ChevronDown, ChevronUp, Plus, RefreshCw } from 'lucide-react'
+import { Target, Clock, CheckCircle2, AlertCircle, ChevronDown, ChevronUp, Plus, RefreshCw, Wrench, Construction, Radio, BookOpen, MessageCircle } from 'lucide-react'
 
 interface Goal {
   id: string
@@ -25,7 +25,18 @@ const PRIORITY_COLORS: Record<string, string> = {
 }
 
 const TYPE_ICONS: Record<string, string> = {
-  fix: '🔧', build: '🏗️', monitor: '📡', learn: '📚', relationship: '💬', default: '🎯',
+  fix: 'wrench', build: 'building', monitor: 'radio', learn: 'book', relationship: 'message', default: 'target',
+}
+
+type GoalIcon = typeof Wrench | typeof Construction | typeof Radio | typeof BookOpen | typeof MessageCircle | typeof Target
+
+const GOAL_ICON_MAP: Record<string, { icon: GoalIcon; color: string }> = {
+  wrench:     { icon: Wrench,       color: 'text-amber-400' },
+  building:   { icon: Construction, color: 'text-orange-400' },
+  radio:      { icon: Radio,        color: 'text-blue-400' },
+  book:       { icon: BookOpen,     color: 'text-emerald-400' },
+  message:    { icon: MessageCircle, color: 'text-purple-400' },
+  target:     { icon: Target,      color: 'text-green-400' },
 }
 
 export function GoalsPanel() {
@@ -171,7 +182,12 @@ export function GoalsPanel() {
                 className="flex items-start gap-2 px-4 py-3 hover:bg-white/[0.02] transition-colors cursor-pointer"
                 onClick={() => toggleExpand(goal.id)}
               >
-                <div className="mt-0.5 text-base shrink-0">{TYPE_ICONS[goal.type] ?? TYPE_ICONS.default}</div>
+                <div className="mt-0.5 shrink-0">{(() => {
+                  const iconKey = TYPE_ICONS[goal.type] ?? TYPE_ICONS.default
+                  const e = GOAL_ICON_MAP[iconKey] ?? GOAL_ICON_MAP.target
+                  const Ic = e.icon
+                  return <Ic size={16} className={e.color} />
+                })()}</div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-bold ${PRIORITY_COLORS[goal.priority] ?? PRIORITY_COLORS.P2}`}>

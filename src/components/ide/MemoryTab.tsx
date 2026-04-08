@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Brain, Trash2, RefreshCw, Sparkles, Shield, Clock, Zap, BookOpen, User, Calendar, MessageSquare, Search, type LucideIcon } from 'lucide-react'
+import { Brain, Trash2, RefreshCw, Sparkles, Shield, Clock, Zap, BookOpen, User, Calendar, MessageSquare, Search, AlertTriangle, type LucideIcon } from 'lucide-react'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface UserMemoryEntry {
@@ -110,7 +110,7 @@ function formatDate(d: string) {
 }
 
 function ttlLabel(expiresAt?: string, stale?: boolean): { label: string; cls: string } | null {
-  if (stale) return { label: '⚠ stale', cls: 'text-yellow-400' }
+  if (stale) return { label: 'stale', cls: 'text-yellow-400' }
   if (!expiresAt) return null
   const days = Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 86_400_000)
   if (days < 0) return { label: 'expired', cls: 'text-red-400' }
@@ -421,7 +421,7 @@ function SelfMemoryCard({ m, onForget, forgetting, forgotten }: {
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
             <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${style.pill}`}>{m.category.replace(/_/g, ' ')}</span>
             <span className="text-[9px] text-text-muted flex items-center gap-0.5"><Clock size={8} />{formatDate(m.created_at)}</span>
-            {ttl && <span className={`text-[9px] ${ttl.cls}`}>{ttl.label}</span>}
+            {ttl && <span className={`flex items-center gap-0.5 text-[9px] ${ttl.cls}`}><AlertTriangle size={9} className={ttl.cls} />{ttl.label}</span>}
             {isLong && (
               <button onClick={() => setExpanded(v => !v)} className="text-[9px] text-blue-400 hover:text-blue-300 transition-colors">
                 {expanded ? 'collapse' : `+${m.content.length - TRUNCATE_LEN} more`}

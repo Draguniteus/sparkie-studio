@@ -151,12 +151,12 @@ const SPEECH_VOICES = [
 
 
 const PROMPT_TEMPLATES = [
-  { label: "Landing page", prompt: "Build a stunning landing page with hero section, features grid, and CTA. Dark theme, honey gold accents, plain CSS.", icon: "🌐" },
-  { label: "REST API", prompt: "Build a full Express.js REST API with CRUD endpoints, input validation, and proper error handling. Include package.json.", icon: "⚡" },
-  { label: "Dashboard", prompt: "Build an analytics dashboard with charts, stat cards, and a sidebar. Dark theme with honey gold data visualizations.", icon: "📊" },
-  { label: "Todo app", prompt: "Build a beautiful todo app with add, complete, delete, and filter by status. Dark theme, smooth animations, plain CSS.", icon: "✅" },
-  { label: "Auth UI", prompt: "Build a sign in / sign up UI with form validation, password strength meter, and animated transitions. Dark theme.", icon: "🔐" },
-  { label: "Chat UI", prompt: "Build a chat interface with message bubbles, timestamps, typing indicator, and smooth animations. Dark theme.", icon: "💬" },
+  { label: "Landing page", prompt: "Build a stunning landing page with hero section, features grid, and CTA. Dark theme, honey gold accents, plain CSS.", icon: "globe" },
+  { label: "REST API", prompt: "Build a full Express.js REST API with CRUD endpoints, input validation, and proper error handling. Include package.json.", icon: "zap" },
+  { label: "Dashboard", prompt: "Build an analytics dashboard with charts, stat cards, and a sidebar. Dark theme with honey gold data visualizations.", icon: "chart" },
+  { label: "Todo app", prompt: "Build a beautiful todo app with add, complete, delete, and filter by status. Dark theme, smooth animations, plain CSS.", icon: "check" },
+  { label: "Auth UI", prompt: "Build a sign in / sign up UI with form validation, password strength meter, and animated transitions. Dark theme.", icon: "lock" },
+  { label: "Chat UI", prompt: "Build a chat interface with message bubbles, timestamps, typing indicator, and smooth animations. Dark theme.", icon: "message" },
 ]
 
 type GenMode = "chat" | "image" | "video" | "music" | "lyrics" | "speech"

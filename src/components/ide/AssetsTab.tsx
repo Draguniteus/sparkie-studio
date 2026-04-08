@@ -7,6 +7,7 @@ import {
   Download, Search, X, ExternalLink, MessageSquare,
   Globe, FileText, Music, Video, Table, File,
   Trash2, ChevronDown, Image, Play, ArrowUpDown,
+  Sparkles, Palette, BarChart3, Projector,
 } from "lucide-react"
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -199,22 +200,35 @@ interface PreviewModal {
 
 // ── Empty state per type ──────────────────────────────────────────────────
 const TYPE_PROMPTS: Record<string, { icon: string; prompt: string }> = {
-  all:      { icon: "✨", prompt: "/build me a landing page" },
-  website:  { icon: "🌐", prompt: "/build me a landing page" },
-  image:    { icon: "🎨", prompt: "generate an image of a sunset" },
-  audio:    { icon: "🎵", prompt: "make me a chill lo-fi track" },
-  video:    { icon: "🎬", prompt: "generate a video of ocean waves" },
-  document: { icon: "📄", prompt: "/build me a resume template" },
-  excel:    { icon: "📊", prompt: "/build me a budget spreadsheet" },
-  ppt:      { icon: "📽", prompt: "/build me a pitch deck" },
+  all:      { icon: "sparkles", prompt: "/build me a landing page" },
+  website:  { icon: "globe",   prompt: "/build me a landing page" },
+  image:    { icon: "palette", prompt: "generate an image of a sunset" },
+  audio:    { icon: "music",   prompt: "make me a chill lo-fi track" },
+  video:    { icon: "video",   prompt: "generate a video of ocean waves" },
+  document: { icon: "file",    prompt: "/build me a resume template" },
+  excel:    { icon: "chart",   prompt: "/build me a budget spreadsheet" },
+  ppt:      { icon: "projector", prompt: "/build me a pitch deck" },
+}
+
+const ASSET_ICON_MAP: Record<string, { icon: typeof Sparkles | typeof Globe | typeof Palette | typeof Music | typeof Video | typeof FileText | typeof BarChart3 | typeof Projector; color: string }> = {
+  sparkles:  { icon: Sparkles,        color: 'text-purple-300' },
+  globe:     { icon: Globe,           color: 'text-blue-400' },
+  palette:   { icon: Palette,        color: 'text-pink-400' },
+  music:     { icon: Music,          color: 'text-pink-300' },
+  video:     { icon: Video,          color: 'text-fuchsia-400' },
+  file:      { icon: FileText,       color: 'text-blue-400' },
+  chart:     { icon: BarChart3,   color: 'text-emerald-400' },
+  projector: { icon: Projector,    color: 'text-amber-400' },
 }
 
 function EmptyState({ filter, onPrompt }: { filter: string; onPrompt: (p: string) => void }) {
   const cfg = TYPE_PROMPTS[filter] ?? TYPE_PROMPTS.all
   const label = filter === "all" ? "assets" : filter + "s"
+  const iconEntry = ASSET_ICON_MAP[cfg.icon] ?? ASSET_ICON_MAP.sparkles
+  const IconC = iconEntry.icon
   return (
     <div className="flex flex-col items-center justify-center py-14 px-6 text-center gap-3">
-      <div className="text-4xl">{cfg.icon}</div>
+      <div className="text-4xl"><IconC size={40} className={iconEntry.color} /></div>
       <p className="text-sm font-medium text-text-secondary">No {label} yet</p>
       <p className="text-[11px] text-text-muted">Ask Sparkie to create one</p>
       <button
