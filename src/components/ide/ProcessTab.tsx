@@ -72,7 +72,7 @@ function ThoughtCard({ text, icon, label }: { text: string; icon?: string; label
   const isLong = stripMarkdown(text).length > 120
   return (
     <details className="group px-3 py-2 rounded-lg border border-purple-500/20 bg-purple-500/5 border-l-2 border-l-purple-400">
-      <summary className="flex items-center gap-2 cursor-pointer list-none">
+      <summary className="flex items-center gap-2 cursor-pointer list-none thought-summary">
         <IconComponent size={12} className={`shrink-0 mt-px ${entry.color}`} />
         {label
           ? <span className="font-bold text-purple-300 text-[11px]">{label}</span>
@@ -176,64 +176,80 @@ function matchesTagFilter(trace: StepTrace, filter: string): boolean {
   return true
 }
 
-function FrozenCard({ group, index, hasLive, isSettled, tagFilter }: { group: { chipLabel: string; traces: StepTrace[] }; index: number; hasLive: boolean; isSettled?: boolean; tagFilter: string }) {
+function FrozenCard({ group, index, hasLive, isSettled, tagFilter, prevMsgId }: { group: { chipLabel: string; traces: StepTrace[]; msgId?: string }; index: number; hasLive: boolean; isSettled?: boolean; tagFilter: string; prevMsgId?: string }) {
   const [open, setOpen] = useState(index === 0 && !hasLive)
   // Count only non-thought traces for the step counter
   const toolTraces = group.traces.filter(t => t.type !== 'thought')
   const doneTraces = toolTraces.filter(t => t.status === 'done' || t.status === 'error')
   const errorTraces = toolTraces.filter(t => t.status === 'error')
   const totalMs = group.traces.reduce((sum, t) => sum + (t.duration ?? 0), 0)
+  // 11c: detect session change — new msgId means a different conversation turn
+  const isNewSession = prevMsgId != null && group.msgId !== prevMsgId
 
   const firstMeaningful = group.traces.find(t => t.type === 'thought' && (t.text ?? t.label ?? '').length > 20 && !/sparkie thinking/i.test(t.text ?? t.label ?? ''))
   const toolTraceLabels = group.traces.filter(t => t.type !== 'thought').map(t => t.label ?? t.toolName ?? '').filter(Boolean)
   const raw = firstMeaningful?.text ?? firstMeaningful?.label ?? toolTraceLabels[0] ?? ''
   const toolSummary = toolTraceLabels.length > 0 ? toolTraceLabels.slice(0, 3).join(' → ') : ''
-  const label = raw || toolSummary || (index === 0 && !hasLive ? 'Last response' : `${index + 1} responses ago`)
+  const labelRaw = raw || toolSummary || (index === 0 && !hasLive ? 'Last response' : `${index + 1} responses ago`)
+  // 11a: truncate label to ~80 chars with ellipsis
+  const label = labelRaw.length > 80 ? labelRaw.slice(0, 80) + '…' : labelRaw
 
   return (
-    <div className={`rounded-lg border overflow-hidden transition-colors duration-500 ${isSettled ? 'border-purple-400/60 bg-purple-500/10' : 'border-hive-border/60 bg-hive-elevated/30'}`}>
-      <button
-        onClick={() => setOpen(v => !v)}
-        className="w-full flex items-center gap-2 px-3 py-2 bg-hive-elevated/30 hover:bg-hive-elevated/50 transition-colors text-left"
-      >
-        <ChevronRight size={10} className={`shrink-0 text-text-muted transition-transform ${open ? 'rotate-90' : ''}`} />
-        <span title={label} className="text-[10px] text-text-muted flex-1">{label}</span>
-        <div className="flex items-center gap-2 shrink-0">
-          {errorTraces.length > 0 && (
-            <span className="text-[9px] text-red-400">{errorTraces.length} err</span>
-          )}
-          <span className="text-[9px] text-text-muted/60 tabular-nums">
-            {doneTraces.length}/{toolTraces.length} steps
-          </span>
-          {totalMs > 0 && (
-            <span className="text-[9px] text-text-muted/60 tabular-nums">
-              {totalMs < 1000 ? `${totalMs}ms` : `${(totalMs / 1000).toFixed(1)}s`}
-            </span>
-          )}
-        </div>
-      </button>
-      {open && (
-        <div className="p-2 flex flex-col gap-1 bg-hive-600/20 max-h-72 overflow-y-auto">
-          {group.traces
-            .filter(t => matchesTagFilter(t, tagFilter))
-            .map((trace, ti) => (
-            trace.type === 'thought'
-              ? <ThoughtCard key={ti} text={trace.text ?? trace.label} icon={trace.icon} />
-              : <TraceRow key={ti} trace={trace} />
-          ))}
+    <>
+      {/* 11c: visual divider between sessions */}
+      {isNewSession && (
+        <div className="flex items-center gap-2 px-2">
+          <div className="flex-1 h-px bg-gradient-to-r from-transparent via-purple-500/30 to-transparent" />
+          <span className="text-[8px] text-purple-400/40 uppercase tracking-widest">new session</span>
+          <div className="flex-1 h-px bg-gradient-to-r from-transparent via-purple-500/30 to-transparent" />
         </div>
       )}
-    </div>
+      <div className={`rounded-lg border overflow-hidden transition-colors duration-500 ${isSettled ? 'border-purple-400/60 bg-purple-500/10' : 'border-hive-border/60 bg-hive-elevated/30'}`}>
+        <button
+          onClick={() => setOpen(v => !v)}
+          className="w-full flex items-center gap-2 px-3 py-2 bg-hive-elevated/30 hover:bg-hive-elevated/50 transition-colors text-left"
+        >
+          <ChevronRight size={10} className={`shrink-0 text-text-muted transition-transform ${open ? 'rotate-90' : ''}`} />
+          <span title={label} className="text-[10px] text-text-muted flex-1">{label}</span>
+          <div className="flex items-center gap-2 shrink-0">
+            {errorTraces.length > 0 && (
+              <span className="text-[9px] text-red-400">{errorTraces.length} err</span>
+            )}
+            <span className="text-[9px] text-text-muted/60 tabular-nums">
+              {doneTraces.length}/{toolTraces.length} steps
+            </span>
+            {totalMs > 0 && (
+              <span className="text-[9px] text-text-muted/60 tabular-nums">
+                {totalMs < 1000 ? `${totalMs}ms` : `${(totalMs / 1000).toFixed(1)}s`}
+              </span>
+            )}
+          </div>
+        </button>
+        {open && (
+          <div className="p-2 flex flex-col gap-1 bg-hive-600/20 max-h-72 overflow-y-auto">
+            {group.traces
+              .filter(t => matchesTagFilter(t, tagFilter))
+              .map((trace, ti) => (
+              trace.type === 'thought'
+                ? <ThoughtCard key={ti} text={trace.text ?? trace.label} icon={trace.icon} />
+                : <TraceRow key={ti} trace={trace} />
+            ))}
+          </div>
+        )}
+      </div>
+    </>
   )
 }
 
 export function ProcessTab() {
-  const { chats, currentChatId, longTaskLabel, selectedModel } = useAppStore(
+  const { chats, currentChatId, longTaskLabel, selectedModel, ideTab, setIdeTab } = useAppStore(
     useShallow((s) => ({
       chats: s.chats,
       currentChatId: s.currentChatId,
       longTaskLabel: s.longTaskLabel,
       selectedModel: s.selectedModel,
+      ideTab: s.ideTab,
+      setIdeTab: s.setIdeTab,
     }))
   )
   const tier = modelToTier(selectedModel)
@@ -374,6 +390,17 @@ export function ProcessTab() {
     window.addEventListener('sparkie:checkpoint', handler)
     return () => window.removeEventListener('sparkie:checkpoint', handler)
   }, [])
+
+  // Issue 16: auto-switch to Process tab when sparkie_step_trace fires while on Worklog
+  useEffect(() => {
+    const handler = () => {
+      if (ideTab === 'worklog') {
+        setIdeTab('process')
+      }
+    }
+    window.addEventListener('sparkie_step_trace', handler)
+    return () => window.removeEventListener('sparkie_step_trace', handler)
+  }, [ideTab, setIdeTab])
 
   // Auto-scroll to bottom as new traces arrive
   useEffect(() => {
@@ -539,7 +566,7 @@ export function ProcessTab() {
 
         {/* Frozen traces from recent messages — collapsible cards */}
         {recentFrozen.map((group, gi) => (
-          <FrozenCard key={group.msgId ?? `frozen-${gi}`} group={group} index={gi} hasLive={liveTraces.length > 0} isSettled={settledId === group.msgId} tagFilter={tagFilter} />
+          <FrozenCard key={group.msgId ?? `frozen-${gi}`} group={group} index={gi} hasLive={liveTraces.length > 0} isSettled={settledId === group.msgId} tagFilter={tagFilter} prevMsgId={gi > 0 ? recentFrozen[gi - 1].msgId : undefined} />
         ))}
 
         {/* Empty state */}

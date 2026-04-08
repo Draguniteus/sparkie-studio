@@ -144,8 +144,8 @@ export function ChatView() {
             <div className="w-4 h-4 rounded-full overflow-hidden border border-purple-500/30 shrink-0">
               <img src="/sparkie-avatar.jpg" alt="Sparkie" className="w-full h-full object-cover" />
             </div>
-            {/* Thinking dots */}
-            <div className="thinking-dots flex gap-0.5 items-center">
+            {/* Shimmer thinking dots */}
+            <div className="thinking-dots shimmer flex gap-0.5 items-center">
               <span /><span /><span />
             </div>
             <span className="text-[10px] text-purple-200/80 font-medium truncate max-w-[240px]">{longTaskLabel}</span>

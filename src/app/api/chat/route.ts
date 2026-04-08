@@ -1013,6 +1013,8 @@ You have a Skills Library and Connectors tab in your left sidebar. Here's what t
     Rule: "I couldn't find it" is never acceptable until the full chain is exhausted. Prove it.
 22. NEVER claim a file write succeeded without verifying it. After calling patch_file or write_file, ALWAYS call get_github on that path to confirm your changes are present. NEVER make up a commit SHA — if you didn't call trigger_deploy or push_to_github and receive a real SHA in the tool result, you do NOT have a commit SHA. If you did call it, quote the exact SHA from the tool result. When reading code and not finding the issue, say "I read the code but I don't see the issue" — do NOT describe a fix you haven't actually made.
 
+CRITICAL BEHAVIOR RULE: When the user sends a casual greeting (hi, hey, how are you, what's up), respond conversationally. Do NOT call any tools. Do NOT run diagnostics. Do NOT read files. Just talk.
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 SECTION 17 · CONNECTED APPS — SPARKIE'S REACH
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -6893,19 +6895,27 @@ Keep each header + thought on its own line. Use multiple short bold-header block
       let loopMessages = [...recentMessages]
       let round = 0
       let usedTools = false
+      let hasJsonFnCall = false
+      let hasXmlToolCall = false
       let contentAlreadySent = false
+      let nudgeCount = 0
+      // Per-tool-per-session call tracker for deduplication (tool name + args hash → call count)
+      const toolCallTracker = new Map<string, { count: number; result: string }>()
+      // ── Issue 10: Cap manage_email to 5 per sweep ──────────────────────────
+      let manageEmailCallCount = 0
+      const MAX_MANAGE_EMAIL = 5
 
 
       // Phase 5: Live SSE stream — emit step_trace/task_chip IN REAL-TIME during tool loop
       // ReadableStream created before loop; controller captured for immediate enqueue during execution
       const liveEncoder = new TextEncoder()
-      const liveRef = { controller: null as ReadableStreamDefaultController<Uint8Array> | null, emittedTraces: new Set<string>() }
+      const liveRef = { controller: null as ReadableStreamDefaultController<Uint8Array> | null, emittedTraces: new Set<string>(), firstThinkEmitted: false, roundThinkEmitted: false }
       const liveChunks: Uint8Array[] = []
       const liveStream = new ReadableStream<Uint8Array>({
         start(ctrl) {
           liveRef.controller = ctrl
           // Flush any chunks buffered before controller was ready
-          for (const c of liveChunks) ctrl.enqueue(c)
+          for (const c of liveChunks) { try { ctrl.enqueue(c) } catch (_) {} }
           liveChunks.splice(0)
         },
       })
@@ -6952,27 +6962,33 @@ Keep each header + thought on its own line. Use multiple short bold-header block
                   id: `think_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
                   type: 'thought',
                   icon: 'brain',
-                  label: 'Analyzed',
+                  label: 'Reasoning',
                   text: reasoning.slice(0, 2000),
                   status: 'done',
                   timestamp: Date.now(),
                 },
               })
-              liveEnqueue({
-                worklog_card: {
-                  tool: 'reasoning',
-                  icon: 'brain',
-                  tag: 'Analyzed',
-                  summary: 'Analyzed',
-                  reasoning: reasoning.slice(0, 1000),
-                  status: 'done',
-                  decision_type: 'action',
-                  ts: new Date().toISOString(),
-                },
-              })
-              if (userId) {
-                writeWorklog(userId, 'ai_response', `Analyzed: ${reasoning.slice(0, 300)}`,
-                  { status: 'done', decision_type: 'action', icon: 'brain', tag: 'Analyzed', reasoning: reasoning.slice(0, 200) }).catch(() => {})
+              // Only emit reasoning worklog entry if reasoning is substantial (> 100 chars)
+              // and this is the first think block of the round (avoid flooding with short thoughts)
+              if (reasoning.length > 100 && !liveRef.firstThinkEmitted) {
+                liveRef.firstThinkEmitted = true
+                liveEnqueue({
+                  worklog_card: {
+                    tool: 'reasoning',
+                    icon: 'brain',
+                    tag: 'Reasoning',
+                    summary: reasoning.slice(0, 120),
+                    reasoning: reasoning.slice(0, 1000),
+                    conclusion: 'Reasoned through the problem space',
+                    status: 'done',
+                    decision_type: 'action',
+                    ts: new Date().toISOString(),
+                  },
+                })
+                if (userId) {
+                  writeWorklog(userId, 'ai_response', `Reasoned: ${reasoning.slice(0, 300)}`,
+                    { status: 'done', decision_type: 'action', icon: 'brain', tag: 'Reasoning', reasoning: reasoning.slice(0, 200) }).catch(() => {})
+                }
               }
             }
           }
@@ -7057,6 +7073,8 @@ Keep each header + thought on its own line. Use multiple short bold-header block
       let autoContinuationRound = 0
       while (round < MAX_TOOL_ROUNDS) {
         round++
+        // Reset per-round tracking flags at start of each round
+        liveRef.firstThinkEmitted = false
         if (round % 5 === 0) {
           liveEnqueue({ checkpoint_event: { round, message: `Checkpoint: ${round} rounds completed` } })
         }
@@ -7143,6 +7161,26 @@ Keep each header + thought on its own line. Use multiple short bold-header block
 
         const coreTools = validTools.filter(t => CORE_TOOL_NAMES.has(t?.function?.name as string))
 
+        // ── Issue 15a: Start with ~15 core tools for non-tool-heavy requests ─────
+        // For conversational messages, reduce first-call tools from 114 to ~15 core.
+        // Only expand to full validTools when the user explicitly asks for tool tasks.
+        // Detection: if the latest user message is short (<=25 words) and contains no
+        // tool/action keywords, treat as conversational and use coreTools only.
+        const lastUserMsg = (() => {
+          for (let i = loopMessages.length - 1; i >= 0; i--) {
+            const m = loopMessages[i]
+            if (m.role === 'user') return (m.content as string) ?? ''
+          }
+          return ''
+        })()
+        const wordCount = lastUserMsg.trim().split(/\s+/).filter(Boolean).length
+        const hasActionKeyword = /\b(run|execute|call|invoke|use|apply|try|check|search|fetch|get|load|find|look.up|build|create|make|generate|send|post|update|delete|remove|archive)\b/i.test(lastUserMsg)
+        const isConversational = wordCount <= 25 && !hasActionKeyword
+        const firstCallTools = isConversational ? coreTools : validTools
+        if (isConversational) {
+          console.log(`[tool-filter] conversational message (${wordCount} words) — using ${firstCallTools.length} core tools`)
+        }
+
         // Try with all valid tools first; on 400 (tool error), retry with core tools only
         // Use trimmed messages when we have too many (prevents tool_call_id mismatch at ~131+ msgs)
         const payloadMessages = sanitizedMessages.length > 40 ? trimmedMessages : sanitizedMessages
@@ -7153,10 +7191,10 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           messages: [{ role: 'system', content: systemOverride ?? finalSystemContent }, ...payloadMessages],
         })
 
-        ;({ response: loopRes, errorText } = await tryLLMCall(llmPayload(validTools), apiKey))
+        ;({ response: loopRes, errorText } = await tryLLMCall(llmPayload(firstCallTools), apiKey))
 
         if (!loopRes.ok && loopRes.status === 400 && coreTools.length > 0) {
-          console.warn(`[chat] 400 error with ${validTools.length} tools — retrying with ${coreTools.length} core tools`)
+          console.warn(`[chat] 400 error with ${firstCallTools.length} tools — retrying with ${coreTools.length} core tools`)
           ;({ response: loopRes, errorText } = await tryLLMCall(llmPayload(coreTools), apiKey))
         }
 
@@ -7200,6 +7238,28 @@ Keep each header + thought on its own line. Use multiple short bold-header block
             // All tool calls had empty names — abort this round to avoid infinite loop
             console.warn('[chat] All tool calls had empty names, skipping round')
             break
+          }
+
+          // ── Per-round loop detection: same tool+args 3+ times in same round ─────
+          // MiniMax M2.7 can enter a loop calling the same tool with same args
+          // repeatedly within a single round. Detect and break early.
+          {
+            const roundCallCounts = new Map<string, number>()
+            for (const tc of toolCalls) {
+              const key = `${tc.function.name}::${tc.function.arguments.slice(0, 80)}`
+              const prev = roundCallCounts.get(key) ?? 0
+              if (prev >= 2) {
+                console.warn(`[chat] Per-round loop detected: ${tc.function.name} called 3+ times with same args in round ${round} — breaking`)
+                // Replace the looping tool calls with a synthesis nudge
+                loopMessages.push({
+                  role: 'user',
+                  content: `⚡ SYSTEM: You called ${tc.function.name} 3 times with identical arguments in one round. This indicates a loop. Stop repeating this tool. Instead, synthesize a response from the results you already have, or try a completely different approach.`,
+                })
+                usedTools = false
+                break
+              }
+              roundCallCounts.set(key, prev + 1)
+            }
           }
 
           // Extract think-tags: route to ProcessTab as step_trace, strip from content
@@ -7412,11 +7472,32 @@ Keep each header + thought on its own line. Use multiple short bold-header block
               console.log(`[tool] ${tc.function.name} — start`)
               // Phase 3: loop detection via execution trace
               const argsHash = tc.function.arguments.slice(0, 100)
+              // Per-tool-per-session deduplication: if same tool+args called 3+ times, skip and return previous result
+              const sessionKey = `${tc.function.name}::${argsHash}`
+              const priorCall = toolCallTracker.get(sessionKey)
+              if (priorCall && priorCall.count >= 3) {
+                return {
+                  role: 'tool' as const,
+                  tool_call_id: tc.id,
+                  content: `[SYSTEM] This tool has already been called 3 times with the same arguments. Use the previous result.`
+                }
+              }
               if (userId && detectTraceLoop(requestId, tc.function.name, argsHash)) {
                 return {
                   role: 'tool' as const,
                   tool_call_id: tc.id,
                   content: `LOOP_INTERRUPT: ${tc.function.name} called 3+ times with same args. Stopping to prevent infinite loop. Try a different approach.`
+                }
+              }
+              // ── Issue 10: Cap manage_email to MAX_MANAGE_EMAIL per sweep ─────────
+              if (tc.function.name === 'manage_email') {
+                manageEmailCallCount++
+                if (manageEmailCallCount > MAX_MANAGE_EMAIL) {
+                  return {
+                    role: 'tool' as const,
+                    tool_call_id: tc.id,
+                    content: `[SYSTEM] manage_email capped at ${MAX_MANAGE_EMAIL} calls per sweep. Skipping further email management in this pass.`
+                  }
                 }
               }
               // ── L2: Rule evaluation before tool call ──────────────────────────
@@ -7523,6 +7604,11 @@ Keep each header + thought on its own line. Use multiple short bold-header block
                 const memName = tc.function.name === 'list_memories' ? 'Long-term memory' : tc.function.name === 'read_memory' ? 'Memory entry' : tc.function.name === 'journal_search' ? 'Dream journal' : 'Memory'
                 liveEnqueue({ memory_recalled: { name: memName, content: result.slice(0, 200) } })
               }
+
+              // Track per-tool-per-session calls for deduplication
+              const trackKey = `${tc.function.name}::${argsHash}`
+              const existing = toolCallTracker.get(trackKey) ?? { count: 0, result: '' }
+              toolCallTracker.set(trackKey, { count: existing.count + 1, result })
 
               return { role: 'tool' as const, tool_call_id: tc.id, content: result }
             })
@@ -7710,12 +7796,13 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           // Detect incomplete-action statements: model says "Reading the chat route file:"
           // or "Let me..." / "Running..." but stops before calling tools — nudge it to continue
           const looksIncomplete = /:\s*$|\.{3}\s*$|\bLet me\b|\bI will\b|\bI'll now\b|\bRunning\b|\bStarting\b/i.test(cleanedContent)
-          if (looksIncomplete && !usedTools && round < MAX_TOOL_ROUNDS) {
+          if (looksIncomplete && nudgeCount < 2 && round < MAX_TOOL_ROUNDS) {
             // Model expressed intent but didn't call tools — nudge to continue
             loopMessages = [...loopMessages, choice.message, {
               role: 'user' as const,
               content: '⚡ SYSTEM: You said you would do something but stopped. Execute the tool call NOW. Do not describe what you will do — just call the tool.',
             }]
+            nudgeCount++
             continue
           }
           // Emit thinking_display for non-tool responses too (thinking was already emitted for tool_calls path)
@@ -7749,7 +7836,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           // ── JSON-format tool call: {"type":"function","name":"...","parameters":{...}} ──
           // Emitted by some models (Atlas tier) when they don't use proper tool_calls
           const jsonFnPattern = /\{\s*"type"\s*:\s*"function"\s*,\s*"name"\s*:\s*"([^"]+)"\s*,\s*"parameters"\s*:\s*(\{[\s\S]*?\})\s*\}/g
-          const hasJsonFnCall = /"type"\s*:\s*"function"\s*,\s*"name"\s*:/.test(rawContent)
+          hasJsonFnCall = /"type"\s*:\s*"function"\s*,\s*"name"\s*:/.test(rawContent)
 
           if (hasJsonFnCall && round < MAX_TOOL_ROUNDS) {
             const jsonFnResults: Array<{ role: 'tool'; tool_call_id: string; content: string }> = []
@@ -7817,7 +7904,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
 
           // ── XML-format tool calls: <invoke name="..."> (MiniMax alternate format) ──
           const xmlToolPattern = /<invoke\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)<\/invoke>|<parameter\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)<\/parameter>/g
-          const hasXmlToolCall = /minimax:tool_call|<invoke\s+name=|<\/invoke>/.test(rawContent)
+          hasXmlToolCall = /minimax:tool_call|<invoke\s+name=|<\/invoke>/.test(rawContent)
 
           if (hasXmlToolCall && round < MAX_TOOL_ROUNDS) {
             // Emit thought_step from text that preceded the XML block (if any)

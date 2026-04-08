@@ -144,7 +144,7 @@ app.prepare().then(() => {
   // Two WebSocket servers: /api/terminal-ws (terminal) + /api/proactive-ws (proactive push, noServer mode for path-based userId)
   const wssTerminal = new WebSocketServer({ server, path: '/api/terminal-ws' })
   // noServer mode: client connects to /api/proactive-ws/<userId> (path-based userId, exact path option won't match)
-  const wssProactive = new WebSocketServer({ noServer: true })
+  const wssProactive = new WebSocketServer({ noServer: true, perMessageDeflate: false })
 
   // Global registry for proactive WebSocket clients — shared with Next.js API routes
   // via global.__proactiveClients. API routes push events to this Set.
@@ -300,15 +300,15 @@ app.prepare().then(() => {
 
     proactiveClientsAdd(ws, userId)
 
-    // Delay ack by 150ms — DO proxy needs time to stabilize WS tunnel before we send bytes
+    // Delay ack by 500ms — DO proxy needs time to stabilize WS tunnel before we send bytes
     // Sending immediately causes "Invalid frame header" on the client
     setTimeout(() => {
       if (ws.readyState === 1) {
         try { ws.send(JSON.stringify({ type: 'connected', data: 'Proactive stream ready' })) } catch (_) {}
       }
-    }, 150)
+    }, 500)
 
-    // Heartbeat: ping every 30s to keep DO proxy connection alive
+    // First heartbeat ping at 60s, then every 30s — gives DO proxy time to establish tunnel
     const pingInterval = setInterval(() => {
       if (ws.readyState === /* OPEN */ 1) {
         try { ws.ping() } catch (_) {}
@@ -316,9 +316,18 @@ app.prepare().then(() => {
         clearInterval(pingInterval)
       }
     }, 30_000)
+    // First ping fires at 60s mark (60s > first interval tick at 30s)
+    setTimeout(() => {
+      if (ws.readyState === 1) {
+        try { ws.ping() } catch (_) {}
+      }
+    }, 60_000)
 
     ws.on('close', () => { proactiveClientsRemove(ws); clearInterval(pingInterval) })
-    ws.on('error', () => { proactiveClientsRemove(ws); clearInterval(pingInterval) })
+    ws.on('error', (err) => {
+      console.error('[proactive-ws] error event:', err.message, 'userId:', userId)
+      proactiveClientsRemove(ws); clearInterval(pingInterval)
+    })
   })
 
   server.listen(port, () => {

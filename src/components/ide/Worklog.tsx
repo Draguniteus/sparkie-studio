@@ -204,72 +204,110 @@ function WorklogIcon({ icon, className }: { icon?: string; className?: string })
   return <IconComponent size={11} className={`${entry.color} ${className ?? ''}`} />
 }
 
-// ── Standard timeline entry (tool_call, code_push, result, error, etc.) ─────
+// ── Border color per entry type (left border accent) ────────────────────────
+function getBorderColor(entry: WorklogEntry): string {
+  const type = entry.type
+  const status = entry.status
+  if (status === 'error' || status === 'anomaly') return 'border-l-red-500'
+  if (status === 'running') return 'border-l-amber-400'
+  if (status === 'blocked') return 'border-l-yellow-500'
+  if (entry.decision_type === 'proactive') return 'border-l-orange-400'
+  if (entry.decision_type === 'skip') return 'border-l-slate-600'
+  const map: Record<string, string> = {
+    memory_learned:  'border-l-purple-500',
+    memory_updated:  'border-l-purple-500',
+    self_assessment:  'border-l-amber-400',
+    proactive_check: 'border-l-amber-400',
+    code_push:       'border-l-blue-500',
+    email_processed: 'border-l-blue-400',
+    email_skipped:   'border-l-slate-500',
+    email_triage:    'border-l-slate-500',
+    tool_call:       'border-l-amber-500',
+    decision:        'border-l-amber-500',
+    task_executed:   'border-l-emerald-500',
+    result:          'border-l-emerald-500',
+    ai_response:     'border-l-purple-400',
+    message_batch:   'border-l-blue-400',
+    heartbeat:       'border-l-slate-500',
+    reasoning:       'border-l-purple-400',
+    action:          'border-l-blue-400',
+    code:            'border-l-blue-500',
+    error:           'border-l-red-500',
+    signal_skipped:  'border-l-slate-600',
+    hold:            'border-l-amber-400',
+  }
+  return map[type] ?? 'border-l-slate-600'
+}
+
+// ── Standard timeline entry — card-style with color-coded left border ───────────
 function StandardEntry({ entry }: { entry: WorklogEntry }) {
-  const isRunning = entry.status === "running"
+  const isRunning = entry.status === 'running'
   const duration = entry.actual_duration_ms ?? entry.duration
+  const borderColor = getBorderColor(entry)
 
   const typeLabel: Record<string, string> = {
-    tool_call: "Tool call", code_push: "Code push", result: "Result",
-    error: "Error", task_executed: "Task done", decision: "Decision",
-    heartbeat: "Heartbeat", auth_check: "Auth", thinking: "Thinking",
-    action: "Executing", code: "Writing code", signal_skipped: "Skipped",
-    hold: "Held", ai_response: "Response", email_triage: "Email triage",
+    tool_call: 'Tool call', code_push: 'Code push', result: 'Result',
+    error: 'Error', task_executed: 'Task done', decision: 'Decision',
+    heartbeat: 'Heartbeat', auth_check: 'Auth', thinking: 'Thinking',
+    action: 'Executing', code: 'Writing code', signal_skipped: 'Skipped',
+    hold: 'Held', ai_response: 'Response', email_triage: 'Email triage',
+    reasoning: 'Reasoning',
   }
-  const label = entry.tag ?? typeLabel[entry.type] ?? entry.type.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ")
+  const label = entry.tag ?? typeLabel[entry.type] ?? entry.type.split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
 
-  const textColors: Record<string, string> = {
-    result:       "text-emerald-400",
-    task_executed:"text-emerald-400",
-    error:        "text-red-400",
-    code_push:    "text-blue-400",
-    tool_call:    "text-amber-300",
-    decision:     "text-amber-300",
+  const labelColors: Record<string, string> = {
+    result:        'text-emerald-400',
+    task_executed: 'text-emerald-400',
+    error:         'text-red-400',
+    code_push:     'text-blue-400',
+    tool_call:     'text-amber-300',
+    decision:      'text-amber-300',
+    reasoning:     'text-purple-300',
+    action:        'text-blue-400',
+    code:          'text-blue-400',
+    ai_response:   'text-purple-300',
   }
-  const tc = textColors[entry.type] ?? "text-text-secondary"
+  const lc = labelColors[entry.type] ?? 'text-text-secondary'
 
   return (
-    <div className="pl-3 py-0.5">
-      <div className="flex items-start gap-2">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {(entry.icon ?? DEFAULT_TYPE_ICONS[entry.type]) && (
-              <WorklogIcon icon={entry.icon ?? DEFAULT_TYPE_ICONS[entry.type]} />
-            )}
-            <span className={`text-[10px] font-semibold uppercase tracking-wider ${tc}`}>{label}</span>
-            {entry.signal_priority && entry.signal_priority !== "P3" && (
-              <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold ${
-                entry.signal_priority === "P0" ? "bg-red-500/20 text-red-400 border border-red-500/40" :
-                entry.signal_priority === "P1" ? "bg-amber-500/20 text-amber-300 border border-amber-500/40" :
-                "bg-blue-500/20 text-blue-300 border border-blue-500/40"
-              }`}>{entry.signal_priority}</span>
-            )}
-            <span className="text-[10px] text-text-muted">{formatTime(entry.created_at ?? entry.timestamp)}</span>
-            {duration != null && entry.status === "done" && (
-              <span className="text-[10px] text-text-muted">{formatDuration(duration)}</span>
-            )}
-            {isRunning && <Loader2 size={9} className="animate-spin text-amber-400" />}
-          </div>
-          <p className="text-xs text-text-secondary mt-0.5 break-words leading-relaxed">
-            {entry.content}
-          </p>
-          {entry.result_preview && (
-            <p className="text-[10px] text-emerald-300/80 mt-1 pl-2 border-l border-emerald-500/30 leading-relaxed bg-emerald-500/5 rounded-r-sm">
-              → {entry.result_preview}
-            </p>
-          )}
-          {entry.reasoning && !entry.result_preview && (
-            <p className="text-[10px] text-text-muted italic mt-1 pl-2 border-l border-white/10 leading-relaxed opacity-70">
-              &ldquo;{entry.reasoning}&rdquo;
-            </p>
-          )}
-          {entry.conclusion && (
-            <p className="text-[10px] text-emerald-400/80 mt-1 font-medium leading-relaxed">
-              ✓ {entry.conclusion}
-            </p>
-          )}
-        </div>
+    <div className={`pl-3 py-0.5 border-l-2 ${borderColor}`}>
+      {/* Top row: icon + label + timestamp + badges */}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {(entry.icon ?? DEFAULT_TYPE_ICONS[entry.type]) && (
+          <WorklogIcon icon={entry.icon ?? DEFAULT_TYPE_ICONS[entry.type]} />
+        )}
+        <span className={`text-[10px] font-semibold uppercase tracking-wider ${lc}`}>{label}</span>
+        {entry.signal_priority && entry.signal_priority !== 'P3' && (
+          <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold ${
+            entry.signal_priority === 'P0' ? 'bg-red-500/20 text-red-400 border border-red-500/40' :
+            entry.signal_priority === 'P1' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' :
+            'bg-blue-500/20 text-blue-300 border border-blue-500/40'
+          }`}>{entry.signal_priority}</span>
+        )}
+        <span className="text-[10px] text-text-muted ml-auto">{formatTime(entry.created_at ?? entry.timestamp)}</span>
+        {duration != null && entry.status === 'done' && (
+          <span className="text-[10px] text-text-muted">{formatDuration(duration)}</span>
+        )}
+        {isRunning && <Loader2 size={9} className="animate-spin text-amber-400" />}
       </div>
+      {/* Content text — actual substance */}
+      {entry.content && (
+        <p className="text-xs text-text-secondary mt-1 break-words leading-relaxed pl-0.5">
+          {entry.content}
+        </p>
+      )}
+      {/* Result preview */}
+      {entry.result_preview && (
+        <p className="text-[10px] text-emerald-300/80 mt-1 pl-2 border-l border-emerald-500/30 leading-relaxed bg-emerald-500/5 rounded-r-sm">
+          → {entry.result_preview}
+        </p>
+      )}
+      {/* Conclusion */}
+      {entry.conclusion && (
+        <p className="text-[10px] text-emerald-400/80 mt-1 font-medium leading-relaxed">
+          ✓ {entry.conclusion}
+        </p>
+      )}
     </div>
   )
 }
@@ -376,9 +414,21 @@ export function Worklog({ compact = false }: WorklogProps) {
       const card = (ev as CustomEvent<{
         tool?: string; icon?: string; summary?: string; result_preview?: string;
         duration?: number; status?: string; decision_type?: string; tag?: string;
-        reasoning?: string; ts?: string
+        reasoning?: string; conclusion?: string; ts?: string
       }>).detail
       if (!card?.tool) return
+
+      // ── Noise filter: skip content-free or noise entries ─────────────────────
+      const summary = card.summary ?? ''
+      const isNoise =
+        !summary.trim() ||
+        summary === 'Analyzed' ||
+        summary === 'Response ready' ||
+        summary === "I've learned something new" ||
+        summary.length < 3
+
+      if (isNoise) return
+
       addWorklogEntry({
         type: card.tool,
         content: card.summary ?? '',
@@ -389,6 +439,7 @@ export function Worklog({ compact = false }: WorklogProps) {
         status: (card.status as WorklogEntry['status']) ?? 'done',
         decision_type: card.decision_type as WorklogEntry['decision_type'],
         reasoning: card.reasoning,
+        conclusion: card.conclusion,
         created_at: card.ts,
       })
     }

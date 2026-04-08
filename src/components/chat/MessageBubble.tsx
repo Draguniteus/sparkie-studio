@@ -380,7 +380,10 @@ function MessageBubbleInner({ message, userAvatarUrl }: Props) {
       <div className={`max-w-[90%] md:max-w-[80%] min-w-0 overflow-hidden ${isUser ? "order-first" : ""}`}>
         {!isUser && message.isStreaming && (
           <div className="mb-1.5 flex items-center gap-2 px-2.5 py-1 rounded-lg bg-gradient-to-r from-purple-600/10 via-blue-600/6 to-purple-500/6 border border-purple-500/20 w-fit">
-            <Loader2 size={10} className="text-purple-400 animate-spin shrink-0" />
+            {/* Shimmer thinking dots */}
+            <div className="thinking-dots shimmer flex gap-0.5 items-center">
+              <span /><span /><span />
+            </div>
             <span className="text-[10px] text-purple-300/85 font-medium">Sparkie is thinking…</span>
             <button
               onClick={() => window.dispatchEvent(new CustomEvent('sparkie_pause_stream'))}
