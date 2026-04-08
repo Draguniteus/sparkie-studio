@@ -64,6 +64,8 @@ export interface StepTrace {
   resuming?: boolean    // true when memory_recalled is a topic resumption
   round?: number        // which tool round
   timestamp?: number    // unix ms when emitted
+  tag?: string          // short category tag for filtering (e.g. 'file', 'brain', 'web', 'memory', 'thought')
+  category?: string     // broader grouping: 'code', 'web', 'memory', 'email', 'calendar', 'social', 'media', 'system'
 }
 
 export interface AceMusicMetadata {

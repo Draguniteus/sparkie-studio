@@ -7367,7 +7367,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
             get_schema: 'database', get_deployment_history: 'rocket', search_github: 'search',
             create_calendar_event: 'calendarToday', transcribe_audio: 'mic', text_to_speech: 'mic',
             execute_script: 'code', npm_run: 'terminal', git_ops: 'git',
-            delete_memory: 'trash', run_tests: 'checkCircle', check_lint: 'alertCircle',
+            delete_memory: 'trash', run_tests: 'check', check_lint: 'alert',
             read_email_thread: 'mail', manage_email: 'mail', rsvp_event: 'calendar',
             manage_calendar_event: 'calendar', analyze_file: 'file', fetch_url: 'globe', research: 'search',
             read_uploaded_file: 'file',

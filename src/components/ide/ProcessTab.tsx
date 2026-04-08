@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useAppStore, StepTrace } from '@/store/appStore'
 import { useShallow } from 'zustand/react/shallow'
-import { Brain, CheckCircle, AlertCircle, Loader2, Zap, Cpu, Database, ChevronRight, FileText, Pencil, Terminal, Search, Globe, Scroll, Rocket, Image, Music, Video, Mic, Hash } from 'lucide-react'
+import { Brain, CheckCircle, AlertCircle, Loader2, Zap, Cpu, Database, ChevronRight, FileText, Pencil, Terminal, Search, Globe, Scroll, Rocket, Image, Music, Video, Mic, Hash, Clock, Hash as HashIcon, Mail, Calendar, Code2, GitBranch, Trash2, CalendarDays } from 'lucide-react'
 
 function stripMarkdown(text: string): string {
   return text
@@ -27,21 +27,29 @@ function modelToTier(model: string): { label: string; color: string } {
 
 // Lucide icon map for step traces — replaces emoji
 type SparkieIcon = React.ComponentType<{ size?: number | string; className?: string }>
-const STEP_ICON_MAP: Record<string, { icon: SparkieIcon; color: string }> = {
-  file:     { icon: FileText,   color: 'text-blue-400' },
-  edit:     { icon: Pencil,     color: 'text-amber-400' },
-  terminal: { icon: Terminal,   color: 'text-green-400' },
-  search:   { icon: Search,     color: 'text-purple-400' },
-  database: { icon: Database,   color: 'text-cyan-400' },
-  globe:    { icon: Globe,     color: 'text-blue-400' },
-  brain:    { icon: Brain,      color: 'text-pink-400' },
-  scroll:   { icon: Scroll,     color: 'text-amber-300' },
-  rocket:   { icon: Rocket,     color: 'text-orange-400' },
-  image:    { icon: Image,      color: 'text-violet-400' },
-  music:    { icon: Music,     color: 'text-pink-300' },
-  video:    { icon: Video,      color: 'text-fuchsia-400' },
-  mic:      { icon: Mic,       color: 'text-rose-400' },
-  zap:      { icon: Zap,       color: 'text-yellow-400' },
+const STEP_ICON_MAP: Record<string, { icon: SparkieIcon; color: string; tag: string; category: string }> = {
+  file:      { icon: FileText,    color: 'text-blue-400',    tag: 'file',     category: 'code' },
+  edit:      { icon: Pencil,      color: 'text-amber-400',  tag: 'edit',     category: 'code' },
+  terminal:  { icon: Terminal,    color: 'text-green-400',  tag: 'terminal', category: 'code' },
+  search:    { icon: Search,      color: 'text-purple-400', tag: 'search',   category: 'web' },
+  database:  { icon: Database,    color: 'text-cyan-400',   tag: 'database', category: 'system' },
+  globe:     { icon: Globe,       color: 'text-blue-400',   tag: 'web',      category: 'web' },
+  brain:     { icon: Brain,        color: 'text-pink-400',   tag: 'memory',   category: 'memory' },
+  scroll:    { icon: Scroll,       color: 'text-amber-300',  tag: 'log',      category: 'system' },
+  rocket:    { icon: Rocket,      color: 'text-orange-400', tag: 'deploy',   category: 'code' },
+  image:     { icon: Image,       color: 'text-violet-400', tag: 'image',    category: 'media' },
+  music:     { icon: Music,       color: 'text-pink-300',   tag: 'music',    category: 'media' },
+  video:     { icon: Video,       color: 'text-fuchsia-400',tag: 'video',    category: 'media' },
+  mic:       { icon: Mic,         color: 'text-rose-400',   tag: 'audio',    category: 'media' },
+  zap:       { icon: Zap,         color: 'text-yellow-400', tag: 'tool',     category: 'system' },
+  mail:      { icon: Mail,        color: 'text-blue-400',   tag: 'email',    category: 'email' },
+  calendar:  { icon: Calendar,    color: 'text-emerald-400', tag: 'calendar', category: 'calendar' },
+  calendarToday: { icon: CalendarDays, color: 'text-emerald-400', tag: 'calendar', category: 'calendar' },
+  code:      { icon: Code2,       color: 'text-blue-400',   tag: 'code',     category: 'code' },
+  git:       { icon: GitBranch,   color: 'text-orange-400', tag: 'git',      category: 'code' },
+  trash:     { icon: Trash2,     color: 'text-red-400',    tag: 'delete',   category: 'code' },
+  check:     { icon: CheckCircle, color: 'text-emerald-400', tag: 'success',  category: 'system' },
+  alert:     { icon: AlertCircle, color: 'text-amber-400',   tag: 'warning',  category: 'system' },
 }
 
 // Stable key for React list rendering — prefer id, fallback to label+status+index
@@ -88,11 +96,17 @@ function ThoughtCard({ text, icon, label }: { text: string; icon?: string; label
 }
 
 function TraceRow({ trace }: { trace: StepTrace }) {
-  const entry = STEP_ICON_MAP[trace.icon] ?? { icon: Zap, color: 'text-yellow-400' }
+  const entry = STEP_ICON_MAP[trace.icon] ?? { icon: Zap, color: 'text-yellow-400', tag: 'tool', category: 'system' }
   const IconComponent = entry.icon
+
+  // Format timestamp as HH:MM:SS
+  const timeStr = trace.timestamp
+    ? new Date(trace.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : null
+
   return (
     <div
-      className={`flex items-start gap-2.5 px-3 py-2 rounded-lg border text-[11px] ${
+      className={`flex items-start gap-2 px-2.5 py-1.5 rounded-lg border text-[11px] ${
         trace.status === 'error'
           ? 'bg-red-500/5 border-red-500/15 text-red-400'
           : trace.status === 'running'
@@ -100,17 +114,44 @@ function TraceRow({ trace }: { trace: StepTrace }) {
           : 'bg-hive-elevated/40 border-white/4 text-text-secondary'
       }`}
     >
-      <IconComponent size={12} className={`shrink-0 mt-px ${entry.color}`} />
-      <span className="flex-1 break-all leading-snug">{trace.label}</span>
+      <IconComponent size={11} className={`shrink-0 mt-0.5 ${entry.color}`} />
+      <span className="flex-1 break-all leading-snug min-w-0">{trace.label}</span>
+
+      {/* toolName badge */}
+      {trace.toolName && (
+        <span className="shrink-0 text-[9px] px-1 py-px rounded bg-white/5 text-text-muted/70 border border-white/8 font-mono">
+          {trace.toolName.replace(/_/g, '_')}
+        </span>
+      )}
+
+      {/* round badge */}
+      {trace.round != null && (
+        <span className="shrink-0 flex items-center gap-0.5 text-[9px] text-text-muted/50">
+          <HashIcon size={8} />
+          {trace.round}
+        </span>
+      )}
+
+      {/* timestamp */}
+      {timeStr && (
+        <span className="shrink-0 flex items-center gap-0.5 text-[9px] text-text-muted/50">
+          <Clock size={8} />
+          {timeStr}
+        </span>
+      )}
+
+      {/* status indicators */}
       {trace.status === 'running' && (
-        <Loader2 size={10} className="shrink-0 text-purple-400 animate-spin mt-0.5" />
+        <Loader2 size={9} className="shrink-0 text-purple-400 animate-spin mt-0.5" />
       )}
       {trace.status === 'done' && (
-        <CheckCircle size={10} className="shrink-0 text-green-400 mt-0.5" />
+        <CheckCircle size={9} className="shrink-0 text-green-400 mt-0.5" />
       )}
       {trace.status === 'error' && (
-        <AlertCircle size={10} className="shrink-0 text-red-400 mt-0.5" />
+        <AlertCircle size={9} className="shrink-0 text-red-400 mt-0.5" />
       )}
+
+      {/* duration */}
       {trace.duration != null && trace.status !== 'running' && (
         <span className="text-[9px] tabular-nums shrink-0 text-text-muted/60 mt-0.5">
           {trace.duration < 1000 ? `${trace.duration}ms` : `${(trace.duration / 1000).toFixed(1)}s`}
@@ -120,7 +161,22 @@ function TraceRow({ trace }: { trace: StepTrace }) {
   )
 }
 
-function FrozenCard({ group, index, hasLive, isSettled }: { group: { chipLabel: string; traces: StepTrace[] }; index: number; hasLive: boolean; isSettled?: boolean }) {
+// Returns true if a trace matches the given tag filter
+function matchesTagFilter(trace: StepTrace, filter: string): boolean {
+  if (filter === 'all') return true
+  if (filter === 'thought') return trace.type === 'thought'
+  if (filter === 'memory') return trace.type === 'memory'
+  if (filter === 'tool') return trace.type === 'tool'
+  // Category-level filters
+  const entry = STEP_ICON_MAP[trace.icon]
+  if (filter === 'code')    return trace.type === 'tool' && entry?.category === 'code'
+  if (filter === 'web')     return trace.type === 'tool' && entry?.category === 'web'
+  if (filter === 'media')   return trace.type === 'tool' && entry?.category === 'media'
+  if (filter === 'system')  return trace.type === 'tool' && (entry?.category === 'system' || !entry)
+  return true
+}
+
+function FrozenCard({ group, index, hasLive, isSettled, tagFilter }: { group: { chipLabel: string; traces: StepTrace[] }; index: number; hasLive: boolean; isSettled?: boolean; tagFilter: string }) {
   const [open, setOpen] = useState(index === 0 && !hasLive)
   // Count only non-thought traces for the step counter
   const toolTraces = group.traces.filter(t => t.type !== 'thought')
@@ -158,7 +214,9 @@ function FrozenCard({ group, index, hasLive, isSettled }: { group: { chipLabel: 
       </button>
       {open && (
         <div className="p-2 flex flex-col gap-1 bg-hive-600/20 max-h-72 overflow-y-auto">
-          {group.traces.map((trace, ti) => (
+          {group.traces
+            .filter(t => matchesTagFilter(t, tagFilter))
+            .map((trace, ti) => (
             trace.type === 'thought'
               ? <ThoughtCard key={ti} text={trace.text ?? trace.label} icon={trace.icon} />
               : <TraceRow key={ti} trace={trace} />
@@ -187,6 +245,7 @@ export function ProcessTab() {
   const prevLongTaskRef = useRef<string | null>(null)
   const [settledId, setSettledId] = useState<string | null>(null)
   const settledTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [tagFilter, setTagFilter] = useState<string>('all') // 'all' | 'tool' | 'thought' | 'memory' | 'code' | 'web' | 'media' | 'system'
 
   // Subscribe to live step_trace SSE events (id-based upsert for per-tool spinner→checkmark)
   useEffect(() => {
@@ -420,6 +479,34 @@ export function ProcessTab() {
         )}
       </div>
 
+      {/* Tag filter chips */}
+      {hasContent && (
+        <div className="flex items-center gap-1 px-3 py-1.5 border-b border-hive-border/40 shrink-0 overflow-x-auto scrollbar-hide">
+          {[
+            { key: 'all',    label: 'All' },
+            { key: 'tool',   label: 'Tools' },
+            { key: 'thought',label: 'Thoughts' },
+            { key: 'memory', label: 'Memory' },
+            { key: 'code',   label: 'Code' },
+            { key: 'web',    label: 'Web' },
+            { key: 'media',  label: 'Media' },
+            { key: 'system', label: 'System' },
+          ].map(f => (
+            <button
+              key={f.key}
+              onClick={() => setTagFilter(f.key)}
+              className={`shrink-0 text-[10px] px-2 py-0.5 rounded-full border transition-colors ${
+                tagFilter === f.key
+                  ? 'bg-purple-500/20 border-purple-500/40 text-purple-300'
+                  : 'bg-hive-elevated/40 border-hive-border/40 text-text-muted hover:text-text-secondary'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Model / session metrics bar */}
       <div className="flex items-center gap-2 px-3 py-1.5 border-b border-hive-border/60 shrink-0 bg-hive-700/40">
         <Cpu size={9} className="text-text-muted shrink-0" />
@@ -438,7 +525,9 @@ export function ProcessTab() {
         {liveTraces.length > 0 && (
           <div className="flex flex-col gap-3">
             <p className="text-[10px] text-text-muted px-1 mb-0.5 uppercase tracking-wide">Live</p>
-            {liveTraces.map((trace, i) => {
+            {liveTraces
+              .filter(t => matchesTagFilter(t, tagFilter))
+              .map((trace, i) => {
               const k = traceKey(trace, i)
               if (trace.type === 'thought') {
                 return <ThoughtCard key={k} text={trace.text ?? trace.label ?? ''} icon={trace.icon} label={trace.label} />
@@ -450,7 +539,7 @@ export function ProcessTab() {
 
         {/* Frozen traces from recent messages — collapsible cards */}
         {recentFrozen.map((group, gi) => (
-          <FrozenCard key={group.msgId ?? `frozen-${gi}`} group={group} index={gi} hasLive={liveTraces.length > 0} isSettled={settledId === group.msgId} />
+          <FrozenCard key={group.msgId ?? `frozen-${gi}`} group={group} index={gi} hasLive={liveTraces.length > 0} isSettled={settledId === group.msgId} tagFilter={tagFilter} />
         ))}
 
         {/* Empty state */}
