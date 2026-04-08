@@ -1,10 +1,11 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import React, { useEffect, useRef, useState } from "react"
 import { Search } from "lucide-react"
 import { useAppStore, WorklogEntry } from "@/store/appStore"
+import { DEFAULT_TYPE_ICONS } from "@/lib/worklog"
 import { useShallow } from "zustand/react/shallow"
-import { Brain, Loader2, Mail, MessageSquare, Send, Activity, Eye } from "lucide-react"
+import { Brain, Loader2, Mail, MessageSquare, Send, Activity, Eye, CheckCircle, Code2, Bug, AlertTriangle, FileText, Rocket, Lightbulb, Sparkles, Timer, XCircle, Info, ArrowRight, Terminal, Pencil, Zap } from "lucide-react"
 
 function formatTime(ts: Date | number | string | undefined) {
   if (!ts) return ""
@@ -161,31 +162,46 @@ function MessageEntry({ entry, isSent }: { entry: WorklogEntry; isSent: boolean 
   )
 }
 
-// ── Icon emoji map for worklog entry icons ───────────────────────────────────
-const ICON_EMOJI: Record<string, string> = {
-  brain: "🧠",
-  check: "✅",
-  code: "💻",
-  bug: "🐛",
-  mail: "✉️",
-  send: "📤",
-  alert: "⚠️",
-  memory: "🧩",
-  search: "🔍",
-  file: "📄",
-  rocket: "🚀",
-  lightbulb: "💡",
-  sparkles: "✨",
-  hourglass: "⏳",
-  done: "🎉",
-  error: "❌",
-  warning: "⚡",
-  info: "ℹ️",
-  arrow: "➡️",
+// ── Lucide icon map for worklog entry icons ───────────────────────────────────
+type WorklogIcon = React.ComponentType<{ size?: number | string; className?: string }>
+const ICON_MAP: Record<string, { icon: WorklogIcon; color: string }> = {
+  brain:     { icon: Brain,        color: 'text-pink-400' },
+  check:     { icon: CheckCircle,   color: 'text-emerald-400' },
+  code:      { icon: Code2,         color: 'text-blue-400' },
+  bug:       { icon: Bug,          color: 'text-red-400' },
+  mail:      { icon: Mail,         color: 'text-blue-400' },
+  send:      { icon: Send,         color: 'text-blue-400' },
+  alert:     { icon: AlertTriangle, color: 'text-amber-400' },
+  memory:    { icon: Brain,        color: 'text-purple-400' },
+  search:    { icon: Search,       color: 'text-purple-400' },
+  file:      { icon: FileText,    color: 'text-blue-400' },
+  rocket:    { icon: Rocket,     color: 'text-orange-400' },
+  lightbulb: { icon: Lightbulb,  color: 'text-yellow-400' },
+  sparkles:  { icon: Sparkles,    color: 'text-purple-300' },
+  hourglass: { icon: Timer,       color: 'text-amber-400' },
+  done:      { icon: CheckCircle, color: 'text-emerald-400' },
+  error:     { icon: XCircle,    color: 'text-red-400' },
+  warning:   { icon: AlertTriangle, color: 'text-amber-400' },
+  info:      { icon: Info,        color: 'text-blue-400' },
+  arrow:     { icon: ArrowRight,  color: 'text-text-muted' },
+  terminal:  { icon: Terminal,    color: 'text-green-400' },
+  edit:      { icon: Pencil,      color: 'text-amber-400' },
+  zap:       { icon: Zap,         color: 'text-yellow-400' },
+  tool:      { icon: Zap,         color: 'text-amber-400' },
+  signal:    { icon: Zap,         color: 'text-blue-400' },
+  pulse:     { icon: Zap,         color: 'text-pink-400' },
+  pause:     { icon: Timer,       color: 'text-amber-400' },
+  skip:      { icon: ArrowRight,  color: 'text-text-muted' },
+  refresh:   { icon: ArrowRight,  color: 'text-purple-400' },
+  forgot:    { icon: XCircle,    color: 'text-red-400' },
 }
 
-function getIconEmoji(icon?: string): string {
-  return icon ? (ICON_EMOJI[icon] ?? `【${icon}】`) : ""
+function WorklogIcon({ icon, className }: { icon?: string; className?: string }) {
+  if (!icon) return null
+  const entry = ICON_MAP[icon]
+  if (!entry) return <span className={`text-[10px] ${className ?? ''}`}>{`【${icon}】`}</span>
+  const IconComponent = entry.icon
+  return <IconComponent size={11} className={`${entry.color} ${className ?? ''}`} />
 }
 
 // ── Standard timeline entry (tool_call, code_push, result, error, etc.) ─────
@@ -217,8 +233,8 @@ function StandardEntry({ entry }: { entry: WorklogEntry }) {
       <div className="flex items-start gap-2">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap">
-            {entry.icon && (
-              <span className="text-[12px]" title={entry.icon}>{getIconEmoji(entry.icon)}</span>
+            {(entry.icon ?? DEFAULT_TYPE_ICONS[entry.type]) && (
+              <WorklogIcon icon={entry.icon ?? DEFAULT_TYPE_ICONS[entry.type]} />
             )}
             <span className={`text-[10px] font-semibold uppercase tracking-wider ${tc}`}>{label}</span>
             {entry.signal_priority && entry.signal_priority !== "P3" && (

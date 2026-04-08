@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useAppStore, StepTrace } from '@/store/appStore'
 import { useShallow } from 'zustand/react/shallow'
-import { Brain, CheckCircle, AlertCircle, Loader2, Zap, Cpu, Database, ChevronRight } from 'lucide-react'
+import { Brain, CheckCircle, AlertCircle, Loader2, Zap, Cpu, Database, ChevronRight, FileText, Pencil, Terminal, Search, Globe, Scroll, Rocket, Image, Music, Video, Mic, Hash } from 'lucide-react'
 
 function stripMarkdown(text: string): string {
   return text
@@ -25,10 +25,23 @@ function modelToTier(model: string): { label: string; color: string } {
   return { label: model.slice(0, 24), color: 'text-text-muted' }
 }
 
-const STEP_ICON_MAP: Record<string, string> = {
-  file: '📄', edit: '✏️', terminal: '⚡', search: '🔍',
-  database: '🗃️', globe: '🌐', brain: '🧠', scroll: '📋',
-  rocket: '🚀', image: '🎨', music: '🎵', video: '🎬', mic: '🎤', zap: '⚡',
+// Lucide icon map for step traces — replaces emoji
+type SparkieIcon = React.ComponentType<{ size?: number | string; className?: string }>
+const STEP_ICON_MAP: Record<string, { icon: SparkieIcon; color: string }> = {
+  file:     { icon: FileText,   color: 'text-blue-400' },
+  edit:     { icon: Pencil,     color: 'text-amber-400' },
+  terminal: { icon: Terminal,   color: 'text-green-400' },
+  search:   { icon: Search,     color: 'text-purple-400' },
+  database: { icon: Database,   color: 'text-cyan-400' },
+  globe:    { icon: Globe,     color: 'text-blue-400' },
+  brain:    { icon: Brain,      color: 'text-pink-400' },
+  scroll:   { icon: Scroll,     color: 'text-amber-300' },
+  rocket:   { icon: Rocket,     color: 'text-orange-400' },
+  image:    { icon: Image,      color: 'text-violet-400' },
+  music:    { icon: Music,     color: 'text-pink-300' },
+  video:    { icon: Video,      color: 'text-fuchsia-400' },
+  mic:      { icon: Mic,       color: 'text-rose-400' },
+  zap:      { icon: Zap,       color: 'text-yellow-400' },
 }
 
 // Stable key for React list rendering — prefer id, fallback to label+status+index
@@ -37,16 +50,22 @@ function traceKey(trace: StepTrace, i: number) {
   return `auto_${i}__${trace.label}__${trace.status}`
 }
 
-const THOUGHT_ICON_MAP: Record<string, string> = { brain: '🧠', zap: '⚡', flag: '🚩', memory: '💾' }
+const THOUGHT_ICON_MAP: Record<string, { icon: SparkieIcon; color: string }> = {
+  brain:  { icon: Brain,    color: 'text-pink-400' },
+  zap:    { icon: Zap,      color: 'text-yellow-400' },
+  flag:   { icon: Hash,    color: 'text-orange-400' },
+  memory: { icon: Brain,   color: 'text-purple-400' },
+}
 
 function ThoughtCard({ text, icon, label }: { text: string; icon?: string; label?: string }) {
-  const emoji = THOUGHT_ICON_MAP[icon ?? 'brain'] ?? '🧠'
+  const entry = THOUGHT_ICON_MAP[icon ?? 'brain'] ?? THOUGHT_ICON_MAP.brain
+  const IconComponent = entry.icon
   const preview = stripMarkdown(text).slice(0, 120)
   const isLong = stripMarkdown(text).length > 120
   return (
     <details className="group px-3 py-2 rounded-lg border border-purple-500/20 bg-purple-500/5 border-l-2 border-l-purple-400">
       <summary className="flex items-center gap-2 cursor-pointer list-none">
-        <span className="text-[13px] shrink-0 mt-px">{emoji}</span>
+        <IconComponent size={12} className={`shrink-0 mt-px ${entry.color}`} />
         {label
           ? <span className="font-bold text-purple-300 text-[11px]">{label}</span>
           : <span className="text-[11px] text-purple-300/70 italic">thinking…</span>
@@ -69,7 +88,8 @@ function ThoughtCard({ text, icon, label }: { text: string; icon?: string; label
 }
 
 function TraceRow({ trace }: { trace: StepTrace }) {
-  const icon = STEP_ICON_MAP[trace.icon] ?? '⚡'
+  const entry = STEP_ICON_MAP[trace.icon] ?? { icon: Zap, color: 'text-yellow-400' }
+  const IconComponent = entry.icon
   return (
     <div
       className={`flex items-start gap-2.5 px-3 py-2 rounded-lg border text-[11px] ${
@@ -80,7 +100,7 @@ function TraceRow({ trace }: { trace: StepTrace }) {
           : 'bg-hive-elevated/40 border-white/4 text-text-secondary'
       }`}
     >
-      <span className="text-[13px] shrink-0 mt-px">{icon}</span>
+      <IconComponent size={12} className={`shrink-0 mt-px ${entry.color}`} />
       <span className="flex-1 break-all leading-snug">{trace.label}</span>
       {trace.status === 'running' && (
         <Loader2 size={10} className="shrink-0 text-purple-400 animate-spin mt-0.5" />

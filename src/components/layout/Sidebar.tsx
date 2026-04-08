@@ -6,7 +6,7 @@ import { useShallow } from 'zustand/react/shallow'
 import {
   Search, FolderOpen, Image, MessageSquare,
   Settings, ChevronLeft, Sparkles, Radio, Plug, Zap, Lock, Rss, BookOpen, Brain,
-  Play, Pause, Music,
+  Play, Pause, Music, Loader2, CheckCircle, XCircle, Code2, Circle,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 
@@ -326,23 +326,21 @@ export function Sidebar() {
             </div>
           ) : (
             <div className="flex flex-col gap-1">
-              {recentActivity.map((entry) => (
-                <div key={entry.id} className="flex items-start gap-2 px-2 py-1.5 rounded-lg bg-hive-elevated/50">
-                  <span className={`mt-0.5 text-[9px] shrink-0 ${
-                    entry.type === 'error' ? 'text-red-400' :
-                    entry.type === 'result' ? 'text-green-400' :
-                    entry.type === 'code' ? 'text-honey-500' :
-                    entry.type === 'action' ? 'text-blue-400' : 'text-text-muted'
-                  }`}>
-                    {entry.type === 'thinking' ? '◌' :
-                     entry.type === 'action' ? '⚡' :
-                     entry.type === 'result' ? '✓' :
-                     entry.type === 'error' ? '✕' :
-                     entry.type === 'code' ? '{}' : '·'}
-                  </span>
-                  <span className="text-[11px] text-text-secondary truncate">{entry.content.slice(0, 60)}</span>
-                </div>
-              ))}
+              {recentActivity.map((entry) => {
+                const iconProps = { size: 10, className: 'shrink-0 mt-0.5' }
+                const iconEl = entry.type === 'thinking' ? <Loader2 {...iconProps} className={`${iconProps.className} animate-spin text-purple-400`} /> :
+                               entry.type === 'action' ? <Zap {...iconProps} className={`${iconProps.className} text-blue-400`} /> :
+                               entry.type === 'result' ? <CheckCircle {...iconProps} className={`${iconProps.className} text-emerald-400`} /> :
+                               entry.type === 'error' ? <XCircle {...iconProps} className={`${iconProps.className} text-red-400`} /> :
+                               entry.type === 'code' ? <Code2 {...iconProps} className={`${iconProps.className} text-honey-400`} /> :
+                               <Circle {...iconProps} className={`${iconProps.className} text-text-muted`} />
+                return (
+                  <div key={entry.id} className="flex items-start gap-2 px-2 py-1.5 rounded-lg bg-hive-elevated/50">
+                    {iconEl}
+                    <span className="text-[11px] text-text-secondary line-clamp-2">{entry.content}</span>
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>

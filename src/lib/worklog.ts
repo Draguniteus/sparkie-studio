@@ -1,5 +1,28 @@
 import { query } from '@/lib/db'
 
+/** Default icon key per worklog type — used when call site doesn't specify one */
+export const DEFAULT_TYPE_ICONS: Record<string, string> = {
+  proactive_check:  'sparkles',
+  message_batch:    'mail',
+  email_processed:  'check',
+  email_skipped:    'skip',
+  memory_learned:   'brain',
+  memory_updated:   'refresh',
+  memory_forgotten: 'forgot',
+  task_executed:    'check',
+  code_push:        'code',
+  error:            'bug',
+  heartbeat:        'pulse',
+  ai_response:      'sparkles',
+  signal_skipped:   'skip',
+  auth_check:       'check',
+  tool_call:        'tool',
+  proactive_signal: 'signal',
+  decision:        'flag',
+  hold:             'pause',
+  self_assessment:  'check',
+}
+
 export type WorklogType =
   | 'proactive_check'
   | 'message_batch'
@@ -49,6 +72,8 @@ export interface WorklogMeta {
   loop_count?: number        // how many times this tool was called in this trace
   token_budget_pct?: number  // token usage % at time of entry
   conclusion?: string        // human-readable outcome sentence shown below action type in Worklog tab
+  icon?: string             // Lucide-style icon key for display
+  tag?: string              // short category tag for filtering
   [key: string]: unknown
 }
 
@@ -75,6 +100,8 @@ async function ensureTable() {
   await query(`ALTER TABLE sparkie_worklog ADD COLUMN IF NOT EXISTS side_effect_of TEXT`).catch(() => {})
   await query(`ALTER TABLE sparkie_worklog ADD COLUMN IF NOT EXISTS confidence FLOAT`).catch(() => {})
   await query(`ALTER TABLE sparkie_worklog ADD COLUMN IF NOT EXISTS conclusion TEXT`).catch(() => {})
+  await query(`ALTER TABLE sparkie_worklog ADD COLUMN IF NOT EXISTS icon TEXT`).catch(() => {})
+  await query(`ALTER TABLE sparkie_worklog ADD COLUMN IF NOT EXISTS tag TEXT`).catch(() => {})
 }
 
 export async function writeWorklog(
@@ -86,10 +113,10 @@ export async function writeWorklog(
   try {
     await ensureTable()
     const id = crypto.randomUUID()
-    const { status, decision_type, reasoning, estimated_duration_ms, actual_duration_ms, signal_priority, confidence, depends_on, side_effect_of, conclusion, ...restMeta } = metadata
+    const { status, decision_type, reasoning, estimated_duration_ms, actual_duration_ms, signal_priority, confidence, depends_on, side_effect_of, conclusion, icon, tag, ...restMeta } = metadata
     await query(
-      `INSERT INTO sparkie_worklog (id, user_id, type, content, metadata, status, decision_type, reasoning, estimated_duration_ms, actual_duration_ms, signal_priority, confidence, depends_on, side_effect_of, conclusion)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+      `INSERT INTO sparkie_worklog (id, user_id, type, content, metadata, status, decision_type, reasoning, estimated_duration_ms, actual_duration_ms, signal_priority, confidence, depends_on, side_effect_of, conclusion, icon, tag)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
       [
         id, userId, type, content, JSON.stringify(restMeta),
         status ?? 'done',
@@ -102,6 +129,8 @@ export async function writeWorklog(
         depends_on ? JSON.stringify(depends_on) : null,
         side_effect_of ?? null,
         conclusion ?? null,
+        icon ?? null,
+        tag ?? null,
       ]
     )
   } catch (e) {
