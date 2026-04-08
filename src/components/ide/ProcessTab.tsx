@@ -231,7 +231,7 @@ function FrozenCard({ group, index, hasLive, isSettled, tagFilter, prevMsgId }: 
               .filter(t => matchesTagFilter(t, tagFilter))
               .map((trace, ti) => (
               trace.type === 'thought'
-                ? <ThoughtCard key={ti} text={trace.text ?? trace.label} icon={trace.icon} />
+                ? <ThoughtCard key={ti} text={trace.text ?? trace.label ?? ''} icon={trace.icon} label={trace.label} />
                 : <TraceRow key={ti} trace={trace} />
             ))}
           </div>

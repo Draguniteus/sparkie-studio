@@ -21,6 +21,10 @@ export const DEFAULT_TYPE_ICONS: Record<string, string> = {
   decision:        'flag',
   hold:             'pause',
   self_assessment:  'check',
+  result:           'check',
+  reasoning:        'brain',
+  message_received: 'mail',
+  cron_sweep:       'sparkles',
 }
 
 export type WorklogType =

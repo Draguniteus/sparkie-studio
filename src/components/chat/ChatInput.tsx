@@ -1145,10 +1145,10 @@ export function ChatInput() {
                 return next
               })
               // Log real step to worklog so Live Activity shows what Sparkie is actually doing
-              if (trace.status === 'done') {
-                addWorklogEntry({ type: 'result', content: trace.label + (trace.duration ? ` (${trace.duration < 1000 ? trace.duration + 'ms' : (trace.duration / 1000).toFixed(1) + 's'})` : ''), status: 'done' })
+              if (trace.status === 'done' && trace.type !== 'thought') {
+                addWorklogEntry({ type: 'result', content: trace.label + (trace.duration ? ` (${trace.duration < 1000 ? trace.duration + 'ms' : (trace.duration / 1000).toFixed(1) + 's'})` : ''), status: 'done', icon: trace.icon })
               } else if (trace.status === 'error') {
-                addWorklogEntry({ type: 'error', content: trace.label, status: 'error' })
+                addWorklogEntry({ type: 'error', content: trace.label, status: 'error', icon: trace.icon })
               }
               // Broadcast to ChatView so the in-stream chip can show it
               window.dispatchEvent(new CustomEvent('sparkie_step_trace', { detail: trace }))

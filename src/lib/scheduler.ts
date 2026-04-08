@@ -210,6 +210,27 @@ async function proactiveInboxSweep(userId: string): Promise<void> {
 
     messages = triageResults.filter(r => r.decision === 'process').map(r => r.msg).slice(0, 5)
 
+    // ── Issue 5: Email deduplication — skip emails already in worklog (last 30 min) ──
+    if (messages.length > 0) {
+      try {
+        const recentEmailWorklogs = await query<{ email_id: string }>(
+          `SELECT metadata->>'email_id' as email_id FROM sparkie_worklog
+           WHERE user_id = $1 AND type IN ('email_triage', 'decision', 'proactive_signal', 'task_executed')
+           AND created_at > NOW() - INTERVAL '30 minutes'
+           AND metadata ? 'email_id'`,
+          [userId]
+        ).catch(() => ({ rows: [] as { email_id: string }[] }))
+        const recentEmailIds = new Set(recentEmailWorklogs.rows.map(r => r.email_id).filter(Boolean))
+        const prevCount = messages.length
+        messages = messages.filter(m => !recentEmailIds.has(m.id))
+        if (messages.length < prevCount) {
+          console.log(`[scheduler] proactiveInboxSweep: deduped ${prevCount - messages.length} already-processed emails`)
+        }
+      } catch (e) {
+        console.error('[scheduler] email dedup error:', e)
+      }
+    }
+
     emailsJson = JSON.stringify(messages)
     // Write a proactive entry even when inbox is empty — the act of checking IS proactive
     if (messages.length === 0) {

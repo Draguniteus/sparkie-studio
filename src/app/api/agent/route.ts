@@ -268,6 +268,7 @@ async function executeDueTasks(userId: string, host: string, proto: string, cook
                 'x-internal-user-id': userId,
                 'x-internal-secret': internalSecret,
                 'x-autonomous-task': 'true',
+                'x-sparkie-mode': 'agent_sweep',
               },
               body: JSON.stringify({
                 messages: conversation,
@@ -691,6 +692,11 @@ export async function GET(req: NextRequest) {
     await query(
       `UPDATE sparkie_tasks SET status = 'pending'
        WHERE status = 'in_progress' AND created_at < NOW() - INTERVAL '5 minutes'`
+    ).catch(() => {})
+
+    // ── Issue 5: Clean up stale GMAIL_MODIFY_MESSAGE failures on agent startup ──
+    await query(
+      `UPDATE sparkie_tasks SET status = 'failed' WHERE status = 'pending' AND label LIKE '%GMAIL_MODIFY_MESSAGE%'`
     ).catch(() => {})
 
     // ── Get ALL active users (seen within 30 days) ────────────────────────────

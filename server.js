@@ -300,13 +300,13 @@ app.prepare().then(() => {
 
     proactiveClientsAdd(ws, userId)
 
-    // Delay ack by 500ms — DO proxy needs time to stabilize WS tunnel before we send bytes
+    // Delay ack by 1000ms — DO proxy needs time to stabilize WS tunnel before we send bytes
     // Sending immediately causes "Invalid frame header" on the client
     setTimeout(() => {
       if (ws.readyState === 1) {
         try { ws.send(JSON.stringify({ type: 'connected', data: 'Proactive stream ready' })) } catch (_) {}
       }
-    }, 500)
+    }, 1000)
 
     // First heartbeat ping at 60s, then every 30s — gives DO proxy time to establish tunnel
     const pingInterval = setInterval(() => {

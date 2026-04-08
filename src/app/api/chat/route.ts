@@ -6962,7 +6962,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
                   id: `think_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
                   type: 'thought',
                   icon: 'brain',
-                  label: 'Reasoning',
+                  label: reasoning.slice(0, 80) + (reasoning.length > 80 ? '…' : ''),
                   text: reasoning.slice(0, 2000),
                   status: 'done',
                   timestamp: Date.now(),
@@ -7079,31 +7079,6 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           liveEnqueue({ checkpoint_event: { round, message: `Checkpoint: ${round} rounds completed` } })
         }
 
-        // Strip ALL tool_calls from assistant messages before sending to MiniMax.
-        // MiniMax uses the tools[] array to know what's available — tool_call entries
-        // in messages are only needed for multi-round tool execution context, but they
-        // can carry corruption (empty names/args) that triggers 400 errors. Safer to omit.
-        // Tool results from prior rounds are preserved as simple {role:"tool"} messages.
-        const sanitizedMessages = loopMessages
-          .filter((msg: Record<string, unknown>) => {
-            // Remove pure tool result messages
-            if (msg.role === 'tool') return false
-            // Remove assistant messages that are PURE tool_calls with no text content
-            // These orphaned tool_call references cause 400 errors at high message counts
-            if (msg.role === 'assistant' && msg.tool_calls && !msg.content) return false
-            return true
-          })
-          .map((msg: Record<string, unknown>) => {
-            if (msg.role === 'assistant') return { ...msg, tool_calls: undefined }
-            return msg
-          })
-
-        // Aggressive trim: before hitting tools=0 fallback, trim to system + last 20 messages
-        // to prevent tool_call_id mismatch errors at high message counts (~131+ messages)
-        const trimmedMessages = sanitizedMessages.length > 40
-          ? [sanitizedMessages[0], ...sanitizedMessages.slice(-20)]
-          : sanitizedMessages
-
         // Use ONLY SPARKIE_TOOLS — do NOT include connectorTools.
         // Deduplicate by function name: keep first occurrence only.
         // MiniMax rejects requests with duplicate function names.
@@ -7181,9 +7156,26 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           console.log(`[tool-filter] conversational message (${wordCount} words) — using ${firstCallTools.length} core tools`)
         }
 
-        // Try with all valid tools first; on 400 (tool error), retry with core tools only
-        // Use trimmed messages when we have too many (prevents tool_call_id mismatch at ~131+ msgs)
-        const payloadMessages = sanitizedMessages.length > 40 ? trimmedMessages : sanitizedMessages
+        // ── Issue 4: Agent sweep mode — filter to ~20 relevant tools ─────────────
+        // When /api/agent calls /api/chat with x-sparkie-mode=agent_sweep, use only
+        // the tools most relevant for autonomous sweeps (email, memory, calendar, tasks).
+        const isAgentSweep = req.headers.get('x-sparkie-mode') === 'agent_sweep'
+        const AGENT_TOOLS = ['manage_email', 'update_worklog', 'manage_topic', 'save_self_memory',
+          'query_database', 'get_current_time', 'self_diagnose', 'trigger_deploy', 'check_health',
+          'manage_calendar_event', 'list_memories', 'read_memory', 'save_memory', 'update_context',
+          'create_task', 'read_pending_tasks', 'composio_execute', 'composio_discover', 'search_web']
+        const effectiveTools = isAgentSweep
+          ? validTools.filter(t => AGENT_TOOLS.includes(t.function?.name as string))
+          : firstCallTools
+        if (isAgentSweep) {
+          console.log(`[tool-filter] agent_sweep mode — filtering to ${effectiveTools.length} agent tools (from ${validTools.length} valid)`)
+        }
+
+        // Use loopMessages directly — preserve tool results so model sees its own outputs
+        // Trim on the low side to stay within MiniMax context window
+        const payloadMessages = loopMessages.length > 60
+          ? [loopMessages[0], ...loopMessages.slice(-30)]
+          : loopMessages
         const llmPayload = (tools: typeof validTools, systemOverride?: string) => ({
           model: 'MiniMax-M2.7',
           stream: false, temperature: 0.8, max_tokens: 16000,
@@ -7191,10 +7183,10 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           messages: [{ role: 'system', content: systemOverride ?? finalSystemContent }, ...payloadMessages],
         })
 
-        ;({ response: loopRes, errorText } = await tryLLMCall(llmPayload(firstCallTools), apiKey))
+        ;({ response: loopRes, errorText } = await tryLLMCall(llmPayload(effectiveTools), apiKey))
 
         if (!loopRes.ok && loopRes.status === 400 && coreTools.length > 0) {
-          console.warn(`[chat] 400 error with ${firstCallTools.length} tools — retrying with ${coreTools.length} core tools`)
+          console.warn(`[chat] 400 error with ${effectiveTools.length} tools — retrying with ${coreTools.length} core tools`)
           ;({ response: loopRes, errorText } = await tryLLMCall(llmPayload(coreTools), apiKey))
         }
 
@@ -7208,9 +7200,27 @@ Keep each header + thought on its own line. Use multiple short bold-header block
         }
 
         if (!loopRes.ok && loopRes.status === 400) {
-          // Final fallback: 0-tools synthesis — model answers from conversation context only
+          // Final fallback: 0-tools synthesis — strip orphaned tool_calls to avoid 400 errors
           console.warn(`[chat] 400 with core tools — falling back to 0-tools synthesis`)
-          ;({ response: loopRes, errorText } = await tryLLMCall(llmPayload([], systemContent), apiKey))
+          const sanitizedFallbackMessages = loopMessages
+            .filter((msg: Record<string, unknown>) => {
+              if (msg.role === 'assistant' && msg.tool_calls && !msg.content) return false
+              return true
+            })
+            .map((msg: Record<string, unknown>) => {
+              if (msg.role === 'assistant') return { ...msg, tool_calls: undefined }
+              return msg
+            })
+          const fallbackPayloadMessages = sanitizedFallbackMessages.length > 40
+            ? [sanitizedFallbackMessages[0], ...sanitizedFallbackMessages.slice(-20)]
+            : sanitizedFallbackMessages
+          const fallbackLlmPayload = (tools: typeof validTools, systemOverride?: string) => ({
+            model: 'MiniMax-M2.7',
+            stream: false, temperature: 0.8, max_tokens: 16000,
+            tools,
+            messages: [{ role: 'system', content: systemOverride ?? finalSystemContent }, ...fallbackPayloadMessages],
+          })
+          ;({ response: loopRes, errorText } = await tryLLMCall(fallbackLlmPayload([], systemContent), apiKey))
         }
 
         if (!loopRes.ok) {

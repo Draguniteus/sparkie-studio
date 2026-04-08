@@ -244,6 +244,8 @@ function StandardEntry({ entry }: { entry: WorklogEntry }) {
   const isRunning = entry.status === 'running'
   const duration = entry.actual_duration_ms ?? entry.duration
   const borderColor = getBorderColor(entry)
+  const [reasoningExpanded, setReasoningExpanded] = useState(false)
+  const hasLongReasoning = (entry.reasoning?.length ?? 0) > 150
 
   const typeLabel: Record<string, string> = {
     tool_call: 'Tool call', code_push: 'Code push', result: 'Result',
@@ -296,7 +298,7 @@ function StandardEntry({ entry }: { entry: WorklogEntry }) {
           {entry.content}
         </p>
       )}
-      {/* Result preview */}
+      {/* Result preview section */}
       {entry.result_preview && (
         <p className="text-[10px] text-emerald-300/80 mt-1 pl-2 border-l border-emerald-500/30 leading-relaxed bg-emerald-500/5 rounded-r-sm">
           → {entry.result_preview}
@@ -307,6 +309,44 @@ function StandardEntry({ entry }: { entry: WorklogEntry }) {
         <p className="text-[10px] text-emerald-400/80 mt-1 font-medium leading-relaxed">
           ✓ {entry.conclusion}
         </p>
+      )}
+      {/* Email sender */}
+      {(entry.type === 'email_processed' || entry.type === 'email_triage') && entry.metadata?.sender ? (
+        <div className="flex items-center gap-1.5 mt-1 pl-0.5">
+          <Mail size={10} className="text-text-muted" />
+          <span className="text-[10px] text-text-muted">from</span>
+          <span className="text-[10px] font-medium text-text-primary">{String(entry.metadata.sender)}</span>
+        </div>
+      ) : null}
+      {/* Collapsible reasoning */}
+      {hasLongReasoning && (
+        <div className="mt-1 pl-0.5">
+          {!reasoningExpanded ? (
+            <div className="flex items-start gap-1.5">
+              <span className="text-[10px] text-purple-300/70 italic leading-relaxed">
+                {entry.reasoning!.slice(0, 100)}…
+              </span>
+              <button
+                onClick={(e) => { e.stopPropagation(); setReasoningExpanded(true) }}
+                className="text-[9px] text-purple-400 hover:text-purple-300 shrink-0 mt-0.5"
+              >
+                expand
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-start gap-1.5">
+              <span className="text-[10px] text-purple-300/70 italic leading-relaxed">
+                {entry.reasoning}
+              </span>
+              <button
+                onClick={(e) => { e.stopPropagation(); setReasoningExpanded(false) }}
+                className="text-[9px] text-purple-400 hover:text-purple-300 shrink-0 mt-0.5"
+              >
+                collapse
+              </button>
+            </div>
+          )}
+        </div>
       )}
     </div>
   )
@@ -451,14 +491,16 @@ export function Worklog({ compact = false }: WorklogProps) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [worklog.length])
 
-  // Filter entries by search query
-  const filteredWorklog = searchQuery
-    ? worklog.filter((e: WorklogEntry) =>
-        e.content?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (e as any).reasoning?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (e as any).conclusion?.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-    : worklog
+  // Filter noise entries and by search query
+  const filteredWorklog = worklog.filter((e: WorklogEntry) => {
+    if (e.content === 'Response ready' || e.content === 'Reasoning') return false
+    if (!searchQuery) return true
+    return (
+      e.content?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (e as any).reasoning?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (e as any).conclusion?.toLowerCase().includes(searchQuery.toLowerCase())
+    )
+  })
 
   if (filteredWorklog.length === 0 && !isExecuting) {
     if (compact) return null
@@ -541,6 +583,14 @@ export function Worklog({ compact = false }: WorklogProps) {
 
       {/* Timeline */}
       <div className="flex-1 overflow-y-auto px-4 py-3">
+        {/* Entry count header */}
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-hive-border/60 text-[11px] text-text-muted">
+          <span>{filteredWorklog.length} entries</span>
+          <span>·</span>
+          <span className="text-green-400 flex items-center gap-1">
+            <Activity size={10} /> Watching for signals
+          </span>
+        </div>
         <div className="relative">
           {/* Vertical spine */}
           <div className="absolute left-[5px] top-2 bottom-2 w-px bg-gradient-to-b from-purple-500/30 via-slate-600/20 to-transparent" />

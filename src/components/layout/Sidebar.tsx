@@ -169,8 +169,10 @@ export function Sidebar() {
     )
   }
 
-  // Last 6 worklog entries reversed (most recent first)
-  const recentActivity = [...worklog].reverse().slice(0, 6)
+  // Last 8 filtered worklog entries reversed (most recent first), noise filtered
+  const recentActivity = [...worklog]
+    .filter(e => e.content !== 'Response ready' && e.content !== 'Reasoning' && (e.content?.length ?? 0) >= 10)
+    .reverse().slice(0, 8)
 
   // ── Desktop expanded sidebar ─────────────────────────────────────────────────
   return (
