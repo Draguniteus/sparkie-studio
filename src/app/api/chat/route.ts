@@ -7603,7 +7603,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
                 }
               })()
               // id matches the running trace → client upserts this trace (spinner becomes checkmark)
-              liveEnqueue({ step_trace: { id: tc.id, toolName: tc.function.name, icon: stepIcon[tc.function.name] ?? 'zap', label: richStepLabel, status: isStepError ? 'error' : 'done', duration: stepDuration, timestamp: Date.now() } })
+              liveEnqueue({ step_trace: { id: tc.id, toolName: tc.function.name, icon: stepIcon[tc.function.name] ?? 'zap', label: richStepLabel, text: result.slice(0, 300), status: isStepError ? 'error' : 'done', duration: stepDuration, timestamp: Date.now() } })
               console.log(`[tool] ${tc.function.name} — ${isStepError ? 'error' : 'done'} in ${stepDuration}ms`)
 
               // Worklog card SSE — emit LIVE via liveEnqueue so worklog updates as each tool completes
