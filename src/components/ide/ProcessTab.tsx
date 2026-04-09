@@ -220,8 +220,6 @@ export function ProcessTab() {
   const seenKeysRef = useRef<Set<string>>(new Set())
   const scrollRef = useRef<HTMLDivElement>(null)
   const prevLongTaskRef = useRef<string | null>(null)
-  const [settledId, setSettledId] = useState<string | null>(null)
-  const settledTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [tagFilter, setTagFilter] = useState<string>('all') // 'all' | 'tool' | 'thought' | 'memory' | 'code' | 'web' | 'media' | 'system'
 
   // Subscribe to live step_trace SSE events (id-based upsert for per-tool spinner→checkmark)
@@ -363,10 +361,10 @@ export function ProcessTab() {
     return () => window.removeEventListener('sparkie_step_trace', handler)
   }, [ideTab, setIdeTab])
 
-  // Auto-scroll to bottom as new traces arrive
+  // Auto-scroll to top as new traces arrive (newest at top)
   useEffect(() => {
     if (scrollRef.current) {
-      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
+      scrollRef.current.scrollTo({ top: 0, behavior: 'smooth' })
     }
   }, [liveTraces.length])
 
@@ -394,25 +392,6 @@ export function ProcessTab() {
     return () => window.removeEventListener('sparkie:live-done', handler)
   }, [])
 
-  // On task_chip_clear (synthesis done) — flash the most recent FrozenCard as "settled"
-  useEffect(() => {
-    const handler = () => {
-      // Access current chat's frozen traces directly from store (avoids forward-ref issue)
-      const store = useAppStore.getState()
-      const chat = store.chats.find(c => c.id === store.currentChatId)
-      const frozenMsgs = chat?.messages.filter(m => m.role === 'assistant' && m.toolTraces && m.toolTraces.length > 0) ?? []
-      if (frozenMsgs.length > 0) {
-        const mostRecent = frozenMsgs[frozenMsgs.length - 1]?.id
-        if (mostRecent) {
-          setSettledId(mostRecent)
-          if (settledTimerRef.current) clearTimeout(settledTimerRef.current)
-          settledTimerRef.current = setTimeout(() => setSettledId(null), 2000)
-        }
-      }
-    }
-    window.addEventListener('sparkie:task-chip-clear', handler)
-    return () => window.removeEventListener('sparkie:task-chip-clear', handler)
-  }, [])
 
   // Clear live traces 3s after longTaskLabel clears (response done)
   useEffect(() => {
@@ -425,24 +404,20 @@ export function ProcessTab() {
     }
   }, [longTaskLabel])
 
-  // Collect frozen toolTraces from recent assistant messages (last 3)
+  // Collect frozen toolTraces from recent assistant messages
   const chat = chats.find(c => c.id === currentChatId)
-  const recentFrozen: Array<{ chipLabel: string; traces: StepTrace[]; msgId?: string }> = []
+  const frozenTraces: StepTrace[] = []
   if (chat) {
     const assistantMsgs = [...chat.messages]
       .filter(m => m.role === 'assistant' && m.toolTraces && m.toolTraces.length > 0)
       .reverse()
     for (const msg of assistantMsgs) {
-      recentFrozen.push({
-        chipLabel: msg.chipLabel ?? 'In memory',
-        traces: msg.toolTraces!,
-        msgId: msg.id,
-      })
+      frozenTraces.push(...msg.toolTraces!)
     }
   }
 
   const isLive = !!longTaskLabel
-  const hasContent = liveTraces.length > 0 || recentFrozen.length > 0
+  const hasContent = liveTraces.length > 0 || frozenTraces.length > 0
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -462,7 +437,7 @@ export function ProcessTab() {
         </div>
         {hasContent && (
           <span className="text-[10px] text-text-muted">
-            {isLive ? `${liveTraces.filter(t => t.type !== 'thought').length} steps` : `${recentFrozen.length} session${recentFrozen.length !== 1 ? 's' : ''}`}
+            {isLive ? `${liveTraces.filter(t => t.type !== 'thought').length} steps` : `${frozenTraces.filter(t => t.type !== 'thought').length} steps`}
           </span>
         )}
       </div>
@@ -504,31 +479,21 @@ export function ProcessTab() {
         <span className="text-[10px] text-text-muted">
           {liveTraces.length > 0
             ? `${liveTraces.filter(t => t.status === 'done' && t.type !== 'thought').length}/${liveTraces.filter(t => t.type !== 'thought').length} steps done`
-            : recentFrozen.length === 0 ? 'No sessions yet' : `${recentFrozen.length} session${recentFrozen.length !== 1 ? 's' : ''} in memory`}
+            : frozenTraces.length === 0 ? 'No steps yet' : `${frozenTraces.filter(t => t.status === 'done' && t.type !== 'thought').length} steps done`}
         </span>
       </div>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 flex flex-col gap-3">
-        {/* Live traces — interleaved thoughts + tool cards */}
-        {liveTraces.length > 0 && (
-          <div className="flex flex-col gap-3">
-            <p className="text-[10px] text-text-muted px-1 mb-0.5 uppercase tracking-wide">Live</p>
-            {liveTraces
-              .filter(t => matchesTagFilter(t, tagFilter))
-              .map((trace, i) => {
-              const k = traceKey(trace, i)
-              if (trace.type === 'thought') {
-                return <ThoughtCard key={k} text={trace.text ?? trace.label ?? ''} icon={trace.icon} label={trace.label} />
-              }
-              return <TraceRow key={k} trace={trace} />
-            })}
-          </div>
-        )}
-
-        {/* Frozen traces from recent messages — collapsible cards */}
-        {recentFrozen.map((group, gi) => (
-          <FrozenCard key={group.msgId ?? `frozen-${gi}`} group={group} index={gi} hasLive={liveTraces.length > 0} isSettled={settledId === group.msgId} tagFilter={tagFilter} prevMsgId={gi > 0 ? recentFrozen[gi - 1].msgId : undefined} />
-        ))}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 flex flex-col gap-0.5">
+        {/* All traces — one continuous timeline, newest first */}
+        {[...liveTraces, ...frozenTraces].reverse()
+          .filter(t => matchesTagFilter(t, tagFilter))
+          .map((trace, i) => {
+            const k = traceKey(trace, i)
+            if (trace.type === 'thought') {
+              return <ThoughtCard key={k} text={trace.text ?? trace.label ?? ''} icon={trace.icon} label={trace.label} />
+            }
+            return <TraceRow key={k} trace={trace} />
+          })}
 
         {/* Empty state */}
         {!hasContent && (

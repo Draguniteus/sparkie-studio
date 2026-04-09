@@ -318,6 +318,7 @@ function MessageBubbleInner({ message, userAvatarUrl }: Props) {
   const isUser = message.role === "user"
   const [copied, setCopied] = useState(false)
   const [thinkingPreview, setThinkingPreview] = useState('')
+  const longTaskLabel = useAppStore(s => s.longTaskLabel)
 
   // Listen for live thought_step events to show think block preview in bubble
   useEffect(() => {
@@ -415,7 +416,8 @@ function MessageBubbleInner({ message, userAvatarUrl }: Props) {
             </button>
           </div>
         )}
-        {!isUser && !message.isStreaming && message.toolTraces && message.toolTraces.length > 0 && (
+        {!isUser && !message.isStreaming && !longTaskLabel && message.toolTraces && message.toolTraces.length > 0 && (
+          // Only show InMemoryPill after streaming fully completes (longTaskLabel cleared)
           <InMemoryPill traces={message.toolTraces} />
         )}
         <div className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${

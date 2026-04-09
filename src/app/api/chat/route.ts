@@ -2080,7 +2080,7 @@ const SPARKIE_TOOLS = [
     type: 'function',
     function: {
       name: 'query_database',
-      description: 'Run a SQL SELECT query on the Sparkie database. Tables: sparkie_worklog, sparkie_tasks, sparkie_feed, user_memories, sparkie_skills, sparkie_assets, sparkie_radio_tracks, chat_messages, dream_journal, user_sessions, sparkie_outreach_log, user_identity_files, users. Never guess — query first.',
+      description: 'Run a SQL SELECT query on the Sparkie database. Tables with columns:\n- sparkie_worklog: id TEXT, user_id TEXT, type TEXT, content TEXT, status TEXT, decision_type TEXT, reasoning TEXT, conclusion TEXT, metadata JSONB, icon TEXT, tag TEXT, result_preview TEXT, created_at TIMESTAMPTZ\n- sparkie_tasks: id TEXT, user_id TEXT, action TEXT, label TEXT, payload JSONB, status TEXT, executor TEXT, trigger_type TEXT, scheduled_at TIMESTAMPTZ, completed_at TIMESTAMPTZ\n- user_memories: id TEXT, user_id TEXT, category TEXT, content TEXT, importance INTEGER, last_accessed TIMESTAMPTZ, created_at TIMESTAMPTZ\n- sparkie_skills: id TEXT, user_id TEXT, name TEXT, description TEXT, trigger_type TEXT, trigger_config JSONB, is_active BOOLEAN, created_at TIMESTAMPTZ\n- sparkie_assets: id TEXT, user_id TEXT, name TEXT, language TEXT, content TEXT, chat_id TEXT, file_id TEXT, asset_type TEXT, source TEXT, created_at TIMESTAMPTZ\n- users: id TEXT, email TEXT, display_name TEXT, email_verified BOOLEAN, role TEXT, created_at TIMESTAMPTZ\nNever guess — query information_schema.columns if unsure.',
       parameters: {
         type: 'object',
         properties: {
@@ -6459,6 +6459,9 @@ async function tryLLMCall(
   const isStream = payload.stream === true
   // Debug log: show message count, tool count, and first message role to help trace 400 errors
   const msgs = payload.messages as Array<{ role: string; content?: unknown; tool_calls?: unknown }>
+  // Safety: MiniMax only supports role:'system' on the FIRST message.
+  // Strip role:'system' from all other messages — prevents 400 errors.
+  msgs.forEach((m, i) => { if (i > 0 && m.role === 'system') m.role = 'user' })
   const rawTools = (payload.tools as Array<Record<string, unknown>> | undefined) ?? []
   // Do NOT transform parameters → input_schema. MiniMax expects OpenAI format: parameters (not input_schema).
   // Error 2013 "parameters is empty" means MiniMax validates the 'parameters' field directly.
@@ -7173,9 +7176,22 @@ Keep each header + thought on its own line. Use multiple short bold-header block
 
         // Use loopMessages directly — preserve tool results so model sees its own outputs
         // Trim on the low side to stay within MiniMax context window
-        const payloadMessages = loopMessages.length > 60
-          ? [loopMessages[0], ...loopMessages.slice(-30)]
-          : loopMessages
+        // Smart-trim: find a clean cut point so we never orphan a tool result mid-pair
+        const MAX_LOOP = 60
+        const KEEP_RECENT = 30
+        let payloadMessages: typeof loopMessages
+        if (loopMessages.length > MAX_LOOP) {
+          const cutStart = loopMessages.length - KEEP_RECENT
+          let adjustedStart = cutStart
+          // Skip orphaned tool results at the cut boundary
+          while (adjustedStart < loopMessages.length && loopMessages[adjustedStart].role === 'tool') {
+            adjustedStart++
+          }
+          // Always keep the first message (system prompt) even if it falls after the cut
+          payloadMessages = [loopMessages[0], ...loopMessages.slice(adjustedStart)]
+        } else {
+          payloadMessages = loopMessages
+        }
         const llmPayload = (tools: typeof validTools, systemOverride?: string) => ({
           model: 'MiniMax-M2.7',
           stream: false, temperature: 0.8, max_tokens: 16000,
@@ -7730,10 +7746,11 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           loopMessages = [...loopMessages, messageForLoop, ...toolResults]
 
           // ── Block 11: Checkpoint injection every 15 rounds ─────────────────────
-          // At round 15, 30, etc. inject a system nudge reminding Sparkie to checkpoint
+          // At round 15, 30, etc. inject a nudge reminding Sparkie to checkpoint
+          // NOTE: role must be 'user' — MiniMax rejects 'system' role in mid-conversation
           if (round > 0 && round % 15 === 0 && userId) {
             loopMessages = [...loopMessages, {
-              role: 'system' as const,
+              role: 'user' as const,
               content: `Checkpoint at round ${round}. Save progress then continue.`
             }]
           }
@@ -7762,7 +7779,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
               return tc?.function?.name ?? 'unknown_tool'
             }).join(', ')
             loopMessages = [...loopMessages, {
-              role: 'system' as const,
+              role: 'user' as const,
               content: `[SYSTEM] Tool ${failedNames} failed. Try alternatives.`
             }]
             // Log fallback activation to worklog (fire-and-forget)
@@ -8153,9 +8170,8 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           model: 'MiniMax-M2.7', stream: false, temperature: 0.8, max_tokens: 16000,
           tools: [],
           messages: [
-            { role: 'system', content: finalSystemContent },
-            ...loopMessages,
-            { role: 'system', content: 'Synthesize all tool results into a clear, complete response for Michael. Do not call any more tools. Just deliver the report.' },
+            { role: 'system', content: finalSystemContent + '\n\nSynthesize all tool results into a clear, complete response for Michael. Do not call any more tools. Just deliver the report.' },
+            ...loopMessages.filter((m, i) => i === 0 || m.role !== 'system'),
           ],
         }
         const { response: synthRes } = await tryLLMCall(synthPayload, apiKey)

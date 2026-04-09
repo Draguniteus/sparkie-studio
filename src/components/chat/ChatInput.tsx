@@ -1146,7 +1146,15 @@ export function ChatInput() {
               })
               // Log real step to worklog so Live Activity shows what Sparkie is actually doing
               if (trace.status === 'done' && trace.type !== 'thought') {
-                addWorklogEntry({ type: 'result', content: trace.label + (trace.duration ? ` (${trace.duration < 1000 ? trace.duration + 'ms' : (trace.duration / 1000).toFixed(1) + 's'})` : ''), result_preview: trace.text?.slice(0, 150), status: 'done', icon: trace.icon })
+                // Rewrite query_database labels to show table name, not raw SQL
+                let displayContent = trace.label
+                if (trace.toolName === 'query_database') {
+                  const tableMatch = trace.label.match(/FROM\s+(\w+)/i)
+                  const table = tableMatch?.[1] ?? 'database'
+                  displayContent = `Queried ${table}`
+                }
+                const dur = trace.duration ? (trace.duration < 1000 ? `${trace.duration}ms` : `${(trace.duration / 1000).toFixed(1)}s`) : ''
+                addWorklogEntry({ type: 'result', content: displayContent + (dur ? ` (${dur})` : ''), result_preview: trace.text?.slice(0, 150), status: 'done', icon: trace.icon })
               } else if (trace.status === 'error') {
                 addWorklogEntry({ type: 'error', content: trace.label, status: 'error', icon: trace.icon })
               }
