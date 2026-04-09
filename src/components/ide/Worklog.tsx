@@ -272,7 +272,7 @@ function StandardEntry({ entry }: { entry: WorklogEntry }) {
   const lc = labelColors[entry.type] ?? 'text-text-secondary'
 
   return (
-    <div className={`pl-3 py-0.5 border-l-2 ${borderColor}`}>
+    <div className={`pl-3 py-0.5 border-l-2 ${borderColor} hover:bg-hive-elevated/40 transition-colors rounded-r-lg`}>
       {/* Top row: icon + label + timestamp + badges */}
       <div className="flex items-center gap-1.5 flex-wrap">
         {(entry.icon ?? DEFAULT_TYPE_ICONS[entry.type]) && (

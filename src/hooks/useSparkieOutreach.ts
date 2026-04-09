@@ -15,6 +15,7 @@ interface ProactiveEvent {
 // Falls back to the cron-job.org GET /api/agent poll (15 min) if WS not available.
 export function useSparkieOutreach(enabled: boolean) {
   const wsRef = useRef<WebSocket | null>(null)
+  const esRef = useRef<EventSource | null>(null)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastTriggerRef = useRef<string | null>(null)
   const reconnectAttemptsRef = useRef(0)
@@ -142,13 +143,9 @@ export function useSparkieOutreach(enabled: boolean) {
       }
     }
 
-    async function connect() {
+    async function connectWebSocket() {
       const userId = await getSessionUserId()
-      if (!userId) {
-        // Session not ready yet — retry in 5s
-        reconnectTimerRef.current = setTimeout(connect, 5_000)
-        return
-      }
+      if (!userId) return
 
       const url = getWsUrl(userId)
       if (!url) return
@@ -160,9 +157,6 @@ export function useSparkieOutreach(enabled: boolean) {
 
         ws.onopen = () => {
           console.log('[proactive-ws] connected for userId:', userId)
-          // Clear any reconnect timer on successful connection
-          // DO NOT reset backoff counter here — onopen fires before DO proxy stabilizes,
-          // and a "connect" that immediately gets Invalid frame header should NOT reset backoff
           if (reconnectTimerRef.current) {
             clearTimeout(reconnectTimerRef.current)
             reconnectTimerRef.current = null
@@ -170,17 +164,14 @@ export function useSparkieOutreach(enabled: boolean) {
         }
 
         ws.onmessage = async (event) => {
-          // Reset backoff ONLY after a real message is received (not just onopen)
           reconnectAttemptsRef.current = 0
-          if (document.hidden) return // Don't interrupt if tab not visible
+          if (document.hidden) return
           let msg: ProactiveEvent | null = null
           try { msg = JSON.parse(event.data) as ProactiveEvent } catch { return }
           if (!msg || msg.type !== 'proactive') return
 
           const { subtype, data } = msg
           const today = new Date().toDateString()
-
-          // Deduplicate per type per day
           const triggerKey = subtype + '_' + today
           if (lastTriggerRef.current === triggerKey) return
           lastTriggerRef.current = triggerKey
@@ -194,7 +185,6 @@ export function useSparkieOutreach(enabled: boolean) {
         ws.onclose = () => {
           console.log('[proactive-ws] disconnected')
           wsRef.current = null
-          // Exponential backoff: 10s, 20s, 40s, 80s, 160s — max 5 minutes
           const backoffMs = Math.min(10_000 * Math.pow(2, reconnectAttemptsRef.current), 300_000)
           reconnectAttemptsRef.current++
           console.log(`[proactive-ws] reconnecting in ${backoffMs / 1000}s (attempt ${reconnectAttemptsRef.current})`)
@@ -206,8 +196,58 @@ export function useSparkieOutreach(enabled: boolean) {
           ws.close()
         }
       } catch {
-        // WebSocket not available — fall back to reconnect later
         reconnectTimerRef.current = setTimeout(connect, 15_000)
+      }
+    }
+
+    async function connect() {
+      const userId = await getSessionUserId()
+      if (!userId) {
+        reconnectTimerRef.current = setTimeout(connect, 5_000)
+        return
+      }
+
+      // Try SSE first — works through DigitalOcean's HTTP proxy
+      const sseUrl = `/api/proactive-sse?userId=${encodeURIComponent(userId)}`
+      console.log('[proactive] trying SSE at:', sseUrl)
+      const eventSource = new EventSource(sseUrl)
+
+      eventSource.onopen = () => {
+        console.log('[proactive-sse] connected for userId:', userId)
+        esRef.current = eventSource
+        reconnectAttemptsRef.current = 0
+        if (reconnectTimerRef.current) {
+          clearTimeout(reconnectTimerRef.current)
+          reconnectTimerRef.current = null
+        }
+      }
+
+      eventSource.onmessage = (event) => {
+        reconnectAttemptsRef.current = 0
+        if (document.hidden) return
+        try {
+          const msg = JSON.parse(event.data as string) as ProactiveEvent
+          if (!msg || msg.type !== 'proactive') return
+
+          const { subtype, data } = msg
+          const today = new Date().toDateString()
+          const triggerKey = subtype + '_' + today
+          if (lastTriggerRef.current === triggerKey) return
+          lastTriggerRef.current = triggerKey
+
+          const nudge = buildNudge(subtype, data)
+          if (!nudge) return
+
+          void injectNudge(nudge)
+        } catch { /* skip malformed */ }
+      }
+
+      eventSource.onerror = () => {
+        console.log('[proactive-sse] error — falling back to WebSocket')
+        eventSource.close()
+        esRef.current = null
+        // Fall back to WebSocket if SSE fails
+        connectWebSocket()
       }
     }
 
@@ -215,6 +255,9 @@ export function useSparkieOutreach(enabled: boolean) {
 
     return () => {
       wsRef.current?.close()
+      wsRef.current = null
+      esRef.current?.close()
+      esRef.current = null
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
     }
   }, [enabled])

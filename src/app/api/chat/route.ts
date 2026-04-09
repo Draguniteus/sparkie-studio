@@ -7075,7 +7075,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
         round++
         // Reset per-round tracking flags at start of each round
         liveRef.firstThinkEmitted = false
-        if (round % 5 === 0) {
+        if (round % 15 === 0) {
           liveEnqueue({ checkpoint_event: { round, message: `Checkpoint: ${round} rounds completed` } })
         }
 
@@ -7729,29 +7729,17 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           }
           loopMessages = [...loopMessages, messageForLoop, ...toolResults]
 
-          // ── Block 11: Checkpoint injection every 5 rounds ─────────────────────
-          // At round 5, 10, etc. inject a system nudge reminding Sparkie to checkpoint
-          if (round > 0 && round % 5 === 0 && userId) {
+          // ── Block 11: Checkpoint injection every 15 rounds ─────────────────────
+          // At round 15, 30, etc. inject a system nudge reminding Sparkie to checkpoint
+          if (round > 0 && round % 15 === 0 && userId) {
             loopMessages = [...loopMessages, {
-              role: 'user' as const,
-              content: `⚡ SYSTEM CHECKPOINT (not from Michael): You have completed ${round} tool rounds. Per your CHECKPOINT SYSTEM rule: call update_worklog({ type: 'decision', message: 'Checkpoint: completed ${round} tool rounds. Progress: [brief summary]. Remaining: [what's left].' }) before continuing. This is mandatory.`
+              role: 'system' as const,
+              content: `Checkpoint at round ${round}. Save progress then continue.`
             }]
           }
 
-          // ── FIX 3: Context health check — warn at 60%, proactive summarize at 75% ──
-          if (userId && round > 0 && round % 10 === 0) {
-            const tokenStatus = getTokenStatus(requestId, 80_000)
-            if (tokenStatus.checkpointZone) {
-              loopMessages = [...loopMessages, {
-                role: 'user' as const,
-                content: `⚡ SYSTEM CONTEXT ALERT (not from Michael): You are at ${Math.round((tokenStatus.used / 80_000) * 100)}% context capacity. MANDATORY: call save_self_memory({ category: 'mid_task_summary', content: 'Task: [goal]. Done: [what you have completed]. Remaining: [what is left]. Key decisions: [any important choices made].' }) NOW — then continue. This prevents context loss on long tasks.`
-              }]
-            } else if (tokenStatus.warningZone) {
-              liveEnqueue({ step_trace: { icon: 'brain', label: `Context at ${Math.round((tokenStatus.used / 80_000) * 100)}% — approaching limit`, status: 'running' } })
-            }
-          }
-
           // ── FIX 2: Auto-inject fallback nudge when tools fail or return empty ──
+          // Model manages its own context — removed context health injection
           // When any tool returns an error or empty result, inject a system nudge
           // telling Sparkie to try the next tool rather than asking the user.
           const failedOrEmptyResults = toolResults.filter(tr =>
@@ -7774,8 +7762,8 @@ Keep each header + thought on its own line. Use multiple short bold-header block
               return tc?.function?.name ?? 'unknown_tool'
             }).join(', ')
             loopMessages = [...loopMessages, {
-              role: 'user' as const,
-              content: `⚡ SYSTEM NOTE (not from Michael): Tool(s) [${failedNames}] returned empty or failed. Per your NEVER GIVE UP rule (Rule 21): do NOT ask Michael. Immediately try the next tool in your fallback chain:\n→ Try different path/params for same tool\n→ try get_github on alternative file paths\n→ try execute_terminal with find/ls/grep\n→ try query_database for relevant data\n→ try workbench_run for complex operations\nKeep going until you have a real answer. You are NOT done yet.`
+              role: 'system' as const,
+              content: `[SYSTEM] Tool ${failedNames} failed. Try alternatives.`
             }]
             // Log fallback activation to worklog (fire-and-forget)
             if (userId) {
@@ -8150,6 +8138,58 @@ Keep each header + thought on its own line. Use multiple short bold-header block
               },
             })
             return new Response(okStream, {
+              headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
+            })
+          }
+        }
+      }
+
+      // ── Issue 2e: Force synthesis when tools completed but preamble was output as final ─
+      // If model finished tool calls but only output preamble text (not a real synthesis),
+      // force one more non-streaming synthesis call then stream the result.
+      if (usedTools && !contentAlreadySent) {
+        console.log(`[chat] forced synthesis: usedTools=true, contentAlreadySent=false, streaming forced synthesis`)
+        const synthPayload = {
+          model: 'MiniMax-M2.7', stream: false, temperature: 0.8, max_tokens: 16000,
+          tools: [],
+          messages: [
+            { role: 'system', content: finalSystemContent },
+            ...loopMessages,
+            { role: 'system', content: 'Synthesize all tool results into a clear, complete response for Michael. Do not call any more tools. Just deliver the report.' },
+          ],
+        }
+        const { response: synthRes } = await tryLLMCall(synthPayload, apiKey)
+        if (synthRes.ok) {
+          const synthData = await synthRes.json()
+          const synthContent: string = synthData?.choices?.[0]?.message?.content ?? ''
+          if (synthContent) {
+            const sseEnc = new TextEncoder()
+            const synthStream = new ReadableStream({
+              start(ctrl) {
+                const cleanContent = synthContent
+                  .replace(/minimax-m2\.\d+(-free)?/gi, 'Atlas')
+                  .replace(/music-2\.[05]/gi, 'the music engine')
+                  .replace(/speech-02(-hd)?/gi, 'voice synthesis')
+                  .replace(/whisper-large-v3-turbo/gi, 'voice recognition')
+                  .replace(/ace-step-v1\.5/gi, 'the music engine')
+                const chunk = sseEnc.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: cleanContent } }] })}\n\n`)
+                ctrl.enqueue(chunk)
+                liveEnqueue({
+                  step_trace: {
+                    id: `ready_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                    type: 'step',
+                    icon: 'check',
+                    label: 'Response ready',
+                    text: '',
+                    status: 'done',
+                    timestamp: Date.now(),
+                  },
+                })
+                ctrl.enqueue(sseEnc.encode('data: [DONE]\n\n'))
+                ctrl.close()
+              },
+            })
+            return new Response(synthStream, {
               headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
             })
           }

@@ -1146,7 +1146,7 @@ export function ChatInput() {
               })
               // Log real step to worklog so Live Activity shows what Sparkie is actually doing
               if (trace.status === 'done' && trace.type !== 'thought') {
-                addWorklogEntry({ type: 'result', content: trace.label + (trace.duration ? ` (${trace.duration < 1000 ? trace.duration + 'ms' : (trace.duration / 1000).toFixed(1) + 's'})` : ''), status: 'done', icon: trace.icon })
+                addWorklogEntry({ type: 'result', content: trace.label + (trace.duration ? ` (${trace.duration < 1000 ? trace.duration + 'ms' : (trace.duration / 1000).toFixed(1) + 's'})` : ''), result_preview: trace.text?.slice(0, 150), status: 'done', icon: trace.icon })
               } else if (trace.status === 'error') {
                 addWorklogEntry({ type: 'error', content: trace.label, status: 'error', icon: trace.icon })
               }
@@ -1217,6 +1217,9 @@ export function ChatInput() {
             }
             // Phase 5: task_chip_clear — hide chip when response arrives
             if (parsed.task_chip_clear) {
+              // Defer slightly to allow any buffered SSE traces to flush first
+              // (SSE events may be batched; task_chip_clear could arrive before last few traces)
+              await new Promise(resolve => setTimeout(resolve, 50))
               // Stamp step traces onto the completed message.
               // Previously guarded by `chipLabelNow &&` which meant responses without
               // tool calls (no task_chip sent) never got their traces stamped → Process

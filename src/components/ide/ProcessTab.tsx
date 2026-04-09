@@ -68,29 +68,17 @@ const THOUGHT_ICON_MAP: Record<string, { icon: SparkieIcon; color: string }> = {
 function ThoughtCard({ text, icon, label }: { text: string; icon?: string; label?: string }) {
   const entry = THOUGHT_ICON_MAP[icon ?? 'brain'] ?? THOUGHT_ICON_MAP.brain
   const IconComponent = entry.icon
-  const preview = stripMarkdown(text).slice(0, 120)
-  const isLong = stripMarkdown(text).length > 120
+  const displayLabel = label || stripMarkdown(text).slice(0, 80) + (text.length > 80 ? '…' : '')
   return (
-    <details className="group px-3 py-2 rounded-lg border border-purple-500/20 bg-purple-500/5 border-l-2 border-l-purple-400">
-      <summary className="flex items-center gap-2 cursor-pointer list-none thought-summary">
-        <IconComponent size={12} className={`shrink-0 mt-px ${entry.color}`} />
-        {label
-          ? <span className="font-bold text-purple-300 text-[11px]">{label}</span>
-          : <span className="text-[11px] text-purple-300/70 italic">thinking…</span>
-        }
-        {isLong && (
-          <span className="ml-auto text-[9px] text-purple-400/50 group-open:hidden shrink-0">
-            +{stripMarkdown(text).length - 120} chars
-          </span>
-        )}
+    <details className="group pl-4 py-0.5 border-l border-purple-500/30 ml-1">
+      <summary className="flex items-center gap-2 cursor-pointer list-none text-[11px] text-purple-300/80 italic hover:text-purple-200 transition-colors">
+        <IconComponent size={11} className={`shrink-0 ${entry.color}`} />
+        <span className="flex-1">{displayLabel}</span>
+        {text.length > 80 && <ChevronRight size={10} className="shrink-0 text-purple-400/40 group-open:rotate-90 transition-transform" />}
       </summary>
-      <div className="mt-1 pl-5">
-        {isLong ? (
-          <p className="text-[11px] leading-snug text-purple-200/70 break-words">{stripMarkdown(text)}</p>
-        ) : (
-          <p className="text-[11px] leading-snug text-purple-200/70 break-words">{preview}</p>
-        )}
-      </div>
+      {text.length > 80 && (
+        <p className="text-[10px] text-purple-200/50 mt-0.5 pl-5 leading-relaxed break-words">{stripMarkdown(text)}</p>
+      )}
     </details>
   )
 }
@@ -105,58 +93,31 @@ function TraceRow({ trace }: { trace: StepTrace }) {
     : null
 
   return (
-    <div
-      className={`flex items-start gap-2 px-2.5 py-1.5 rounded-lg border text-[11px] ${
-        trace.status === 'error'
-          ? 'bg-red-500/5 border-red-500/15 text-red-400'
-          : trace.status === 'running'
-          ? 'bg-purple-500/8 border-purple-500/20 text-purple-300'
-          : 'bg-hive-elevated/40 border-white/4 text-text-secondary'
-      }`}
-    >
-      <IconComponent size={11} className={`shrink-0 mt-0.5 ${entry.color}`} />
-      <span className="flex-1 break-all leading-snug min-w-0">{trace.label}</span>
+    <div className="flex items-start gap-2 pl-4 py-1 border-l border-white/10 ml-1 hover:bg-white/[0.02] transition-colors">
+      <IconComponent size={12} className={`shrink-0 mt-0.5 ${entry.color}`} />
+      <span className="text-[11px] text-text-secondary flex-1 break-words">{trace.label}</span>
 
       {/* toolName badge */}
       {trace.toolName && (
-        <span className="shrink-0 text-[9px] px-1 py-px rounded bg-white/5 text-text-muted/70 border border-white/8 font-mono">
-          {trace.toolName.replace(/_/g, '_')}
-        </span>
-      )}
-
-      {/* round badge */}
-      {trace.round != null && (
-        <span className="shrink-0 flex items-center gap-0.5 text-[9px] text-text-muted/50">
-          <HashIcon size={8} />
-          {trace.round}
-        </span>
+        <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded bg-white/5 text-text-muted font-mono">{trace.toolName}</span>
       )}
 
       {/* timestamp */}
       {timeStr && (
-        <span className="shrink-0 flex items-center gap-0.5 text-[9px] text-text-muted/50">
-          <Clock size={8} />
-          {timeStr}
-        </span>
-      )}
-
-      {/* status indicators */}
-      {trace.status === 'running' && (
-        <Loader2 size={9} className="shrink-0 text-purple-400 animate-spin mt-0.5" />
-      )}
-      {trace.status === 'done' && (
-        <CheckCircle size={9} className="shrink-0 text-green-400 mt-0.5" />
-      )}
-      {trace.status === 'error' && (
-        <AlertCircle size={9} className="shrink-0 text-red-400 mt-0.5" />
+        <span className="text-[9px] text-text-muted/60 tabular-nums shrink-0">{timeStr}</span>
       )}
 
       {/* duration */}
       {trace.duration != null && trace.status !== 'running' && (
-        <span className="text-[9px] tabular-nums shrink-0 text-text-muted/60 mt-0.5">
+        <span className="text-[9px] text-text-muted/60 tabular-nums shrink-0">
           {trace.duration < 1000 ? `${trace.duration}ms` : `${(trace.duration / 1000).toFixed(1)}s`}
         </span>
       )}
+
+      {/* status indicators */}
+      {trace.status === 'running' && <Loader2 size={10} className="shrink-0 text-purple-400 animate-spin" />}
+      {trace.status === 'done' && <CheckCircle size={10} className="shrink-0 text-green-400/60" />}
+      {trace.status === 'error' && <AlertCircle size={10} className="shrink-0 text-red-400" />}
     </div>
   )
 }

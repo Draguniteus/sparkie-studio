@@ -152,6 +152,25 @@ app.prepare().then(() => {
   var __proactiveClients = global.__proactiveClients || []
   if (!global.__proactiveClients) global.__proactiveClients = __proactiveClients
 
+  // Universal push — works for both WebSocket clients (ws.send) and SSE clients (sseSend)
+  function pushToClient(client, data) {
+    const str = typeof data === 'string' ? data : JSON.stringify(data)
+    if (client.sseSend) {
+      client.sseSend(str)
+    } else if (client.ws && client.ws.readyState === 1 /* OPEN */) {
+      try { client.ws.send(str) } catch (_) {}
+    }
+  }
+
+  // Broadcast to all clients, or to a specific userId
+  function broadcastProactive(data, targetUserId) {
+    const str = typeof data === 'string' ? data : JSON.stringify(data)
+    for (const client of __proactiveClients) {
+      if (targetUserId && client.userId !== targetUserId) continue
+      pushToClient(client, str)
+    }
+  }
+
   function proactiveClientsAdd(ws, userId) {
     __proactiveClients.push({ ws, userId })
     global.__proactiveClients = __proactiveClients

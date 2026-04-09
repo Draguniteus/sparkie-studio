@@ -13,7 +13,7 @@ import type { WebSocket } from 'ws'
 // server.js maintains global.__proactiveClients = Array<{ ws: WebSocket, userId: string }>
 declare global {
   // eslint-disable-next-line no-var
-  var __proactiveClients: Array<{ ws: WebSocket | null; userId: string }> | undefined
+  var __proactiveClients: Array<{ ws: WebSocket | null; userId: string; sseSend?: (data: string) => void }> | undefined
 }
 
 function pushProactiveEvent(userId: string, event: { type: string; subtype: string; data: Record<string, unknown>; timestamp: number }): void {
