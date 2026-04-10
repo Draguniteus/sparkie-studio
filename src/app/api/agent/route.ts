@@ -17,10 +17,16 @@ declare global {
 }
 
 function pushProactiveEvent(userId: string, event: { type: string; subtype: string; data: Record<string, unknown>; timestamp: number }): void {
-  const clients: Array<{ ws: { readyState: number; send: (d: string) => void } | null; userId: string }> = global.__proactiveClients ?? []
+  const clients = global.__proactiveClients ?? []
+  const payload = JSON.stringify(event)
   for (const c of clients) {
-    if (c.userId === userId && c.ws && c.ws.readyState === 1 /* OPEN */) {
-      try { c.ws.send(JSON.stringify(event)) } catch (e) { console.error('[proactive push error]', e) }
+    if (c.userId !== userId) continue
+    if (c.sseSend) {
+      // SSE client — send via its sseSend function
+      try { c.sseSend(payload) } catch (e) { console.error('[proactive SSE push error]', e) }
+    } else if (c.ws && c.ws.readyState === 1 /* OPEN */) {
+      // WebSocket client — send via ws.send
+      try { c.ws.send(payload) } catch (e) { console.error('[proactive WS push error]', e) }
     }
   }
 }

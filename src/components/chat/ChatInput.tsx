@@ -1152,6 +1152,9 @@ export function ChatInput() {
                   const tableMatch = trace.label.match(/FROM\s+(\w+)/i)
                   const table = tableMatch?.[1] ?? 'database'
                   displayContent = `Queried ${table}`
+                } else if (trace.toolName === 'git_ops') {
+                  const actionMatch = trace.text?.match(/^([a-z_]+)/i)
+                  displayContent = `git: ${actionMatch?.[1] ?? 'operation'}`
                 }
                 const dur = trace.duration ? (trace.duration < 1000 ? `${trace.duration}ms` : `${(trace.duration / 1000).toFixed(1)}s`) : ''
                 addWorklogEntry({ type: 'result', content: displayContent + (dur ? ` (${dur})` : ''), result_preview: trace.text?.slice(0, 150), status: 'done', icon: trace.icon })

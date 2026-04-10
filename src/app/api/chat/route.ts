@@ -7961,7 +7961,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
               }
               const xmlDuration = Date.now() - xmlStart
               const xmlError = failed || result.startsWith('LOOP_INTERRUPT')
-              liveEnqueue({ step_trace: { id: fakeId, toolName, icon: xmlIcon, label: xmlLabel, status: xmlError ? 'error' : 'done', duration: xmlDuration, timestamp: Date.now() } })
+              liveEnqueue({ step_trace: { id: fakeId, toolName, icon: xmlIcon, label: xmlLabel, text: result.slice(0, 300), status: xmlError ? 'error' : 'done', duration: xmlDuration, timestamp: Date.now() } })
               console.log(`[tool] ${toolName} (xml) — ${xmlError ? 'error' : 'done'} in ${xmlDuration}ms`)
               xmlToolResults.push({ role: 'tool' as const, tool_call_id: fakeId, content: result })
               // Per-tool DB worklog entry for XML-format tool execution
