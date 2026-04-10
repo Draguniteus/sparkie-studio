@@ -1079,9 +1079,9 @@ export function ChatInput() {
       : rawMessages
     const assistantMsgId = addMessage(chatId, { role: "assistant", content: "", model: selectedModel, isStreaming: true })
     setStreaming(true)
-    // ── Worklog framing: open IDE + log session start ──
+    // ── Open IDE to Process tab — show live step traces and thinking bubbles ──
     if (!ideOpen) openIDE()
-    setIDETab('worklog')
+    setIDETab('process')
     try {
       const userProfile = useAppStore.getState().userProfile
       chatAbortRef.current?.abort()

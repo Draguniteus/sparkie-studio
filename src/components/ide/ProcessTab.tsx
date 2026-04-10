@@ -485,7 +485,7 @@ export function ProcessTab() {
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 flex flex-col gap-0.5">
         {/* All traces — newest at TOP */}
-        {[...liveTraces.reverse(), ...frozenTraces.reverse()]
+        {[...liveTraces, ...frozenTraces].reverse()
           .filter(t => matchesTagFilter(t, tagFilter))
           .map((trace, i) => {
             const k = traceKey(trace, i)
