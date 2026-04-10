@@ -98,6 +98,19 @@ export default defineConfig({
         previewSent: false,
       })
 
+      // Sync workspace to latest master so grep_codebase/read_file work on current code
+      try {
+        const gitSync = await sbx.commands.run(
+          `cd /home/user && git clone https://github.com/Draguniteus/sparkie-studio.git sparkie-studio 2>&1 || (cd sparkie-studio && git pull origin master 2>&1)`,
+          { timeoutMs: 30000 }
+        )
+        if (!gitSync.error) {
+          console.log('[create] Workspace synced to latest master')
+        }
+      } catch (_) {
+        // Non-fatal — workspace may be fresh and not need sync
+      }
+
       // Auto-start PTY with cmd if provided.
       // This eliminates the need for the client to send {type:'input'} over WS —
       // which DO's nginx proxy was swallowing (no [WS] pong received or message type
