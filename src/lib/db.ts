@@ -6,13 +6,12 @@ import { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 const rawUrl = process.env.DATABASE_URL ?? ''
 const isPgBouncer = rawUrl.includes('pgbouncer=true')
 
-// Append sslmode=no-verify to handle DO's self-signed certificate chain.
-// pg v8+ changed how SSL aliases work — using the connection-string approach
-// (not the ssl:{} pool option) ensures the fix is always applied regardless
-// of pool initialization order.
+// Append sslmode=require to handle DO's self-signed cert chain via libpq-compatible mode.
+// sslmode=require tells pg to use TLS but skip chain verification — exactly what DO needs.
+// The pool's ssl: { rejectUnauthorized: false } reinforces this for pg v8+.
 const dbUrlWithSsl = rawUrl.includes('sslmode=')
   ? rawUrl
-  : `${rawUrl}${rawUrl.includes('?') ? '&' : '?'}sslmode=no-verify`
+  : `${rawUrl}${rawUrl.includes('?') ? '&' : '?'}sslmode=require`
 
 const pool = new Pool({
   connectionString: dbUrlWithSsl,
