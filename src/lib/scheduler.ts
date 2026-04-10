@@ -254,6 +254,52 @@ async function routeEmailToTopic(
 }
 
 
+// Deploy failure email detection patterns for watchdog
+const DEPLOY_FAIL_PATTERNS = [
+  /deploy.*(fail|error|failed|rejected)/i,
+  /build.*(fail|error|failed)/i,
+  /vercel.*(fail|error|failed)/i,
+  /render.*(fail|error|failed)/i,
+  /netlify.*(fail|error|failed)/i,
+  /error.*deployment/i,
+  /deployment.*error/i,
+]
+
+// Check if a message is a deploy failure notification
+function isDeployFailureEmail(msg: { subject: string; from: string; snippet: string }): boolean {
+  const text = `${msg.subject} ${msg.from} ${msg.snippet}`
+  return DEPLOY_FAIL_PATTERNS.some(p => p.test(text))
+}
+
+// Fetch and diagnose build logs from deploy-monitor
+async function diagnoseDeploymentFailure(): Promise<{
+  errorType: string
+  details: string
+  suggestedFix: string
+  buildLog: string
+} | null> {
+  try {
+    const res = await fetch(`${INTERNAL_BASE}/api/deploy-monitor`, {
+      headers: { 'x-cron-secret': process.env.AGENT_CRON_SECRET ?? '' },
+      signal: AbortSignal.timeout(15000),
+    })
+    if (!res.ok) return null
+    const data = await res.json() as {
+      status: string
+      failed: boolean
+      buildLog?: string
+      diagnosis?: { errorType: string; details: string; suggestedFix: string }
+    }
+    if (!data.failed) return null
+    return {
+      errorType: data.diagnosis?.errorType ?? 'Unknown',
+      details: data.diagnosis?.details ?? '',
+      suggestedFix: data.diagnosis?.suggestedFix ?? '',
+      buildLog: data.buildLog ?? '',
+    }
+  } catch { return null }
+}
+
 async function proactiveInboxSweep(userId: string): Promise<void> {
   if (!COMPOSIO_KEY) return
 
@@ -293,6 +339,16 @@ async function proactiveInboxSweep(userId: string): Promise<void> {
       const from = m.from ?? ''
       const snippet = m.snippet ?? ''
       const text = `${subject} ${from} ${snippet}`
+
+      // ── Deployment Watchdog: detect deploy failure emails first ─────────────
+      if (isDeployFailureEmail(m)) {
+        triageResults.push({
+          msg: m,
+          decision: 'process',
+          reason: 'Deploy failure detected — will run watchdog diagnosis',
+        })
+        continue
+      }
 
       const isMarketing = SKIP_PATTERNS.some(p => p.test(text)) || m.labelIds?.some(l => SKIP_LABELS.has(l))
       const isEngagement = /\b(linkedin|add.*network|endorse|puzzle|quiz|follow.*up|connection.*request)\b/i.test(text)
@@ -372,6 +428,39 @@ async function proactiveInboxSweep(userId: string): Promise<void> {
       }
     }
   }))
+
+  // ── Deployment Watchdog: detect deploy failure emails ────────────────────────
+  // messages = filtered inbox emails already computed above (line 385)
+  const deployFailEmails = messages.filter(m => isDeployFailureEmail(m))
+
+  if (deployFailEmails.length > 0) {
+    // Run watchdog diagnosis — pull build logs and diagnose root cause
+    const diagnosis = await diagnoseDeploymentFailure()
+    if (diagnosis) {
+      await writeWorklog(userId, 'error', `🐕 Deployment Watchdog: ${diagnosis.errorType}`, {
+        status: 'anomaly',
+        decision_type: 'escalate',
+        reasoning: `Deploy failure detected from inbox. ${diagnosis.details} Fix: ${diagnosis.suggestedFix}`,
+        signal_priority: 'P1',
+        conclusion: `Watchdog diagnosis complete — ${diagnosis.errorType}: ${diagnosis.details.slice(0, 100)}`,
+        build_log_excerpt: diagnosis.buildLog.slice(-500),
+        suggested_fix: diagnosis.suggestedFix,
+      }).catch(() => {})
+
+      // Push immediate notification via SSE so Michael sees the alert right away
+      await pushProactiveSignal({
+        userId,
+        topicId: 'deployment-watchdog',
+        topicName: 'Deployment Watchdog',
+        notificationPolicy: 'immediate',
+        signalType: 'deploy_failure',
+        content: `🐕 Deployment Watchdog: ${diagnosis.errorType} — ${diagnosis.details.slice(0, 80)}`,
+        priority: 'P1',
+      }).catch(() => {})
+
+      console.log(`[watchdog] Deploy failure detected for user ${userId}: ${diagnosis.errorType} — ${diagnosis.suggestedFix.slice(0, 60)}`)
+    }
+  }
 
   // 2. Check if we already have a pending inbox task for this user (debounce)
   try {
