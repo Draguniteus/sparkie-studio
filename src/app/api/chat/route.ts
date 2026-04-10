@@ -7244,7 +7244,13 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           break
         }
 
-        const loopData = await loopRes.json()
+        let loopData: Record<string, unknown>
+        try {
+          loopData = await loopRes.json() as Record<string, unknown>
+        } catch (e) {
+          console.error(`[chat IIFE] JSON parse error (truncated/invalid response body): ${String(e)}`)
+          break
+        }
         // Wire real token counts so context health check functions correctly
         if (requestId && loopData.usage?.total_tokens) {
           updateTokenEstimate(requestId, loopData.usage.total_tokens)
@@ -8176,7 +8182,13 @@ Keep each header + thought on its own line. Use multiple short bold-header block
         }
         const { response: synthRes } = await tryLLMCall(synthPayload, apiKey)
         if (synthRes.ok) {
-          const synthData = await synthRes.json()
+          let synthData: Record<string, unknown>
+          try {
+            synthData = await synthRes.json() as Record<string, unknown>
+          } catch (e) {
+            console.error(`[chat] forced synthesis JSON parse error: ${String(e)}`)
+            break
+          }
           const synthContent: string = synthData?.choices?.[0]?.message?.content ?? ''
           if (synthContent) {
             const sseEnc = new TextEncoder()

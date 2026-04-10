@@ -485,7 +485,10 @@ export function ProcessTab() {
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 flex flex-col gap-0.5">
         {/* All traces — one continuous timeline, newest first */}
-        {[...liveTraces, ...frozenTraces].reverse()
+        {/* liveTraces: newest appended to end, oldest at index 0 */}
+        {/* frozenTraces: extracted from newest messages first (due to .reverse() on messages) */}
+        {/* Combined: [...liveTraces, ...frozenTraces] = [liveOldest..liveNewest, frozenNewest..frozenOldest] = newest-first already */}
+        {[...liveTraces, ...frozenTraces]
           .filter(t => matchesTagFilter(t, tagFilter))
           .map((trace, i) => {
             const k = traceKey(trace, i)
