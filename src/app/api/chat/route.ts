@@ -1,4 +1,8 @@
 import { NextRequest } from 'next/server'
+
+interface MiniMaxChoice { finish_reason?: string; message?: { tool_calls?: unknown; content?: string } }
+interface MiniMaxUsage { total_tokens?: number; prompt_tokens?: number; completion_tokens?: number }
+interface MiniMaxResponse { usage?: MiniMaxUsage; choices?: MiniMaxChoice[] }
 import fs from 'fs'
 import path from 'path'
 import { getServerSession } from 'next-auth/next'
@@ -7244,9 +7248,9 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           break
         }
 
-        let loopData: Record<string, unknown>
+        let loopData: MiniMaxResponse
         try {
-          loopData = await loopRes.json() as Record<string, unknown>
+          loopData = await loopRes.json() as MiniMaxResponse
         } catch (e) {
           console.error(`[chat IIFE] JSON parse error (truncated/invalid response body): ${String(e)}`)
           break
@@ -8182,9 +8186,9 @@ Keep each header + thought on its own line. Use multiple short bold-header block
         }
         const { response: synthRes } = await tryLLMCall(synthPayload, apiKey)
         if (synthRes.ok) {
-          let synthData: Record<string, unknown>
+          let synthData: MiniMaxResponse
           try {
-            synthData = await synthRes.json() as Record<string, unknown>
+            synthData = await synthRes.json() as MiniMaxResponse
           } catch (e) {
             console.error(`[chat] forced synthesis JSON parse error: ${String(e)}`)
             // Return an error stream instead of breaking (forced synthesis is outside the while loop)
