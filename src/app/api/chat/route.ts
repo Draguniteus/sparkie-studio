@@ -8187,7 +8187,11 @@ Keep each header + thought on its own line. Use multiple short bold-header block
             synthData = await synthRes.json() as Record<string, unknown>
           } catch (e) {
             console.error(`[chat] forced synthesis JSON parse error: ${String(e)}`)
-            break
+            // Return an error stream instead of breaking (forced synthesis is outside the while loop)
+            return new Response(
+              new TextEncoder().encode(`data: ${JSON.stringify({ choices: [{ delta: { content: 'I hit an error processing the results. Let me try a different approach.' } }] })}\n\ndata: [DONE]\n\n`),
+              { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' } }
+            )
           }
           const synthContent: string = synthData?.choices?.[0]?.message?.content ?? ''
           if (synthContent) {
