@@ -73,7 +73,8 @@
       "Bash(npm audit:*)",
       "Bash(psql \"$DATABASE_URL\" -c \"SELECT action, label, status FROM sparkie_tasks WHERE action LIKE ''%GMAIL%'' ORDER BY created_at DESC LIMIT 10;\")",
       "Bash(curl -s -X POST \"https://backend.composio.dev/api/v3/tools/search\" -H \"x-api-key: $COMPOSIO_API_KEY\" -H \"Content-Type: application/json\" -d '{\"\"\"\"queries\"\"\"\":[{\"\"\"\"use_case\"\"\"\":\"\"\"\"modify gmail message labels add labels remove labels\"\"\"\"}]}')",
-      "Bash(curl -s \"https://backend.composio.dev/api/v3/tools/search?use_case=modify+gmail+labels\" -H \"x-api-key: $COMPOSIO_API_KEY:-\")"
+      "Bash(curl -s \"https://backend.composio.dev/api/v3/tools/search?use_case=modify+gmail+labels\" -H \"x-api-key: $COMPOSIO_API_KEY:-\")",
+      "Bash(failed\" issue when the agent tries to read files in the workspace.:*)"
     ]
   }
 }

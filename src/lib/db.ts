@@ -6,8 +6,16 @@ import { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 const rawUrl = process.env.DATABASE_URL ?? ''
 const isPgBouncer = rawUrl.includes('pgbouncer=true')
 
+// Append sslmode=no-verify to handle DO's self-signed certificate chain.
+// pg v8+ changed how SSL aliases work — using the connection-string approach
+// (not the ssl:{} pool option) ensures the fix is always applied regardless
+// of pool initialization order.
+const dbUrlWithSsl = rawUrl.includes('sslmode=')
+  ? rawUrl
+  : `${rawUrl}${rawUrl.includes('?') ? '&' : '?'}sslmode=no-verify`
+
 const pool = new Pool({
-  connectionString: rawUrl,
+  connectionString: dbUrlWithSsl,
   ssl: { rejectUnauthorized: false },
   // Autonomous agent tasks (loop + scheduler + memory writes) can spike concurrent connections.
   // max: 15 gives headroom while staying under DO managed PG default limit of 22.
