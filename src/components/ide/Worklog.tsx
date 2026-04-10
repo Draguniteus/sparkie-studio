@@ -529,7 +529,7 @@ export function Worklog({ compact = false }: WorklogProps) {
     // Compact mode: simple list without timeline
     return (
       <div className="p-2 space-y-0.5">
-        {filteredWorklog.slice(-10).map((entry: WorklogEntry) => (
+        {filteredWorklog.slice(-10).reverse().map((entry: WorklogEntry) => (
           <div key={entry.id} className="flex items-center gap-2 py-0.5">
             <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${getNodeStyle(entry.type, entry.status, entry.decision_type)}`} />
             <span className="text-[10px] text-text-secondary truncate flex-1">{entry.content}</span>
@@ -596,7 +596,7 @@ export function Worklog({ compact = false }: WorklogProps) {
           <div className="absolute left-[5px] top-2 bottom-2 w-px bg-gradient-to-b from-purple-500/30 via-slate-600/20 to-transparent" />
 
           <div className="space-y-0.5">
-            {filteredWorklog.map((entry: WorklogEntry, idx: number) => {
+            {filteredWorklog.slice().reverse().map((entry: WorklogEntry, idx: number) => {
               const isMemory  = entry.type === "memory_learned" || entry.type === "memory_updated"
               const isProactive = entry.type === "proactive_check" || entry.decision_type === "proactive"
               const isEmail   = entry.type === "email_processed" || entry.type === "email_skipped"
