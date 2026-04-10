@@ -33,13 +33,14 @@ export async function GET(req: NextRequest) {
 
   try {
     await ensureTable()
+    await ensureColumns()
     const rows = category
       ? await query(
-          'SELECT id, category, content, source, created_at FROM sparkie_self_memory WHERE category = $1 ORDER BY created_at DESC LIMIT $2',
+          'SELECT id, category, content, source, created_at, expires_at, stale_flagged FROM sparkie_self_memory WHERE category = $1 ORDER BY created_at DESC LIMIT $2',
           [category, limit]
         )
       : await query(
-          'SELECT id, category, content, source, created_at FROM sparkie_self_memory ORDER BY created_at DESC LIMIT $1',
+          'SELECT id, category, content, source, created_at, expires_at, stale_flagged FROM sparkie_self_memory ORDER BY created_at DESC LIMIT $1',
           [limit]
         )
     return NextResponse.json({ memories: rows.rows })
@@ -68,6 +69,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'content required' }, { status: 400 })
     }
     await ensureTable()
+    await ensureColumns()
 
     // Block 17: dedup — check for similar existing memories in same category
     const catMems = await query<{ id: number; content: string }>(
@@ -90,10 +92,13 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    await query(
-      'INSERT INTO sparkie_self_memory (category, content, source) VALUES ($1, $2, $3)',
+    const insRes = await query<{ id: number }>(
+      'INSERT INTO sparkie_self_memory (category, content, source) VALUES ($1, $2, $3) RETURNING id',
       [category, content, source]
     )
+    const memoryId = (insRes.rows[0] as { id: number } | undefined)?.id
+    if (memoryId) await setMemoryTTL(memoryId, category)
+
     return NextResponse.json({ ok: true, action: 'inserted' })
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 })

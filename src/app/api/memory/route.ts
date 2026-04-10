@@ -79,13 +79,18 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// DELETE /api/memory?id=X — remove a specific memory
+// DELETE /api/memory?id=X or body { id } — remove a specific memory
 export async function DELETE(req: NextRequest) {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const userId = (session.user as { id?: string }).id
   const { searchParams } = new URL(req.url)
-  const id = searchParams.get('id')
+  let id = searchParams.get('id')
+  if (!id) {
+    // MemoryTab.forgetUser sends JSON body { id }
+    const body = await req.json().catch(() => ({}))
+    id = body?.id
+  }
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
 
   await query('DELETE FROM user_memories WHERE id = $1 AND user_id = $2', [id, userId])
