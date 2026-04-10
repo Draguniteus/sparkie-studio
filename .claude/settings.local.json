@@ -58,7 +58,19 @@
       "Bash(grep -n \"model: ''''MiniMax-M2.7''''\" src/app/api/chat/route.ts)",
       "Bash(xxd)",
       "Bash(node -e \"require\\(''''./src/lib/proactiveEvents''''\\)\")",
-      "Bash(echo \"exit: $?\")"
+      "Bash(echo \"exit: $?\")",
+      "mcp__claude_ai_Vercel__list_teams",
+      "Bash(curl -s -o /dev/null -w \"%{http_code} %{redirect_url}\" \"https://sparkie-studio-mhouq.ondigitalocean.app\")",
+      "Bash(curl -s \"https://sparkie-studio-mhouq.ondigitalocean.app/api/health\")",
+      "Bash(curl -s -L \"https://sparkie-studio-mhouq.ondigitalocean.app\")",
+      "Bash(du -sh .next/static/chunks/*.js)",
+      "Bash(find .next/static -name *.js -exec cat {} +)",
+      "Bash(curl -s -L --cookie-jar /tmp/cookies.txt \"https://sparkie-studio-mhouq.ondigitalocean.app\")",
+      "Bash(ls -la /c/Users/user/Desktop/sparkie-studio/*.json)",
+      "Bash(set NODE_OPTIONS=--max-old-space-size=896)",
+      "Bash(set NEXT_TELEMETRY_DISABLED=1)",
+      "Bash(bash -c \"NODE_OPTIONS='--max-old-space-size=896' NEXT_TELEMETRY_DISABLED=1 npx next build 2>&1; echo EXIT_CODE=$?\")",
+      "Bash(npm audit:*)"
     ]
   }
 }

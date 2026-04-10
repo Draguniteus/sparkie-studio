@@ -10,7 +10,124 @@ import { runConfidenceDecay } from '@/lib/behaviorRules'
 import { runSelfReflection } from '@/lib/selfReflection'
 import { seedStarterGoals, escalateStaleGoals } from '@/lib/goalEngine'
 
-// ── Proactive inbox/calendar loop (Phase 6) ────────────────────────────────
+// ── Notification Policy Engine ────────────────────────────────────────────────
+// Enforces topic-level notification policies at runtime.
+// immediate → push via SSE immediately
+// defer      → queue for batch digest (no push, log only)
+// auto       → L4 urgency judgment from sparkie_user_model
+
+interface SurfacedSignal {
+  userId: string
+  topicId: string
+  topicName: string
+  notificationPolicy: 'immediate' | 'defer' | 'auto'
+  signalType: string
+  content: string
+  priority: 'P1' | 'P2' | 'P3'
+  metadata?: Record<string, unknown>
+}
+
+// Push a proactive signal to the user's SSE stream via the proactive-sse endpoint
+async function pushProactiveSignal(signal: SurfacedSignal): Promise<void> {
+  try {
+    await fetch(`${INTERNAL_BASE}/api/proactive-sse?userId=${signal.userId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'proactive_signal',
+        signal_type: signal.signalType,
+        topic_id: signal.topicId,
+        topic_name: signal.topicName,
+        content: signal.content,
+        priority: signal.priority,
+        metadata: signal.metadata ?? {},
+        timestamp: new Date().toISOString(),
+      }),
+    }).catch(() => {}) // non-fatal — SSE may not be connected
+  } catch { /* non-fatal */ }
+}
+
+// Evaluate urgency via L4 user model for 'auto' policy signals
+async function evaluateAutoUrgency(userId: string, signal: SurfacedSignal): Promise<'immediate' | 'defer'> {
+  try {
+    // Fetch L4 emotional/behavioral state to determine if signal warrants push
+    const userModelRows = await query<{ emotional_state: string; behavioral_tags: string[] }>(
+      `SELECT emotional_state, behavioral_tags FROM sparkie_user_model WHERE user_id = $1 LIMIT 1`,
+      [userId]
+    )
+    if (userModelRows.rows.length === 0) return 'defer'
+
+    const { emotional_state, behavioral_tags } = userModelRows.rows[0]
+    const state = typeof emotional_state === 'string' ? JSON.parse(emotional_state) : (emotional_state ?? {})
+    const tags: string[] = Array.isArray(behavioral_tags) ? behavioral_tags : []
+
+    // High urgency signals always get immediate treatment
+    if (signal.priority === 'P1') return 'immediate'
+
+    // If user is in 'focus' mode, defer non-critical signals
+    const focusMode = state.focus_mode ?? false
+    if (focusMode && signal.priority === 'P3') return 'defer'
+
+    // Check if signal topic matches user's current active interests (behavioral tags)
+    const topicLower = signal.topicName.toLowerCase()
+    const matchesInterest = tags.some(tag => topicLower.includes(tag.toLowerCase()))
+    if (matchesInterest && signal.priority === 'P2') return 'immediate'
+
+    return 'defer'
+  } catch {
+    return 'defer' // fail safe
+  }
+}
+
+// Main policy engine — call this whenever a signal surfaces from any source
+export async function notificationPolicyEngine(signal: SurfacedSignal): Promise<void> {
+  switch (signal.notificationPolicy) {
+    case 'immediate':
+      // Always push immediately
+      await pushProactiveSignal(signal)
+      await writeWorklog(signal.userId, 'proactive_signal', signal.content, {
+        decision_type: 'proactive',
+        reasoning: `Topic "${signal.topicName}" has immediate notification policy. Pushing now.`,
+        signal_priority: signal.priority,
+        topic_id: signal.topicId,
+        conclusion: `Immediate notification sent for: ${signal.content.slice(0, 60)}`,
+        ...(signal.metadata ?? {}),
+      })
+      break
+
+    case 'defer':
+      // Log silently, no push — will surface in digest
+      await writeWorklog(signal.userId, 'proactive_signal', signal.content, {
+        decision_type: 'skip',
+        reasoning: `Topic "${signal.topicName}" has defer policy. Silently queued for digest.`,
+        signal_priority: 'P3',
+        topic_id: signal.topicId,
+        conclusion: `Deferred — queued for batch digest: ${signal.content.slice(0, 60)}`,
+        ...(signal.metadata ?? {}),
+      })
+      break
+
+    case 'auto':
+      // L4 judgment: evaluate urgency, then push or defer
+      const resolved = await evaluateAutoUrgency(signal.userId, signal)
+      if (resolved === 'immediate') {
+        await pushProactiveSignal(signal)
+        await writeWorklog(signal.userId, 'proactive_signal', signal.content, {
+          decision_type: 'proactive',
+          reasoning: `Topic "${signal.topicName}" has auto policy — L4 judgment: immediate (high urgency detected).`,
+          signal_priority: 'P1',
+          topic_id: signal.topicId,
+          conclusion: `Auto-immediate notification sent: ${signal.content.slice(0, 60)}`,
+          ...(signal.metadata ?? {}),
+        })
+      }
+      // 'defer' → silent log, nothing pushed
+      break
+  }
+}
+
+// Also export pushProactiveSignal for use by other schedulers/tasks
+export { pushProactiveSignal }
 const COMPOSIO_BASE = 'https://backend.composio.dev/api/v3'
 const COMPOSIO_KEY  = process.env.COMPOSIO_API_KEY ?? ''
 const INTERNAL_BASE = process.env.NEXTAUTH_URL ?? process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3000'
@@ -118,14 +235,15 @@ async function routeEmailToTopic(
       return bestMatch.id
     }
 
-    await writeWorklog(userId, 'decision', `📎 Email routed to topic "${bestMatch.name}": ${subject.slice(0, 80)}`, {
-      decision_type: 'proactive',
-      reasoning: `Email matched topic fingerprint/aliases with score ${bestMatch.score}. Notification policy: ${bestMatch.policy}.`,
-      signal_priority: logPriority,
-      topic_id: bestMatch.id,
-      email_id: emailId,
-      status: 'done',
-      conclusion: `Email automatically linked to topic "${bestMatch.name}" with match score ${bestMatch.score}`,
+    await notificationPolicyEngine({
+      userId,
+      topicId: bestMatch.id,
+      topicName: bestMatch.name,
+      notificationPolicy: bestMatch.policy as 'immediate' | 'defer' | 'auto',
+      signalType: 'email_routed',
+      content: `📎 Email routed to topic "${bestMatch.name}": ${subject.slice(0, 80)}`,
+      priority: logPriority as 'P1' | 'P2' | 'P3',
+      metadata: { email_id: emailId, match_score: bestMatch.score },
     })
 
     return bestMatch.id
@@ -527,9 +645,9 @@ async function executeUserTasks(
   baseUrl: string
 ): Promise<Array<{ id: string; label: string; result: string }>> {
   const dueTasks = await query<{
-    id: string; label: string; action: string; trigger_type: string; trigger_config: Record<string, unknown>
+    id: string; label: string; action: string; trigger_type: string; trigger_config: Record<string, unknown>; depends_on: string | null
   }>(
-    `SELECT id, label, action, trigger_type, trigger_config FROM sparkie_tasks
+    `SELECT id, label, action, trigger_type, trigger_config, depends_on FROM sparkie_tasks
      WHERE user_id = $1 AND executor = 'ai' AND status = 'pending'
      AND scheduled_at IS NOT NULL AND scheduled_at <= NOW()
      ORDER BY scheduled_at ASC LIMIT 5`,
@@ -554,6 +672,24 @@ async function executeUserTasks(
       })
       await query(`UPDATE sparkie_tasks SET status = 'failed' WHERE id = $1`, [task.id])
       return undefined
+    }
+
+    // depends_on enforcement: skip if dependency is not yet resolved
+    if (task.depends_on) {
+      const depRes = await query<{ status: string }>(
+        `SELECT status FROM sparkie_tasks WHERE id = $1 AND user_id = $2`,
+        [task.depends_on, userId]
+      )
+      const depTask = depRes.rows[0]
+      const terminalStatuses = ['completed', 'failed', 'skipped', 'cancelled']
+      if (!depTask || !terminalStatuses.includes(depTask.status)) {
+        // Dependency not met — re-queue for 60s later
+        await query(
+          `UPDATE sparkie_tasks SET scheduled_at = NOW() + INTERVAL '60 seconds' WHERE id = $1`,
+          [task.id]
+        )
+        return undefined
+      }
     }
 
     try {
@@ -602,7 +738,7 @@ async function executeUserTasks(
         }
       }
 
-      // Re-queue cron tasks; complete delay/manual tasks
+      // Re-queue cron tasks; reset event tasks to pending (fire on next event); complete one-shot tasks
       if (task.trigger_type === 'cron') {
         const expr = (task.trigger_config as { expression?: string }).expression ?? '0 9 * * 1'
         const nextTime = nextCronTime(expr)
@@ -610,7 +746,15 @@ async function executeUserTasks(
           `UPDATE sparkie_tasks SET status = 'pending', scheduled_at = $2 WHERE id = $1`,
           [task.id, nextTime.toISOString()]
         )
+      } else if (task.trigger_type === 'event') {
+        // Event tasks stay pending — they are re-triggered by external event listeners
+        // Do NOT mark completed; reset to pending for next event trigger
+        await query(
+          `UPDATE sparkie_tasks SET status = 'pending', scheduled_at = NULL WHERE id = $1`,
+          [task.id]
+        )
       } else {
+        // manual, immediate, delay — one-shot, mark completed after execution
         await query(
           `UPDATE sparkie_tasks SET status = 'completed', resolved_at = NOW() WHERE id = $1`,
           [task.id]
@@ -721,12 +865,20 @@ async function heartbeatTick(baseUrl: string): Promise<void> {
       for (const { user_id } of activeUsers.rows.slice(0, 10)) {
         const readyIntents = await loadReadyDeferredIntents(user_id)
         for (const intent of readyIntents) {
-          // Surface as worklog entry + mark as surfaced
-          await writeWorklog(user_id, 'decision', intent.intent, {
-            decision_type: 'proactive',
-            reasoning: `Deferred intent from ${intent.createdAt.toLocaleDateString()}: "${intent.sourceMsg.slice(0, 80)}"`,
-            signal_priority: intent.dueAt && intent.dueAt < new Date() ? 'P1' : 'P2',
-            conclusion: `Deferred intent surfaced and ready for action: "${intent.intent.slice(0, 80)}"`,
+          const intentPriority = intent.dueAt && intent.dueAt < new Date() ? 'P1' : 'P2'
+          await notificationPolicyEngine({
+            userId: user_id,
+            topicId: 'deferred',
+            topicName: 'Deferred Intent',
+            notificationPolicy: 'auto',
+            signalType: 'deferred_intent_surfaced',
+            content: intent.intent,
+            priority: intentPriority,
+            metadata: {
+              source_msg: intent.sourceMsg.slice(0, 200),
+              created_at: intent.createdAt.toISOString(),
+              due_at: intent.dueAt?.toISOString() ?? null,
+            },
           })
           await markDeferredIntentSurfaced(intent.id)
         }

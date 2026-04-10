@@ -2559,7 +2559,12 @@ const SPARKIE_TOOLS = [
   { type: 'function', function: { name: 'list_memories', description: 'List all memories in a given category or source. Use to audit what Sparkie knows before deleting or updating entries. Returns id, category, and content preview for each entry.', parameters: { type: 'object', properties: { category: { type: 'string', description: 'Filter by category name (optional). e.g. "work_rule", "api_behavior", "contact"' }, source: { type: 'string', description: '"self" (default), "user", or "all"' }, limit: { type: 'number', description: 'Max entries to return (default 20, max 50)' } }, required: [] } } },
   { type: 'function', function: { name: 'send_card_to_user', description: 'Send a beautiful HITL card to the user in chat instead of plain text. Use for: email drafts (type=email_draft), tasks (type=task), calendar events (type=calendar_event), contacts (type=contact), memory saves (type=memory), deploy confirmations (type=deploy), reminders (type=reminder), GitHub PRs (type=github_pr), reports (type=report), media (type=media), images (type=image), permission requests (type=permission), confirmations (type=confirmation), browser actions (type=browser_action). Always prefer cards over plain text for structured content.', parameters: { type: 'object', properties: { type: { type: 'string', description: 'Card type: email_draft | calendar_event | memory | contact | task | deploy | reminder | github_pr | report | media | image | permission | confirmation | browser_action' }, title: { type: 'string', description: 'Card header title (e.g. "Email Draft", "Memory Saved")' }, subtitle: { type: 'string', description: 'Secondary header text (e.g. email subject, event name)' }, to: { type: 'string', description: 'Recipient badge (for email/contact cards)' }, body: { type: 'string', description: 'Main body text (email body, event description, memory content, etc.)' }, fields: { type: 'array', items: { type: 'object', properties: { label: { type: 'string' }, value: { type: 'string' } }, required: ['label', 'value'] }, description: 'Key-value fields to display (e.g. date, attendees, commit SHA)' }, items: { type: 'array', items: { type: 'string' }, description: 'Bullet list items (e.g. tasks to approve, permissions requested)' }, actions: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, label: { type: 'string' }, icon: { type: 'string' }, variant: { type: 'string', description: '"primary" | "secondary" | "danger"' } }, required: ['id', 'label'] }, description: 'Action buttons on the card' }, preview_url: { type: 'string', description: 'Image URL to show as preview (for image/media cards)' }, text: { type: 'string', description: 'Short text shown above the card in chat' }, metadata: { type: 'object', description: 'Any extra data to attach to the card' } }, required: ['type', 'title', 'actions'] } } },
   // ── Block 4C: Previously missing tool definitions ───────────────────────────
+  { type: 'function', function: { name: 'user_operation_signal', description: 'Handle a user operation signal from the HITL card flow. When the user approves, rejects, requests changes, or discards a card action, the frontend sends this signal to resume autonomous execution. Call this tool to process the user action and continue the workflow.', parameters: { type: 'object', properties: { task_id: { type: 'string', description: 'The sparkie_tasks ID from the card that was acted on' }, action: { type: 'string', enum: ['approved', 'rejected', 'changes_requested', 'discarded'], description: 'The user action: approved (proceed), rejected (skip), changes_requested (create new draft), discarded (cancel)' }, feedback: { type: 'string', description: 'Optional user feedback or requested changes (for changes_requested action)' } }, required: ['task_id', 'action'] } } },
   { type: 'function', function: { name: 'create_social_draft', description: 'Create a social media draft and send it to the user for HITL approval before publishing. Use for Twitter/X, LinkedIn, Reddit, Instagram, and TikTok posts. The user must explicitly approve before the post goes live.', parameters: { type: 'object', properties: { platform: { type: 'string', description: 'Social platform: twitter, linkedin, reddit, instagram, tiktok' }, content: { type: 'string', description: 'The post content (max 2000 chars for Twitter/X, platform limits apply)' }, media_url: { type: 'string', description: 'Optional image/video URL to attach to the post' } }, required: ['platform', 'content'] } } },
+  { type: 'function', function: { name: 'composio_discover', description: 'Search for tools available in Composio\'s library of 992+ apps. Use when you need to perform an action on an app that isn\'t covered by a dedicated Sparkie tool. Returns tool slugs, descriptions, and app names. ALWAYS run discover before using composio_execute with an unfamiliar tool.', parameters: { type: 'object', properties: { query: { type: 'string', description: 'Natural language search for what you want to do, e.g. "post a tweet" or "send a discord message"' }, app: { type: 'string', description: 'Optional: limit search to a specific app name (e.g. "twitter", "discord", "github")' }, limit: { type: 'number', description: 'Max results to return (default 5, max 10)' } }, required: ['query'] } } },
+  { type: 'function', function: { name: 'composio_execute', description: 'Execute any Composio tool by its exact slug with schema-compliant arguments. Use composio_discover first to find the correct slug and required parameters. For Gmail, Calendar, GitHub, Twitter, Discord, Slack, and other connected apps.', parameters: { type: 'object', properties: { slug: { type: 'string', description: 'The exact Composio tool slug, e.g. "TWITTER_CREATE_TWEET", "DISCORD_SEND_CHANNEL_MESSAGE", "GITHUB_CREATE_PULL_REQUEST"' }, args: { type: 'object', description: 'The tool arguments as a key-value object. Get the exact schema from composio_discover or composio_get_tool_schemas.' } }, required: ['slug', 'args'] } } },
+  { type: 'function', function: { name: 'composio_get_tool_schemas', description: 'Get the full input JSON schema for one or more Composio tools by their slug. Use when composio_discover returns a tool but the parameters are unclear. Returns name, description, and full input_schema.', parameters: { type: 'object', properties: { tool_slugs: { type: 'array', items: { type: 'string' }, description: 'Array of Composio tool slugs to get schemas for, e.g. ["TWITTER_CREATE_TWEET", "GITHUB_CREATE_ISSUE"]' } }, required: ['tool_slugs'] } } },
+  { type: 'function', function: { name: 'composio_multi_execute_tool', description: 'Execute up to 50 Composio tools in parallel in a single API call. Use for bulk operations like sending multiple emails, creating multiple calendar events, or posting to multiple platforms simultaneously. Results are returned as a summary with per-tool success/failure.', parameters: { type: 'object', properties: { tools: { type: 'array', items: { type: 'object', properties: { tool_slug: { type: 'string', description: 'The Composio tool slug' }, arguments: { type: 'object', description: 'The tool arguments as a key-value object' } }, required: ['tool_slug', 'arguments'] }, description: 'Array of up to 50 tools to execute in parallel' } }, required: ['tools'] } } },
   { type: 'function', function: { name: 'log_worklog', description: 'Read back recent worklog entries to understand what Sparkie has been doing, thinking, or deciding. Useful for reviewing recent actions, checking decision history, or auditing why a particular choice was made.', parameters: { type: 'object', properties: { type: { type: 'string', description: 'Filter by entry type (e.g. "task_executed", "decision", "email_triage", "proactive_sweep"). Optional — omit for all entries.' }, limit: { type: 'number', description: 'Max entries to return (default 50, max 200)' } }, required: [] } } },
   { type: 'function', function: { name: 'get_attempt_history', description: 'Read the attempt history for a specific domain to learn from past successes, failures, and workarounds before attempting a complex operation. Domains: minimax_video, ace_music, github_push, github_pr, send_email, calendar_event, deploy, coding, image_gen, browser_navigate, and 20+ more.', parameters: { type: 'object', properties: { domain: { type: 'string', description: 'The domain to look up (e.g. "minimax_video", "send_email", "github_push")' }, limit: { type: 'number', description: 'Max entries to return (default 5, max 20)' } }, required: ['domain'] } } },
   { type: 'function', function: { name: 'save_attempt', description: 'Record an attempt result (success or failure) after a tool call completes so Sparkie learns and self-heals on future attempts. Automatically called by executeToolWithRetry — only use this directly when you want to manually record an attempt outside the retry flow.', parameters: { type: 'object', properties: { domain: { type: 'string', description: 'Domain name (e.g. "send_email", "github_push", "image_gen")' }, attempt_type: { type: 'string', description: 'Type: success | failure | workaround | pattern' }, summary: { type: 'string', description: 'Brief one-line summary of what was attempted' }, outcome: { type: 'string', description: 'What actually happened (e.g. "API returned 403", "video generated but audio was out of sync"' }, lesson: { type: 'string', description: 'The key lesson or workaround discovered (e.g. "Use refresh token, not access token for expired sessions")' }, ttl_days: { type: 'number', description: 'Optional: days until this lesson expires (default 30, max 365)' } }, required: ['domain', 'attempt_type', 'summary', 'outcome', 'lesson'] } } },
@@ -2574,6 +2579,27 @@ const SPARKIE_TOOLS = [
   { type: 'function', function: { name: 'browser_fill', description: 'Fill in a form field on a web page. Use for search boxes, login fields, text inputs, or any form input. Powered by Hyperbrowser browser-use agent.', parameters: { type: 'object', properties: { url: { type: 'string', description: 'The URL of the page with the form' }, selector: { type: 'string', description: 'CSS selector for the input field (preferred if known)' }, value: { type: 'string', description: 'The value to type into the field' }, description: { type: 'string', description: 'Natural language description of the field, e.g. "the email input" or "the search box"' }, profile_id: { type: 'string', description: 'Optional: Hyperbrowser profile ID for authenticated sessions' } }, required: ['url', 'value'] } } },
   { type: 'function', function: { name: 'browser_create_profile', description: 'Create a persistent browser profile for authenticated sessions. Once created, use the profile ID with browser_use_profile to log into websites and have credentials persist between sessions. Powered by Hyperbrowser.', parameters: { type: 'object', properties: { name: { type: 'string', description: 'Name for the profile, e.g. "gmail-michael" or "linkedin-auth"' } }, required: [] } } },
   { type: 'function', function: { name: 'browser_use_profile', description: 'Use a previously created browser profile to complete a browser task. The profile persists cookies and login state, so this can log in, fill forms, and interact with authenticated pages. Use for tasks like "log into Gmail and forward the last email" or "post to LinkedIn". Powered by Hyperbrowser browser-use agent.', parameters: { type: 'object', properties: { profile_id: { type: 'string', description: 'The Hyperbrowser profile ID (from browser_create_profile or memory)' }, task: { type: 'string', description: 'Natural language task to perform, e.g. "Navigate to https://gmail.com and read the first unread email"' }, url: { type: 'string', description: 'Optional starting URL for the task' } }, required: ['profile_id', 'task'] } } },
+  {
+    type: 'function',
+    function: {
+      name: 'memory_manage',
+      description: 'Manage user long-term memories: save with AI-distilled hint + original quote, search by query/category, delete by ID, or list all. Use after conversations to save what was learned. Categories: identity, preference, emotion, project, relationship, habit, conversation.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['save', 'search', 'delete', 'list'], description: 'Action: save (store a new memory with hint+quote), search (full-text search), delete (remove by id), list (show all or by category)' },
+          category: { type: 'string', enum: ['identity', 'preference', 'emotion', 'project', 'relationship', 'habit', 'conversation'], description: 'Category for save/list actions' },
+          hint: { type: 'string', description: 'AI-distilled short hint/summary of the memory (for save) — e.g. "Michael prefers dark UI themes"' },
+          quote: { type: 'string', description: 'Original verbatim excerpt from conversation that supports this memory (for save) — e.g. "he said \'I really prefer dark mode\'"' },
+          content: { type: 'string', description: 'Full memory content to save (for save action)' },
+          query: { type: 'string', description: 'Search query for memory search (for search action)' },
+          memory_id: { type: 'number', description: 'Memory ID to delete (for delete action)' },
+          limit: { type: 'number', description: 'Max results for list/search (default 20)' },
+        },
+        required: ['action'],
+      },
+    },
+  },
 ]
 
 // ── One-time DDL init guard ───────────────────────────────────────────────────────
@@ -2712,7 +2738,9 @@ Rules: Only USER facts + Sparkie execution procedures. Only NEW, specific, worth
       if (m.category && m.content) {
         const existing = await query('SELECT id FROM user_memories WHERE user_id = $1 AND content ILIKE $2', [userId, `%${m.content.slice(0, 40)}%`])
         if (existing.rows.length === 0) {
-          await query('INSERT INTO user_memories (user_id, category, content) VALUES ($1, $2, $3)', [userId, m.category, m.content])
+          const aiHint = m.content
+          const originalQuote = conversation.slice(0, 300)
+          await query('INSERT INTO user_memories (user_id, category, hint, quote, content) VALUES ($1, $2, $3, $4, $5)', [userId, m.category, aiHint, originalQuote, m.content])
           writeWorklog(userId, 'memory_learned', m.content, { category: m.category, conclusion: `New memory saved in category "${m.category}": "${m.content.slice(0, 80)}"` }).catch(() => {})
         }
       }
@@ -3306,7 +3334,7 @@ async function executeTool(
         const cronExpression = args.cron_expression as string | undefined
         if (!label || !action || !triggerType) return 'label, action, and trigger_type are required'
 
-        // Calculate scheduled_at for delay tasks
+        // Calculate scheduled_at for delay tasks and immediate tasks
         const whenIso = args.when_iso as string | undefined
         let scheduledAt: Date | null = null
         if (triggerType === 'delay') {
@@ -3317,6 +3345,9 @@ async function executeTool(
           } else if (delayHours) {
             scheduledAt = new Date(Date.now() + delayHours * 3600 * 1000)
           }
+        } else if (triggerType === 'immediate') {
+          // Immediate tasks fire as soon as the scheduler picks them up
+          scheduledAt = new Date()
         }
 
         const taskId = `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
@@ -3327,7 +3358,7 @@ async function executeTool(
               payload JSONB NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'pending',
               executor TEXT NOT NULL DEFAULT 'human', trigger_type TEXT DEFAULT 'manual',
               trigger_config JSONB DEFAULT '{}', scheduled_at TIMESTAMPTZ, why_human TEXT,
-              created_at TIMESTAMPTZ DEFAULT NOW(), resolved_at TIMESTAMPTZ, depends_on TEXT
+              created_at TIMESTAMPTZ DEFAULT NOW(), resolved_at TIMESTAMPTZ, depends_on TEXT, draft_id TEXT
             )`
           )
           // Alter existing table to add new columns if they don't exist
@@ -3337,6 +3368,7 @@ async function executeTool(
           await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMPTZ`).catch(() => {})
           await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS why_human TEXT`).catch(() => {})
           await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS depends_on TEXT`).catch(() => {})
+          await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS draft_id TEXT`).catch(() => {})
 
           const triggerConfig = triggerType === 'cron' ? { expression: cronExpression } : { delay_hours: delayHours }
           await query(
@@ -3362,7 +3394,7 @@ async function executeTool(
             : "user_id = $1 AND status = $2"
           const params = statusFilter === 'all' ? [userId] : [userId, statusFilter]
           const result = await query(
-            `SELECT id, label, action, status, executor, trigger_type, scheduled_at, created_at
+            `SELECT id, label, action, status, executor, trigger_type, scheduled_at, created_at, draft_id
              FROM sparkie_tasks WHERE ${whereClause} ORDER BY created_at DESC LIMIT 20`,
             params
           )
@@ -4515,16 +4547,16 @@ def invoke_llm(query, model='MiniMax-M2.7'):
           let userMemSql: string
           let userParams: unknown[]
           if (memQuery && memCategory) {
-            userMemSql = `SELECT 'user' AS source, category, content, created_at FROM user_memories WHERE user_id = $1 AND content ILIKE $2 AND category = $3 ORDER BY created_at DESC LIMIT $4`
+            userMemSql = `SELECT 'user' AS source, category, hint, quote, content, created_at FROM user_memories WHERE user_id = $1 AND content ILIKE $2 AND category = $3 ORDER BY created_at DESC LIMIT $4`
             userParams = [userId, `%${memQuery}%`, memCategory, memLimit]
           } else if (memQuery) {
-            userMemSql = `SELECT 'user' AS source, category, content, created_at FROM user_memories WHERE user_id = $1 AND content ILIKE $2 ORDER BY created_at DESC LIMIT $3`
+            userMemSql = `SELECT 'user' AS source, category, hint, quote, content, created_at FROM user_memories WHERE user_id = $1 AND content ILIKE $2 ORDER BY created_at DESC LIMIT $3`
             userParams = [userId, `%${memQuery}%`, memLimit]
           } else if (memCategory) {
-            userMemSql = `SELECT 'user' AS source, category, content, created_at FROM user_memories WHERE user_id = $1 AND category = $2 ORDER BY created_at DESC LIMIT $3`
+            userMemSql = `SELECT 'user' AS source, category, hint, quote, content, created_at FROM user_memories WHERE user_id = $1 AND category = $2 ORDER BY created_at DESC LIMIT $3`
             userParams = [userId, memCategory, memLimit]
           } else {
-            userMemSql = `SELECT 'user' AS source, category, content, created_at FROM user_memories WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2`
+            userMemSql = `SELECT 'user' AS source, category, hint, quote, content, created_at FROM user_memories WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2`
             userParams = [userId, memLimit]
           }
           const userMems = await query(userMemSql, userParams)
@@ -4539,9 +4571,13 @@ def invoke_llm(query, model='MiniMax-M2.7'):
             selfParams = [memLimit]
           }
           const selfMems = await query(selfMemSql, selfParams)
-          const allRows = [...userMems.rows, ...selfMems.rows] as Array<{ source: string; category: string; content: string }>
+          const allRows = [...userMems.rows, ...selfMems.rows] as Array<{ source: string; category: string; content: string; hint?: string | null; quote?: string | null }>
           if (allRows.length === 0) return `read_memory: no memories found${memQuery ? ' matching "' + memQuery + '"' : ''}`
-          return allRows.map(r => `[${r.source}:${r.category}] ${r.content}`).join('\n')
+          return allRows.map(r => {
+            const text = r.hint ?? r.content
+            const src = r.quote ? ` (original: "${String(r.quote).slice(0, 60)}")` : ''
+            return `[${r.source}:${r.category}] ${text}${src}`
+          }).join('\n')
         } catch (e) {
           return `read_memory error: ${String(e)}`
         }
@@ -4600,6 +4636,88 @@ def invoke_llm(query, model='MiniMax-M2.7'):
         } catch (e) { return `delete_memory error: ${String(e)}` }
       }
 
+      case 'memory_manage': {
+        if (!userId) return 'Not authenticated'
+        const { action, category, hint, quote, content, query: memQuery, memory_id, limit: memLim = 20 } = args as {
+          action: string; category?: string; hint?: string; quote?: string; content?: string
+          query?: string; memory_id?: number; limit?: number
+        }
+        try {
+          if (action === 'save') {
+            if (!content) return 'memory_manage: content is required for save'
+            const cat = category ?? 'general'
+            // Deduplicate — skip if similar content exists in same category
+            const existing = await query<{ id: number; content: string }>(
+              'SELECT id, content FROM user_memories WHERE user_id = $1 AND category = $2 ORDER BY created_at DESC LIMIT 10',
+              [userId, cat]
+            )
+            const newWords = new Set((content).toLowerCase().split(/\s+/).filter(w => w.length > 3))
+            const isCorrectionIntent = /\b(actually|correction|update|changed|revised|no longer)\b/i.test(content)
+            for (const row of existing.rows) {
+              const existWords = new Set(row.content.toLowerCase().split(/\s+/).filter(w => w.length > 3))
+              const overlap = newWords.size > 0 && existWords.size > 0
+                ? [...newWords].filter(w => existWords.has(w)).length / Math.max(newWords.size, existWords.size)
+                : 0
+              if (overlap > 0.6) {
+                if (isCorrectionIntent) {
+                  await query('UPDATE user_memories SET content = $1, hint = $2, quote = $3, updated_at = NOW() WHERE id = $4',
+                    [content, hint ?? content, quote ?? null, row.id])
+                  return `✅ Memory updated: [${cat}] ${hint ?? content}`
+                }
+                return `Already remembered: "${row.content.slice(0, 60)}"`
+              }
+            }
+            const aiHint = hint ?? content
+            const originalQuote = quote ?? null
+            await query(
+              'INSERT INTO user_memories (user_id, category, hint, quote, content) VALUES ($1, $2, $3, $4, $5)',
+              [userId, cat, aiHint, originalQuote, content]
+            )
+            pushToSupermemory(userId, `[${cat}] ${aiHint}`)
+            return `✅ Saved memory: [${cat}] ${aiHint}${originalQuote ? ` (from: "${String(originalQuote).slice(0, 50)}")` : ''}`
+          }
+
+          if (action === 'search') {
+            if (!memQuery) return 'memory_manage: query is required for search'
+            const cap = Math.min(Number(memLim), 50)
+            const catFilter = category ? 'AND category = $3' : ''
+            const params = category ? [userId, `%${memQuery}%`, category, cap] : [userId, `%${memQuery}%`, cap]
+            const res = await query(
+              `SELECT id, category, hint, quote, content, created_at FROM user_memories WHERE user_id = $1 AND content ILIKE $2 ${catFilter} ORDER BY created_at DESC LIMIT $${params.length}`,
+              params
+            )
+            const rows = res.rows as Array<{ id: number; category: string; hint: string | null; quote: string | null; content: string; created_at: string }>
+            if (!rows.length) return `No memories found for "${memQuery}"`
+            return rows.map(r =>
+              `[${r.id}:${r.category}] ${r.hint ?? r.content}${r.quote ? `\n  original: "${r.quote.slice(0, 80)}"` : ''}`
+            ).join('\n')
+          }
+
+          if (action === 'delete') {
+            if (!memory_id) return 'memory_manage: memory_id is required for delete'
+            await query('DELETE FROM user_memories WHERE id = $1 AND user_id = $2', [memory_id, userId])
+            return `✅ Memory ${memory_id} deleted`
+          }
+
+          if (action === 'list') {
+            const cap = Math.min(Number(memLim), 100)
+            const catFilter = category ? 'AND category = $2' : ''
+            const params = category ? [userId, category, cap] : [userId, cap]
+            const res = await query(
+              `SELECT id, category, hint, quote, content, created_at FROM user_memories WHERE user_id = $1 ${catFilter} ORDER BY created_at DESC LIMIT $${params.length}`,
+              params
+            )
+            const rows = res.rows as Array<{ id: number; category: string; hint: string | null; quote: string | null; content: string; created_at: string }>
+            if (!rows.length) return `No${category ? ` ${category}` : ''} memories found`
+            return rows.map(r =>
+              `[${r.id}:${r.category}] ${r.hint ?? r.content}${r.quote ? `\n  original: "${r.quote.slice(0, 80)}"` : ''}`
+            ).join('\n')
+          }
+
+          return `memory_manage: unknown action "${action}" — use save, search, delete, or list`
+        } catch (e) { return `memory_manage error: ${String(e)}` }
+      }
+
       case 'list_memories': {
         if (!userId) return 'Not authenticated'
         const { category: listCat, source: listSource = 'user', limit: listLim = 50 } = args as { category?: string; source?: string; limit?: number }
@@ -4616,8 +4734,8 @@ def invoke_llm(query, model='MiniMax-M2.7'):
           // 'user' or 'all' — query user_memories
           const catFilter = listCat ? 'AND category = $2' : ''
           const params = listCat ? [userId, listCat, cap] : [userId, cap]
-          const userRes = await query(`SELECT id, category, content, created_at FROM user_memories WHERE user_id = $1 ${catFilter} ORDER BY created_at DESC LIMIT $${params.length}`, params)
-          const userRows = userRes.rows as Array<{ id: number; category: string; content: string }>
+          const userRes = await query(`SELECT id, category, hint, quote, content, created_at FROM user_memories WHERE user_id = $1 ${catFilter} ORDER BY created_at DESC LIMIT $${params.length}`, params)
+          const userRows = userRes.rows as Array<{ id: number; category: string; hint: string | null; quote: string | null; content: string }>
           if (listSource === 'all') {
             // Also include sparkie self-memories
             const selfCatFilter = listCat ? 'WHERE category = $1' : ''
@@ -4625,12 +4743,12 @@ def invoke_llm(query, model='MiniMax-M2.7'):
             const selfRes = await query(`SELECT id, category, content, created_at FROM sparkie_self_memory ${selfCatFilter} ORDER BY created_at DESC LIMIT $${selfParams.length}`, selfParams).catch(() => ({ rows: [] }))
             const selfRows = selfRes.rows as Array<{ id: number; category: string; content: string }>
             const combined = [
-              ...userRows.map(r => `[user:${r.id}:${r.category}] ${r.content.slice(0, 120)}`),
+              ...userRows.map(r => `[user:${r.id}:${r.category}] ${r.hint ?? r.content}${r.quote ? ` (original: "${String(r.quote).slice(0, 60)}")` : ''}`),
               ...selfRows.map(r => `[self:${r.id}:${r.category}] ${r.content.slice(0, 120)}`),
             ]
             return combined.length ? combined.join('\n') : 'No memories found'
           }
-          return userRows.length ? userRows.map(r => `[${r.id}:${r.category}] ${r.content.slice(0, 120)}`).join('\n') : 'No user memories found'
+          return userRows.length ? userRows.map(r => `[${r.id}:${r.category}] ${r.hint ?? r.content}${r.quote ? ` (original: "${String(r.quote).slice(0, 60)}")` : ''}`).join('\n') : 'No user memories found'
         } catch (e) { return `list_memories error: ${String(e)}` }
       }
 
@@ -4789,6 +4907,50 @@ def invoke_llm(query, model='MiniMax-M2.7'):
           metadata: cardMeta,
         }
         return `SPARKIE_CARD:${JSON.stringify({ card: cardData, text: cardText ?? '' })}`
+      }
+
+      // ── user_operation_signal: HITL resume after user acts on a card ─────────
+      case 'user_operation_signal': {
+        if (!userId) return 'Not authenticated'
+        const { task_id: opTaskId, action: opAction, feedback: opFeedback } = args as {
+          task_id: string; action: string; feedback?: string
+        }
+        if (!opTaskId || !opAction) return 'user_operation_signal: task_id and action are required'
+
+        // Fetch the task to get action + draft_id + payload
+        const taskRes = await query<{
+          id: string; action: string; label: string; status: string; payload: unknown; draft_id: string | null
+        }>(`SELECT id, action, label, status, payload, draft_id FROM sparkie_tasks WHERE id = $1 AND user_id = $2`, [opTaskId, userId])
+        const task = taskRes.rows[0]
+        if (!task) return `user_operation_signal: task ${opTaskId} not found`
+
+        const payload = typeof task.payload === 'string' ? JSON.parse(task.payload) : task.payload
+
+        if (opAction === 'approved' || opAction === 'rejected') {
+          // Mark the task as completed/skipped and return the result to the AI
+          const resolved = opAction === 'approved' ? 'completed' : 'skipped'
+          await query(`UPDATE sparkie_tasks SET status = $1, resolved_at = NOW() WHERE id = $2`, [resolved, opTaskId])
+          return `[user_operation: ${opAction}] Task "${task.label}" has been ${resolved} by the user.` +
+            (opFeedback ? ` Feedback: ${opFeedback}` : '') +
+            ` The task is now marked as ${resolved}. You may continue autonomously.`
+        }
+
+        if (opAction === 'changes_requested') {
+          // Mark current task as skipped, return feedback so AI can create new draft
+          await query(`UPDATE sparkie_tasks SET status = 'skipped', resolved_at = NOW() WHERE id = $1`, [opTaskId])
+          return `[user_operation: changes_requested] User requested changes for task "${task.label}".` +
+            (opFeedback ? ` Feedback: ${opFeedback}` : ' No specific feedback provided.') +
+            ` The previous task is skipped. Please create a revised draft based on the feedback and send a new card.`
+        }
+
+        if (opAction === 'discarded') {
+          // Mark as cancelled
+          await query(`UPDATE sparkie_tasks SET status = 'cancelled', resolved_at = NOW() WHERE id = $1`, [opTaskId])
+          return `[user_operation: discarded] Task "${task.label}" has been discarded by the user.` +
+            ` The task is cancelled. Stop unless you have urgent follow-up work.`
+        }
+
+        return `user_operation_signal: unknown action "${opAction}"`
       }
 
       // ── Block 7: File upload access ──────────────────────────────────────────
@@ -7048,8 +7210,8 @@ Keep each header + thought on its own line. Use multiple short bold-header block
             query<{ category: string; content: string }>(
               `SELECT category, content FROM sparkie_self_memory ORDER BY created_at DESC LIMIT 10`
             ),
-            query<{ category: string; content: string }>(
-              `SELECT category, content FROM user_memories WHERE user_id = $1 ORDER BY created_at DESC LIMIT 8`,
+            query<{ category: string; content: string; hint: string | null; quote: string | null }>(
+              `SELECT category, hint, quote, content FROM user_memories WHERE user_id = $1 ORDER BY created_at DESC LIMIT 8`,
               [userId]
             ),
           ])
@@ -7066,7 +7228,9 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           if (userMemRows.rows.length > 0) {
             userLines.push(`\n## ABOUT MICHAEL (from memory)`)
             for (const m of userMemRows.rows) {
-              userLines.push(`- [${m.category}] ${m.content}`)
+              const text = m.hint ?? m.content
+              const src = m.quote ? ` (original: "${String(m.quote).slice(0, 60)}")` : ''
+              userLines.push(`- [${m.category}] ${text}${src}`)
             }
           }
 

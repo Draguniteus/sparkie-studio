@@ -142,6 +142,86 @@ export const SPARKIE_TOOLS_S5 = [
       },
     },
   },
+  // ── Composio Search (Structured Discovery) ─────────────────────────────────
+  {
+    type: 'function',
+    function: {
+      name: 'COMPOSIO_SEARCH_TOOLS',
+      description: 'Structured Composio tool discovery — returns tool slugs, schemas, connection state, execution plan, and pitfalls. Unlike composio_discover (natural language search), this returns structured results with connection status and recommended execution path. Use when you need a complete picture of how to execute an external app action including whether it is connected.',
+      parameters: {
+        type: 'object',
+        properties: {
+          queries: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                use_case: { type: 'string', description: 'Natural language description of the action needed, e.g. "send a tweet", "create a GitHub issue", "send a Slack message"' },
+                known_fields: { type: 'string', description: 'Fields you already know, e.g. "channel_id, text" — Composio will fill in the rest' },
+              },
+              required: ['use_case'],
+            },
+            description: 'Array of discovery queries. Each returns a structured result with tools, connection state, execution plan, and pitfalls.',
+          },
+        },
+        required: ['queries'],
+      },
+    },
+  },
+  // ── Composio Connection Management ─────────────────────────────────────────
+  {
+    type: 'function',
+    function: {
+      name: 'COMPOSIO_MANAGE_CONNECTIONS',
+      description: 'Manage OAuth/API key connections for external apps via Composio. Use to check connection status, initiate OAuth flows, or disconnect an app. After calling connect, present the returned auth URL to the user for approval.',
+      parameters: {
+        type: 'object',
+        properties: {
+          toolkit: { type: 'string', description: 'The Composio toolkit name, e.g. "gmail", "github", "twitter", "discord", "slack", "googlecalendar", "linkedin", "instagram", "reddit"' },
+          action: { type: 'string', enum: ['connect', 'disconnect', 'status'], description: '"connect" — initiate OAuth or API key flow (returns auth URL); "disconnect" — remove connection; "status" — check if connected' },
+        },
+        required: ['toolkit', 'action'],
+      },
+    },
+  },
+  // ── Topic Search ───────────────────────────────────────────────────────────
+  {
+    type: 'function',
+    function: {
+      name: 'topic_search',
+      description: 'Search and filter Sparkie topics (context clusters) by name, status, category, or keyword. Topics organize related emails, tasks, and conversations under named contexts. Use this to find or resume work on a specific project/topic, or to look up a topic\'s notification policy and current state.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Search query — matches against topic name, fingerprint, aliases, and summary' },
+          status: { type: 'string', description: 'Filter by status: "active" | "archived" | "all" (default: active)' },
+          notification_policy: { type: 'string', description: 'Filter by notification policy: "immediate" | "defer" | "auto"' },
+          topic_type: { type: 'string', description: 'Filter by topic type, e.g. "project", "area", "person"' },
+          limit: { type: 'number', description: 'Max results to return (default 20, max 50)' },
+        },
+        required: [],
+      },
+    },
+  },
+  // ── Chat History Search ────────────────────────────────────────────────────
+  {
+    type: 'function',
+    function: {
+      name: 'chat_history_search',
+      description: 'Search past conversation messages in Sparkie\'s thread store. Use to find earlier context, decisions, or information without re-executing tools. Searches message content with optional filters for role (user/assistant), date range, or tool call ID.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Search query — matches against message content' },
+          role: { type: 'string', description: 'Filter by message role: "user" | "assistant" (default: both)' },
+          tool_call_id: { type: 'string', description: 'Filter to messages from a specific tool call session' },
+          since_hours: { type: 'number', description: 'Limit to messages within the last N hours (default: all time)' },
+          limit: { type: 'number', description: 'Max messages to return (default 20, max 100)' },
+        },
+        required: ['query'],
+      },
+    },
+  },
   // ── GitHub Actions ────────────────────────────────────────────────────────
   {
     type: 'function',

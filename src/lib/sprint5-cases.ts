@@ -431,6 +431,86 @@ export async function executeSprint5Tool(
       }
     }
 
+    // ── composio_get_tool_schemas ─────────────────────────────────────────────
+    case 'composio_get_tool_schemas': {
+      if (!userId) return 'Not authenticated'
+      const { tool_slugs } = args as { tool_slugs: string[] }
+      if (!tool_slugs || !Array.isArray(tool_slugs)) return 'composio_get_tool_schemas: tool_slugs array is required'
+      if (tool_slugs.length > 20) return 'composio_get_tool_schemas: max 20 slugs per call'
+      try {
+        const results: Array<{ slug: string; schema?: Record<string, unknown>; error?: string }> = []
+        for (const slug of tool_slugs) {
+          const res = await fetch(`${COMPOSIO_BASE}/tools/info?tool_slug=${encodeURIComponent(slug)}`, {
+            headers: { 'x-api-key': composioApiKey, 'Content-Type': 'application/json' },
+          })
+          if (!res.ok) {
+            results.push({ slug, error: `HTTP ${res.status}` })
+            continue
+          }
+          const data = await res.json() as Record<string, unknown>
+          results.push({ slug, schema: data })
+        }
+        const lines = results.map(r => {
+          if (r.error) return `${r.slug}: ERROR — ${r.error}`
+          const s = r.schema as Record<string, unknown>
+          const inputSchema = s.input_schema as Record<string, unknown> | undefined
+          const name = String(s.name ?? r.slug)
+          const desc = String(s.description ?? '')
+          const params = inputSchema ? JSON.stringify(inputSchema, null, 2) : 'no schema found'
+          return `${name}: ${desc}\nInput schema:\n${params}`
+        })
+        return `Tool schemas (${results.length}):\n\n${lines.join('\n\n')}`
+      } catch (e) {
+        return `composio_get_tool_schemas error: ${(e as Error).message}`
+      }
+    }
+
+    // ── composio_multi_execute_tool ──────────────────────────────────────────
+    case 'composio_multi_execute_tool': {
+      if (!userId) return 'Not authenticated'
+      const { tools } = args as {
+        tools: Array<{ tool_slug: string; arguments: Record<string, unknown> }>
+      }
+      if (!tools || !Array.isArray(tools)) return 'composio_multi_execute_tool: tools array is required'
+      if (tools.length > 50) return 'composio_multi_execute_tool: max 50 tools per call'
+      const entity_id = `sparkie_user_${userId}`
+      const results: Array<{ slug: string; success: boolean; result?: string; error?: string }> = []
+      // Execute up to 10 in parallel (Composio rate limit)
+      const batchSize = 10
+      for (let i = 0; i < tools.length; i += batchSize) {
+        const batch = tools.slice(i, i + batchSize)
+        const batchResults = await Promise.all(
+          batch.map(async (t) => {
+            try {
+              const res = await fetch(`${COMPOSIO_BASE}/tools/execute/${t.tool_slug}`, {
+                method: 'POST',
+                headers: { 'x-api-key': composioApiKey, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ entity_id, arguments: t.arguments }),
+                signal: AbortSignal.timeout(30000),
+              })
+              if (!res.ok) {
+                const errText = await res.text()
+                return { slug: t.tool_slug, success: false, error: `HTTP ${res.status}: ${errText.slice(0, 100)}` }
+              }
+              const data = await res.json() as Record<string, unknown>
+              return { slug: t.tool_slug, success: true, result: JSON.stringify(data).slice(0, 500) }
+            } catch (e) {
+              return { slug: t.tool_slug, success: false, error: String(e) }
+            }
+          })
+        )
+        results.push(...batchResults)
+      }
+      const succeeded = results.filter(r => r.success).length
+      const failed = results.filter(r => !r.success).length
+      const lines = results.map(r =>
+        r.success
+          ? `✅ ${r.slug}: ${r.result}`
+          : `❌ ${r.slug}: ${r.error}`
+      )
+      return `Multi-execute complete: ${succeeded}/${tools.length} succeeded\n${lines.join('\n')}`
+    }
+
     // ── github_open_pr ───────────────────────────────────────────────────────
     case 'github_open_pr': {
       const { head, base = 'master', title, body = '', draft = true } = args as {
@@ -468,6 +548,215 @@ export async function executeSprint5Tool(
         return `✅ PR #${pr.number} opened${draft ? ' (draft)' : ''}: ${pr.html_url}\n"${title}" — ${head} → ${base}`
       } catch (e) {
         return `github_open_pr error: ${(e as Error).message}`
+      }
+    }
+
+    // ── COMPOSIO_SEARCH_TOOLS ─────────────────────────────────────────────────
+    case 'COMPOSIO_SEARCH_TOOLS': {
+      const { queries } = args as {
+        queries: Array<{ use_case: string; known_fields?: string }>
+      }
+      if (!queries || !Array.isArray(queries)) return 'COMPOSIO_SEARCH_TOOLS: queries array is required'
+      if (queries.length > 10) return 'COMPOSIO_SEARCH_TOOLS: max 10 queries per call'
+      try {
+        const results: Array<{
+          query: string; tools: Array<{ slug: string; description: string; app: string; input_schema?: Record<string, unknown> }>
+          connection_state: string; execution_plan: string; pitfalls: string[]
+        }> = []
+        for (const q of queries) {
+          const params = new URLSearchParams({ q: q.use_case, limit: '8' })
+          if (q.known_fields) params.set('fields', q.known_fields)
+          const res = await fetch(`${COMPOSIO_BASE}/tools/search?${params}`, {
+            headers: { 'x-api-key': composioApiKey, 'Content-Type': 'application/json' },
+          })
+          if (!res.ok) {
+            results.push({ query: q.use_case, tools: [], connection_state: 'error', execution_plan: '', pitfalls: [`HTTP ${res.status}`] })
+            continue
+          }
+          const data = await res.json() as { items?: Array<{ slug: string; description: string; app: string }> }
+          const items = data.items ?? []
+          // Check connection state for each app
+          const apps = [...new Set(items.map(t => t.app.toLowerCase()))]
+          const connectedApps = new Set<string>()
+          for (const app of apps.slice(0, 5)) {
+            const connRes = await fetch(`${COMPOSIO_BASE}/connected_accounts?user_id=${encodeURIComponent(`sparkie_user_${userId}`)}&status=ACTIVE&limit=50`, {
+              headers: { 'x-api-key': composioApiKey },
+            })
+            if (connRes.ok) {
+              const connData = await connRes.json() as { items?: Array<{ toolkit?: { slug?: string } }> }
+              connData.items?.forEach(c => { if (c.toolkit?.slug) connectedApps.add(c.toolkit.slug.toLowerCase()) })
+            }
+          }
+          const isConnected = (app: string) => connectedApps.has(app.toLowerCase())
+          const connection_state = items.length > 0 ? (isConnected(items[0].app) ? 'CONNECTED' : 'NOT_CONNECTED') : 'NO_TOOLS_FOUND'
+          const pitfalls = items.length === 0
+            ? ['No tools found for this use case — try different search terms']
+            : !isConnected(items[0].app)
+              ? [`App "${items[0].app}" is not connected. Use COMPOSIO_MANAGE_CONNECTIONS to connect first.`]
+              : []
+          const execution_plan = items.length > 0
+            ? `1. COMPOSIO_SEARCH_TOOLS confirmed "${items[0].app}" is ${isConnected(items[0].app) ? 'connected' : 'not connected'}. ` +
+              (isConnected(items[0].app)
+                ? `2. Use ${items[0].slug} with schema-compliant arguments.`
+                : `2. Connect via COMPOSIO_MANAGE_CONNECTIONS first.`)
+            : 'No execution plan — no tools found.'
+          results.push({
+            query: q.use_case,
+            tools: items.map(t => ({ slug: t.slug, description: t.description, app: t.app })),
+            connection_state,
+            execution_plan,
+            pitfalls,
+          })
+        }
+        const lines = results.map(r =>
+          `Query: "${r.query}"\n` +
+          `Connection: ${r.connection_state}\n` +
+          `Tools (${r.tools.length}): ${r.tools.map(t => `${t.slug} (${t.app})`).join(', ')}\n` +
+          (r.pitfalls.length > 0 ? `Pitfalls: ${r.pitfalls.join('; ')}\n` : '') +
+          `Plan: ${r.execution_plan}`
+        )
+        return `COMPOSIO_SEARCH_TOOLS results:\n\n${lines.join('\n\n')}`
+      } catch (e) {
+        return `COMPOSIO_SEARCH_TOOLS error: ${(e as Error).message}`
+      }
+    }
+
+    // ── COMPOSIO_MANAGE_CONNECTIONS ──────────────────────────────────────────
+    case 'COMPOSIO_MANAGE_CONNECTIONS': {
+      if (!userId) return 'Not authenticated'
+      const { toolkit, action } = args as { toolkit: string; action: string }
+      if (!toolkit || !action) return 'COMPOSIO_MANAGE_CONNECTIONS: toolkit and action are required'
+      try {
+        if (action === 'status') {
+          // Check all connections for this entity
+          const connRes = await fetch(`${COMPOSIO_BASE}/connected_accounts?user_id=${encodeURIComponent(`sparkie_user_${userId}`)}&status=ACTIVE&limit=50`, {
+            headers: { 'x-api-key': composioApiKey },
+          })
+          if (!connRes.ok) return `COMPOSIO_MANAGE_CONNECTIONS status: API error ${connRes.status}`
+          const connData = await connRes.json() as { items?: Array<{ id: string; toolkit?: { slug: string; name: string } }> }
+          const all = connData.items ?? []
+          const connected = all.filter(c => toolkit.toLowerCase() === 'all' || c.toolkit?.slug?.toLowerCase().includes(toolkit.toLowerCase()))
+          if (toolkit.toLowerCase() !== 'all') {
+            const isConnected = all.some(c => c.toolkit?.slug?.toLowerCase().includes(toolkit.toLowerCase()))
+            if (!isConnected) return `COMPOSIO_MANAGE_CONNECTIONS: "${toolkit}" is NOT connected. Use action "connect" to initiate OAuth.`
+            const entry = all.find(c => c.toolkit?.slug?.toLowerCase().includes(toolkit.toLowerCase()))
+            return `COMPOSIO_MANAGE_CONNECTIONS: "${toolkit}" is CONNECTED (ID: ${entry?.id}). Use action "disconnect" to remove.`
+          }
+          const lines = all.map(c => `• ${c.toolkit?.name ?? c.toolkit?.slug} [${c.toolkit?.slug}] — ${c.id}`)
+          return `Connected apps (${all.length}):\n${lines.join('\n') || 'None'}`
+        }
+        if (action === 'disconnect') {
+          // Find connection ID for toolkit
+          const connRes = await fetch(`${COMPOSIO_BASE}/connected_accounts?user_id=${encodeURIComponent(`sparkie_user_${userId}`)}&status=ACTIVE&limit=50`, {
+            headers: { 'x-api-key': composioApiKey },
+          })
+          if (!connRes.ok) return `COMPOSIO_MANAGE_CONNECTIONS disconnect: API error ${connRes.status}`
+          const connData = await connRes.json() as { items?: Array<{ id: string; toolkit?: { slug: string } }> }
+          const entry = (connData.items ?? []).find(c => c.toolkit?.slug?.toLowerCase().includes(toolkit.toLowerCase()))
+          if (!entry) return `COMPOSIO_MANAGE_CONNECTIONS: "${toolkit}" is not currently connected.`
+          const delRes = await fetch(`${COMPOSIO_BASE}/connected_accounts/${entry.id}`, {
+            method: 'DELETE',
+            headers: { 'x-api-key': composioApiKey },
+          })
+          if (!delRes.ok) return `COMPOSIO_MANAGE_CONNECTIONS disconnect failed (${delRes.status})`
+          return `✅ Disconnected "${toolkit}" (${entry.id}). To reconnect, use action "connect".`
+        }
+        if (action === 'connect') {
+          // Initiate OAuth — Composio returns an auth URL to redirect the user
+          const connRes = await fetch(`${COMPOSIO_BASE}/connected_accounts`, {
+            method: 'POST',
+            headers: { 'x-api-key': composioApiKey, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ entity_id: `sparkie_user_${userId}`, toolkit: toolkit.toUpperCase() }),
+          })
+          if (!connRes.ok) {
+            const errText = await connRes.text()
+            return `COMPOSIO_MANAGE_CONNECTIONS connect failed (${connRes.status}): ${errText.slice(0, 200)}`
+          }
+          const connData = await connRes.json() as { data?: { auth_url?: string; id?: string; status?: string } }
+          // If auth_url is returned, present it to the user for OAuth approval
+          if (connData.data?.auth_url) {
+            return `OAuth flow required for "${toolkit}":\n\n${connData.data.auth_url}\n\nOpen this URL to authorize, then use COMPOSIO_MANAGE_CONNECTIONS with action "status" to verify connection.`
+          }
+          if (connData.data?.status) {
+            return `Connection initiated for "${toolkit}". Status: ${connData.data.status}. Use action "status" to check when active.`
+          }
+          return `Connection request sent for "${toolkit}". Use action "status" to verify connection.`
+        }
+        return `COMPOSIO_MANAGE_CONNECTIONS: unknown action "${action}" — use connect, disconnect, or status`
+      } catch (e) {
+        return `COMPOSIO_MANAGE_CONNECTIONS error: ${(e as Error).message}`
+      }
+    }
+
+    // ── topic_search ─────────────────────────────────────────────────────────
+    case 'topic_search': {
+      if (!userId) return 'Not authenticated'
+      const { query: topicQ, status: topicStatus = 'active', notification_policy: notifPol, topic_type: topicTp, limit: topicLim = 20 } = args as {
+        query?: string; status?: string; notification_policy?: string; topic_type?: string; limit?: number
+      }
+      try {
+        const cap = Math.min(Number(topicLim), 50)
+        let sql = `SELECT id, name, fingerprint, aliases, summary, notification_policy, topic_type, cognition_state, updated_at FROM sparkie_topics WHERE user_id = $1`
+        const params: unknown[] = [userId]
+        let n = 2
+        if (topicStatus !== 'all') { sql += ` AND status = $${n++}`; params.push(topicStatus === 'archived' ? 'archived' : 'active') }
+        if (topicQ) { sql += ` AND (name ILIKE $${n} OR fingerprint ILIKE $${n} OR summary ILIKE $${n})`; params.push(`%${topicQ}%`); n++ }
+        if (notifPol) { sql += ` AND notification_policy = $${n++}`; params.push(notifPol) }
+        if (topicTp) { sql += ` AND topic_type = $${n++}`; params.push(topicTp) }
+        sql += ` ORDER BY updated_at DESC LIMIT $${n}`
+        params.push(cap)
+        const res = await query(sql, params)
+        if (!res.rows.length) return `topic_search: no topics found${topicQ ? ` matching "${topicQ}"` : ''}`
+        const rows = res.rows as Array<{
+          id: string; name: string; fingerprint: string | null; aliases: unknown; summary: string; notification_policy: string; topic_type: string | null; cognition_state: unknown; updated_at: string
+        }>
+        const lines = rows.map(r => {
+          const aliases = (r.aliases as string[] | null) ?? []
+          const cog = r.cognition_state as Record<string, unknown> | null
+          const cogSummary = cog ? Object.keys(cog).join(', ') : 'no cognition'
+          return `[${r.id}] ${r.name}` +
+            (r.fingerprint ? ` (${r.fingerprint})` : '') +
+            (aliases.length > 0 ? ` aliases: ${aliases.join(', ')}` : '') +
+            `\n  summary: ${r.summary || '(none)'}` +
+            `\n  policy: ${r.notification_policy} | type: ${r.topic_type ?? 'unspecified'} | cognition: ${cogSummary}` +
+            ` | updated: ${new Date(r.updated_at).toLocaleDateString()}`
+        })
+        return `Topics (${rows.length}):\n${lines.join('\n\n')}`
+      } catch (e) {
+        return `topic_search error: ${(e as Error).message}`
+      }
+    }
+
+    // ── chat_history_search ──────────────────────────────────────────────────
+    case 'chat_history_search': {
+      if (!userId) return 'Not authenticated'
+      const { query: histQ, role: histRole, tool_call_id: histTcid, since_hours: histHours, limit: histLim = 20 } = args as {
+        query?: string; role?: string; tool_call_id?: string; since_hours?: number; limit?: number
+      }
+      if (!histQ && !histRole && !histTcid) return 'chat_history_search: query, role, or tool_call_id is required'
+      try {
+        const cap = Math.min(Number(histLim), 100)
+        let sql = `SELECT id, role, content, tool_call_id, is_tool_result, created_at FROM sparkie_threads WHERE user_id = $1`
+        const params: unknown[] = [userId]
+        let n = 2
+        if (histQ) { sql += ` AND content ILIKE $${n++}`; params.push(`%${histQ}%`) }
+        if (histRole) { sql += ` AND role = $${n++}`; params.push(histRole) }
+        if (histTcid) { sql += ` AND tool_call_id = $${n++}`; params.push(histTcid) }
+        if (histHours) { sql += ` AND created_at > NOW() - INTERVAL '${Number(histHours)} hours'`; n++ }
+        sql += ` ORDER BY created_at DESC LIMIT $${n}`
+        params.push(cap)
+        const res = await query(sql, params)
+        if (!res.rows.length) return `chat_history_search: no messages found${histQ ? ` matching "${histQ}"` : ''}`
+        const rows = res.rows as Array<{ id: number; role: string; content: string; tool_call_id: string | null; is_tool_result: boolean; created_at: string }>
+        const lines = rows.map(r => {
+          const prefix = r.is_tool_result ? `[TOOL:${r.tool_call_id ?? '?'}]` : `[${r.role.toUpperCase()}]`
+          const time = new Date(r.created_at).toLocaleString()
+          const content = (typeof r.content === 'string' ? r.content : JSON.stringify(r.content)).slice(0, 200)
+          return `${prefix} ${time}\n${content}${content.length >= 200 ? '...' : ''}`
+        })
+        return `Chat history (${rows.length} messages):\n${lines.join('\n\n')}`
+      } catch (e) {
+        return `chat_history_search error: ${(e as Error).message}`
       }
     }
 

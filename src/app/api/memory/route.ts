@@ -10,11 +10,15 @@ async function ensureTable() {
       id          SERIAL PRIMARY KEY,
       user_id     TEXT NOT NULL,
       category    TEXT NOT NULL DEFAULT 'general',
+      hint        TEXT,
+      quote       TEXT,
       content     TEXT NOT NULL,
       created_at  TIMESTAMPTZ DEFAULT NOW(),
       updated_at  TIMESTAMPTZ DEFAULT NOW()
     )
   `)
+  await query(`ALTER TABLE user_memories ADD COLUMN IF NOT EXISTS hint TEXT`).catch(() => {})
+  await query(`ALTER TABLE user_memories ADD COLUMN IF NOT EXISTS quote TEXT`).catch(() => {})
   await query(`
     CREATE INDEX IF NOT EXISTS idx_user_memories_user_id ON user_memories(user_id)
   `)
@@ -42,7 +46,7 @@ export async function GET() {
   try {
     await ensureTable()
     const result = await query(
-      'SELECT id, category, content, created_at FROM user_memories WHERE user_id = $1 ORDER BY created_at ASC',
+      'SELECT id, category, hint, quote, content, created_at FROM user_memories WHERE user_id = $1 ORDER BY created_at ASC',
       [userId]
     )
     return NextResponse.json({ memories: result.rows })
@@ -60,14 +64,14 @@ export async function POST(req: NextRequest) {
   const userId = (session.user as { id?: string }).id
   if (!userId) return NextResponse.json({ error: 'No user id' }, { status: 401 })
 
-  const { category = 'general', content } = await req.json()
+  const { category = 'general', hint, quote, content } = await req.json()
   if (!content) return NextResponse.json({ error: 'content required' }, { status: 400 })
 
   try {
     await ensureTable()
     await query(
-      'INSERT INTO user_memories (user_id, category, content) VALUES ($1, $2, $3)',
-      [userId, category, content]
+      'INSERT INTO user_memories (user_id, category, hint, quote, content) VALUES ($1, $2, $3, $4, $5)',
+      [userId, category, hint ?? null, quote ?? null, content]
     )
     return NextResponse.json({ ok: true })
   } catch (e) {

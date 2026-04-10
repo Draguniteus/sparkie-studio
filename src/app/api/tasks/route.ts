@@ -20,6 +20,7 @@ async function ensureTable() {
     trigger_config JSONB DEFAULT '{}',
     scheduled_at TIMESTAMPTZ,
     why_human TEXT,
+    draft_id TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     resolved_at TIMESTAMPTZ
   )`)
@@ -27,6 +28,7 @@ async function ensureTable() {
   await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS executor TEXT NOT NULL DEFAULT 'human'`).catch(() => {})
   await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS trigger_type TEXT DEFAULT 'manual'`).catch(() => {})
   await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMPTZ`).catch(() => {})
+  await query(`ALTER TABLE sparkie_tasks ADD COLUMN IF NOT EXISTS draft_id TEXT`).catch(() => {})
 }
 
 // POST /api/tasks — create a new pending task
@@ -98,8 +100,8 @@ export async function GET(req: NextRequest) {
     const limit = Math.min(parseInt(req.nextUrl.searchParams.get('limit') ?? '30'), 100)
 
     if (id) {
-      const res = await query<{ id: string; status: string; action: string; label: string; payload: unknown }>(
-        `SELECT id, status, action, label, payload FROM sparkie_tasks WHERE id = $1 AND user_id = $2`,
+      const res = await query<{ id: string; status: string; action: string; label: string; payload: unknown; draft_id: string | null }>(
+        `SELECT id, status, action, label, payload, draft_id FROM sparkie_tasks WHERE id = $1 AND user_id = $2`,
         [id, userId]
       )
       if (res.rows.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -117,7 +119,7 @@ export async function GET(req: NextRequest) {
     }
 
     const res = await query(
-      `SELECT id, label, action, status, executor, trigger_type, scheduled_at, created_at, resolved_at, payload, why_human
+      `SELECT id, label, action, status, executor, trigger_type, scheduled_at, created_at, resolved_at, payload, why_human, draft_id
        FROM sparkie_tasks WHERE ${whereClause}
        ORDER BY
          CASE status WHEN 'pending' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END,
@@ -230,7 +232,7 @@ export async function PATCH(req: NextRequest) {
     const { id, ids, status } = body
     if (!status) return NextResponse.json({ error: 'Missing status' }, { status: 400 })
 
-    const validStatuses = ['approved', 'rejected', 'completed', 'failed', 'skipped', 'pending', 'cancelled', 'paused']
+    const validStatuses = ['approved', 'rejected', 'completed', 'failed', 'skipped', 'pending', 'cancelled', 'paused', 'awaiting_user_action']
     if (!validStatuses.includes(status)) {
       return NextResponse.json({ error: 'Invalid status' }, { status: 400 })
     }
