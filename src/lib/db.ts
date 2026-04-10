@@ -6,12 +6,12 @@ import { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 const rawUrl = process.env.DATABASE_URL ?? ''
 const isPgBouncer = rawUrl.includes('pgbouncer=true')
 
-// Append sslmode=require to handle DO's self-signed cert chain via libpq-compatible mode.
-// sslmode=require tells pg to use TLS but skip chain verification — exactly what DO needs.
-// The pool's ssl: { rejectUnauthorized: false } reinforces this for pg v8+.
-const dbUrlWithSsl = rawUrl.includes('sslmode=')
+// pg-connection-string v2.11.0 aliases 'no-verify', 'require', 'verify-ca' all to 'verify-full'.
+// sslmode=no-verify + uselibpqcompat=true forces old libpq-compatible SSL behavior where
+// no-verify truly skips cert chain verification (needed for DO's self-signed cert chain).
+const dbUrlWithSsl = rawUrl.includes('uselibpqcompat=true')
   ? rawUrl
-  : `${rawUrl}${rawUrl.includes('?') ? '&' : '?'}sslmode=require`
+  : `${rawUrl}${rawUrl.includes('?') ? '&' : '?'}uselibpqcompat=true&sslmode=no-verify`
 
 const pool = new Pool({
   connectionString: dbUrlWithSsl,
