@@ -70,7 +70,10 @@
       "Bash(set NODE_OPTIONS=--max-old-space-size=896)",
       "Bash(set NEXT_TELEMETRY_DISABLED=1)",
       "Bash(bash -c \"NODE_OPTIONS='--max-old-space-size=896' NEXT_TELEMETRY_DISABLED=1 npx next build 2>&1; echo EXIT_CODE=$?\")",
-      "Bash(npm audit:*)"
+      "Bash(npm audit:*)",
+      "Bash(psql \"$DATABASE_URL\" -c \"SELECT action, label, status FROM sparkie_tasks WHERE action LIKE ''%GMAIL%'' ORDER BY created_at DESC LIMIT 10;\")",
+      "Bash(curl -s -X POST \"https://backend.composio.dev/api/v3/tools/search\" -H \"x-api-key: $COMPOSIO_API_KEY\" -H \"Content-Type: application/json\" -d '{\"\"\"\"queries\"\"\"\":[{\"\"\"\"use_case\"\"\"\":\"\"\"\"modify gmail message labels add labels remove labels\"\"\"\"}]}')",
+      "Bash(curl -s \"https://backend.composio.dev/api/v3/tools/search?use_case=modify+gmail+labels\" -H \"x-api-key: $COMPOSIO_API_KEY:-\")"
     ]
   }
 }

@@ -117,12 +117,15 @@ export async function writeWorklog(
   try {
     await ensureTable()
     const id = crypto.randomUUID()
-    const { status, decision_type, reasoning, estimated_duration_ms, actual_duration_ms, signal_priority, confidence, depends_on, side_effect_of, conclusion, icon, tag, ...restMeta } = metadata
+    // Extract top-level columns — store icon/tag/result_preview in metadata JSONB
+    // (the table only has base columns; icon/tag/result_preview are stored via metadata->>)
+    const { status, decision_type, reasoning, estimated_duration_ms, actual_duration_ms, signal_priority, confidence, depends_on, side_effect_of, conclusion, icon, tag, result_preview, ...restMeta } = metadata
     await query(
-      `INSERT INTO sparkie_worklog (id, user_id, type, content, metadata, status, decision_type, reasoning, estimated_duration_ms, actual_duration_ms, signal_priority, confidence, depends_on, side_effect_of, conclusion, icon, tag)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+      `INSERT INTO sparkie_worklog (id, user_id, type, content, metadata, status, decision_type, reasoning, estimated_duration_ms, actual_duration_ms, signal_priority, confidence, depends_on, side_effect_of, conclusion)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
       [
-        id, userId, type, content, JSON.stringify(restMeta),
+        id, userId, type, content,
+        JSON.stringify({ ...restMeta, ...(icon ? { icon } : {}), ...(tag ? { tag } : {}), ...(result_preview ? { result_preview } : {}) }),
         status ?? 'done',
         decision_type ?? null,
         reasoning ?? null,
@@ -133,8 +136,6 @@ export async function writeWorklog(
         depends_on ? JSON.stringify(depends_on) : null,
         side_effect_of ?? null,
         conclusion ?? null,
-        icon ?? null,
-        tag ?? null,
       ]
     )
   } catch (e) {

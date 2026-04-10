@@ -1,7 +1,6 @@
 import { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 
-// DO managed PostgreSQL uses a self-signed cert chain — disable Node TLS verification
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+// DO managed PostgreSQL uses a self-signed cert chain — use Pool ssl option only.
 
 // PgBouncer-aware: if DATABASE_URL contains ?pgbouncer=true, disable prepared statements
 const rawUrl = process.env.DATABASE_URL ?? ''
