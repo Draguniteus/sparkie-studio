@@ -6,12 +6,13 @@ import { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 const rawUrl = process.env.DATABASE_URL ?? ''
 const isPgBouncer = rawUrl.includes('pgbouncer=true')
 
-// pg-connection-string v2.11.0 aliases 'no-verify', 'require', 'verify-ca' all to 'verify-full'.
-// sslmode=no-verify + uselibpqcompat=true forces old libpq-compatible SSL behavior where
-// no-verify truly skips cert chain verification (needed for DO's self-signed cert chain).
-const dbUrlWithSsl = rawUrl.includes('uselibpqcompat=true')
+// pg-connection-string v2.11.0 aliases 'prefer', 'require', 'verify-ca' to 'verify-full'.
+// sslmode=no-verify is handled separately and correctly sets rejectUnauthorized: false,
+// which skips cert chain verification for Supabase's self-signed cert chain.
+// sslmode=no-verify in the URL overrides any existing sslmode (e.g. sslmode=require).
+const dbUrlWithSsl = rawUrl.includes('sslmode=no-verify')
   ? rawUrl
-  : `${rawUrl}${rawUrl.includes('?') ? '&' : '?'}uselibpqcompat=true&sslmode=no-verify`
+  : `${rawUrl}${rawUrl.includes('?') ? '&' : '?'}sslmode=no-verify`
 
 const pool = new Pool({
   connectionString: dbUrlWithSsl,
