@@ -19,15 +19,17 @@ const ALLOWED_TABLES = new Set([
 ])
 
 function isSelectOnly(sql: string): boolean {
-  const clean = sql.trim().toUpperCase()
-  return (
-    clean.startsWith('SELECT') &&
-    !clean.includes('INSERT') && !clean.includes('UPDATE') &&
-    !clean.includes('DELETE') && !clean.includes('DROP') &&
-    !clean.includes('TRUNCATE') && !clean.includes('ALTER') &&
-    !clean.includes('CREATE') && !clean.includes('GRANT') &&
-    !clean.includes('EXEC') && !clean.includes('EXECUTE')
-  )
+  // Strip string literals and line comments so keywords inside quotes don't trigger false positives
+  const stripped = sql
+    .replace(/'[^']*'/g, "''")           // single-quoted strings
+    .replace(/"[^"]*"/g, '""')           // double-quoted identifiers
+    .replace(/--[^\n]*/g, '')             // line comments
+    .replace(/\/\*[\s\S]*?\*\//g, '')   // block comments
+  const clean = stripped.trim().toUpperCase()
+  const FORBIDDEN = ['INSERT', 'UPDATE', 'DELETE', 'DROP', 'TRUNCATE', 'ALTER', 'CREATE', 'GRANT', 'REVOKE', 'EXEC', 'EXECUTE', 'COPY', 'pg_']
+  const startsOk = clean.startsWith('SELECT') || clean.startsWith('WITH')
+  const noForbidden = !FORBIDDEN.some(kw => clean.includes(kw))
+  return startsOk && noForbidden
 }
 
 export async function POST(req: NextRequest) {

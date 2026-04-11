@@ -57,7 +57,7 @@ export async function executeSprint5Tool(
       const { action, id, name: topicName, fingerprint, aliases, summary, notification_policy = 'auto', status } =
         args as { action: string; id?: string; name?: string; fingerprint?: string; aliases?: string[]; summary?: string; notification_policy?: string; status?: string }
 
-      // Ensure table exists
+      // Ensure table exists — mirrors topics/route.ts ensureTable() for full schema parity
       await query(`CREATE TABLE IF NOT EXISTS sparkie_topics (
         id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
         user_id TEXT NOT NULL,
@@ -69,8 +69,23 @@ export async function executeSprint5Tool(
         status TEXT DEFAULT 'active',
         total_threads INTEGER DEFAULT 0,
         created_at TIMESTAMPTZ DEFAULT NOW(),
-        updated_at TIMESTAMPTZ DEFAULT NOW()
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        last_state TEXT,
+        last_round INT DEFAULT 0,
+        step_count INT DEFAULT 0,
+        original_request TEXT,
+        topic_type TEXT DEFAULT 'chat',
+        cognition_state JSONB DEFAULT '{}'
       )`).catch(() => {})
+      // Phase 2 column migrations (idempotent — only add if missing)
+      await query(`ALTER TABLE sparkie_topics ADD COLUMN IF NOT EXISTS last_state TEXT`).catch(() => {})
+      await query(`ALTER TABLE sparkie_topics ADD COLUMN IF NOT EXISTS last_round INT DEFAULT 0`).catch(() => {})
+      await query(`ALTER TABLE sparkie_topics ADD COLUMN IF NOT EXISTS step_count INT DEFAULT 0`).catch(() => {})
+      await query(`ALTER TABLE sparkie_topics ADD COLUMN IF NOT EXISTS original_request TEXT`).catch(() => {})
+      await query(`ALTER TABLE sparkie_topics ADD COLUMN IF NOT EXISTS topic_type TEXT DEFAULT 'chat'`).catch(() => {})
+      await query(`ALTER TABLE sparkie_topics ADD COLUMN IF NOT EXISTS cognition_state JSONB DEFAULT '{}'`).catch(() => {})
+      await query(`ALTER TABLE sparkie_topics ADD COLUMN IF NOT EXISTS aliases JSONB DEFAULT '[]'`).catch(() => {})
+      await query(`ALTER TABLE sparkie_topics ADD COLUMN IF NOT EXISTS total_threads INTEGER DEFAULT 0`).catch(() => {})
 
       if (action === 'create') {
         if (!topicName) return 'manage_topic create: name is required'

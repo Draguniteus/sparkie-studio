@@ -4646,6 +4646,9 @@ def invoke_llm(query, model='MiniMax-M2.7'):
           if (action === 'save') {
             if (!content) return 'memory_manage: content is required for save'
             const cat = category ?? 'general'
+            // Ensure hint and quote columns exist (may have been added by /api/memory route)
+            await query(`ALTER TABLE user_memories ADD COLUMN IF NOT EXISTS hint TEXT`).catch(() => {})
+            await query(`ALTER TABLE user_memories ADD COLUMN IF NOT EXISTS quote TEXT`).catch(() => {})
             // Deduplicate — skip if similar content exists in same category
             const existing = await query<{ id: number; content: string }>(
               'SELECT id, content FROM user_memories WHERE user_id = $1 AND category = $2 ORDER BY created_at DESC LIMIT 10',

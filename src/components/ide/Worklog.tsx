@@ -487,9 +487,13 @@ export function Worklog({ compact = false }: WorklogProps) {
     return () => window.removeEventListener("sparkie_worklog_card", handler)
   }, [addWorklogEntry])
 
+  // Only auto-scroll when worklog grows while user is at/executing; otherwise newest-first
+  // timeline should stay scrolled to top so newest entries are immediately visible
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [worklog.length])
+    if (isExecuting && bottomRef.current) {
+      bottomRef.current.scrollIntoView({ behavior: "smooth" })
+    }
+  }, [worklog.length, isExecuting])
 
   // Filter noise entries and by search query
   const filteredWorklog = worklog.filter((e: WorklogEntry) => {
@@ -607,7 +611,10 @@ export function Worklog({ compact = false }: WorklogProps) {
               const nodeStyle = getNodeStyle(entry.type, entry.status, entry.decision_type)
 
               // Show timestamp anchor for first entry or when time changes significantly
-              const prevTs = idx > 0 ? new Date((filteredWorklog[idx-1].created_at ?? filteredWorklog[idx-1].timestamp) as string | Date).getTime() : 0
+              // reversedDisplayOrder matches the render order (newest first)
+              const reversedDisplayOrder = filteredWorklog.slice().reverse()
+              const prevEntry = idx > 0 ? reversedDisplayOrder[idx - 1] : null
+              const prevTs = prevEntry ? new Date(prevEntry.created_at ?? prevEntry.timestamp).getTime() : 0
               const currTs = new Date((entry.created_at ?? entry.timestamp) as string | Date).getTime()
               const showTimeAnchor = idx === 0 || Math.abs(currTs - prevTs) > 60_000
 

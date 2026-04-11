@@ -39,6 +39,8 @@ async function ensureTable() {
   await query(`ALTER TABLE sparkie_topics ADD COLUMN IF NOT EXISTS original_request TEXT`).catch(() => {})
   await query(`ALTER TABLE sparkie_topics ADD COLUMN IF NOT EXISTS topic_type TEXT DEFAULT 'chat'`).catch(() => {})
   await query(`ALTER TABLE sparkie_topics ADD COLUMN IF NOT EXISTS cognition_state JSONB DEFAULT '{}'`).catch(() => {})
+  await query(`ALTER TABLE sparkie_topics ADD COLUMN IF NOT EXISTS aliases JSONB DEFAULT '[]'`).catch(() => {})
+  await query(`ALTER TABLE sparkie_topics ADD COLUMN IF NOT EXISTS total_threads INTEGER DEFAULT 0`).catch(() => {})
 }
 
 export async function GET(req: NextRequest) {
