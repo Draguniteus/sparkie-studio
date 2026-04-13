@@ -4106,12 +4106,14 @@ def invoke_llm(query, model='MiniMax-M2.7'):
 
       case 'get_calendar': {
         if (!userId) return 'Not authenticated'
-        return await executeConnectorTool('GOOGLECALENDAR_LIST_EVENTS', args, userId)
+        // GOOGLECALENDAR_LIST_EVENTS doesn't exist — use GOOGLECALENDAR_EVENTS_LIST (confirmed working)
+        return await executeConnectorTool('GOOGLECALENDAR_EVENTS_LIST', args, userId)
       }
 
       case 'search_youtube': {
         if (!userId) return 'Not authenticated'
-        return await executeConnectorTool('YOUTUBE_LIST_VIDEO', args, userId)
+        // YOUTUBE_LIST_VIDEO doesn't exist — use YOUTUBE_SEARCH (confirmed working)
+        return await executeConnectorTool('YOUTUBE_SEARCH', args, userId)
       }
 
       case 'send_discord': {
