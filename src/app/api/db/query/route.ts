@@ -65,10 +65,11 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  // Enforce LIMIT cap — robust pattern handles trailing punctuation/whitespace after number
-  const limitMatch = rawSql.match(/\bLIMIT\s+(\d+)/i)
-  const existingLimit = limitMatch ? parseInt(limitMatch[1]) : null
+  // Enforce LIMIT cap — first strip any model-provided LIMIT so we can replace it cleanly.
+  // This prevents "LIMIT 20 LIMIT 20" when the AI already included a LIMIT clause.
   let safeSQL = rawSql.replace(/;\s*$/, '').trim()
+  const limitMatch = safeSQL.match(/\bLIMIT\s+(\d+)/i)
+  const existingLimit = limitMatch ? parseInt(limitMatch[1]) : null
   if (!existingLimit) {
     safeSQL += ' LIMIT 20'
   } else if (existingLimit > 100) {

@@ -4773,14 +4773,14 @@ def invoke_llm(query, model='MiniMax-M2.7'):
             delete:  { addLabels: ['TRASH'] },
           }
           if (emailAction === 'label' && label_name) {
-            // GMAIL_MODIFY_MESSAGE is the correct Composio v3 action for modifying message labels
-            const modResult = await executeConnectorTool('GMAIL_MODIFY_MESSAGE', { message_id: emailMsgId, add_labels: [label_name] }, userId)
+            // GMAIL_UPDATE_MESSAGE is the correct Composio v3 action for modifying message labels
+            const modResult = await executeConnectorTool('GMAIL_UPDATE_MESSAGE', { message_id: emailMsgId, add_labels: [label_name] }, userId)
             return `✅ manage_email: labeled "${label_name}" — ${modResult}`
           }
           const labelOp = actionMap[emailAction]
           if (!labelOp) return `manage_email: unknown action "${emailAction}". Use: archive, label, delete, star, unstar, read, unread`
-          // GMAIL_MODIFY_MESSAGE is the correct Composio v3 action for modifying message labels
-          const modResult = await executeConnectorTool('GMAIL_MODIFY_MESSAGE', {
+          // GMAIL_UPDATE_MESSAGE is the correct Composio v3 action for modifying message labels
+          const modResult = await executeConnectorTool('GMAIL_UPDATE_MESSAGE', {
             message_id: emailMsgId,
             ...(labelOp.addLabels ? { add_labels: labelOp.addLabels } : {}),
             ...(labelOp.removeLabels ? { remove_labels: labelOp.removeLabels } : {}),
