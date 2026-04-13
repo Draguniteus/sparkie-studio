@@ -4764,26 +4764,34 @@ def invoke_llm(query, model='MiniMax-M2.7'):
         }
         if (!emailAction || !emailMsgId) return 'manage_email: action and message_id are required'
         try {
-          const actionMap: Record<string, { addLabels?: string[]; removeLabels?: string[] }> = {
-            archive: { removeLabels: ['INBOX'] },
-            star:    { addLabels: ['STARRED'] },
-            unstar:  { removeLabels: ['STARRED'] },
-            read:    { removeLabels: ['UNREAD'] },
-            unread:  { addLabels: ['UNREAD'] },
-            delete:  { addLabels: ['TRASH'] },
-          }
+          // label action uses GMAIL_ADD_LABEL_TO_EMAIL with label_name
           if (emailAction === 'label' && label_name) {
-            // GMAIL_UPDATE_MESSAGE is the correct Composio v3 action for modifying message labels
-            const modResult = await executeConnectorTool('GMAIL_UPDATE_MESSAGE', { message_id: emailMsgId, add_labels: [label_name] }, userId)
+            const modResult = await executeConnectorTool('GMAIL_ADD_LABEL_TO_EMAIL', { message_id: emailMsgId, label_name }, userId)
             return `✅ manage_email: labeled "${label_name}" — ${modResult}`
           }
+
+          const actionMap: Record<string, { add_label_ids?: string[]; remove_label_ids?: string[]; useMoveToTrash?: boolean }> = {
+            archive: { remove_label_ids: ['INBOX'] },
+            star:    { add_label_ids: ['STARRED'] },
+            unstar:  { remove_label_ids: ['STARRED'] },
+            read:    { remove_label_ids: ['UNREAD'] },
+            unread:  { add_label_ids: ['UNREAD'] },
+            delete:  { useMoveToTrash: true },
+          }
+
           const labelOp = actionMap[emailAction]
           if (!labelOp) return `manage_email: unknown action "${emailAction}". Use: archive, label, delete, star, unstar, read, unread`
-          // GMAIL_UPDATE_MESSAGE is the correct Composio v3 action for modifying message labels
-          const modResult = await executeConnectorTool('GMAIL_UPDATE_MESSAGE', {
-            message_id: emailMsgId,
-            ...(labelOp.addLabels ? { add_labels: labelOp.addLabels } : {}),
-            ...(labelOp.removeLabels ? { remove_labels: labelOp.removeLabels } : {}),
+
+          // delete uses GMAIL_MOVE_TO_TRASH (message_id param); other actions use GMAIL_MODIFY_THREAD_LABELS (thread_id param)
+          if (labelOp.useMoveToTrash) {
+            const modResult = await executeConnectorTool('GMAIL_MOVE_TO_TRASH', { message_id: emailMsgId }, userId)
+            return `✅ manage_email: ${emailAction} on ${emailMsgId} — ${modResult}`
+          }
+
+          const modResult = await executeConnectorTool('GMAIL_MODIFY_THREAD_LABELS', {
+            thread_id: emailMsgId,
+            ...(labelOp.add_label_ids ? { add_label_ids: labelOp.add_label_ids } : {}),
+            ...(labelOp.remove_label_ids ? { remove_label_ids: labelOp.remove_label_ids } : {}),
           }, userId)
           return `✅ manage_email: ${emailAction} on ${emailMsgId} — ${modResult}`
         } catch (e) { return `manage_email error: ${String(e)}` }

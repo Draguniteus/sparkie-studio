@@ -25,24 +25,27 @@ export async function executeSprint4Tool(
       try {
         if (action === 'search') {
           if (!query) return 'manage_email search: query is required'
-          return executeConnector('GMAIL_SEARCH_EMAILS', { query, max_results: Math.min(Number(max_results), 50) }, userId)
+          // GMAIL_FETCH_EMAILS supports query param with full Gmail search syntax
+          return executeConnector('GMAIL_FETCH_EMAILS', { query, max_results: Math.min(Number(max_results), 50) }, userId)
         }
         if (!message_id) return `manage_email ${action}: message_id is required`
+        // Use GMAIL_MODIFY_THREAD_LABELS for all label operations (star/unstar/read/unread/archive/delete)
+        // actionMap uses add_label_ids / remove_label_ids per Composio v3 GMAIL_MODIFY_THREAD_LABELS schema
         if (action === 'mark_read') {
-          return executeConnector('GMAIL_MARK_AS_READ', { message_id }, userId)
+          return executeConnector('GMAIL_MODIFY_THREAD_LABELS', { thread_id: message_id, remove_label_ids: ['UNREAD'] }, userId)
         }
         if (action === 'mark_unread') {
-          return executeConnector('GMAIL_MARK_AS_UNREAD', { message_id }, userId)
+          return executeConnector('GMAIL_MODIFY_THREAD_LABELS', { thread_id: message_id, add_label_ids: ['UNREAD'] }, userId)
         }
         if (action === 'archive') {
-          return executeConnector('GMAIL_ARCHIVE_EMAIL', { message_id }, userId)
+          return executeConnector('GMAIL_MODIFY_THREAD_LABELS', { thread_id: message_id, remove_label_ids: ['INBOX'] }, userId)
         }
         if (action === 'label') {
           if (!label) return 'manage_email label: label name is required'
           return executeConnector('GMAIL_ADD_LABEL_TO_EMAIL', { message_id, label_name: label }, userId)
         }
         if (action === 'delete') {
-          return executeConnector('GMAIL_DELETE_EMAIL', { message_id }, userId)
+          return executeConnector('GMAIL_MOVE_TO_TRASH', { message_id }, userId)
         }
         return `manage_email: unknown action "${action}". Valid: search, mark_read, mark_unread, archive, label, delete`
       } catch (e) {
