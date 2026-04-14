@@ -4060,7 +4060,14 @@ def invoke_llm(query, model='MiniMax-M2.7'):
           const termData = await termRes.json() as { sessionId?: string; output?: string; error?: string }
           if (termData.error) return `Terminal error: ${termData.error}`
           if (action === 'create') return JSON.stringify({ sessionId: termData.sessionId, ready: true })
-          return termData.output ?? 'Command sent'
+          // 'input' action: wait for output accumulation then poll logs endpoint
+          await new Promise(r => setTimeout(r, 1500))
+          if (!sessionId) return 'Command sent'
+          const logsRes = await fetch(`${baseUrl}/api/logs?sessionId=${encodeURIComponent(sessionId)}`, {
+            signal: AbortSignal.timeout(10000),
+          })
+          const { logs } = await logsRes.json() as { logs: string[] }
+          return logs.join('').trim() || 'Command sent'
         } catch (e) {
           return `Terminal unavailable: ${String(e)}`
         }
