@@ -65,17 +65,19 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  // Enforce LIMIT cap — first strip any model-provided LIMIT so we can replace it cleanly.
-  // This prevents "LIMIT 20 LIMIT 20" when the AI already included a LIMIT clause.
+  // Enforce LIMIT cap — only add LIMIT if SQL doesn't already have one.
+  // Uses case-insensitive scan so it catches "limit 20", "LIMIT 5", etc.
   let safeSQL = rawSql.replace(/;\s*$/, '').trim()
-  const limitMatch = safeSQL.match(/\bLIMIT\s+(\d+)/i)
-  const existingLimit = limitMatch ? parseInt(limitMatch[1]) : null
-  if (!existingLimit) {
+  const hasLimit = /\bLIMIT\b/i.test(safeSQL)
+  if (!hasLimit) {
     safeSQL += ' LIMIT 20'
-  } else if (existingLimit > 100) {
-    safeSQL = safeSQL.replace(/\bLIMIT\s+\d+/i, 'LIMIT 100')
+  } else {
+    // Cap existing high limits at 100 to prevent abuse
+    const highLimitMatch = safeSQL.match(/\bLIMIT\s+(\d+)/i)
+    if (highLimitMatch && parseInt(highLimitMatch[1]) > 100) {
+      safeSQL = safeSQL.replace(/\bLIMIT\s+\d+/i, 'LIMIT 100')
+    }
   }
-  // If model provided a reasonable limit (<=100), keep it — don't double-apply LIMIT
 
   try {
     const result = await query(safeSQL)

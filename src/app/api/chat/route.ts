@@ -2069,6 +2069,83 @@ const SPARKIE_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'list_processes',
+      description: 'List running processes in the E2B sandbox. Shows PID, CPU%, MEM%, command. Use to inspect what is running, find process IDs for kill, or monitor resource usage.',
+      parameters: {
+        type: 'object',
+        properties: {
+          limit: { type: 'number', description: 'Max number of processes to show (default: 20)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'kill_process',
+      description: 'Send a signal to a process by PID. Default signal is TERM (graceful). Use KILL for forced termination. Always try TERM first.',
+      parameters: {
+        type: 'object',
+        properties: {
+          pid: { type: 'number', description: 'Process ID to signal' },
+          signal: { type: 'string', description: 'Signal name or number (default: TERM). Examples: KILL, INT, HUP, 9' },
+        },
+        required: ['pid'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'process_info',
+      description: 'Get detailed information about a specific process: status, memory, threads, command line, open files. Reads from /proc/[pid]/.',
+      parameters: {
+        type: 'object',
+        properties: {
+          pid: { type: 'number', description: 'Process ID to inspect (default: 1)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'system_info',
+      description: 'Get system-level information: hostname, uptime, load average, memory (free -h), disk (df -h), CPU details. Useful for diagnosing resource exhaustion.',
+      parameters: {
+        type: 'object',
+        properties: {},
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'pgrep',
+      description: 'Search running processes by name pattern. Returns PIDs and full command lines for all matching processes.',
+      parameters: {
+        type: 'object',
+        properties: {
+          pattern: { type: 'string', description: 'Process name or pattern to search for' },
+        },
+        required: ['pattern'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'netstat_info',
+      description: 'Show network connections, listening ports, and network statistics. Uses netstat or ss. Useful for debugging server processes, checking which ports are open.',
+      parameters: {
+        type: 'object',
+        properties: {},
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'workbench_run',
       description: 'Run Python code in an E2B cloud sandbox. Pre-loaded helpers: run_composio_tool(slug, args) for Composio tools, invoke_llm(query) for inline AI reasoning. Use for bulk data processing, looping over API results, multi-step pipelines, or anything too complex for a single tool call. Returns stdout + stderr.',
       parameters: {
@@ -2084,7 +2161,7 @@ const SPARKIE_TOOLS = [
     type: 'function',
     function: {
       name: 'query_database',
-      description: 'Run a SQL SELECT query on the Sparkie database. Tables with columns:\n- sparkie_worklog: id TEXT, user_id TEXT, type TEXT, content TEXT, status TEXT, decision_type TEXT, reasoning TEXT, conclusion TEXT, metadata JSONB, icon TEXT, tag TEXT, result_preview TEXT, created_at TIMESTAMPTZ\n- sparkie_tasks: id TEXT, user_id TEXT, action TEXT, label TEXT, payload JSONB, status TEXT, executor TEXT, trigger_type TEXT, scheduled_at TIMESTAMPTZ, completed_at TIMESTAMPTZ\n- user_memories: id TEXT, user_id TEXT, category TEXT, content TEXT, importance INTEGER, last_accessed TIMESTAMPTZ, created_at TIMESTAMPTZ\n- sparkie_skills: id TEXT, user_id TEXT, name TEXT, description TEXT, trigger_type TEXT, trigger_config JSONB, is_active BOOLEAN, created_at TIMESTAMPTZ\n- sparkie_assets: id TEXT, user_id TEXT, name TEXT, language TEXT, content TEXT, chat_id TEXT, file_id TEXT, asset_type TEXT, source TEXT, created_at TIMESTAMPTZ\n- users: id TEXT, email TEXT, display_name TEXT, email_verified BOOLEAN, role TEXT, created_at TIMESTAMPTZ\nNever guess — query information_schema.columns if unsure.',
+      description: 'Run a SQL SELECT query on the Sparkie database. Tables with columns:\n- sparkie_worklog: id TEXT, user_id TEXT, type TEXT, content TEXT, status TEXT, decision_type TEXT, reasoning TEXT, conclusion TEXT, metadata JSONB, icon TEXT, tag TEXT, result_preview TEXT, created_at TIMESTAMPTZ\n- sparkie_tasks: id TEXT, user_id TEXT, action TEXT, label TEXT, payload JSONB, status TEXT, executor TEXT, trigger_type TEXT, scheduled_at TIMESTAMPTZ\n- user_memories: id TEXT, user_id TEXT, category TEXT, content TEXT, importance INTEGER, last_accessed TIMESTAMPTZ, created_at TIMESTAMPTZ\n- sparkie_self_memory: id TEXT, category TEXT, content TEXT, importance INTEGER, created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ (NOTE: NO user_id column)\n- sparkie_skills: id TEXT, user_id TEXT, name TEXT, description TEXT, trigger_type TEXT, trigger_config JSONB, is_active BOOLEAN, created_at TIMESTAMPTZ\n- sparkie_assets: id TEXT, user_id TEXT, name TEXT, language TEXT, content TEXT, chat_id TEXT, file_id TEXT, asset_type TEXT, source TEXT, created_at TIMESTAMPTZ\n- users: id TEXT, email TEXT, display_name TEXT, email_verified BOOLEAN, role TEXT, created_at TIMESTAMPTZ\nNever guess — query information_schema.columns if unsure.',
       parameters: {
         type: 'object',
         properties: {
@@ -5619,6 +5696,179 @@ def invoke_llm(query, model='MiniMax-M2.7'):
         return gcResult || `No matches found for pattern: ${grepPattern}`
       }
 
+      // ── Process management tools (delegate to E2B sandbox) ──────────────────
+      case 'list_processes': {
+        const limit = (args.limit as number) ?? 20
+        const createRes = await fetch(`${baseUrl}/api/terminal`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(process.env.SPARKIE_INTERNAL_SECRET ? { 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET } : {}) },
+          body: JSON.stringify({ action: 'create' }),
+          signal: AbortSignal.timeout(15000),
+        })
+        if (!createRes.ok) return `Terminal create failed: ${createRes.status}`
+        const { sessionId: lpSessId } = await createRes.json() as { sessionId: string }
+        await new Promise(r => setTimeout(r, 800))
+        const inputRes = await fetch(`${baseUrl}/api/terminal`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(process.env.SPARKIE_INTERNAL_SECRET ? { 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET } : {}) },
+          body: JSON.stringify({ action: 'input', sessionId: lpSessId, data: `ps aux --no-headers 2>/dev/null | head -${limit} && echo "---DONE---"\n` }),
+          signal: AbortSignal.timeout(15000),
+        })
+        if (!inputRes.ok) return `Terminal input failed: ${inputRes.status}`
+        await new Promise(r => setTimeout(r, 1200))
+        const logsRes = await fetch(`${baseUrl}/api/logs?sessionId=${encodeURIComponent(lpSessId)}`, {
+          signal: AbortSignal.timeout(10000),
+        })
+        const { logs: lpLogs } = await logsRes.json() as { logs: string[] }
+        const lpResult = lpLogs.join('').split('---DONE---')[0].trim()
+        if (!lpResult) return 'No processes found'
+        // Parse ps output into a readable table
+        const lines = lpResult.split('\n').filter(Boolean)
+        const header = 'USER       PID     %CPU   %MEM    VSZ       RSS TTY   STAT START   TIME COMMAND'
+        const rows = lines.map(l => {
+          const parts = l.trim().split(/\s+/)
+          if (parts.length < 11) return l
+          return `${parts[0]?.padEnd(8)} ${parts[1]?.padStart(5)} ${(parts[2] ?? '0').padStart(4)}% ${(parts[3] ?? '0').padStart(4)}% ${(parts[4] ?? '0').padStart(7)} ${(parts[5] ?? '0').padStart(6)} ${(parts[6] ?? '?').padStart(4)} ${parts[7] ?? '?'} ${parts[8] ?? '??'} ${parts[9] ?? '??'}  ${parts.slice(10).join(' ')}`
+        })
+        return `Running processes:\n${header}\n${rows.join('\n')}`
+      }
+
+      case 'kill_process': {
+        const pid = args.pid as number | undefined
+        if (!pid) return 'kill_process: pid is required'
+        const signal = (args.signal as string) ?? 'TERM'
+        const createRes = await fetch(`${baseUrl}/api/terminal`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(process.env.SPARKIE_INTERNAL_SECRET ? { 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET } : {}) },
+          body: JSON.stringify({ action: 'create' }),
+          signal: AbortSignal.timeout(15000),
+        })
+        if (!createRes.ok) return `Terminal create failed: ${createRes.status}`
+        const { sessionId: kpSessId } = await createRes.json() as { sessionId: string }
+        await new Promise(r => setTimeout(r, 800))
+        const inputRes = await fetch(`${baseUrl}/api/terminal`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(process.env.SPARKIE_INTERNAL_SECRET ? { 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET } : {}) },
+          body: JSON.stringify({ action: 'input', sessionId: kpSessId, data: `kill -${signal} ${pid} 2>&1 && echo "---DONE---"\n` }),
+          signal: AbortSignal.timeout(10000),
+        })
+        if (!inputRes.ok) return `Terminal input failed: ${inputRes.status}`
+        await new Promise(r => setTimeout(r, 1200))
+        const logsRes = await fetch(`${baseUrl}/api/logs?sessionId=${encodeURIComponent(kpSessId)}`, {
+          signal: AbortSignal.timeout(10000),
+        })
+        const { logs: kpLogs } = await logsRes.json() as { logs: string[] }
+        const kpResult = kpLogs.join('').split('---DONE---')[0].trim()
+        return kpResult || `Signal ${signal} sent to PID ${pid}`
+      }
+
+      case 'process_info': {
+        const pid = (args.pid as number) ?? 1
+        const createRes = await fetch(`${baseUrl}/api/terminal`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(process.env.SPARKIE_INTERNAL_SECRET ? { 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET } : {}) },
+          body: JSON.stringify({ action: 'create' }),
+          signal: AbortSignal.timeout(15000),
+        })
+        if (!createRes.ok) return `Terminal create failed: ${createRes.status}`
+        const { sessionId: piSessId } = await createRes.json() as { sessionId: string }
+        await new Promise(r => setTimeout(r, 800))
+        const inputRes = await fetch(`${baseUrl}/api/terminal`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(process.env.SPARKIE_INTERNAL_SECRET ? { 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET } : {}) },
+          body: JSON.stringify({ action: 'input', sessionId: piSessId, data: `echo "=== Process ${pid} ===" && cat /proc/${pid}/status 2>/dev/null | grep -E "^(Name|Pid|PPid|State|Threads|VmSize|VmRSS|MemRss)" && echo "=== cmdline ===" && cat /proc/${pid}/cmdline 2>/dev/null | tr "\\0" " " && echo "" && echo "=== open files ===" && ls -la /proc/${pid}/fd 2>/dev/null | head -10 && echo "---DONE---"\n` }),
+          signal: AbortSignal.timeout(15000),
+        })
+        if (!inputRes.ok) return `Terminal input failed: ${inputRes.status}`
+        await new Promise(r => setTimeout(r, 2000))
+        const logsRes = await fetch(`${baseUrl}/api/logs?sessionId=${encodeURIComponent(piSessId)}`, {
+          signal: AbortSignal.timeout(10000),
+        })
+        const { logs: piLogs } = await logsRes.json() as { logs: string[] }
+        const piResult = piLogs.join('').split('---DONE---')[0].trim()
+        return piResult || `No process info for PID ${pid}`
+      }
+
+      case 'system_info': {
+        const createRes = await fetch(`${baseUrl}/api/terminal`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(process.env.SPARKIE_INTERNAL_SECRET ? { 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET } : {}) },
+          body: JSON.stringify({ action: 'create' }),
+          signal: AbortSignal.timeout(15000),
+        })
+        if (!createRes.ok) return `Terminal create failed: ${createRes.status}`
+        const { sessionId: siSessId } = await createRes.json() as { sessionId: string }
+        await new Promise(r => setTimeout(r, 800))
+        const inputRes = await fetch(`${baseUrl}/api/terminal`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(process.env.SPARKIE_INTERNAL_SECRET ? { 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET } : {}) },
+          body: JSON.stringify({ action: 'input', sessionId: siSessId, data: `echo "=== System Info ===" && echo "Hostname: $(hostname)" && echo "Uptime: $(uptime -p 2>/dev/null || uptime)" && echo "Load avg: $(cat /proc/loadavg 2>/dev/null | awk '{print $1, $2, $3}')" && echo "" && echo "=== Memory ===" && free -h 2>/dev/null && echo "" && echo "=== Disk ===" && df -h / 2>/dev/null && echo "" && echo "=== CPU ===" && lscpu 2>/dev/null | grep -E "^(Model name|CPU\(s\)|Architecture|CPU MHz|CPU min|CPU max)" && echo "---DONE---"\n` }),
+          signal: AbortSignal.timeout(20000),
+        })
+        if (!inputRes.ok) return `Terminal input failed: ${inputRes.status}`
+        await new Promise(r => setTimeout(r, 2500))
+        const logsRes = await fetch(`${baseUrl}/api/logs?sessionId=${encodeURIComponent(siSessId)}`, {
+          signal: AbortSignal.timeout(10000),
+        })
+        const { logs: siLogs } = await logsRes.json() as { logs: string[] }
+        const siResult = siLogs.join('').split('---DONE---')[0].trim()
+        return siResult || 'System info unavailable'
+      }
+
+      case 'pgrep': {
+        const pattern = args.pattern as string | undefined
+        if (!pattern) return 'pgrep: pattern is required'
+        const createRes = await fetch(`${baseUrl}/api/terminal`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(process.env.SPARKIE_INTERNAL_SECRET ? { 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET } : {}) },
+          body: JSON.stringify({ action: 'create' }),
+          signal: AbortSignal.timeout(15000),
+        })
+        if (!createRes.ok) return `Terminal create failed: ${createRes.status}`
+        const { sessionId: pgSessId } = await createRes.json() as { sessionId: string }
+        await new Promise(r => setTimeout(r, 800))
+        const inputRes = await fetch(`${baseUrl}/api/terminal`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(process.env.SPARKIE_INTERNAL_SECRET ? { 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET } : {}) },
+          body: JSON.stringify({ action: 'input', sessionId: pgSessId, data: `pgrep -af "${pattern.replace(/"/g, '\\"')}" 2>/dev/null && echo "---DONE---"\n` }),
+          signal: AbortSignal.timeout(10000),
+        })
+        if (!inputRes.ok) return `Terminal input failed: ${inputRes.status}`
+        await new Promise(r => setTimeout(r, 1200))
+        const logsRes = await fetch(`${baseUrl}/api/logs?sessionId=${encodeURIComponent(pgSessId)}`, {
+          signal: AbortSignal.timeout(10000),
+        })
+        const { logs: pgLogs } = await logsRes.json() as { logs: string[] }
+        const pgResult = pgLogs.join('').split('---DONE---')[0].trim()
+        return pgResult || `No processes matching: ${pattern}`
+      }
+
+      case 'netstat_info': {
+        const createRes = await fetch(`${baseUrl}/api/terminal`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(process.env.SPARKIE_INTERNAL_SECRET ? { 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET } : {}) },
+          body: JSON.stringify({ action: 'create' }),
+          signal: AbortSignal.timeout(15000),
+        })
+        if (!createRes.ok) return `Terminal create failed: ${createRes.status}`
+        const { sessionId: niSessId } = await createRes.json() as { sessionId: string }
+        await new Promise(r => setTimeout(r, 800))
+        const inputRes = await fetch(`${baseUrl}/api/terminal`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(process.env.SPARKIE_INTERNAL_SECRET ? { 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET } : {}) },
+          body: JSON.stringify({ action: 'input', sessionId: niSessId, data: `echo "=== Network Connections ===" && (netstat -tulnp 2>/dev/null || ss -tulnp 2>/dev/null) && echo "" && echo "=== Listening Ports ===" && ss -tlnp 2>/dev/null | head -20 && echo "---DONE---"\n` }),
+          signal: AbortSignal.timeout(15000),
+        })
+        if (!inputRes.ok) return `Terminal input failed: ${inputRes.status}`
+        await new Promise(r => setTimeout(r, 2000))
+        const logsRes = await fetch(`${baseUrl}/api/logs?sessionId=${encodeURIComponent(niSessId)}`, {
+          signal: AbortSignal.timeout(10000),
+        })
+        const { logs: niLogs } = await logsRes.json() as { logs: string[] }
+        const niResult = niLogs.join('').split('---DONE---')[0].trim()
+        return niResult || 'Network info unavailable'
+      }
+
       default: {
         const s2result = await executeSprint2Tool(name, args, userId)
         if (s2result !== null) return s2result
@@ -7234,6 +7484,20 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           liveStreamClosed = true
           try { liveRef.controller?.close() } catch {}
         }
+      }
+
+      // Smart message trimming — never split mid-conversation or orphan tool results
+      function smartTrim(msgs: Array<{ role: string; content?: unknown; tool_calls?: unknown }>, maxCount: number): Array<{ role: string; content?: unknown; tool_calls?: unknown }> {
+        if (msgs.length <= maxCount) return msgs
+        // Find clean cut: never orphan tool results or assistant+tool pairs
+        let cutStart = msgs.length - maxCount
+        // Skip orphaned tool results at the cut boundary
+        while (cutStart < msgs.length && msgs[cutStart]?.role === 'tool') cutStart++
+        // Strip system nudges (they crash MiniMax after position 0)
+        while (cutStart < msgs.length && msgs[cutStart]?.role === 'system') cutStart++
+        // Skip any messages at cutStart that have tool_calls but no content (orphaned calls)
+        while (cutStart < msgs.length && msgs[cutStart]?.role === 'assistant' && msgs[cutStart]?.tool_calls && !msgs[cutStart]?.content) cutStart++
+        return msgs.slice(cutStart)
       }
 
       // ── Think-tag extraction: route reasoning to Process tab, strip from chat ──
