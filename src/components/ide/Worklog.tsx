@@ -21,9 +21,9 @@ function formatDuration(ms: number): string {
 
 // ── Timeline node color per entry type ──────────────────────────────────────
 function getNodeStyle(type: string, status?: string, decisionType?: string) {
-  if (status === "anomaly" || status === "error") return "bg-red-500 shadow-red-500/40"
+  if (status === "anomaly" || status === "error") return "bg-red-500 shadow-red-500/40 shadow-[0_0_8px_rgba(248,113,113,0.5)]"
   if (status === "blocked")   return "bg-yellow-500 shadow-yellow-500/40"
-  if (status === "running")   return "bg-amber-400 shadow-amber-400/40 animate-pulse"
+  if (status === "running")   return "bg-amber-400 shadow-amber-400/40 shadow-[0_0_12px_rgba(251,191,36,0.6)] animate-pulse"
   if (decisionType === "proactive") return "bg-amber-400 shadow-amber-400/40"
   if (decisionType === "skip")      return "bg-slate-600"
   const map: Record<string, string> = {
@@ -49,11 +49,11 @@ function getNodeStyle(type: string, status?: string, decisionType?: string) {
 // ── Pill badge for context (like SureThing's topic pills) ───────────────────
 function ContextPill({ label, color = "amber" }: { label: string; color?: "amber"|"blue"|"purple"|"red"|"green" }) {
   const colors = {
-    amber:  "bg-amber-500/15 text-amber-300 border-amber-500/30",
-    blue:   "bg-blue-500/15 text-blue-300 border-blue-500/30",
-    purple: "bg-purple-500/15 text-purple-300 border-purple-500/30",
-    red:    "bg-red-500/15 text-red-300 border-red-500/30",
-    green:  "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+    amber:  "bg-amber-500/20 text-amber-200 border border-amber-500/50 shadow-[0_0_6px_rgba(251,191,36,0.2)]",
+    blue:   "bg-blue-500/15 text-blue-300 border border-blue-500/30",
+    purple: "bg-purple-500/15 text-purple-300 border border-purple-500/30",
+    red:    "bg-red-500/15 text-red-300 border border-red-500/30",
+    green:  "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30",
   }
   return (
     <span className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border font-medium ${colors[color]}`}>
@@ -76,8 +76,8 @@ function MemoryTimelineEntry({ entry }: { entry: WorklogEntry }) {
         {label}
       </p>
       <div className={`rounded-xl border p-3 ${isNew
-        ? "bg-gradient-to-br from-purple-900/30 to-purple-950/50 border-purple-500/25"
-        : "bg-gradient-to-br from-blue-900/25 to-blue-950/40 border-blue-500/20"
+        ? "bg-gradient-to-br from-purple-900/50 to-purple-950/70 border-purple-500/40"
+        : "bg-gradient-to-br from-blue-900/40 to-blue-950/60 border-blue-500/30"
       }`}>
         <div className="flex items-start gap-2">
           <div className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 mt-0.5 ${isNew ? "bg-purple-600/25" : "bg-blue-600/25"}`}>
@@ -100,7 +100,7 @@ function MemoryTimelineEntry({ entry }: { entry: WorklogEntry }) {
 function MonologueEntry({ entry }: { entry: WorklogEntry }) {
   return (
     <div className="pl-3 py-0.5">
-      <div className="rounded-xl border border-blue-500/15 bg-gradient-to-br from-blue-900/15 to-slate-950/30 p-3">
+      <div className="rounded-xl border border-purple-500/25 bg-gradient-to-br from-purple-900/30 to-slate-950/40 p-3">
         <div className="flex items-start gap-2">
           <span className="text-blue-400/60 text-lg leading-none mt-0.5 shrink-0">"</span>
           <div className="flex-1 min-w-0">
@@ -272,7 +272,7 @@ function StandardEntry({ entry }: { entry: WorklogEntry }) {
   const lc = labelColors[entry.type] ?? 'text-text-secondary'
 
   return (
-    <div className={`pl-3 py-0.5 border-l-2 ${borderColor} hover:bg-hive-elevated/40 transition-colors rounded-r-lg`}>
+    <div className={`pl-3 py-0.5 border-l-2 ${borderColor} hover:bg-purple-500/5 hover:shadow-[0_0_12px_rgba(168,85,247,0.1)] transition-colors rounded-r-lg`}>
       {/* Top row: icon + label + timestamp + badges */}
       <div className="flex items-center gap-1.5 flex-wrap">
         {(entry.icon ?? DEFAULT_TYPE_ICONS[entry.type]) && (
@@ -300,13 +300,13 @@ function StandardEntry({ entry }: { entry: WorklogEntry }) {
       )}
       {/* Result preview section */}
       {entry.result_preview && (
-        <p className="text-[10px] text-emerald-300/80 mt-1 pl-2 border-l border-emerald-500/30 leading-relaxed bg-emerald-500/5 rounded-r-sm">
+        <p className="text-[10px] text-honey-300/90 mt-1 pl-2 border-l border-purple-500/40 leading-relaxed bg-purple-500/10 rounded-r-sm">
           → {entry.result_preview}
         </p>
       )}
       {/* Conclusion */}
       {entry.conclusion && (
-        <p className="text-[10px] text-emerald-400/80 mt-1 font-medium leading-relaxed">
+        <p className="text-[10px] text-honey-400 mt-1 font-medium leading-relaxed">
           ✓ {entry.conclusion}
         </p>
       )}
@@ -511,18 +511,18 @@ export function Worklog({ compact = false }: WorklogProps) {
     const noResults = worklog.length > 0 && searchQuery.length > 0
     return (
       <div className="h-full flex flex-col items-center justify-center text-text-muted p-8">
-        <div className="w-16 h-16 rounded-2xl bg-purple-500/10 flex items-center justify-center mb-4">
+        <div className="w-16 h-16 rounded-2xl bg-purple-500/20 flex items-center justify-center mb-4 shadow-[0_0_20px_rgba(168,85,247,0.3)]">
           <Brain size={24} className="text-purple-400" />
         </div>
         {noResults ? (
           <>
-            <p className="text-sm font-medium text-text-secondary mb-1">No results for "{searchQuery}"</p>
+            <p className="text-sm font-medium text-honey-300 mb-1">No results for "{searchQuery}"</p>
             <button onClick={() => setSearchQuery('')} className="text-xs text-honey-400 hover:text-honey-300 mt-1">Clear search</button>
           </>
         ) : (
           <>
-            <p className="text-sm font-medium text-text-secondary mb-1">Sparkie's inner monologue</p>
-            <p className="text-xs text-center">Her thoughts, actions, and learnings as she works</p>
+            <p className="text-sm font-medium text-honey-300 mb-1">Sparkie's inner monologue</p>
+            <p className="text-xs text-center text-purple-300/60 italic">Her thoughts, actions, and learnings as she works</p>
           </>
         )}
       </div>
@@ -553,14 +553,16 @@ export function Worklog({ compact = false }: WorklogProps) {
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="px-4 py-3 border-b border-hive-border shrink-0">
+      <div className="px-4 py-3 border-b border-purple-500/20 shrink-0 bg-gradient-to-b from-purple-900/10 to-transparent">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-xs font-semibold text-text-primary flex items-center gap-1.5">
-              <Activity size={12} className="text-purple-400" />
+            <p className="text-xs font-bold text-honey-400 flex items-center gap-1.5">
+              <span className="p-0.5 rounded-lg bg-purple-500/20 shadow-[0_0_10px_rgba(168,85,247,0.3)]">
+                <Activity size={12} className="text-honey-400" />
+              </span>
               AI Work Log
             </p>
-            <p className="text-[10px] text-text-muted mt-0.5">Sparkie's inner monologue as she stays awake, sensing signals and changes all around.</p>
+            <p className="text-[10px] text-purple-300/60 mt-0.5 italic">Sparkie's inner monologue as she stays awake, sensing signals and changes all around.</p>
           </div>
           {isExecuting && (
             <div className="flex items-center gap-1.5 text-[10px] text-amber-400">
@@ -588,16 +590,16 @@ export function Worklog({ compact = false }: WorklogProps) {
       {/* Timeline */}
       <div className="flex-1 overflow-y-auto px-4 py-3">
         {/* Entry count header */}
-        <div className="flex items-center gap-2 px-3 py-2 border-b border-hive-border/60 text-[11px] text-text-muted">
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-purple-500/20 text-[11px] text-text-muted bg-gradient-to-r from-purple-900/15 via-hive-elevated to-amber-900/10">
           <span>{filteredWorklog.length} entries</span>
           <span>·</span>
-          <span className="text-green-400 flex items-center gap-1">
+          <span className="text-amber-400 flex items-center gap-1 animate-pulse">
             <Activity size={10} /> Watching for signals
           </span>
         </div>
         <div className="relative">
           {/* Vertical spine */}
-          <div className="absolute left-[5px] top-2 bottom-2 w-px bg-gradient-to-b from-purple-500/30 via-slate-600/20 to-transparent" />
+          <div className="absolute left-[5px] top-2 bottom-2 w-px bg-gradient-to-b from-purple-500/60 via-purple-500/30 to-amber-500/40 shadow-[0_0_8px_rgba(168,85,247,0.5),0_0_16px_rgba(168,85,247,0.2)]" />
 
           <div className="space-y-0.5">
             {filteredWorklog.slice().reverse().map((entry: WorklogEntry, idx: number) => {
@@ -630,7 +632,7 @@ export function Worklog({ compact = false }: WorklogProps) {
                   <div className="flex gap-3 group cursor-pointer" onClick={() => setExpandedId(isExpanded ? null : entry.id)}>
                     {/* Timeline dot */}
                     <div className="flex flex-col items-center shrink-0">
-                      <div className={`w-[11px] h-[11px] rounded-full shadow-sm mt-1 ${nodeStyle}`} />
+                      <div className={`w-[13px] h-[13px] rounded-full mt-1 shadow-[0_0_6px_rgba(168,85,247,0.5)] ${nodeStyle}`} />
                     </div>
 
                     {/* Entry content */}
