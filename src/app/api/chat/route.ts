@@ -5536,7 +5536,7 @@ def invoke_llm(query, model='MiniMax-M2.7'):
         })
         if (!createRes.ok) return `Terminal create failed: ${createRes.status}`
         const { sessionId: ldSessId } = await createRes.json() as { sessionId: string }
-        await new Promise(r => setTimeout(r, 500))
+        await new Promise(r => setTimeout(r, 800))
         const inputRes = await fetch(`${baseUrl}/api/terminal`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...(process.env.SPARKIE_INTERNAL_SECRET ? { 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET } : {}) },
@@ -5544,8 +5544,14 @@ def invoke_llm(query, model='MiniMax-M2.7'):
           signal: AbortSignal.timeout(15000),
         })
         if (!inputRes.ok) return `Terminal input failed: ${inputRes.status}`
-        const ldResult = await inputRes.json() as { output?: string }
-        return ldResult.output ?? 'No output from list_directory'
+        // Wait for output to accumulate in logBuffer, then poll logs
+        await new Promise(r => setTimeout(r, 1500))
+        const logsRes = await fetch(`${baseUrl}/api/logs?sessionId=${encodeURIComponent(ldSessId)}`, {
+          signal: AbortSignal.timeout(10000),
+        })
+        const { logs: ldLogs } = await logsRes.json() as { logs: string[] }
+        const ldResult = ldLogs.join('').split('---DONE---')[0].trim()
+        return ldResult || 'No output from list_directory'
       }
 
       case 'find_file': {
@@ -5559,16 +5565,21 @@ def invoke_llm(query, model='MiniMax-M2.7'):
         })
         if (!createRes2.ok) return `Terminal create failed: ${createRes2.status}`
         const { sessionId: ffSessId } = await createRes2.json() as { sessionId: string }
-        await new Promise(r => setTimeout(r, 500))
+        await new Promise(r => setTimeout(r, 800))
         const inputRes2 = await fetch(`${baseUrl}/api/terminal`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...(process.env.SPARKIE_INTERNAL_SECRET ? { 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET } : {}) },
-          body: JSON.stringify({ action: 'input', sessionId: ffSessId, data: `find / -name "${pattern}" 2>/dev/null | head -20\n` }),
+          body: JSON.stringify({ action: 'input', sessionId: ffSessId, data: `find / -name "${pattern}" 2>/dev/null | head -20 && echo "---DONE---"\n` }),
           signal: AbortSignal.timeout(20000),
         })
         if (!inputRes2.ok) return `Terminal input failed: ${inputRes2.status}`
-        const ffResult = await inputRes2.json() as { output?: string }
-        return ffResult.output ?? 'No files found matching pattern'
+        await new Promise(r => setTimeout(r, 2000))
+        const logsRes2 = await fetch(`${baseUrl}/api/logs?sessionId=${encodeURIComponent(ffSessId)}`, {
+          signal: AbortSignal.timeout(10000),
+        })
+        const { logs: ffLogs } = await logsRes2.json() as { logs: string[] }
+        const ffResult = ffLogs.join('').split('---DONE---')[0].trim()
+        return ffResult || 'No files found matching pattern'
       }
 
       case 'grep_codebase': {
@@ -5584,16 +5595,21 @@ def invoke_llm(query, model='MiniMax-M2.7'):
         })
         if (!createRes3.ok) return `Terminal create failed: ${createRes3.status}`
         const { sessionId: gcSessId } = await createRes3.json() as { sessionId: string }
-        await new Promise(r => setTimeout(r, 500))
+        await new Promise(r => setTimeout(r, 800))
         const inputRes3 = await fetch(`${baseUrl}/api/terminal`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...(process.env.SPARKIE_INTERNAL_SECRET ? { 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET } : {}) },
-          body: JSON.stringify({ action: 'input', sessionId: gcSessId, data: `grep -r "${grepPattern}" /workspace ${includeFlag} -l 2>/dev/null | head -20\n` }),
+          body: JSON.stringify({ action: 'input', sessionId: gcSessId, data: `grep -r "${grepPattern}" /workspace ${includeFlag} -l 2>/dev/null | head -20 && echo "---DONE---"\n` }),
           signal: AbortSignal.timeout(20000),
         })
         if (!inputRes3.ok) return `Terminal input failed: ${inputRes3.status}`
-        const gcResult = await inputRes3.json() as { output?: string }
-        return gcResult.output ?? `No matches found for pattern: ${grepPattern}`
+        await new Promise(r => setTimeout(r, 2000))
+        const logsRes3 = await fetch(`${baseUrl}/api/logs?sessionId=${encodeURIComponent(gcSessId)}`, {
+          signal: AbortSignal.timeout(10000),
+        })
+        const { logs: gcLogs } = await logsRes3.json() as { logs: string[] }
+        const gcResult = gcLogs.join('').split('---DONE---')[0].trim()
+        return gcResult || `No matches found for pattern: ${grepPattern}`
       }
 
       default: {
@@ -6557,11 +6573,16 @@ async function handleBuildMode(
               const inputRes = await fetch(`${buildBaseUrl}/api/terminal`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', ...(process.env.SPARKIE_INTERNAL_SECRET ? { 'x-internal-secret': process.env.SPARKIE_INTERNAL_SECRET } : {}) },
-                body: JSON.stringify({ action: 'input', sessionId: rfSessId, data: `cat "${rfPath}" 2>&1\n` }),
+                body: JSON.stringify({ action: 'input', sessionId: rfSessId, data: `cat "${rfPath}" 2>&1 && echo "---DONE---"\n` }),
                 signal: AbortSignal.timeout(15000),
               })
-              const rfData = await inputRes.json() as { output?: string }
-              agentMessages = [...agentMessages, { role: 'user', content: [{ type: 'tool_result', tool_use_id: callId, content: rfData.output ?? `No output for ${rfPath}` }] }]
+              await new Promise(r => setTimeout(r, 1500))
+              const logsRes = await fetch(`${buildBaseUrl}/api/logs?sessionId=${encodeURIComponent(rfSessId)}`, {
+                signal: AbortSignal.timeout(10000),
+              })
+              const { logs: rfLogs } = await logsRes.json() as { logs: string[] }
+              const rfOutput = rfLogs.join('').split('---DONE---')[0].trim()
+              agentMessages = [...agentMessages, { role: 'user', content: [{ type: 'tool_result', tool_use_id: callId, content: rfOutput || `No output for ${rfPath}` }] }]
             } catch (e) {
               agentMessages = [...agentMessages, { role: 'user', content: [{ type: 'tool_result', tool_use_id: callId, content: `Error: ${String(e)}` }] }]
             }
@@ -6578,7 +6599,26 @@ async function handleBuildMode(
                 body: JSON.stringify({ action: input.action, sessionId: input.sessionId, data: input.data }),
               })
               const termData = await termRes.json() as { sessionId?: string; output?: string; error?: string }
-              const result = termData.error ?? (input.action === 'create' ? JSON.stringify({ sessionId: termData.sessionId, ready: true }) : (termData.output ?? 'Command sent'))
+
+              let result: string
+              if (termData.error) {
+                result = termData.error
+              } else if (input.action === 'create') {
+                result = JSON.stringify({ sessionId: termData.sessionId, ready: true })
+              } else {
+                // Input sent — wait for log accumulation then poll for output
+                await new Promise(r => setTimeout(r, 1500))
+                const sessId = input.sessionId ?? termData.sessionId
+                if (sessId) {
+                  const logsRes = await fetch(`${buildBaseUrl}/api/logs?sessionId=${encodeURIComponent(sessId)}`, {
+                    signal: AbortSignal.timeout(10000),
+                  })
+                  const { logs: termLogs } = await logsRes.json() as { logs: string[] }
+                  result = termLogs.join('').trim() || 'Command sent'
+                } else {
+                  result = 'Command sent'
+                }
+              }
               agentMessages = [...agentMessages, { role: 'user', content: [{ type: 'tool_result', tool_use_id: callId, content: String(result) }] }]
             } catch (e) {
               agentMessages = [...agentMessages, { role: 'user', content: [{ type: 'tool_result', tool_use_id: callId, content: `Error: ${String(e)}` }] }]
