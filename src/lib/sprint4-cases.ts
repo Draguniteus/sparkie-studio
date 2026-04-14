@@ -62,7 +62,8 @@ export async function executeSprint4Tool(
         return `rsvp_event: response must be one of: ${validResponses.join(', ')}`
       }
       try {
-        return executeConnector('GOOGLECALENDAR_RSVP_TO_EVENT', { event_id, response }, userId)
+        // Use PATCH_EVENT with rsvp_response param — the correct Composio action
+        return executeConnector('GOOGLECALENDAR_PATCH_EVENT', { event_id, rsvp_response: response, send_updates: 'all' }, userId)
       } catch (e) {
         return `rsvp_event error: ${String(e)}`
       }
@@ -177,7 +178,7 @@ export async function executeSprint4Tool(
       if (!researchQuery) return 'research: query is required'
       const maxResults = depth === 'deep' ? 8 : 4
       try {
-        return executeConnector('TAVILY_SEARCH', {
+        return executeConnector('TAVILY_TAVILY_SEARCH', {
           query: researchQuery,
           max_results: maxResults,
           search_depth: depth === 'deep' ? 'advanced' : 'basic',

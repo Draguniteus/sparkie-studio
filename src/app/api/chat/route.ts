@@ -2824,7 +2824,7 @@ async function executeTool(
         // If no repo specified, list user's repos via Composio connector (authenticated)
         if (!repo) {
           if (userId) {
-            const listResult = await executeConnectorTool('GITHUB_LIST_REPOSITORIES', { type: 'all' }, userId)
+            const listResult = await executeConnectorTool('GITHUB_LIST_REPOSITORIES_FOR_THE_AUTHENTICATED_USER', { type: 'all' }, userId)
             return listResult
           }
           return 'No repo specified and not authenticated'
@@ -3523,6 +3523,67 @@ async function executeTool(
         }
       }
 
+      // ── Composio Direct Execute ──────────────────────────────────────────────
+      case 'composio_execute': {
+        const { slug, args: execArgs } = args as { slug: string; args: Record<string, unknown> }
+        if (!userId) return 'Not authenticated'
+        if (!slug) return 'composio_execute: slug is required'
+        return await executeConnectorTool(slug, execArgs ?? {}, userId)
+      }
+
+      case 'composio_discover': {
+        if (!userId) return 'Not authenticated'
+        const { query: q, app, limit: qLimit = 5 } = args as { query: string; app?: string; limit?: number }
+        if (!q) return 'composio_discover: query is required'
+        try {
+          const tk = app?.toLowerCase().replace(/\s+/g, '_')
+          let url = `https://backend.composio.dev/api/v3/tools?query=${encodeURIComponent(q)}&limit=${qLimit}`
+          if (tk) {
+            // When app is specified, search within that toolkit using combined query+toolkit_slug
+            url = `https://backend.composio.dev/api/v3/tools?query=${encodeURIComponent(q)}&toolkit_slug=${tk}&limit=${qLimit}`
+          }
+          const res = await fetch(url, {
+            headers: { 'x-api-key': process.env.COMPOSIO_API_KEY ?? '' },
+            signal: AbortSignal.timeout(15000),
+          })
+          if (!res.ok) return `composio_discover: API error ${res.status}`
+          const data = await res.json() as { items?: Array<{ slug: string; name: string; description: string; toolkit: { slug: string } }>; total_items?: number }
+          const tools = data.items ?? []
+          if (!tools.length) return `No tools found for "${q}"${tk ? ` in ${app}` : ''}`
+          const lines = tools.map((t: any) => `**${t.slug}** — ${t.name}\n${t.description?.slice(0, 120) ?? ''}`)
+          return `Found ${tools.length} tools for "${q}"${tk ? ` (${app})` : ''}:\n\n${lines.join('\n\n')}`
+        } catch (e) {
+          return `composio_discover error: ${String(e)}`
+        }
+      }
+
+      case 'composio_get_tool_schemas': {
+        if (!userId) return 'Not authenticated'
+        const { tool_slugs } = args as { tool_slugs: string[] }
+        if (!tool_slugs?.length) return 'composio_get_tool_schemas: tool_slugs array is required'
+        try {
+          const results = await Promise.all(
+            tool_slugs.slice(0, 10).map(async (slug: string) => {
+              const res = await fetch(
+                `https://backend.composio.dev/api/v3/tools/${encodeURIComponent(slug)}`,
+                { headers: { 'x-api-key': process.env.COMPOSIO_API_KEY ?? '' }, signal: AbortSignal.timeout(10000) }
+              )
+              if (!res.ok) return { slug, error: `HTTP ${res.status}` }
+              const data = await res.json() as any
+              return {
+                slug,
+                name: data.name,
+                description: data.description,
+                input_schema: data.input_parameters,
+              }
+            })
+          )
+          return JSON.stringify(results, null, 2)
+        } catch (e) {
+          return `composio_get_tool_schemas error: ${String(e)}`
+        }
+      }
+
       case 'write_file': {
         const { path: filePath, content: fileContent, message: commitMessage } = args as {
           path: string; content: string; message: string
@@ -4119,7 +4180,8 @@ def invoke_llm(query, model='MiniMax-M2.7'):
       case 'send_discord': {
         if (!userId) return 'Not authenticated'
         const { channel_id, message: discordMsg } = args as { channel_id?: string; message: string }
-        // HITL gate: Discord messages are irreversible
+        // Note: Discord SEND_MESSAGE tool is not in the current Composio toolkit (only read-only tools available)
+        // Reconnect Discord in Composio to enable send functionality
         const taskId = `hitl_discord_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
         await query(
           `INSERT INTO sparkie_tasks (id, user_id, action, label, payload, status, executor, trigger_type, why_human, created_at)
@@ -4128,7 +4190,7 @@ def invoke_llm(query, model='MiniMax-M2.7'):
            `executeConnectorTool('DISCORD_SEND_MESSAGE', ${JSON.stringify(args)})`,
            `Discord message: "${discordMsg.slice(0, 60)}${discordMsg.length > 60 ? '...' : ''}"`,
            JSON.stringify(args),
-           'Discord message requires your approval before sending']
+           'WARNING: Discord send_message tool may not be active in Composio — reconnect Discord in app.composio.dev if this fails']
         ).catch(() => {})
         return `HITL_TASK:${JSON.stringify({
           id: taskId, action: 'DISCORD_SEND_MESSAGE', label: 'Send Discord message',
@@ -5764,7 +5826,7 @@ const CONNECTOR_TOOL_CATALOG: Record<string, {
   },
   GITHUB_LIST_REPOSITORIES: {
     description: "List the user's GitHub repositories.",
-    actionSlug: 'GITHUB_LIST_REPOSITORIES',
+    actionSlug: 'GITHUB_LIST_REPOSITORIES_FOR_THE_AUTHENTICATED_USER',
     parameters: {
       type: 'object',
       properties: {
@@ -5775,7 +5837,7 @@ const CONNECTOR_TOOL_CATALOG: Record<string, {
   },
   GITHUB_CREATE_ISSUE: {
     description: "Create a GitHub issue on a repository.",
-    actionSlug: 'GITHUB_CREATE_ISSUE',
+    actionSlug: 'GITHUB_ISSUES_CREATE',
     parameters: {
       type: 'object',
       properties: {
@@ -5968,7 +6030,7 @@ const APP_TOOLS: Record<string, string[]> = {
   gmail: ['GMAIL_FETCH_EMAILS', 'GMAIL_SEND_EMAIL', 'GMAIL_REPLY_EMAIL', 'GMAIL_GET_THREAD', 'GMAIL_CREATE_EMAIL_DRAFT'],
   twitter: ['TWITTER_CREATE_TWEET', 'TWITTER_USER_LOOKUP_ME'],
   instagram: ['INSTAGRAM_CREATE_PHOTO_POST'],
-  github: ['GITHUB_LIST_REPOSITORIES', 'GITHUB_CREATE_ISSUE'],
+  github: ['GITHUB_LIST_REPOSITORIES_FOR_THE_AUTHENTICATED_USER', 'GITHUB_ISSUES_CREATE'],
   slack: ['SLACK_SEND_MESSAGE'],
   tiktok: ['TIKTOK_CREATE_POST'],
   'google-calendar': ['GOOGLECALENDAR_CREATE_EVENT', 'GOOGLECALENDAR_UPDATE_EVENT', 'GOOGLECALENDAR_DELETE_EVENT', 'GOOGLECALENDAR_LIST_EVENTS', 'GOOGLECALENDAR_FIND_FREE_SLOTS'],
