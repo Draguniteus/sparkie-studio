@@ -7766,11 +7766,21 @@ Keep each header + thought on its own line. Use multiple short bold-header block
         }
 
         if (!loopRes.ok && loopRes.status === 400) {
-          // Final fallback: 0-tools synthesis — strip orphaned tool_calls to avoid 400 errors
+          // Final fallback: 0-tools synthesis — strip orphaned tool_calls AND orphaned tool results
+          // to avoid MiniMax 400 error "tool result's tool id not found (2013)"
           console.warn(`[chat] 400 with core tools — falling back to 0-tools synthesis`)
+          // Collect all valid tool_call IDs from assistant messages so we can strip orphaned tool results
+          const validToolCallIds = new Set<string>()
+          loopMessages.forEach((msg: Record<string, unknown>) => {
+            if (msg.role === 'assistant' && msg.tool_calls) {
+              (msg.tool_calls as Array<{ id: string }>).forEach((tc) => { if (tc.id) validToolCallIds.add(tc.id) })
+            }
+          })
           const sanitizedFallbackMessages = loopMessages
             .filter((msg: Record<string, unknown>) => {
               if (msg.role === 'assistant' && msg.tool_calls && !msg.content) return false
+              // Strip orphaned tool results whose tool_call_id has no matching tool call
+              if (msg.role === 'tool' && msg.tool_call_id && !validToolCallIds.has(msg.tool_call_id as string)) return false
               return true
             })
             .map((msg: Record<string, unknown>) => {
@@ -8908,12 +8918,20 @@ When executing multi-step tasks:
       // Mirrors the non-useTools synthesis path but writes to liveRef instead of returning.
       // Nudge prevents synthesis from calling tools again or emitting XML
 
-      // Strip ALL tool_calls from synthesis messages too (same reason as agent loop)
+      // Strip ALL tool_calls and orphaned tool results from synthesis messages (same reason as agent loop)
+      const validToolCallIds = new Set<string>()
+      finalMessages.forEach((msg: Record<string, unknown>) => {
+        if (msg.role === 'assistant' && msg.tool_calls) {
+          (msg.tool_calls as Array<{ id: string }>).forEach((tc) => { if (tc.id) validToolCallIds.add(tc.id) })
+        }
+      })
       const synthSanitized = finalMessages.map((msg: Record<string, unknown>) => {
         if (msg.role === 'assistant') {
           return { ...msg, tool_calls: undefined, content: msg.content }
         }
         if (msg.role === 'tool') {
+          // Strip orphaned tool results whose tool_call_id has no matching tool call
+          if (msg.tool_call_id && !validToolCallIds.has(msg.tool_call_id as string)) return { ...msg, content: '[orphaned result stripped]' }
           return { ...msg, tool_calls: undefined }
         }
         return msg
