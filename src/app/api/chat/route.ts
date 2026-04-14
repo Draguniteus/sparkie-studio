@@ -7728,24 +7728,20 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           console.log(`[tool-filter] agent_sweep mode — filtering to ${effectiveTools.length} agent tools (from ${validTools.length} valid)`)
         }
 
-        // Use loopMessages directly — preserve tool results so model sees its own outputs
-        // Trim on the low side to stay within MiniMax context window
-        // Smart-trim: find a clean cut point so we never orphan a tool result mid-pair
-        const MAX_LOOP = 60
-        const KEEP_RECENT = 30
-        let payloadMessages: typeof loopMessages
-        if (loopMessages.length > MAX_LOOP) {
-          const cutStart = loopMessages.length - KEEP_RECENT
-          let adjustedStart = cutStart
-          // Skip orphaned tool results at the cut boundary
-          while (adjustedStart < loopMessages.length && loopMessages[adjustedStart].role === 'tool') {
-            adjustedStart++
-          }
-          // Always keep the first message (system prompt) even if it falls after the cut
-          payloadMessages = [loopMessages[0], ...loopMessages.slice(adjustedStart)]
-        } else {
-          payloadMessages = loopMessages
+        // Auto-compaction: when loopMessages.length > 50, summarize old messages instead of slicing
+        if (loopMessages.length > 50) {
+          const oldMessages = loopMessages.slice(1, -15) // Keep system + last 15
+          // Count tool calls and results in old messages
+          const toolCallCount = oldMessages.filter(m => m.role === 'assistant' && m.tool_calls)?.length ?? 0
+          const toolResultCount = oldMessages.filter(m => m.role === 'tool')?.length ?? 0
+          const summaryContent = `Previous conversation: ${oldMessages.length} messages, ${toolCallCount} tool calls, ${toolResultCount} results. Key tools used: [auto-generated]. Latest context: ${oldMessages[oldMessages.length - 1]?.content?.slice(0, 200) ?? ''}`
+          loopMessages = [
+            loopMessages[0], // system prompt
+            { role: 'user' as const, content: summaryContent },
+            ...loopMessages.slice(-15) // keep recent context
+          ]
         }
+        const payloadMessages: typeof loopMessages = loopMessages
         const llmPayload = (tools: typeof validTools, systemOverride?: string) => ({
           model: 'MiniMax-M2.7',
           stream: false, temperature: 0.8, max_tokens: 16000,
@@ -8041,7 +8037,12 @@ Keep each header + thought on its own line. Use multiple short bold-header block
                 const t = (s: unknown, n = 40) => String(s ?? '').slice(0, n)
                 switch (tc.function.name) {
                   case 'execute_terminal': case 'check_health': return `Running: ${t(a.command ?? a.cmd, 50)}`
-                  case 'query_database': return `Querying DB: ${t(a.sql ?? a.query, 45)}`
+                  case 'query_database': {
+                    const sql = String(a.sql ?? a.query ?? '')
+                    const tableMatch = sql.match(/\bFROM\s+(\w+)\b/i) || sql.match(/\bUPDATE\s+(\w+)\b/i) || sql.match(/\bINSERT\s+INTO\s+(\w+)\b/i)
+                    const table = tableMatch?.[1] ?? 'database'
+                    return `Querying DB: ${table}`
+                  }
                   case 'search_github': case 'repo_ingest': return `Searching repo: "${t(a.query ?? a.pattern, 35)}"`
                   case 'get_github': case 'read_file': case 'analyze_file': return `Reading: ${t(a.path ?? a.filepath ?? a.file, 45)}`
                   case 'patch_file': case 'write_file': return `Writing: ${t(a.path ?? a.file, 45)}`
@@ -8135,8 +8136,12 @@ Keep each header + thought on its own line. Use multiple short bold-header block
                 switch (tc.function.name) {
                   case 'execute_terminal': case 'check_health':
                     return `Running: ${truncate(toolArgs.command ?? toolArgs.cmd, 50)}`
-                  case 'query_database':
-                    return `Querying DB: ${truncate(toolArgs.sql ?? toolArgs.query, 45)}`
+                  case 'query_database': {
+                    const sql = String(toolArgs.sql ?? toolArgs.query ?? '')
+                    const tableMatch = sql.match(/\bFROM\s+(\w+)\b/i) || sql.match(/\bUPDATE\s+(\w+)\b/i) || sql.match(/\bINSERT\s+INTO\s+(\w+)\b/i)
+                    const table = tableMatch?.[1] ?? 'database'
+                    return `Querying DB: ${table}`
+                  }
                   case 'search_github': case 'repo_ingest':
                     return `Searching repo: "${truncate(toolArgs.query ?? toolArgs.pattern, 35)}"`
                   case 'get_github': case 'read_file': case 'analyze_file':
@@ -8204,6 +8209,43 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           if (toolCalls.length > 1) {
             const parallelTotalMs = Date.now() - parallelBatchStart
             console.log(`[parallel] ${toolCalls.length} tools in ${parallelTotalMs}ms`)
+          }
+
+          // Fire-and-forget: generate tool use summary for worklog enrichment
+          if (userId && toolResults.length > 0) {
+            const summaryPrompt = `Summarize what these tools found in 1 short sentence:\n${toolCalls.map((tc, i) => `${tc.function.name}: ${(toolResults[i]?.content ?? '').slice(0, 200)}`).join('\n')}`
+            fetch('https://api.minimax.io/v1/chat/completions', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.MINIMAX_API_KEY ?? ''}` },
+              body: JSON.stringify({
+                model: 'MiniMax-M2.7',
+                messages: [
+                  { role: 'system', content: 'You generate 1-line summaries of tool results. Be specific. Example: "Searched in auth/ — found 3 files mentioning writeWorklog"' },
+                  { role: 'user', content: summaryPrompt }
+                ],
+                max_tokens: 100,
+              }),
+              signal: AbortSignal.timeout(8000),
+            }).then(r => r.json()).then(data => {
+              const summary = data?.choices?.[0]?.message?.content
+              if (summary) {
+                writeWorklog(userId, 'tool_summary', summary, { icon: 'sparkles', status: 'done' }).catch(() => {})
+              }
+            }).catch(() => {})
+          }
+
+          // PATTERN B: Orphan prevention — ensure every tool_call has a corresponding tool_result
+          // If Promise.all resolved but some toolCalls got error/timeout before resolving,
+          // inject synthetic error results for any orphaned tool_use blocks.
+          const pendingIds = toolCalls.filter(tc =>
+            !toolResults.some(tr => tr.tool_call_id === tc.id)
+          ).map(tc => tc.id)
+          for (const id of pendingIds) {
+            loopMessages.push({
+              role: 'tool' as const,
+              tool_call_id: id,
+              content: `Error: Tool execution was interrupted. Result unknown.`
+            })
           }
 
           // AWAKEN L2/L3 cognition: update topic factual history and live state after tool execution
@@ -8368,14 +8410,21 @@ Keep each header + thought on its own line. Use multiple short bold-header block
             finalMessages = loopMessages
             break // → goes to synthesis path (line 7959+)
           }
-          // Detect incomplete-action statements: model says "Reading the chat route file:"
-          // or "Let me..." / "Running..." but stops before calling tools — nudge it to continue
-          const looksIncomplete = /:\s*$|\.{3}\s*$|\bLet me\b|\bI will\b|\bI'll now\b|\bRunning\b|\bStarting\b/i.test(cleanedContent)
-          if (looksIncomplete && nudgeCount < 2 && round < MAX_TOOL_ROUNDS) {
-            // Model expressed intent but didn't call tools — nudge to continue
+          // PATTERN E: Continuation nudge — tight OpenClaude-style nudge, capped at MAX_CONTINUATION_NUDGES
+          const MAX_CONTINUATION_NUDGES = 3
+          const continuationSignals = [
+            /\blet me (now )?(call|run|check|execute|try)\b/i,
+            /\bnow i('ll| will) (call|run|check|do)\b/i,
+            /\bcalling self.diagnose/i,
+            /\bcheckpoint.*then (executing|continuing)/i,
+          ]
+          const completionMarkers = /\b(done|finished|completed|here'?s|summary|report)\b/i
+          const hasContinuationSignal = continuationSignals.some(s => s.test(cleanedContent))
+          const isCompletion = completionMarkers.test(cleanedContent)
+          if (hasContinuationSignal && !isCompletion && nudgeCount < MAX_CONTINUATION_NUDGES && round < MAX_TOOL_ROUNDS) {
             loopMessages = [...loopMessages, choice.message, {
               role: 'user' as const,
-              content: '⚡ SYSTEM: You said you would do something but stopped. Execute the tool call NOW. Do not describe what you will do — just call the tool.',
+              content: 'Continue.',
             }]
             nudgeCount++
             continue

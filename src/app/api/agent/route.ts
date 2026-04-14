@@ -282,6 +282,8 @@ async function executeDueTasks(userId: string, host: string, proto: string, cook
               signal: AbortSignal.timeout(PASS_TIMEOUT_MS),
             })
 
+            console.log('[orchestrator] pass', passCount, 'status=', chatRes.status, 'textLen=', (await chatRes.clone().text()).length)
+
             if (!chatRes.ok) {
               console.error('[orchestrator] pass', passCount, 'HTTP', chatRes.status)
               consecutiveErrors++
@@ -296,6 +298,7 @@ async function executeDueTasks(userId: string, host: string, proto: string, cook
 
             // Parse SSE stream — collect content chunks and detect tool-limit signal
             const text = await chatRes.text()
+            console.log('[orchestrator] pass', passCount, 'status=', chatRes.status, 'textLen=', text.length, 'passOutputLen=', passOutput.length)
             const sseLines = text.split('\n')
             for (const line of sseLines) {
               if (!line.startsWith('data: ') || line === 'data: [DONE]') continue
@@ -313,6 +316,26 @@ async function executeDueTasks(userId: string, host: string, proto: string, cook
                 }
               } catch { /* skip malformed chunks */ }
             }
+
+            // Fallback: if passOutput is still empty but text looks like a JSON response
+            // (non-SSE path, e.g. !usedTools early return from /api/chat), try parsing it directly
+            if (!passOutput && text.length > 0) {
+              try {
+                const json = JSON.parse(text)
+                // The !usedTools path returns { ok: true, ... } or direct content
+                const fallbackContent = json?.choices?.[0]?.message?.content
+                  ?? json?.choices?.[0]?.delta?.content
+                  ?? json?.content
+                  ?? json?.text
+                  ?? ''
+                if (fallbackContent) {
+                  console.log('[orchestrator] pass', passCount, '— using fallback JSON parse, got', fallbackContent.length, 'chars')
+                  passOutput = fallbackContent
+                }
+              } catch { /* not JSON, ignore */ }
+            }
+
+            console.log('[orchestrator] pass', passCount, 'after parse: passOutputLen=', passOutput.length)
           } catch (fetchErr) {
             console.error('[orchestrator] pass', passCount, 'error:', fetchErr)
             consecutiveErrors++
@@ -322,6 +345,7 @@ async function executeDueTasks(userId: string, host: string, proto: string, cook
             }
           }
 
+          console.log('[orchestrator] pass', passCount, 'checking passOutput empty:', !passOutput, '→', !passOutput ? 'breaking' : 'continuing')
           if (!passOutput) break
 
           finalOutput = passOutput // last non-empty pass wins

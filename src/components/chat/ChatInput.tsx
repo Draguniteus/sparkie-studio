@@ -767,7 +767,7 @@ export function ChatInput() {
         const dots = [".", "..", "..."]
         let dotIdx = 0
         let pollCount = 0
-        const MAX_POLLS = 120 // 10 minutes max (120 × 5s)
+        const MAX_POLLS = 14 // 10 minutes max (14 × 45s)
 
         updateMessage(chatId, assistantMsgId, {
           content: `${taskEmoji} Generating ${taskLabel}… this takes 2-5 minutes`,
@@ -840,7 +840,7 @@ export function ChatInput() {
           } catch {
             // Poll failed — keep trying
           }
-        }, 5000)
+        }, 45_000)
 
         return // don't call setStreaming(false) yet — interval handles it
       }
