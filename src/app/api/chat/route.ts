@@ -3994,69 +3994,160 @@ async function executeTool(
           return 'ACE_MUSIC_API_KEY not configured. Get a free key at https://acemusic.ai/playground/api — then add it to DO environment variables.'
         }
         try {
-          // Use acemusic.ai official cloud API
-          const submitRes = await fetch('https://api.acemusic.ai/v1/chat/completions', {
+          // Build content: tags as STYLE prompt, lyrics wrapped in tag if provided
+          const taggedContent = lyrics
+            ? `<prompt>${tags}</prompt>\n<lyrics>${lyrics}</lyrics>`
+            : `<prompt>${tags}</prompt>`
+
+          // Use acemusic.ai streaming chat/completions endpoint — SSE mode
+          // Key fixes from working reference:
+          // - model: 'acestep/ACE-Step-v1.5' (correct naming)
+          // - stream: true (required for thinking mode)
+          // - thinking: true (required — without this ACE falls back to image mode)
+          // - audio_config with bpm:128 (bpm was missing, causes wrong output mode)
+          // - no sample_mode/batch_size (not supported in completion endpoint)
+          const r = await fetch('https://api.acemusic.ai/v1/chat/completions', {
             method: 'POST',
-            signal: AbortSignal.timeout(150_000),
             headers: {
               'Content-Type': 'application/json',
               'Authorization': 'Bearer ' + ACE_API_KEY,
             },
             body: JSON.stringify({
-              model: 'ace-step-v1.5',
-              messages: [{ role: 'user', content: tags }],
-              stream: false,
-              duration,
-              lyrics: lyrics || undefined,
-              vocal_language: language,
+              model: 'acestep/ACE-Step-v1.5',
+              messages: [{ role: 'user', content: taggedContent }],
+              stream: true,
+              thinking: true,
+              audio_config: {
+                duration: Math.min(duration, 150),
+                bpm: 128,
+                format: 'mp3',
+                vocal_language: language,
+              },
             }),
+            signal: AbortSignal.timeout(240_000),
           })
-          if (!submitRes.ok) {
-            // ACE failed — fall back to MiniMax music-2.5
-            console.warn(`[generate_ace_music] ACE error ${submitRes.status} - trying MiniMax fallback`)
+          if (!r.ok) {
+            const errText = await r.text().catch(() => 'HTTP ' + r.status)
+            let errMsg = 'ACE Music error ' + r.status
+            try { const j = JSON.parse(errText); errMsg = j?.error?.message || j?.message || errMsg } catch { /* noop */ }
+            throw new Error(errMsg)
+          }
+          const rdr = r.body!.getReader()
+          const dec = new TextDecoder()
+          let buf = '', foundUrl: string | undefined
+
+          while (true) {
+            const { done, value } = await rdr.read()
+            if (done) break
+            buf += dec.decode(value, { stream: true })
+            const lines = buf.split('\n'); buf = lines.pop() ?? ''
+            for (const line of lines) {
+              if (!line.startsWith('data:')) continue
+              const j = line.slice(5).trim()
+              if (!j || j === '[DONE]') continue
+              let chunk: Record<string, unknown>
+              try { chunk = JSON.parse(j) } catch { continue }
+              // Debug logging (remove in production):
+              if (!foundUrl) {
+                console.log('[/generate_ace_music] ACE chunk keys:', Object.keys(chunk))
+                if (chunk.audio_url) console.log('[/generate_ace_music] chunk.audio_url:', JSON.stringify(chunk.audio_url)?.slice(0, 200))
+                if (chunk.data) console.log('[/generate_ace_music] chunk.data:', JSON.stringify(chunk.data)?.slice(0, 300))
+              }
+              // Check top-level chunk.audio_url
+              if (!foundUrl && typeof chunk.audio_url === 'string') {
+                foundUrl = chunk.audio_url
+              }
+              // Check chunk.data array (some ACE responses put audio here)
+              if (!foundUrl && Array.isArray(chunk.data) && chunk.data.length > 0) {
+                const d0 = chunk.data[0] as Record<string, unknown>
+                if (typeof d0.audio_url === 'string') foundUrl = d0.audio_url
+                else if (typeof d0.url === 'string') foundUrl = d0.url
+              }
+              if (foundUrl) { rdr.cancel(); break }
+            }
+          }
+
+          // Fallback: also check standard non-stream response
+          if (!foundUrl) {
+            rdr.cancel()
+            // Re-do as non-stream as last resort
+            const nbRes = await fetch('https://api.acemusic.ai/v1/chat/completions', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + ACE_API_KEY },
+              body: JSON.stringify({
+                model: 'acestep/ACE-Step-v1.5',
+                messages: [{ role: 'user', content: taggedContent }],
+                stream: false,
+                thinking: true,
+                audio_config: { duration: Math.min(duration, 150), bpm: 128, format: 'mp3', vocal_language: language },
+              }),
+              signal: AbortSignal.timeout(240_000),
+            })
+            if (nbRes.ok) {
+              const nbData = await nbRes.json() as Record<string, unknown>
+              // Check standard choices path
+              const choices = nbData.choices as Array<{ message?: { audio?: Array<{ audio_url?: { url?: string } }> } }> | undefined
+              const audioArr = choices?.[0]?.message?.audio
+              if (Array.isArray(audioArr)) {
+                for (const item of audioArr) {
+                  let u: string | undefined
+                  if (typeof item.audio_url === 'string') u = item.audio_url
+                  else if (typeof item.audio_url === 'object' && item.audio_url !== null) u = (item.audio_url as Record<string, unknown>).url as string | undefined
+                  if (u) { foundUrl = u; break }
+                }
+              }
+              // Also check top-level audio_url
+              if (!foundUrl && typeof nbData.audio_url === 'string') foundUrl = nbData.audio_url
+              // And chunk.data path
+              if (!foundUrl && Array.isArray(nbData.data) && nbData.data.length > 0) {
+                const d0 = nbData.data[0] as Record<string, unknown>
+                if (typeof d0.audio_url === 'string') foundUrl = d0.audio_url
+                else if (typeof d0.url === 'string') foundUrl = d0.url
+              }
+            }
+          }
+
+          if (!foundUrl) {
+            // MiniMax fallback — use music-01-mini which is the working endpoint
             const minimaxFbKey = process.env.MINIMAX_API_KEY
             if (minimaxFbKey) {
               try {
                 const mmRes = await fetch('https://api.minimax.io/v1/music_generation', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${minimaxFbKey}` },
-                  body: JSON.stringify({ model: 'music-01', refer_instrumental: false, refer_voice: false, extra_info: { tags: tags || 'style:pop', lyrics: lyrics || '' } }),
-                  signal: AbortSignal.timeout(120_000),
+                  body: JSON.stringify({
+                    model: 'music-01-mini',
+                    input: { prompt: tags, lyrics: lyrics || undefined },
+                    config: { duration: Math.min(duration, 90) },
+                  }),
+                  signal: AbortSignal.timeout(90000),
                 })
                 if (mmRes.ok) {
-                  const mmData = await mmRes.json() as { data?: { audio?: string } }
-                  const mmAudio = mmData?.data?.audio
+                  const mmData = await mmRes.json() as { data?: Array<{ audio?: string }> }
+                  const mmAudio = mmData?.data?.[0]?.audio
                   if (mmAudio) return `AUDIO_URL:${mmAudio}`
                 }
               } catch { /* MiniMax fallback failed */ }
             }
-            const errText = await submitRes.text()
-            return `ACE Music error (${submitRes.status}): ${errText.slice(0, 200)}`
+            return 'ACE Music returned no audio URL. Neither streaming nor non-streaming response contained audio data.'
           }
-          const data = await submitRes.json() as {
-            choices?: Array<{
-              message?: {
-                content?: string
-                audio?: Array<{ audio_url?: { url?: string } }>
-              }
-            }>
+
+          if (!foundUrl.startsWith('data:audio')) {
+            return `ACE Music returned unexpected content: ${foundUrl.slice(0, 100)}`
           }
-          // ACE-Step returns audio in message.audio[0].audio_url.url (data:audio/mpeg;base64,...)
-          // message.content only contains text metadata (caption, BPM, language)
-          const audioDataUrl = data?.choices?.[0]?.message?.audio?.[0]?.audio_url?.url ?? ''
-          if (!audioDataUrl.startsWith('data:audio')) return 'ACE Music returned no audio content'
-          // Save to assets DB (fix: use correct schema columns)
+
+          // Save to assets DB
           if (userId) {
             try {
               const fid = crypto.randomUUID()
               await query(
                 `INSERT INTO sparkie_assets (user_id, name, content, asset_type, source, file_id, chat_title, chat_id, language) VALUES ($1, $2, $3, 'audio', 'agent', $4, '', '', '')`,
-                [userId, `ace-music-${Date.now()}.mp3`, audioDataUrl, fid]
+                [userId, `ace-music-${Date.now()}.mp3`, foundUrl, fid]
               )
               return `AUDIO_URL:${baseUrl}/api/assets-image?fid=${fid}`
             } catch { /* fall back to data URL */ }
           }
-          return `AUDIO_URL:${audioDataUrl}`
+          return `AUDIO_URL:${foundUrl}`
 
         } catch (e) {
           return 'generate_ace_music error: ' + String(e)
