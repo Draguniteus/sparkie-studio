@@ -2854,9 +2854,9 @@ function pushConversationToSupermemory(userId: string, conversation: string): vo
 async function executeTool(
   name: string,
   args: Record<string, unknown>,
-  ctx: { userId: string | null; tavilyKey: string | undefined; apiKey: string; doKey: string; baseUrl: string; cookieHeader: string }
+  ctx: { userId: string | null; tavilyKey: string | undefined; apiKey: string; doKey: string; baseUrl: string; cookieHeader: string; abortSignal?: AbortSignal }
 ): Promise<string> {
-  const { userId, tavilyKey, apiKey, doKey, baseUrl, cookieHeader } = ctx
+  const { userId, tavilyKey, apiKey, doKey, baseUrl, cookieHeader, abortSignal } = ctx
   try {
     switch (name) {
       case 'get_weather': {
@@ -3135,6 +3135,11 @@ async function executeTool(
         const prompt = args.prompt as string
         const title = (args.title as string | undefined) ?? 'Sparkie Track'
         const providedLyrics = (args.lyrics as string | undefined) ?? ''
+        // Use shared abort signal from ctx (180s timeout set by tool runner) + per-step limits
+        // AbortSignal.any is available in Node 18+
+        const lyricsSig = abortSignal ? AbortSignal.any([abortSignal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000)
+        const musicSig = abortSignal ? AbortSignal.any([abortSignal, AbortSignal.timeout(120000)]) : AbortSignal.timeout(120000)
+        const cdnSig = abortSignal ? AbortSignal.any([abortSignal, AbortSignal.timeout(60000)]) : AbortSignal.timeout(60000)
 
         // Step 1 — Generate lyrics (skip if caller already provided lyrics)
         let lyricsText = providedLyrics.slice(0, 3400)
@@ -3145,7 +3150,7 @@ async function executeTool(
               method: 'POST',
               headers: { Authorization: `Bearer ${minimaxKey}`, 'Content-Type': 'application/json' },
               body: JSON.stringify({ mode: 'write_full_song', prompt: prompt.slice(0, 2000) }),
-              signal: AbortSignal.timeout(20000),
+              signal: lyricsSig,
             })
             if (lyricsRes.ok) {
               const ld = await lyricsRes.json() as { lyrics?: string; style_tags?: string; song_title?: string; base_resp?: { status_code: number } }
@@ -3177,7 +3182,7 @@ async function executeTool(
             output_format: 'url',
             audio_setting: { sample_rate: 44100, bitrate: 128000, format: 'mp3' },
           }),
-          signal: AbortSignal.timeout(120000),
+          signal: musicSig,
         })
         if (!musicRes.ok) return `Music generation failed: ${musicRes.status}`
         const md = await musicRes.json() as { data?: { audio_file?: string; audio?: string; status?: number }; base_resp?: { status_code: number; status_msg: string } }
@@ -3187,7 +3192,7 @@ async function executeTool(
         if (audioUrl) {
           // Proxy via base64 to avoid CORS issues with MiniMax CDN
           try {
-            const audioRes = await fetch(audioUrl, { signal: AbortSignal.timeout(30000) })
+            const audioRes = await fetch(audioUrl, { signal: cdnSig })
             if (audioRes.ok) {
               const audioBuffer = await audioRes.arrayBuffer()
               const audioB64 = Buffer.from(audioBuffer).toString('base64')
@@ -8206,9 +8211,24 @@ Keep each header + thought on its own line. Use multiple short bold-header block
               }
               const toolStart = Date.now()
               const TOOL_TIMEOUT_MS = 30_000
+              // Music generation needs far more time than other tools — give it 180s
+              const isMusicTool = tc.function.name === 'generate_music'
+              const musicTimeout = isMusicTool ? 180_000 : TOOL_TIMEOUT_MS
+              // Create AbortController with extended timeout for music, pass its signal so
+              // generate_music uses the same signal (not internal AbortSignal.timeout())
+              const musicCtrl = isMusicTool ? new AbortController() : null
+              const toolCtxWithSignal = musicCtrl
+                ? { ...toolContext, abortSignal: musicCtrl.signal }
+                : toolContext
+              const timeoutPromise = new Promise<string>((resolve) =>
+                setTimeout(() => {
+                  musicCtrl?.abort()
+                  resolve(`Error: ${tc.function.name} timed out after ${isMusicTool ? '180' : '30'}s`)
+                }, musicTimeout)
+              )
               const result = await Promise.race([
-                executeTool(tc.function.name, args, toolContext),
-                new Promise<string>((resolve) => setTimeout(() => resolve(`Error: ${tc.function.name} timed out after 30s`), TOOL_TIMEOUT_MS)),
+                executeTool(tc.function.name, args, toolCtxWithSignal),
+                timeoutPromise,
               ])
               if (userId) {
                 addTraceEntry(requestId, {
