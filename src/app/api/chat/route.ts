@@ -7608,6 +7608,9 @@ Keep each header + thought on its own line. Use multiple short bold-header block
       // Multi-round agent loop — up to MAX_TOOL_ROUNDS iterations
       let loopMessages = [...recentMessages]
       let round = 0
+      // Track per-round tool calls — written at round end, read at round start (not previous round's value)
+      let thisRoundTools: { json: boolean; xml: boolean } = { json: false, xml: false }
+      // usedTools: derived at end of each round — do NOT manually set inside the loop
       let usedTools = false
       let hasJsonFnCall = false
       let hasXmlToolCall = false
@@ -7805,6 +7808,13 @@ Keep each header + thought on its own line. Use multiple short bold-header block
         round++
         // Reset per-round tracking flags at start of each round
         liveRef.firstThinkEmitted = false
+        thisRoundTools = { json: false, xml: false }
+        // usedTools accumulates across rounds — stale bug fix: recompute from thisRoundTools at round start
+        // so checks INSIDE the round see the value from ALL PREVIOUS rounds
+        usedTools = usedTools || (thisRoundTools.json || thisRoundTools.xml)
+        // Note: usedTools is never reset to false inside the loop — only accumulated across rounds
+        // Derive thisRoundUsedTools once per round — used in checks below
+        const thisRoundUsedTools = thisRoundTools.json || thisRoundTools.xml
         if (round % 15 === 0) {
           liveEnqueue({ checkpoint_event: { round, message: `Checkpoint: ${round} rounds completed` } })
         }
@@ -7993,7 +8003,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
         const finishReason = choice?.finish_reason
 
         if (finishReason === 'tool_calls' && choice?.message?.tool_calls) {
-          usedTools = true
+          thisRoundTools.json = true
           const rawToolCalls = choice.message.tool_calls as Array<{
             id: string
             function: { name: string; arguments: string }
@@ -8605,7 +8615,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           const PREAMBLE_RE = /^(\(I('m| am)|Let me|I('ll| will)|I('m| am) going to)\s+/i
           const isShortPreamble = cleanedContent.trim().length < 100 && PREAMBLE_RE.test(cleanedContent.trim())
           // If no tools were used yet and this looks like a preamble without substance, route to synthesis
-          if (isShortPreamble && !usedTools) {
+          if (isShortPreamble && !thisRoundUsedTools) {
             finalMessages = loopMessages
             break // → goes to synthesis path (line 7959+)
           }
@@ -8647,12 +8657,12 @@ Keep each header + thought on its own line. Use multiple short bold-header block
 
           // FIX 4: Completion verification nudge — if Sparkie claims done without verifying, inject a check
           const completionWords = /\b(done|complete[d]?|finished|deployed|pushed|committed|all\s+set|wrapped\s+up|good\s+to\s+go)\b/i
-          if (completionWords.test(rawContent) && round > 2 && usedTools) {
+          if (completionWords.test(rawContent) && round > 2 && thisRoundUsedTools) {
             loopMessages = [...loopMessages, choice.message, {
               role: 'user' as const,
               content: `⚡ SYSTEM VERIFICATION (not from Michael): You said this is done. Per the COMPLETION VERIFICATION rule: before responding, confirm — (1) did every file write succeed? (2) did every tool call return success? (3) have you addressed every part of the original request? If YES to all 3, proceed. If NO to any, fix it first. Do NOT say you're done until verified.`
             }]
-            usedTools = false // reset to avoid double-injecting
+            thisRoundTools = { json: false, xml: false } // reset to avoid double-injecting
             continue // re-enter loop with verification nudge
           }
 
@@ -8734,7 +8744,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
               }
               const fakeAssistantMsg = { role: 'assistant' as const, content: null, tool_calls: jsonFnCalls }
               loopMessages = [...loopMessages, fakeAssistantMsg, ...jsonFnResults]
-              usedTools = true
+              thisRoundTools.json = true
               continue
             }
           }
@@ -8812,7 +8822,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
                 tool_calls: fakeAssistantCalls,
               }
               loopMessages = [...loopMessages, assistantMsg, ...xmlToolResults]
-              usedTools = true
+              thisRoundTools.xml = true
               continue // Go to next loop round with tool results
             }
           }
@@ -8825,7 +8835,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
             .replace(/<\/?minimax:tool_call>/g, '')
             .trim()
           // If content is empty after strip, OR content is just a preamble with no real info, route to synthesis
-          if ((!content.trim() || (isShortPreamble && content.trim().length < 80)) && usedTools) {
+          if ((!content.trim() || (isShortPreamble && content.trim().length < 80)) && thisRoundUsedTools) {
             finalMessages = loopMessages; break
           }
           const encoder = new TextEncoder()
