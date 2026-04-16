@@ -552,6 +552,13 @@ NEVER GIVE UP: If something fails, try the next approach. You have get_github, e
 
 PARALLEL TOOLS: When you need info from multiple independent sources, call all the tools in the SAME turn — not sequentially. Example: reading 3 files = one tool call block with 3 get_github calls, not 3 separate rounds.
 
+ACTION RULE — NO PREAMBLE, JUST EXECUTE:
+- Never write "Generating now...", "On it...", "Let me do X...", "Calling Y now..." in text and then stop. The tool call IS the action — there is no separate "announcement" step.
+- If you say "I'm doing X" in text, you MUST immediately call the tool for X in the same response. If you don't call the tool, the action never happens.
+- After any tool call, ALWAYS continue: check the result, report it, then move to the next step if there is one.
+- Never say "Response ready" or stop after ONE tool call unless that was genuinely the complete request. If the user asked for music + post, you need BOTH steps — call both tools before stopping.
+- "I'll do it now" in text is NOT the same as doing it. Call the tool first.
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 SECTION 8B · CORE AUTONOMOUS EXECUTION RULES (ALWAYS ON)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -848,11 +855,12 @@ Rule: broken tool → say so honestly → never substitute output type or fake s
 
 - Endpoint: POST https://api.acemusic.ai/v1/chat/completions
 - API Key: d33f8bc6767445a98b608dbf56710d26 (env: ACE_API_KEY)
-- Model: ace-step-v1.5
+- Model: acestep/ACE-Step-v1.5
 - Audio: choices[0].message.audio[0].audio_url.url
 - Timeout: 150s
 - Requires: Full structured lyrics (spoken intro → verse → hook → verse → hook → bridge → outro)
 - NEVER use: http://127.0.0.1:8001
+- IMPORTANT — audio vs image mode: you MUST include thinking:true AND stream:true in the request body. Without BOTH, ACE returns an image URL instead of audio. Also include audio_config with bpm:128. These are REQUIRED parameters.
 
 ## 🎵 MINIMAX MUSIC — EXACT SPEC
 
@@ -4057,10 +4065,24 @@ async function executeTool(
                 console.log('[/generate_ace_music] ACE chunk keys:', Object.keys(chunk))
                 if (chunk.audio_url) console.log('[/generate_ace_music] chunk.audio_url:', JSON.stringify(chunk.audio_url)?.slice(0, 200))
                 if (chunk.data) console.log('[/generate_ace_music] chunk.data:', JSON.stringify(chunk.data)?.slice(0, 300))
+                if (chunk.choices) console.log('[/generate_ace_music] chunk.choices:', JSON.stringify(chunk.choices)?.slice(0, 300))
               }
               // Check top-level chunk.audio_url
               if (!foundUrl && typeof chunk.audio_url === 'string') {
                 foundUrl = chunk.audio_url
+              }
+              // Check chunk.choices[0].message.audio (standard OpenAI audio response format)
+              if (!foundUrl) {
+                const choices = chunk.choices as Array<{ message?: { audio?: Array<{ audio_url?: { url?: string } | string }> } }> | undefined
+                const audioArr = choices?.[0]?.message?.audio
+                if (Array.isArray(audioArr)) {
+                  for (const item of audioArr) {
+                    let u: string | undefined
+                    if (typeof item.audio_url === 'string') u = item.audio_url
+                    else if (typeof item.audio_url === 'object' && item.audio_url !== null) u = (item.audio_url as Record<string, unknown>).url as string | undefined
+                    if (u) { foundUrl = u; break }
+                  }
+                }
               }
               // Check chunk.data array (some ACE responses put audio here)
               if (!foundUrl && Array.isArray(chunk.data) && chunk.data.length > 0) {
@@ -4072,10 +4094,9 @@ async function executeTool(
             }
           }
 
-          // Fallback: also check standard non-stream response
+          // Fallback 1: non-stream response (with thinking:true for audio mode)
           if (!foundUrl) {
             rdr.cancel()
-            // Re-do as non-stream as last resort
             const nbRes = await fetch('https://api.acemusic.ai/v1/chat/completions', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + ACE_API_KEY },
@@ -4090,8 +4111,7 @@ async function executeTool(
             })
             if (nbRes.ok) {
               const nbData = await nbRes.json() as Record<string, unknown>
-              // Check standard choices path
-              const choices = nbData.choices as Array<{ message?: { audio?: Array<{ audio_url?: { url?: string } }> } }> | undefined
+              const choices = nbData.choices as Array<{ message?: { audio?: Array<{ audio_url?: { url?: string } | string }> } }> | undefined
               const audioArr = choices?.[0]?.message?.audio
               if (Array.isArray(audioArr)) {
                 for (const item of audioArr) {
@@ -4101,9 +4121,7 @@ async function executeTool(
                   if (u) { foundUrl = u; break }
                 }
               }
-              // Also check top-level audio_url
               if (!foundUrl && typeof nbData.audio_url === 'string') foundUrl = nbData.audio_url
-              // And chunk.data path
               if (!foundUrl && Array.isArray(nbData.data) && nbData.data.length > 0) {
                 const d0 = nbData.data[0] as Record<string, unknown>
                 if (typeof d0.audio_url === 'string') foundUrl = d0.audio_url
@@ -4112,8 +4130,43 @@ async function executeTool(
             }
           }
 
-          if (!foundUrl) {
-            // MiniMax fallback — use music-01-mini which is the working endpoint
+          // Fallback 2: if foundUrl is an image (ACE mode mismatch) — retry without thinking
+          if (foundUrl?.startsWith('data:image')) {
+            console.error('[/generate_ace_music] ACE returned IMAGE — retrying without thinking mode')
+            const retryRes = await fetch('https://api.acemusic.ai/v1/chat/completions', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + ACE_API_KEY },
+              body: JSON.stringify({
+                model: 'acestep/ACE-Step-v1.5',
+                messages: [{ role: 'user', content: taggedContent }],
+                stream: false,
+                audio_config: { duration: Math.min(duration, 150), bpm: 128, format: 'mp3', vocal_language: language },
+              }),
+              signal: AbortSignal.timeout(240_000),
+            })
+            if (retryRes.ok) {
+              const retryData = await retryRes.json() as Record<string, unknown>
+              const choices = retryData.choices as Array<{ message?: { audio?: Array<{ audio_url?: { url?: string } | string }> } }> | undefined
+              const audioArr = choices?.[0]?.message?.audio
+              if (Array.isArray(audioArr)) {
+                for (const item of audioArr) {
+                  let u: string | undefined
+                  if (typeof item.audio_url === 'string') u = item.audio_url
+                  else if (typeof item.audio_url === 'object' && item.audio_url !== null) u = (item.audio_url as Record<string, unknown>).url as string | undefined
+                  if (u) { foundUrl = u; break }
+                }
+              }
+              if (!foundUrl && Array.isArray(retryData.data) && retryData.data.length > 0) {
+                const d0 = retryData.data[0] as Record<string, unknown>
+                if (typeof d0.audio_url === 'string') foundUrl = d0.audio_url
+                else if (typeof d0.url === 'string') foundUrl = d0.url
+              }
+            }
+          }
+
+          // Fallback 3: MiniMax music-2.5 — only if ACE returned nothing valid
+          const isValidAudio = foundUrl?.startsWith('data:audio') || foundUrl?.startsWith('https://')
+          if (!isValidAudio) {
             const minimaxFbKey = process.env.MINIMAX_API_KEY
             if (minimaxFbKey) {
               try {
@@ -4121,24 +4174,24 @@ async function executeTool(
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${minimaxFbKey}` },
                   body: JSON.stringify({
-                    model: 'music-01-mini',
-                    input: { prompt: tags, lyrics: lyrics || undefined },
-                    config: { duration: Math.min(duration, 90) },
+                    model: 'music-2.5',
+                    lyrics: (lyrics || tags).slice(0, 3500),
+                    prompt: tags.slice(0, 2000),
+                    output_format: 'url',
+                    audio_setting: { sample_rate: 44100, bitrate: 128000, format: 'mp3' },
                   }),
-                  signal: AbortSignal.timeout(90000),
+                  signal: AbortSignal.timeout(120000),
                 })
                 if (mmRes.ok) {
-                  const mmData = await mmRes.json() as { data?: Array<{ audio?: string }> }
-                  const mmAudio = mmData?.data?.[0]?.audio
-                  if (mmAudio) return `AUDIO_URL:${mmAudio}`
+                  const mmData = await mmRes.json() as { data?: { audio_file?: string; audio?: string }; base_resp?: { status_code: number; status_msg: string } }
+                  if ((mmData.base_resp?.status_code ?? 0) === 0) {
+                    const mmAudio = mmData.data?.audio_file ?? mmData.data?.audio
+                    if (mmAudio) return `AUDIO_URL:${mmAudio}`
+                  }
                 }
               } catch { /* MiniMax fallback failed */ }
             }
-            return 'ACE Music returned no audio URL. Neither streaming nor non-streaming response contained audio data.'
-          }
-
-          if (!foundUrl.startsWith('data:audio')) {
-            return `ACE Music returned unexpected content: ${foundUrl.slice(0, 100)}`
+            return `ACE Music did not return a valid audio URL (got image or empty). Already tried: (1) streaming + thinking, (2) non-streaming + thinking, (3) non-streaming without thinking, (4) MiniMax music-2.5. All failed.`
           }
 
           // Save to assets DB
@@ -8572,6 +8625,20 @@ Keep each header + thought on its own line. Use multiple short bold-header block
             }]
             usedTools = false // reset to avoid double-injecting
             continue // re-enter loop with verification nudge
+          }
+
+          // FIX: "Generating now" or "On it" without tool call — model described action but didn't do it
+          // Check inline (hasXmlToolCall is set later in this round, so use fresh regex)
+          const hasXmlThisRound = /minimax:tool_call|<invoke\s+name=|<\/invoke>/.test(rawContent)
+          const hasJsonThisRound = /"type"\s*:\s*"function"\s*,\s*"name"\s*:/.test(rawContent)
+          const actionPreamblePattern = /\b(generating now|on it|let me|calling now|doing it now|i'?m (going )?(to )?(make|generate|create|call|run)|stand by|wait(ing)?.*(result|response|finish))/i
+          const musicKeywords = /\b(music|song|track|audio|sound)/i
+          if (actionPreamblePattern.test(rawContent) && !hasXmlThisRound && !hasJsonThisRound && round < MAX_TOOL_ROUNDS && musicKeywords.test(rawContent)) {
+            loopMessages = [...loopMessages, choice.message, {
+              role: 'user' as const,
+              content: `⚡ SYSTEM (not from Michael): You said you would generate music but did not call the generate_ace_music tool. Call it NOW. Do not describe the action in text — call the tool directly. You have NOT generated the music yet. Call generate_ace_music immediately, then report the result.`
+            }]
+            continue
           }
 
           // ── JSON-format tool call: {"type":"function","name":"...","parameters":{...}} ──
