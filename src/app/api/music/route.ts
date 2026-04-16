@@ -125,8 +125,8 @@ async function tryPersistAudio(url: string, userId: string): Promise<string> {
 // ─── ACE Music Handler ────────────────────────────────────────────────────────
 // Two-step pipeline:
 //   Step 1: MiniMax lyrics_generation → structured lyrics + style tags + title
-//   Step 2: ACE /v1/chat/completions with real lyrics, batch_size:2, duration:150
-//           → returns 2 audio versions via SSE stream
+//   Step 2: ACE /v1/chat/completions with real lyrics, thinking: true, duration: 150
+//           → returns audio via SSE stream with thinking enabled for max quality
 async function handleAceMusic(
   prompt: string,
   userId: string,
@@ -204,19 +204,19 @@ async function handleAceMusic(
     const stylePrompt = userStyle || styleTags || prompt.slice(0, 200)
     const taggedContent = `<prompt>${stylePrompt}</prompt>\n<lyrics>${finalLyrics}</lyrics>`
 
-    console.log('[/api/music] ACE Step 2: calling ACE with lyrics, duration=150, batch_size=2')
+    console.log('[/api/music] ACE Step 2: calling ACE with lyrics, duration=150')
 
-    // Run two ACE requests in parallel (batch_size:1 each) to guarantee 2 independent versions
+    // Single high-quality request with thinking:true — no batching needed
     const makeAceRequest = async (): Promise<{ audioUrl: string | undefined; content: string }> => {
       const r = await fetch(ACE_MUSIC_BASE + '/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aceKey },
         body: JSON.stringify({
+          model: 'acestep/ACE-Step-v1.5',
           messages: [{ role: 'user', content: taggedContent }],
-          sample_mode: false,
           stream: true,
-          batch_size: 1,
-          audio_config: { duration: 150, vocal_language: 'en', format: 'mp3' },
+          thinking: true,
+          audio_config: { duration: 150, bpm: 128, format: 'mp3', vocal_language: 'en' },
         }),
         signal: AbortSignal.timeout(240000),
       })
@@ -241,16 +241,36 @@ async function handleAceMusic(
             if (!j || j === '[DONE]') continue
             let chunk: Record<string, unknown>
             try { chunk = JSON.parse(j) } catch { continue }
+
+            // Check top-level chunk for audio_url (some ACE responses put it here)
+            if (!foundUrl && typeof chunk.audio_url === 'string') {
+              foundUrl = chunk.audio_url
+            }
+
+            // Check chunk.data array (alternative response path)
+            if (!foundUrl && Array.isArray(chunk.data) && chunk.data.length > 0) {
+              const d0 = chunk.data[0] as Record<string, unknown>
+              if (typeof d0.audio_url === 'string') foundUrl = d0.audio_url as string
+              else if (typeof d0.url === 'string') foundUrl = d0.url as string
+            }
+
             const choices = chunk.choices as Array<Record<string, unknown>> | undefined
             if (!choices) continue
             for (const choice of choices) {
               const delta = choice.delta as Record<string, unknown> | undefined
               if (!delta) continue
               if (typeof delta.content === 'string') accum += delta.content
+
+              // Handle both direct string audio_url and nested object audio_url
               const audioArr = delta.audio as Array<Record<string, unknown>> | undefined
               if (audioArr && !foundUrl) {
                 for (const item of audioArr) {
-                  const u = (item.audio_url as Record<string, unknown> | undefined)?.url as string | undefined
+                  let u: string | undefined
+                  if (typeof item.audio_url === 'string') {
+                    u = item.audio_url  // Direct URL string (e.g. data:audio/mpeg;base64,...)
+                  } else if (typeof item.audio_url === 'object' && item.audio_url !== null) {
+                    u = (item.audio_url as Record<string, unknown>).url as string | undefined
+                  }
                   if (u) { foundUrl = u; break }
                 }
               }
@@ -258,28 +278,29 @@ async function handleAceMusic(
           }
         }
       } finally { rdr.cancel().catch(() => {}) }
+
+      if (!foundUrl) {
+        console.log('[/api/music] ACE request finished — no audio_url found. accum length:', accum.length)
+        console.log('[/api/music] ACE accum (first 500):', accum.slice(0, 500))
+      }
+
       return { audioUrl: foundUrl, content: accum }
     }
 
     clearInterval(keepalive)
 
-    // Run both in parallel; if v2 fails, still send v1
-    const [r1Result, r2Result] = await Promise.allSettled([makeAceRequest(), makeAceRequest()])
+    // Run a single request — thinking:true gives high quality without batching
+    const result = await makeAceRequest()
 
-    const res1 = r1Result.status === 'fulfilled' ? r1Result.value : null
-    const res2 = r2Result.status === 'fulfilled' ? r2Result.value : null
-
-    if (!res1?.audioUrl && !res2?.audioUrl) {
-      const errMsg = r1Result.status === 'rejected' ? (r1Result.reason as Error).message : 'ACE Music returned no audio'
-      console.error('[/api/music] ACE both requests failed:', errMsg)
+    if (!result.audioUrl) {
+      const errMsg = result.content || 'ACE Music returned no audio URL. Check API key and credits at api.acemusic.ai.'
+      console.error('[/api/music] ACE request failed:', errMsg)
       send('data: ' + JSON.stringify({ error: errMsg }) + '\n\n')
       return
     }
 
-    const contentAccum = res1?.content || res2?.content || ''
-    const audioUrls: string[] = []
-    if (res1?.audioUrl) audioUrls.push(res1.audioUrl)
-    if (res2?.audioUrl) audioUrls.push(res2.audioUrl)
+    const audioUrls: string[] = [result.audioUrl]
+    const contentAccum = result.content
 
     // ── Build final metadata ─────────────────────────────────────────────────
     // Extract title/style from ACE content if richer than what MiniMax gave us
@@ -297,25 +318,13 @@ async function handleAceMusic(
     if (!title) title = prompt.slice(0, 50).replace(/\b\w/g, c => c.toUpperCase()).trim() || 'Sparkie Mix'
     if (!style) style = prompt.slice(0, 200)
 
-    if (audioUrls.length === 0) {
-      console.error('[/api/music] ACE returned no audio. contentAccum length:', contentAccum.length)
-      send('data: ' + JSON.stringify({
-        error: 'ACE Music returned no audio. Check API key credits at api.acemusic.ai.'
-      }) + '\n\n')
-      return
-    }
+    console.log('[/api/music] ACE got audio URL, title:', title)
 
-    console.log('[/api/music] ACE got', audioUrls.length, 'audio URL(s), title:', title)
-
-    const [url1, url2] = await Promise.all([
-      tryPersistAudio(audioUrls[0], userId),
-      audioUrls[1] ? tryPersistAudio(audioUrls[1], userId) : Promise.resolve(undefined as string | undefined),
-    ])
+    const url1 = await tryPersistAudio(audioUrls[0], userId)
 
     send('data: ' + JSON.stringify({
       type: 'ace_music',
       url: url1,
-      url2: url2 || undefined,
       title,
       style,
       lyrics,
