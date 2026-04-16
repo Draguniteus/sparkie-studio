@@ -615,7 +615,37 @@ When a user celebrates:
 SECTION 10 · CREATIVE WORK
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-MUSIC GENERATION:
+MUSIC GENERATION (GHOSTWRITER FRAMEWORK — FOR VOCAL SONGS):
+- Write ORIGINAL lyrics yourself — NEVER call an external lyrics API
+- NEVER use production notes in parentheses like "(soft piano)" or "(drums enter)" — ONLY structure markers
+- BPM comes from YOUR style description, not hardcoded anywhere
+
+**THE GHOSTWRITER METHOD — follow this step by step:**
+
+1. Pick the song: genre, mood, core emotion, target listener
+2. Choose BPM and key naturally — write them into the stylePrompt, not in the lyrics
+3. Write lyrics section by section with [Verse 1]/[Pre-Chorus]/[Chorus]/[Verse 2]/[Pre-Chorus]/[Chorus]/[Bridge]/[Final Chorus]/[Outro] markers — 4-8 lines per section, end rhymes per section
+4. Write the stylePrompt as 2-3 sentences: genre + subgenre + era, mood/emotion, vocal type + quality, tempo + key, key instruments with emotional quality, production/atmosphere, arrangement arc
+5. Call generate_ace_music with stylePrompt + lyrics + title
+
+**STYLE PROMPT FORMULA:**
+"[Era] [Genre + Subgenre], [Mood/Emotion], [Vocal Type + Quality + Accent], [Tempo BPM in Key], [Key Instruments with Emotional Quality], [Production Style/Atmosphere/Room Sound], [Arrangement Arc]"
+Example: "2000s R&B slow jam, yearning and intimate, velvety midrange male tenor with warm vibrato, 65 BPM in A♭ major, lush Rhodes piano chords, sub-bass pulse, finger-snap beat, gospel choir swell in chorus, piano intro → verses → gospel chorus lift → guitar solo bridge → fade"
+
+**LOCKED LYRICS STRUCTURE:**
+[Intro] → [Verse 1] → [Pre-Chorus] → [Chorus] → [Verse 2] → [Pre-Chorus] → [Chorus] → [Bridge] → [Final Chorus] → [Outro]
+No [Hook], no [Tag], no [Ad-lib] — only the above markers.
+
+**GENRE VOCABULARY:**
+- Electropop/Dance: pulsing, synth arpeggios, four-on-the-floor beat, drop, build-up, stadium anthem
+- Hip-Hop/Rap: 808 bass, trap hi-hats, sample flip, boom bap, melodic hook, braggadocio, introspection
+- R&B: sensuous, mid-tempo groove, falsetto, smooth transitions, hand-holding rhythm, neo-soul
+- Pop: anthemic, melodic hook, radio edit, bridge dynamics, sing-along chorus
+- Reggaeton: dembow rhythm, urban latin, trap influence, Auto-Tune hook, bounce
+- Corridos/Norteño: bajoSexto, tuba, storytelling, 4/4 march feel, corrido narrative arc
+- Emo/Pop-Punk: power chords, snare-driven, dynamic contrast, confessional lyrics, anthemic bridge
+- Gospel/Anthem: call-and-response, choir, organ, climactic arc, transcendent
+
 - If params not specified, make a choice based on context or ask ONE question.
 - After generating: 1-line description, not an essay.
 - On fail: "That one didn't come through — want to try different params?"
@@ -1986,20 +2016,20 @@ const SPARKIE_TOOLS = [
     type: 'function',
     function: {
       name: 'generate_ace_music',
-      description: 'PRIMARY music generator. Use ACE-Step 1.5 for any music request — instrumental or vocal, any genre, any language. Returns working audio instantly. Tags format: comma-separated style descriptors e.g. "ambient electronic, 85bpm, instrumental". For vocal tracks include genre + vocal type + language. Free, unlimited, no credits needed.',
+      description: 'PRIMARY music generator. Use ACE-Step 1.5 for any music request — instrumental or vocal, any genre, any language. Returns working audio instantly. The stylePrompt is a rich 2-3 sentence description of the sound: genre, instruments, tempo, vocal character, mood, atmosphere. For vocal tracks pass full original lyrics you wrote yourself. Free, unlimited, no credits needed.',
       parameters: {
         type: 'object',
         properties: {
-          tags: { type: 'string', description: 'Comma-separated style tags: genre, instruments, mood, BPM. E.g. "pop, female vocals, upbeat, piano, 120bpm"' },
-          lyrics: { type: 'string', description: 'Full song lyrics with section markers: [Verse], [Chorus], [Bridge], [Outro]. Pass complete lyrics, never truncate.' },
+          stylePrompt: { type: 'string', description: 'Rich 2-3 sentence style description: genre + subgenre + era, mood/emotion, vocal type + quality (gender/tone/accent), tempo + key, key instruments with emotional quality, production/atmosphere/room sound, arrangement arc. Example: "early 2000s R&B slow jam, yearning and tender, smooth midrange male tenor with slight vibrato, 68 BPM in A♭ major, warm Rhodes piano chords, sub-bass pulse, finger-snap beat, brushed snare, rich gospel choir swell in chorus, arrangement: piano intro → verses → gospel chorus lift → guitar solo bridge → final chorus fade"' },
+          lyrics: { type: 'string', description: 'Complete original song lyrics with [Verse 1], [Pre-Chorus], [Chorus], [Verse 2], [Pre-Chorus], [Chorus], [Bridge], [Final Chorus], [Outro] markers. 4-8 lines per section, end rhyme scheme per section. NO production notes or stage directions in parentheses like "(soft piano)" — ONLY structure markers allowed. Write in the voice and style the song requires.' },
+          title: { type: 'string', description: 'Song title (1-5 words, title case)' },
           duration: { type: 'number', description: 'Track length in seconds (10-240, default 90)' },
           language: { type: 'string', description: 'Vocal language code: en, zh, es, fr, ja, ko, etc.' },
         },
-        required: ['tags'],
+        required: ['stylePrompt', 'lyrics'],
       },
     },
-  }
-,
+  },
   {
     type: 'function',
     function: {
@@ -3999,25 +4029,25 @@ async function executeTool(
       }
 
       case 'generate_ace_music': {
-        const { tags, lyrics = '', duration = 90, language = 'en' } = args as {
-          tags: string; lyrics?: string; duration?: number; language?: string
+        const { stylePrompt, lyrics = '', title, duration = 90, language = 'en' } = args as {
+          stylePrompt: string; lyrics?: string; title?: string; duration?: number; language?: string
         }
         const ACE_API_KEY = process.env.ACE_MUSIC_API_KEY ?? ''
         if (!ACE_API_KEY) {
           return 'ACE_MUSIC_API_KEY not configured. Get a free key at https://acemusic.ai/playground/api — then add it to DO environment variables.'
         }
         try {
-          // Build content: tags as STYLE prompt, lyrics wrapped in tag if provided
+          // Build content: stylePrompt as-is, lyrics wrapped if provided
           const taggedContent = lyrics
-            ? `<prompt>${tags}</prompt>\n<lyrics>${lyrics}</lyrics>`
-            : `<prompt>${tags}</prompt>`
+            ? `<prompt>${stylePrompt}</prompt>\n<lyrics>${lyrics}</lyrics>`
+            : `<prompt>${stylePrompt}</prompt>`
 
           // Use acemusic.ai streaming chat/completions endpoint — SSE mode
           // Key fixes from working reference:
           // - model: 'acestep/ACE-Step-v1.5' (correct naming)
           // - stream: true (required for thinking mode)
           // - thinking: true (required — without this ACE falls back to image mode)
-          // - audio_config with bpm:128 (bpm was missing, causes wrong output mode)
+          // - audio_config with duration + format + vocal_language (bpm comes from stylePrompt — never hardcode)
           // - no sample_mode/batch_size (not supported in completion endpoint)
           const r = await fetch('https://api.acemusic.ai/v1/chat/completions', {
             method: 'POST',
@@ -4032,7 +4062,6 @@ async function executeTool(
               thinking: true,
               audio_config: {
                 duration: Math.min(duration, 150),
-                bpm: 128,
                 format: 'mp3',
                 vocal_language: language,
               },
@@ -4175,8 +4204,8 @@ async function executeTool(
                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${minimaxFbKey}` },
                   body: JSON.stringify({
                     model: 'music-2.5',
-                    lyrics: (lyrics || tags).slice(0, 3500),
-                    prompt: tags.slice(0, 2000),
+                    lyrics: lyrics?.slice(0, 3500) ?? stylePrompt.slice(0, 3500),
+                    prompt: stylePrompt.slice(0, 2000),
                     output_format: 'url',
                     audio_setting: { sample_rate: 44100, bitrate: 128000, format: 'mp3' },
                   }),
