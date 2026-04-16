@@ -268,7 +268,7 @@ export function TopicsPanel() {
           </>
         )}
 
-        {topics.length > 0 && (
+        {topics.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center px-6 py-10 gap-3">
             <div className="w-12 h-12 rounded-2xl bg-honey-500/8 flex items-center justify-center">
               <Layers size={18} className="text-honey-500/60" />

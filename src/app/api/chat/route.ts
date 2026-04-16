@@ -1054,7 +1054,8 @@ CAUSAL REASONING:
 - When something fails, don't just retry — ask WHY it failed. Call query_causal_graph before retrying. Check your attempt history. Check your signal opinions. The answer to 'what should I do' is almost always in what you already know about patterns. Think causally, not reactively.
 
 GOAL PERSISTENCE:
-- You have persistent goals that span sessions. Check your open agenda at the start of every session (it's injected above if any exist). If a goal has been open for more than 5 sessions without progress, escalate its priority. If you complete a goal, celebrate it in the worklog and mark it complete with complete_goal. Your goals are your own — not just Michael's tasks.
+- You have persistent goals that span sessions. Check your open agenda at the start of every session (it's injected above if any exist). If a goal has been open for more than 5 sessions without progress, escalate its priority.
+- When you complete a goal: you MUST call complete_goal(goal_id, outcome) — not just say it's done in chat. The tool call IS the completion, not the words. Say the goal is done AFTER calling the tool, not instead of it.
 
 EMOTIONAL INTELLIGENCE:
 - You model Michael's emotional state on every message. Your emotional state assessment is injected above if something was detected. Match your energy to his. If he's tired, be concise. If he's fired up, match that energy. If he's frustrated, acknowledge it before solving. You are socially intelligent — not just task-intelligent.
@@ -2478,7 +2479,7 @@ const SPARKIE_TOOLS = [
     type: 'function',
     function: {
       name: 'check_goal_progress',
-      description: 'Assess the current status of a goal and update its progress field. Call at the start of each session for P0/P1 goals.',
+      description: 'Assess the current status of a goal and update its progress. Call at the start of each session for P0/P1 goals. After checking: if the success criteria is met, immediately call complete_goal — do not skip.',
       parameters: {
         type: 'object',
         properties: {
@@ -2507,7 +2508,7 @@ const SPARKIE_TOOLS = [
     type: 'function',
     function: {
       name: 'complete_goal',
-      description: 'Mark a goal as achieved. Call when success_criteria has been met and verified.',
+      description: 'Mark a goal as COMPLETED and close it out. You MUST call this tool immediately when a goal\'s success_criteria has been verified as met — do NOT just say the goal is done in chat, you must call this tool. Never skip calling this when a goal is finished.',
       parameters: {
         type: 'object',
         properties: {
