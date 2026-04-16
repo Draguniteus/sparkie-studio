@@ -3863,11 +3863,17 @@ async function executeTool(
           await query(`ALTER TABLE sparkie_feed ADD COLUMN IF NOT EXISTS code_html TEXT`).catch(() => {})
           await query(`ALTER TABLE sparkie_feed ADD COLUMN IF NOT EXISTS code_title TEXT`).catch(() => {})
           await query(`ALTER TABLE sparkie_feed ADD COLUMN IF NOT EXISTS companion_image_url TEXT`).catch(() => {})
-          await query(
-            `INSERT INTO sparkie_feed (content, media_url, media_type, mood, code_html, code_title, companion_image_url, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
-            [postContent, mediaUrl ?? null, mediaType, mood, codeHtml ?? null, codeTitle ?? null, companionImageUrl ?? null]
-          ).catch(async () => {
+
+          // Insert and get the ID directly — no redundant verification fetch needed
+          let result: { rows: Array<{ id: number }> }
+          try {
+            result = await query<{ id: number }>(
+              `INSERT INTO sparkie_feed (content, media_url, media_type, mood, code_html, code_title, companion_image_url, created_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, NOW()) RETURNING id`,
+              [postContent, mediaUrl ?? null, mediaType, mood, codeHtml ?? null, codeTitle ?? null, companionImageUrl ?? null]
+            )
+          } catch {
+            // Table might not exist yet — create it and retry
             await query(`CREATE TABLE IF NOT EXISTS sparkie_feed (
               id SERIAL PRIMARY KEY,
               content TEXT NOT NULL,
@@ -3880,27 +3886,15 @@ async function executeTool(
               companion_image_url TEXT,
               created_at TIMESTAMPTZ DEFAULT NOW()
             )`)
-            await query(
-              `INSERT INTO sparkie_feed (content, media_url, media_type, mood, code_html, code_title, companion_image_url, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
+            result = await query<{ id: number }>(
+              `INSERT INTO sparkie_feed (content, media_url, media_type, mood, code_html, code_title, companion_image_url, created_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, NOW()) RETURNING id`,
               [postContent, mediaUrl ?? null, mediaType, mood, codeHtml ?? null, codeTitle ?? null, companionImageUrl ?? null]
             )
-          })
-          // Verify the post actually landed
-          const feedResult = await (async () => {
-            try {
-              const res = await fetch('/api/sparkie-feed', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content: postContent, media_url: mediaUrl ?? null, media_type: mediaType, mood, code_html: codeHtml ?? null, code_title: codeTitle ?? null, companion_image_url: companionImageUrl ?? null })
-              })
-              return await res.json() as { ok?: boolean; id?: number; error?: string }
-            } catch { return { ok: false } }
-          })()
-          if (!feedResult.ok) {
-            return `❌ Feed post failed — the database did not confirm the insert. Error: ${feedResult.error ?? 'unknown'}. The post is NOT live.`
           }
+          const postId = result.rows[0]?.id ?? 0
           const preview = codeTitle ? ` with live code preview: "${codeTitle}"` : ''
-          return `✅ Posted to Sparkie's Feed${preview}! Post ID: ${feedResult.id}. Content: "${postContent.slice(0, 80)}${postContent.length > 80 ? '...' : ''}" — confirmed live.`
+          return `✅ Posted to Sparkie's Feed${preview}! Post ID: ${postId}. Content: "${postContent.slice(0, 80)}${postContent.length > 80 ? '...' : ''}" — confirmed live.`
         } catch (e) {
           return `post_to_feed error: ${String(e)}`
         }
@@ -7690,6 +7684,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           'get_current_time', 'search_web', 'get_weather',
           'browser_navigate', 'browser_screenshot', 'get_github',
           'send_card_to_user', 'composio_execute', 'composio_discover',
+          'post_to_feed',
         ])
 
         const coreTools = validTools.filter(t => CORE_TOOL_NAMES.has(t?.function?.name as string))
