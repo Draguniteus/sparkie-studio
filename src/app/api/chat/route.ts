@@ -4205,7 +4205,20 @@ async function executeTool(
               if (!foundUrl && typeof chunk.audio_url === 'string') {
                 foundUrl = chunk.audio_url
               }
-              // Check chunk.choices[0].message.audio (standard OpenAI audio response format)
+              // Check chunk.choices[0].delta.audio (streaming audio in delta — used during streaming response)
+              if (!foundUrl) {
+                const choices = chunk.choices as Array<{ delta?: { audio?: Array<{ audio_url?: { url?: string } | string }> } }> | undefined
+                const audioArr = choices?.[0]?.delta?.audio
+                if (Array.isArray(audioArr)) {
+                  for (const item of audioArr) {
+                    let u: string | undefined
+                    if (typeof item.audio_url === 'string') u = item.audio_url
+                    else if (typeof item.audio_url === 'object' && item.audio_url !== null) u = (item.audio_url as Record<string, unknown>).url as string | undefined
+                    if (u) { foundUrl = u; break }
+                  }
+                }
+              }
+              // Check chunk.choices[0].message.audio (non-streaming audio response format)
               if (!foundUrl) {
                 const choices = chunk.choices as Array<{ message?: { audio?: Array<{ audio_url?: { url?: string } | string }> } }> | undefined
                 const audioArr = choices?.[0]?.message?.audio
