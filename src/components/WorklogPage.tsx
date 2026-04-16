@@ -100,7 +100,7 @@ const TYPE_CONFIG: Record<string, {
     actionBadge: () => 'Skipped',
   },
   ai_response:      {
-    icon: CheckCircle, color: 'text-emerald-400', bg: 'bg-emerald-400/8', border: 'border-l-emerald-400/50',
+    icon: CheckCircle, color: 'text-honey-400', bg: 'bg-honey-500/8', border: 'border-l-honey-500/50',
     label: 'Response sent',
     actionBadge: () => "I've sent you a message",
   },
@@ -191,30 +191,23 @@ function groupEntries(entries: WorklogEntry[]): RenderItem[] {
   return result
 }
 
-/** Memory "I've learned something new" card — purple gradient */
+/** Memory "I've learned something new" — inline, no box */
 function MemoryCard({ entry }: { entry: WorklogEntry }) {
   const cfg = TYPE_CONFIG[entry.type] ?? DEFAULT_CONFIG
   const meta = entry.metadata ?? {}
   return (
-    <div className="mx-4 my-1 rounded-xl overflow-hidden border border-purple-500/20 bg-gradient-to-br from-purple-950/60 via-indigo-950/40 to-purple-900/30 shadow-sm">
-      <div className="flex items-center gap-2 px-3 pt-3 pb-1">
-        <div className="w-5 h-5 rounded-md bg-purple-500/20 flex items-center justify-center shrink-0">
-          <Brain size={11} className="text-purple-400" />
-        </div>
-        <span className="text-[10px] font-bold text-purple-300 uppercase tracking-widest">I&apos;ve learned something new</span>
-        {!!meta.category && (
-          <span className="ml-auto text-[9px] px-2 py-0.5 rounded-full bg-purple-500/20 border border-purple-500/30 text-purple-300 font-medium capitalize">
-            {String(meta.category).replace(/_/g, ' ')}
-          </span>
-        )}
-      </div>
-      <div className="px-3 pb-3 pt-0.5">
-        <p className="text-[11px] text-purple-100/80 leading-relaxed italic">
-          &ldquo;{entry.content}&rdquo;
-        </p>
-        <div className="flex items-center gap-2 mt-1.5">
-          <span className="text-[9px] text-purple-400/60 tabular-nums">{formatTime(entry.created_at)}</span>
-          <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${cfg.bg} ${cfg.color}`}>{cfg.label}</span>
+    <div className="flex items-start gap-2 px-4 py-2">
+      <Brain size={11} className="text-purple-400 shrink-0 mt-0.5" />
+      <div className="flex-1 min-w-0">
+        <p className="text-[11px] text-text-primary leading-relaxed italic">"{entry.content}"</p>
+        <div className="flex items-center gap-2 mt-0.5">
+          <span className="text-[9px] text-purple-400 tabular-nums">{formatTime(entry.created_at)}</span>
+          <span className={`text-[9px] font-medium ${cfg.color}`}>{cfg.label}</span>
+          {!!meta.category && (
+            <span className="text-[9px] text-text-muted capitalize">
+              {String(meta.category).replace(/_/g, ' ')}
+            </span>
+          )}
         </div>
       </div>
     </div>
@@ -258,8 +251,8 @@ function EntryCard({ entry }: { entry: WorklogEntry }) {
         <span className="text-[9px] text-text-muted tabular-nums leading-none">{formatTime(entry.created_at)}</span>
       </div>
 
-      {/* Icon */}
-      <div className={`w-6 h-6 rounded-lg ${cfg.bg} flex items-center justify-center shrink-0 mt-0.5`}>
+      {/* Icon — no background box */}
+      <div className="shrink-0 mt-0.5">
         <Icon size={11} className={cfg.color} />
       </div>
 
@@ -289,18 +282,18 @@ function EntryCard({ entry }: { entry: WorklogEntry }) {
           </div>
         )}
 
-        {/* Inner monologue — italics, Sparkie's personality */}
-        <p className="text-[11px] text-text-secondary leading-relaxed break-words italic">{entry.content}</p>
+        {/* Inner monologue — bright text, not faded grey */}
+        <p className="text-[11px] text-text-primary leading-relaxed break-words">{entry.content}</p>
 
         {/* Conclusion if present */}
         {entry.conclusion && entry.conclusion !== entry.content && (
-          <p className="text-[10px] text-text-muted mt-0.5 not-italic">{entry.conclusion}</p>
+          <p className="text-[10px] text-honey-400 mt-0.5 not-italic">{entry.conclusion}</p>
         )}
 
-        {/* Bottom row: category badge + action badge */}
+        {/* Bottom row: category badge + action badge — no background boxes */}
         <div className="flex items-center gap-1.5 flex-wrap mt-1">
           {actionBadge && (
-            <span className={`text-[9px] px-2 py-0.5 rounded-full font-medium ${cfg.bg} ${cfg.color}`}>
+            <span className={`text-[9px] font-medium ${cfg.color}`}>
               {actionBadge}
             </span>
           )}
