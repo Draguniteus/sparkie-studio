@@ -63,56 +63,38 @@ function ContextPill({ label, color = "amber" }: { label: string; color?: "amber
   )
 }
 
-// ── Memory / learning card ───────────────────────────────────────────────────
+// ── Memory / learning — inline, no box ───────────────────────────────────────
 function MemoryTimelineEntry({ entry }: { entry: WorklogEntry }) {
   const isNew = (Date.now() - new Date((entry.created_at ?? entry.timestamp) as string | Date).getTime()) < 86_400_000
-  const label = isNew ? "I've learned something new:" : "I already knew this:"
   const tagLabel = isNew ? "Work Rule" : "Profile"
   const tagColor = isNew ? "purple" : "blue"
   return (
-    <div className="pl-3 py-0.5">
-      <p className="text-[10px] text-text-muted mb-1.5 flex items-center gap-1.5">
-        <span className={`w-1.5 h-1.5 rounded-full ${isNew ? "bg-purple-400" : "bg-blue-400"}`} />
-        {label}
-      </p>
-      <div className={`rounded-xl border p-3 ${isNew
-        ? "bg-gradient-to-br from-purple-900/50 to-purple-950/70 border-purple-500/40"
-        : "bg-gradient-to-br from-blue-900/40 to-blue-950/60 border-blue-500/30"
-      }`}>
-        <div className="flex items-start gap-2">
-          <div className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 mt-0.5 ${isNew ? "bg-purple-600/25" : "bg-blue-600/25"}`}>
-            <Brain size={11} className={isNew ? "text-purple-300" : "text-blue-300"} />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs text-text-secondary leading-relaxed break-words">{entry.content}</p>
-            <div className="flex items-center gap-2 mt-1.5">
-              <ContextPill label={tagLabel} color={tagColor} />
-              <span className="text-[9px] text-text-muted">{formatTime(entry.created_at ?? entry.timestamp)}</span>
-            </div>
-          </div>
+    <div className="flex items-start gap-2">
+      <Brain size={11} className={`shrink-0 mt-0.5 ${isNew ? "text-purple-400" : "text-blue-400"}`} />
+      <div className="flex-1 min-w-0">
+        <p className="text-xs text-text-primary leading-relaxed break-words">{entry.content}</p>
+        <div className="flex items-center gap-2 mt-0.5">
+          <ContextPill label={tagLabel} color={tagColor} />
+          <span className="text-[9px] text-text-muted">{formatTime(entry.created_at ?? entry.timestamp)}</span>
         </div>
       </div>
     </div>
   )
 }
 
-// ── AI inner monologue / reasoning quote ────────────────────────────────────
+// ── AI inner monologue / reasoning — inline like ProcessTab, no box ───────────
 function MonologueEntry({ entry }: { entry: WorklogEntry }) {
   return (
-    <div className="pl-3 py-0.5">
-      <div className="rounded-xl border border-purple-500/25 bg-gradient-to-br from-purple-900/30 to-slate-950/40 p-3">
-        <div className="flex items-start gap-2">
-          <span className="text-blue-400/60 text-lg leading-none mt-0.5 shrink-0">"</span>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs text-text-secondary leading-relaxed italic break-words">{entry.content}</p>
-            {entry.reasoning && (
-              <p className="text-[10px] text-text-muted mt-1 leading-relaxed italic opacity-70">{entry.reasoning}</p>
-            )}
-            <div className="flex items-center gap-2 mt-1.5">
-              <span className="text-[9px] text-text-muted">{formatTime(entry.created_at ?? entry.timestamp)}</span>
-              <span className="text-[10px] text-blue-300/70 flex items-center gap-1"><Eye size={9} /> Updated what I knew.</span>
-            </div>
-          </div>
+    <div className="flex items-start gap-2">
+      <span className="text-blue-400/60 text-lg leading-none mt-0.5 shrink-0">"</span>
+      <div className="flex-1 min-w-0">
+        <p className="text-xs text-text-primary leading-relaxed italic break-words">{entry.content}</p>
+        {entry.reasoning && (
+          <p className="text-[10px] text-purple-300 mt-0.5 leading-relaxed italic">{entry.reasoning}</p>
+        )}
+        <div className="flex items-center gap-2 mt-0.5">
+          <span className="text-[9px] text-text-muted">{formatTime(entry.created_at ?? entry.timestamp)}</span>
+          <span className="text-[10px] text-blue-400 flex items-center gap-1"><Eye size={9} /> Updated what I knew.</span>
         </div>
       </div>
     </div>
@@ -139,7 +121,7 @@ function EmailEntry({ entry }: { entry: WorklogEntry }) {
     <div className="pl-3 py-0.5">
       <div className="flex items-center gap-2 flex-wrap">
         <Mail size={11} className={isAlert ? "text-red-400" : "text-blue-400"} />
-        <span className="text-[11px] text-text-secondary">{entry.content.length > 60 ? entry.content.slice(0,60)+"…" : entry.content}</span>
+        <span className="text-[11px] text-text-primary">{entry.content.length > 60 ? entry.content.slice(0,60)+"…" : entry.content}</span>
         {!!(entry.metadata && (entry.metadata as Record<string,unknown>).from) ? (
           <ContextPill label={String((entry.metadata as Record<string,unknown>).from).split("<")[0].trim().slice(0,25)} color={isAlert ? "red" : "blue"} />
         ) : null}
@@ -149,15 +131,15 @@ function EmailEntry({ entry }: { entry: WorklogEntry }) {
   )
 }
 
-// ── Message sent / received entry ───────────────────────────────────────────
+// ── Message sent / received entry — clean inline, no box ──────────────────────
 function MessageEntry({ entry, isSent }: { entry: WorklogEntry; isSent: boolean }) {
   return (
-    <div className="pl-3 py-0.5">
-      <div className="flex items-center gap-2 flex-wrap">
-        {isSent ? <Send size={10} className="text-blue-400" /> : <MessageSquare size={10} className="text-slate-400" />}
-        <span className="text-[11px] text-text-secondary">{isSent ? "I've sent you a message." : entry.content}</span>
-        <span className="text-[10px] text-text-muted">{formatTime(entry.created_at ?? entry.timestamp)}</span>
-      </div>
+    <div className="flex items-center gap-1.5 flex-wrap">
+      {isSent ? <Send size={10} className="text-blue-400 shrink-0" /> : <MessageSquare size={10} className="text-slate-400 shrink-0" />}
+      <span className={`text-[11px] ${isSent ? "text-honey-300 font-medium" : "text-text-secondary italic"}`}>
+        {isSent ? "You just sent me a message" : entry.content}
+      </span>
+      <span className="text-[10px] text-text-muted">{formatTime(entry.created_at ?? entry.timestamp)}</span>
     </div>
   )
 }
@@ -272,7 +254,7 @@ function StandardEntry({ entry }: { entry: WorklogEntry }) {
   const lc = labelColors[entry.type] ?? 'text-text-secondary'
 
   return (
-    <div className={`pl-3 py-0.5 border-l-2 ${borderColor} hover:bg-purple-500/5 hover:shadow-[0_0_12px_rgba(168,85,247,0.1)] transition-colors rounded-r-lg`}>
+    <div className={`border-l-2 ${borderColor}`}>
       {/* Top row: icon + label + timestamp + badges */}
       <div className="flex items-center gap-1.5 flex-wrap">
         {(entry.icon ?? DEFAULT_TYPE_ICONS[entry.type]) && (
@@ -292,21 +274,21 @@ function StandardEntry({ entry }: { entry: WorklogEntry }) {
         )}
         {isRunning && <Loader2 size={9} className="animate-spin text-amber-400" />}
       </div>
-      {/* Content text — actual substance */}
+      {/* Content text */}
       {entry.content && (
-        <p className="text-xs text-text-secondary mt-1 break-words leading-relaxed pl-0.5">
+        <p className="text-xs text-text-primary mt-0.5 break-words leading-relaxed">
           {entry.content}
         </p>
       )}
-      {/* Result preview section */}
+      {/* Result preview — inline, no box */}
       {entry.result_preview && (
-        <p className="text-[10px] text-honey-300/90 mt-1 pl-2 border-l border-purple-500/40 leading-relaxed bg-purple-500/10 rounded-r-sm">
+        <p className="text-[10px] text-honey-400 mt-0.5 leading-relaxed">
           → {entry.result_preview}
         </p>
       )}
-      {/* Conclusion */}
+      {/* Conclusion — inline, no box */}
       {entry.conclusion && (
-        <p className="text-[10px] text-honey-400 mt-1 font-medium leading-relaxed">
+        <p className="text-[10px] text-emerald-400 mt-0.5 leading-relaxed">
           ✓ {entry.conclusion}
         </p>
       )}
@@ -323,7 +305,7 @@ function StandardEntry({ entry }: { entry: WorklogEntry }) {
         <div className="mt-1 pl-0.5">
           {!reasoningExpanded ? (
             <div className="flex items-start gap-1.5">
-              <span className="text-[10px] text-purple-300/70 italic leading-relaxed">
+              <span className="text-[10px] text-purple-300 italic leading-relaxed">
                 {entry.reasoning!.slice(0, 100)}…
               </span>
               <button
@@ -335,7 +317,7 @@ function StandardEntry({ entry }: { entry: WorklogEntry }) {
             </div>
           ) : (
             <div className="flex items-start gap-1.5">
-              <span className="text-[10px] text-purple-300/70 italic leading-relaxed">
+              <span className="text-[10px] text-purple-300 italic leading-relaxed">
                 {entry.reasoning}
               </span>
               <button
@@ -589,11 +571,11 @@ export function Worklog({ compact = false }: WorklogProps) {
 
       {/* Timeline */}
       <div className="flex-1 overflow-y-auto px-4 py-3">
-        {/* Entry count header */}
-        <div className="flex items-center gap-2 px-3 py-2 border-b border-purple-500/20 text-[11px] text-text-muted bg-gradient-to-r from-purple-900/15 via-hive-elevated to-amber-900/10">
+        {/* Entry count header — no background box */}
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 text-[11px] text-text-muted">
           <span>{filteredWorklog.length} entries</span>
           <span>·</span>
-          <span className="text-amber-400 flex items-center gap-1 animate-pulse">
+          <span className="text-amber-400 flex items-center gap-1">
             <Activity size={10} /> Watching for signals
           </span>
         </div>
@@ -646,30 +628,30 @@ export function Worklog({ compact = false }: WorklogProps) {
                        entry.reasoning  ? <MonologueEntry entry={entry} /> :
                                           <StandardEntry entry={entry} />
                       }
-                      {/* Expanded detail panel */}
+                      {/* Expanded detail panel — no box, just subtle left border */}
                       {isExpanded && (
-                        <div className="mt-2 p-2 rounded-lg bg-hive-elevated border border-hive-border/60 flex flex-col gap-1.5">
+                        <div className="mt-1 pl-2 border-l border-white/10 flex flex-col gap-1">
                           {(entry as any).reasoning && (
                             <div>
                               <span className="text-[9px] text-purple-400 uppercase font-semibold tracking-wide">Reasoning</span>
-                              <p className="text-[10px] text-purple-200/80 italic leading-relaxed mt-0.5">{(entry as any).reasoning}</p>
+                              <p className="text-[10px] text-purple-200 italic leading-relaxed mt-0.5">{(entry as any).reasoning}</p>
                             </div>
                           )}
                           {(entry as any).conclusion && (
                             <div>
                               <span className="text-[9px] text-emerald-400 uppercase font-semibold tracking-wide">Conclusion</span>
-                              <p className="text-[10px] text-emerald-300/80 leading-relaxed mt-0.5">✓ {(entry as any).conclusion}</p>
+                              <p className="text-[10px] text-emerald-300 leading-relaxed mt-0.5">✓ {(entry as any).conclusion}</p>
                             </div>
                           )}
                           {(entry as any).metadata && (
                             <div>
                               <span className="text-[9px] text-text-muted uppercase font-semibold tracking-wide">Metadata</span>
-                              <pre className="text-[9px] text-text-muted/60 mt-0.5 overflow-x-auto whitespace-pre-wrap leading-relaxed">
+                              <pre className="text-[9px] text-text-muted mt-0.5 overflow-x-auto whitespace-pre-wrap leading-relaxed">
                                 {JSON.stringify((entry as any).metadata, null, 2)}
                               </pre>
                             </div>
                           )}
-                          <div className="flex items-center gap-2 mt-1">
+                          <div className="flex items-center gap-2">
                             <span className="text-[9px] text-text-muted/40">{entry.type}</span>
                             {(entry as any).duration != null && (
                               <span className="text-[9px] text-text-muted/40">· {formatDuration((entry as any).duration)}</span>
