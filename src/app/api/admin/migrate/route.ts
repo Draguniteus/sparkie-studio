@@ -126,8 +126,11 @@ ALTER TABLE sparkie_topics ADD COLUMN IF NOT EXISTS last_round INT DEFAULT 0;
 ALTER TABLE sparkie_topics ADD COLUMN IF NOT EXISTS step_count INT DEFAULT 0;
 ALTER TABLE sparkie_topics ADD COLUMN IF NOT EXISTS original_request TEXT;
 ALTER TABLE sparkie_topics ADD COLUMN IF NOT EXISTS topic_type TEXT DEFAULT 'chat';
+-- Ensure id is UUID (may have been TEXT from prior partial run)
+ALTER TABLE sparkie_topics ALTER COLUMN id TYPE UUID USING id::uuid;
 
-CREATE TABLE IF NOT EXISTS sparkie_topic_threads (
+DROP TABLE IF EXISTS sparkie_topic_threads CASCADE;
+CREATE TABLE sparkie_topic_threads (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   topic_id    UUID NOT NULL,
   source_type TEXT NOT NULL,
@@ -136,11 +139,12 @@ CREATE TABLE IF NOT EXISTS sparkie_topic_threads (
   created_at  TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE(topic_id, source_type, source_id)
 );
-ALTER TABLE sparkie_topic_threads ALTER COLUMN topic_id TYPE UUID USING topic_id::uuid;
+-- Ensure sparkie_topics.id is UUID (may have been TEXT from prior partial runs)
+ALTER TABLE sparkie_topics ALTER COLUMN id TYPE UUID USING id::uuid;
 ALTER TABLE sparkie_topic_threads ADD CONSTRAINT fk_topic_threads_topic
   FOREIGN KEY (topic_id) REFERENCES sparkie_topics(id) ON DELETE CASCADE;
-CREATE INDEX IF NOT EXISTS idx_sparkie_topic_threads_topic_id ON sparkie_topic_threads(topic_id);
-CREATE INDEX IF NOT EXISTS idx_sparkie_topic_threads_source ON sparkie_topic_threads(source_type, source_id);
+CREATE INDEX idx_sparkie_topic_threads_topic_id ON sparkie_topic_threads(topic_id);
+CREATE INDEX idx_sparkie_topic_threads_source ON sparkie_topic_threads(source_type, source_id);
 
 -- ── Phase 4: Contact Notes Table ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS sparkie_contacts (
