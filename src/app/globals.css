@@ -146,6 +146,10 @@ html, body {
     box-shadow: 0 0 20px var(--honey-glow), 0 0 40px rgba(255, 195, 11, 0.05);
   }
 
+  .glow-purple {
+    box-shadow: 0 0 20px rgba(168, 85, 247, 0.2), 0 0 40px rgba(168, 85, 247, 0.08);
+  }
+
   .text-gradient-honey {
     background: linear-gradient(135deg, #FFD700, #FFC30B, #E5A800);
     -webkit-background-clip: text;

@@ -69,7 +69,7 @@ function MemoryTimelineEntry({ entry }: { entry: WorklogEntry }) {
   const tagLabel = isNew ? "Work Rule" : "Profile"
   const tagColor = isNew ? "purple" : "blue"
   return (
-    <div className="flex items-start gap-2">
+    <div className={`flex items-start gap-2 border-l-2 ${isNew ? 'border-purple-500/40 bg-purple-900/50 to-purple-950/70' : 'border-blue-500/30 bg-blue-900/40 to-blue-950/60'} pl-2 rounded-r`}>
       <Brain size={11} className={`shrink-0 mt-0.5 ${isNew ? "text-purple-400" : "text-blue-400"}`} />
       <div className="flex-1 min-w-0">
         <p className="text-xs text-text-primary leading-relaxed break-words">{entry.content}</p>
@@ -85,8 +85,8 @@ function MemoryTimelineEntry({ entry }: { entry: WorklogEntry }) {
 // ── AI inner monologue / reasoning — inline like ProcessTab, no box ───────────
 function MonologueEntry({ entry }: { entry: WorklogEntry }) {
   return (
-    <div className="flex items-start gap-2">
-      <span className="text-blue-400/60 text-lg leading-none mt-0.5 shrink-0">"</span>
+    <div className="flex items-start gap-2 border-l-2 border-purple-500/25 pl-2">
+      <span className="text-purple-400/60 text-lg leading-none mt-0.5 shrink-0">"</span>
       <div className="flex-1 min-w-0">
         <p className="text-xs text-text-primary leading-relaxed italic break-words">{entry.content}</p>
         {entry.reasoning && (
@@ -94,7 +94,7 @@ function MonologueEntry({ entry }: { entry: WorklogEntry }) {
         )}
         <div className="flex items-center gap-2 mt-0.5">
           <span className="text-[9px] text-text-muted">{formatTime(entry.created_at ?? entry.timestamp)}</span>
-          <span className="text-[10px] text-blue-400 flex items-center gap-1"><Eye size={9} /> Updated what I knew.</span>
+          <span className="text-[10px] text-purple-400 flex items-center gap-1"><Eye size={9} /> Updated what I knew.</span>
         </div>
       </div>
     </div>
@@ -282,13 +282,13 @@ function StandardEntry({ entry }: { entry: WorklogEntry }) {
       )}
       {/* Result preview — inline, no box */}
       {entry.result_preview && (
-        <p className="text-[10px] text-honey-400 mt-0.5 leading-relaxed">
+        <p className="text-[10px] text-purple-400/80 mt-0.5 leading-relaxed">
           → {entry.result_preview}
         </p>
       )}
       {/* Conclusion — inline, no box */}
       {entry.conclusion && (
-        <p className="text-[10px] text-emerald-400 mt-0.5 leading-relaxed">
+        <p className="text-[10px] text-honey-400 mt-0.5 leading-relaxed">
           ✓ {entry.conclusion}
         </p>
       )}
@@ -572,10 +572,10 @@ export function Worklog({ compact = false }: WorklogProps) {
       {/* Timeline */}
       <div className="flex-1 overflow-y-auto px-4 py-3">
         {/* Entry count header — no background box */}
-        <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 text-[11px] text-text-muted">
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 bg-gradient-to-r from-purple-900/20 via-hive-elevated to-amber-900/10 text-[11px] text-text-muted">
           <span>{filteredWorklog.length} entries</span>
           <span>·</span>
-          <span className="text-amber-400 flex items-center gap-1">
+          <span className="text-amber-400 flex items-center gap-1 animate-pulse">
             <Activity size={10} /> Watching for signals
           </span>
         </div>
@@ -669,7 +669,7 @@ export function Worklog({ compact = false }: WorklogProps) {
             {isExecuting && (
               <div className="flex gap-3">
                 <div className="flex flex-col items-center shrink-0">
-                  <div className="w-[11px] h-[11px] rounded-full bg-amber-400 shadow-sm shadow-amber-400/40 animate-pulse mt-1" />
+                  <div className="w-[13px] h-[13px] rounded-full bg-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.6)] animate-pulse mt-1" />
                 </div>
                 <div className="flex-1 min-w-0 pb-3 pl-3">
                   <div className="flex items-center gap-2">
