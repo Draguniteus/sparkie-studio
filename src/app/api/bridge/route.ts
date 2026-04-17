@@ -59,12 +59,24 @@ export async function GET(req: NextRequest) {
 //
 // Auth: Requires a valid session. Entries are tagged to the authenticated user's user_id.
 // This means entries from sparkie-prime are ONLY visible to Michael's session.
+//
+// OpenClaw (Sparkie Prime) authenticates via x-sparkie-secret header:
+//   POST with header x-sparkie-secret: <SPARKIE_INTERNAL_SECRET value>
 export async function POST(req: NextRequest) {
+  const secretHeader = req.headers.get('x-sparkie-secret') ?? ''
+  const isOpenClaw = secretHeader.length > 0 &&
+    secretHeader === process.env.SPARKIE_INTERNAL_SECRET
+
   const session = await getServerSession(authOptions)
-  if (!session?.user?.email) {
+
+  // Allow either session auth OR OpenClaw secret header
+  if (!session?.user?.email && !isOpenClaw) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
-  const userId = session.user.email as string
+
+  // Sparkie Prime (OpenClaw) writes as 'sparkie-prime' with a fixed placeholder user_id
+  // Studio Agent writes as 'studio-agent' with the session user's email
+  const userId = isOpenClaw ? 'sparkie-prime' : (session!.user!.email as string)
 
   try {
     const body = await req.json() as {
