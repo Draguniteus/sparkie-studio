@@ -169,6 +169,10 @@ CREATE TABLE IF NOT EXISTS sparkie_bridge (
   metadata    JSONB DEFAULT '{}',
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
+-- Add user_id to existing tables created before this column was added
+ALTER TABLE sparkie_bridge ADD COLUMN IF NOT EXISTS user_id TEXT;
+ALTER TABLE sparkie_bridge ALTER COLUMN user_id SET DEFAULT '';
+UPDATE sparkie_bridge SET user_id = 'draguniteus@gmail.com' WHERE user_id IS NULL OR user_id = '';
 CREATE INDEX IF NOT EXISTS idx_sparkie_bridge_user_id ON sparkie_bridge(user_id);
 CREATE INDEX IF NOT EXISTS idx_sparkie_bridge_author ON sparkie_bridge(author);
 CREATE INDEX IF NOT EXISTS idx_sparkie_bridge_created_at ON sparkie_bridge(created_at);
