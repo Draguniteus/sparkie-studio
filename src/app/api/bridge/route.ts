@@ -11,41 +11,66 @@ import { query } from '@/lib/db'
 // Returns bridge entries + worklog + feed for the authenticated user.
 // Called by: Sparkie Prime (OpenClaw) during heartbeats, or Studio Agent at session start.
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions)
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // Allow OpenClaw (Sparkie Prime) to read via x-sparkie-secret header
+  const secret = req.headers.get('x-sparkie-secret')
+  const isOpenClaw = secret && secret === process.env.SPARKIE_INTERNAL_SECRET
+
+  if (!isOpenClaw) {
+    const session = await getServerSession(authOptions)
+    if (!session?.user?.email) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    const userId = session.user.email as string
+    const { searchParams } = new URL(req.url)
+    const since = searchParams.get('since')
+
+    try {
+      const bridgeQuery = since
+        ? "SELECT id, author, type, content, metadata, created_at FROM sparkie_bridge WHERE user_id = $1 AND created_at > $2 ORDER BY created_at DESC LIMIT 30"
+        : "SELECT id, author, type, content, metadata, created_at FROM sparkie_bridge WHERE user_id = $1 ORDER BY created_at DESC LIMIT 30"
+      const bridgeParams = since ? [userId, since] : [userId]
+      const bridge = await query(bridgeQuery, bridgeParams)
+
+      const worklogQuery = since
+        ? "SELECT id, created_at, type, content, metadata FROM sparkie_worklog WHERE user_id = $1 AND created_at > $2 ORDER BY created_at DESC LIMIT 20"
+        : "SELECT id, created_at, type, content, metadata FROM sparkie_worklog WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20"
+      const worklogParams = since ? [userId, since] : [userId]
+      const worklog = await query(worklogQuery, worklogParams)
+
+      const feed = await query(
+        "SELECT id, created_at, content, media_url, media_type, mood FROM sparkie_feed WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20",
+        [userId]
+      )
+
+      return NextResponse.json({
+        user_id: userId,
+        bridge: bridge.rows,
+        worklog: worklog.rows,
+        feed: feed.rows,
+        synced_at: new Date().toISOString(),
+      })
+    } catch (e) {
+      return NextResponse.json({ error: String(e) }, { status: 500 })
+    }
   }
-  const userId = session.user.email as string
 
-  const { searchParams } = new URL(req.url)
-  const since = searchParams.get('since')
-
+  // OpenClaw path — read ALL recent entries (for heartbeat monitoring)
   try {
-    // Bridge entries written FOR this user (from sparkie-prime or from the studio agent)
-    const bridgeQuery = since
-      ? "SELECT id, author, type, content, metadata, created_at FROM sparkie_bridge WHERE user_id = $1 AND created_at > $2 ORDER BY created_at DESC LIMIT 30"
-      : "SELECT id, author, type, content, metadata, created_at FROM sparkie_bridge WHERE user_id = $1 ORDER BY created_at DESC LIMIT 30"
-    const bridgeParams = since ? [userId, since] : [userId]
-    const bridge = await query(bridgeQuery, bridgeParams)
-
-    // Recent worklog for this user
-    const worklogQuery = since
-      ? "SELECT id, created_at, type, content, metadata FROM sparkie_worklog WHERE user_id = $1 AND created_at > $2 ORDER BY created_at DESC LIMIT 20"
-      : "SELECT id, created_at, type, content, metadata FROM sparkie_worklog WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20"
-    const worklogParams = since ? [userId, since] : [userId]
-    const worklog = await query(worklogQuery, worklogParams)
-
-    // Recent feed posts for this user
-    const feed = await query(
-      "SELECT id, created_at, content, media_url, media_type, mood FROM sparkie_feed WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20",
-      [userId]
+    const { searchParams } = new URL(req.url)
+    const since = searchParams.get('since')
+    const sinceClause = since ? `AND created_at > '${since}'` : ''
+    const bridge = await query(
+      `SELECT id, user_id, author, type, content, metadata, created_at FROM sparkie_bridge WHERE 1=1 ${sinceClause} ORDER BY created_at DESC LIMIT 50`,
+      []
     )
-
+    const worklog = await query(
+      `SELECT id, user_id, created_at, type, content, metadata FROM sparkie_worklog WHERE 1=1 ${sinceClause} ORDER BY created_at DESC LIMIT 50`,
+      []
+    )
     return NextResponse.json({
-      user_id: userId,
+      source: 'sparkie-prime',
       bridge: bridge.rows,
       worklog: worklog.rows,
-      feed: feed.rows,
       synced_at: new Date().toISOString(),
     })
   } catch (e) {
@@ -57,9 +82,42 @@ export async function GET(req: NextRequest) {
 // Writes cross-agent context to the bridge. Primarily used by Sparkie Prime (OpenClaw)
 // to share learnings about Michael with the Studio Agent.
 //
-// Auth: Requires a valid session. Entries are tagged to the authenticated user's user_id.
-// This means entries from sparkie-prime are ONLY visible to Michael's session.
+// Auth: x-sparkie-secret header (from OpenClaw/Sparkie Prime) OR valid session (browser).
+// Entries are tagged to the authenticated user's user_id — or to 'draguniteus@gmail.com'
+// when using the secret header (since OpenClaw is Michael's local agent).
 export async function POST(req: NextRequest) {
+  const secret = req.headers.get('x-sparkie-secret')
+  const isOpenClaw = secret && secret === process.env.SPARKIE_INTERNAL_SECRET
+
+  if (isOpenClaw) {
+    // OpenClaw path — write as sparkie-prime, tagged to Michael's account
+    try {
+      const body = await req.json() as {
+        author: string
+        type?: string
+        content: string
+        metadata?: Record<string, unknown>
+      }
+      if (!body.author || !body.content) {
+        return NextResponse.json({ error: 'author and content required' }, { status: 400 })
+      }
+      if (!['sparkie-prime', 'studio-agent'].includes(body.author)) {
+        return NextResponse.json({ error: 'invalid author' }, { status: 400 })
+      }
+      // OpenClaw always writes to Michael's account
+      const michaelUserId = 'draguniteus@gmail.com'
+      await query(
+        `INSERT INTO sparkie_bridge (user_id, author, type, content, metadata, created_at)
+         VALUES ($1, $2, $3, $4, $5, NOW())`,
+        [michaelUserId, body.author, body.type || 'note', body.content, JSON.stringify(body.metadata || {})]
+      )
+      return NextResponse.json({ ok: true, user_id: michaelUserId, written_at: new Date().toISOString(), via: 'sparkie-prime' })
+    } catch (e) {
+      return NextResponse.json({ error: String(e) }, { status: 500 })
+    }
+  }
+
+  // Browser session path
   const session = await getServerSession(authOptions)
   if (!session?.user?.email) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -78,7 +136,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'author and content required' }, { status: 400 })
     }
 
-    // Guard: only sparkie-prime or studio-agent can write here
     if (!['sparkie-prime', 'studio-agent'].includes(body.author)) {
       return NextResponse.json({ error: 'invalid author' }, { status: 400 })
     }
