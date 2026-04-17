@@ -129,13 +129,16 @@ ALTER TABLE sparkie_topics ADD COLUMN IF NOT EXISTS topic_type TEXT DEFAULT 'cha
 
 CREATE TABLE IF NOT EXISTS sparkie_topic_threads (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  topic_id    UUID NOT NULL REFERENCES sparkie_topics(id) ON DELETE CASCADE,
+  topic_id    UUID NOT NULL,
   source_type TEXT NOT NULL,
   source_id   TEXT NOT NULL,
   summary     TEXT DEFAULT '',
   created_at  TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE(topic_id, source_type, source_id)
 );
+ALTER TABLE sparkie_topic_threads ALTER COLUMN topic_id TYPE UUID USING topic_id::uuid;
+ALTER TABLE sparkie_topic_threads ADD CONSTRAINT fk_topic_threads_topic
+  FOREIGN KEY (topic_id) REFERENCES sparkie_topics(id) ON DELETE CASCADE;
 CREATE INDEX IF NOT EXISTS idx_sparkie_topic_threads_topic_id ON sparkie_topic_threads(topic_id);
 CREATE INDEX IF NOT EXISTS idx_sparkie_topic_threads_source ON sparkie_topic_threads(source_type, source_id);
 
