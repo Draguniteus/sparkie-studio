@@ -159,6 +159,20 @@ CREATE INDEX IF NOT EXISTS idx_sparkie_contacts_email ON sparkie_contacts(email)
 -- ── Phase 5: user_memories category column (if not already present) ──────────
 ALTER TABLE user_memories ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'work_rule';
 
+-- ── Shared Mind Bridge ───────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS sparkie_bridge (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     TEXT NOT NULL,
+  author      TEXT NOT NULL,  -- 'sparkie-prime' or 'studio-agent'
+  type        TEXT DEFAULT 'note',  -- 'context', 'activity', 'preference', 'note'
+  content     TEXT NOT NULL,
+  metadata    JSONB DEFAULT '{}',
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_sparkie_bridge_user_id ON sparkie_bridge(user_id);
+CREATE INDEX IF NOT EXISTS idx_sparkie_bridge_author ON sparkie_bridge(author);
+CREATE INDEX IF NOT EXISTS idx_sparkie_bridge_created_at ON sparkie_bridge(created_at);
+
 
 INSERT INTO users (email, display_name, email_verified, role)
 VALUES ('draguniteus@gmail.com', 'Michael', true, 'owner')
