@@ -101,7 +101,6 @@ export function Sidebar() {
 
   // ── Mobile bottom nav ────────────────────────────────────────────────────────
   // Rendered on small screens via the md:hidden wrapper in page.tsx
-  const isMobileNav = typeof window !== 'undefined' && window.innerWidth < 768
 
   // Mobile bottom nav — fixed, full-width, icon bar
   const MobileBottomNav = () => (
@@ -233,18 +232,17 @@ export function Sidebar() {
         {/* Quick Nav */}
         <div className="px-2 flex gap-0.5 shrink-0">
           {[
-            { icon: Search,     label: 'Search',  key: 'search'     },
             { icon: FolderOpen, label: 'Assets',  key: 'assets'     },
             { icon: Image,      label: 'Gallery', key: 'images'     },
             { icon: Radio,      label: 'Radio',   key: 'radio'      },
             { icon: Plug,       label: 'Apps',    key: 'connectors' },
             { icon: Rss,        label: 'Feed',    key: 'feed'       },
             { icon: BookOpen,   label: 'Skills',  key: 'skills'     },
-            { icon: Brain,     label: 'Log',     key: 'worklog'    },
+            { icon: Brain,      label: 'Log',     key: 'worklog'    },
           ].map(({ icon: Icon, label, key }) => (
             <button
               key={key}
-              onClick={() => key !== 'search' && setActiveTab(key as string)}
+              onClick={() => setActiveTab(key as string)}
               className={`flex-1 flex flex-col items-center gap-1 py-2 rounded-lg transition-colors text-[10px] font-medium ${
                 activeTab === key
                   ? 'bg-honey-500/10 text-honey-500'
