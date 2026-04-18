@@ -7,17 +7,17 @@
 
 ## THE TWO MUSIC PROVIDERS
 
-### 1. ACE-Step (PRIMARY — FREE, UNLIMITED) ✅
+### 1. ACE-Step (PRIMARY — 100 SONGS PER 5 HOURS) ✅
 - **Model:** `acestep/ACE-Step-v1.5`
 - **API:** `https://api.acemusic.ai/v1/chat/completions`
-- **Limit:** UNLIMITED — 100 songs per 5-hour window on Michael's token plan
+- **Limit:** 100 songs per 5-hour window on Michael's token plan
 - **Quality:** EXCELLENT — comparable to commercial production
 - **Best for:** Every music request. Use this first.
 
-### 2. MiniMax music-2.6 (BACKUP — HAS LIMITS) ⚠️
+### 2. MiniMax music-2.6 (BACKUP — UNLIMITED) ⚠️
 - **Model:** `music-2.6`
 - **API:** `https://api.minimax.io/v1/music_generation`
-- **Limit:** ~100 songs per 5 hours (separate from ACE)
+- **Limit:** UNLIMITED — no quota on token plan
 - **Best for:** Fallback only — if ACE is down or fails
 
 ---
@@ -235,7 +235,7 @@ Soft fade — 1-2 lines
 ❌ Put BPM in the lyrics text (put it in audio_config.bpm)
 ❌ Use `music-2.5+` or `music-01` — those are MiniMax paid models
 ❌ Use `data:image` URLs as audio (that's ACE mode mismatch — retry without thinking)
-❌ Call MiniMax lyrics_generation as the primary path — ACE IS unlimited
+❌ Call MiniMax lyrics_generation as the primary path — write lyrics yourself instead
 ❌ Use the `/v1/text/chatcompletion_v2` endpoint — that path doesn't exist
 
 ---
@@ -247,7 +247,8 @@ Michael's token plan resets every 5 hours. The windows are anchored at 7:00 AM E
 
 Track at: `memory/token-window.json`
 
-**100 songs per 5-hour window** — use ACE freely. If the window is almost exhausted, batch requests.
+**ACE-Step: 100 songs per 5-hour window** — track usage, batch if needed.
+**MiniMax music-2.6: UNLIMITED** — use as fallback when ACE window is exhausted.
 
 ---
 
