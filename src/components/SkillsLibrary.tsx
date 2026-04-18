@@ -40,7 +40,7 @@ const MARKETPLACE_SKILLS = [
   {
     name: "ace-music",
     description: "Generate unlimited free music with vocals using ACE-Step 1.5. Full songs, any genre, any language.",
-    url: "https://raw.githubusercontent.com/ace-step/ace-step-skills/main/skills/acestep/SKILL.md",
+    url: "https://raw.githubusercontent.com/Draguniteus/sparkie-music-skills/main/skills/acestep/SKILL.md",
     category: "Music",
     icon: "music",
     badge: "Free"
