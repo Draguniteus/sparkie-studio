@@ -189,8 +189,8 @@ export function ChatInput() {
   const [selectedImageModel, setSelectedImageModel] = useState("flux")
   const [selectedVideoModel, setSelectedVideoModel] = useState("MiniMax-Hailuo-2.3")
   const [videoFrameImage, setVideoFrameImage] = useState<string | null>(null)  // I2V: base64 data URL
-  const [selectedMusicModel, setSelectedMusicModel] = useState("music-2.5")
-  const [selectedLyricsModel, setSelectedLyricsModel] = useState("music-2.5")
+  const [selectedMusicModel, setSelectedMusicModel] = useState("ace-step-free")
+  const [selectedLyricsModel, setSelectedLyricsModel] = useState("ace-step-free")
   const [selectedSpeechModel, setSelectedSpeechModel] = useState("speech-02-turbo")
   const [selectedVoiceId, setSelectedVoiceId] = useState("English_CalmWoman")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
