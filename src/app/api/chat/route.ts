@@ -4411,15 +4411,19 @@ def run_composio_tool(slug, args={}):
 
 def invoke_llm(query, model='MiniMax-M2.7'):
     """Run an inline LLM query. Returns the text response."""
-    req = urllib.request.Request(
-        'https://api.minimax.io/v1/text/chatcompletion_v2',
-        data=json.dumps({'model': model, 'stream': False, 'max_tokens': 4000, 'messages': [{'role': 'user', 'content': query}]}).encode(),
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {miniKey}"},
-        method='POST',
-    )
-    with urllib.request.urlopen(req, timeout=30) as r:
-        d = json.loads(r.read())
-        return d.get('choices', [{}])[0].get('message', {}).get('content', '')
+    try:
+        req = urllib.request.Request(
+            'https://api.minimax.io/v1/chat/completions',
+            data=json.dumps({'model': model, 'stream': False, 'max_tokens': 4000, 'messages': [{'role': 'user', 'content': query}]}).encode(),
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {miniKey}"},
+            method='POST',
+        )
+        with urllib.request.urlopen(req, timeout=30) as r:
+            d = json.loads(r.read())
+            return d.get('choices', [{}])[0].get('message', {}).get('content', '')
+    except urllib.error.HTTPError as e:
+        body = e.read().decode() if e.fp else str(e)
+        raise RuntimeError(f'HTTP {e.code}: {body[:500]}')
 `
           const { Sandbox } = await import('@e2b/code-interpreter')
           const sbx = await Sandbox.create({ apiKey: e2bKey, timeoutMs: 120_000 })

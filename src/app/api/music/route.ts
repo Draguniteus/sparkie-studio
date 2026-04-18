@@ -40,6 +40,16 @@ function normalizeLyricsTags(lyrics: string): string {
   })
 }
 
+function extractBpmFromText(text: string): number {
+  // Match patterns like "120 BPM", "120bpm", "120 bpm", "at 120"
+  const match = /\b(\d{2,3})\s*bpm\b/i.exec(text)
+  if (match) {
+    const bpm = parseInt(match[1], 10)
+    if (bpm >= 40 && bpm <= 300) return bpm
+  }
+  return 120 // sensible default
+}
+
 function parseMusicPrompt(raw: string): { stylePrompt: string; lyrics: string } {
   const text = raw.trim()
   const paragraphs = text.split(/\n\n+/)
@@ -133,7 +143,8 @@ async function handleAceMusic(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ctrl: any,
   userStyle?: string,
-  userLyrics?: string
+  userLyrics?: string,
+  userDuration?: number
 ): Promise<void> {
   const enc = new TextEncoder()
   const send = (data: string) => { try { ctrl.enqueue(enc.encode(data)) } catch { /* closed */ } }
@@ -203,8 +214,10 @@ async function handleAceMusic(
     // Build tagged content: <prompt>STYLE</prompt>\n<lyrics>LYRICS</lyrics>
     const stylePrompt = userStyle || styleTags || prompt.slice(0, 200)
     const taggedContent = `<prompt>${stylePrompt}</prompt>\n<lyrics>${finalLyrics}</lyrics>`
+    const aceDuration = userDuration ?? 90
+    const aceBpm = extractBpmFromText(stylePrompt)
 
-    console.log('[/api/music] ACE Step 2: calling ACE with lyrics, duration=150')
+    console.log('[/api/music] ACE Step 2: calling ACE — duration:', aceDuration, 'bpm:', aceBpm, 'prompt len:', stylePrompt.length)
 
     // Single high-quality request with thinking:true — no batching needed
     const makeAceRequest = async (): Promise<{ audioUrl: string | undefined; content: string }> => {
@@ -216,7 +229,7 @@ async function handleAceMusic(
           messages: [{ role: 'user', content: taggedContent }],
           stream: true,
           thinking: true,
-          audio_config: { duration: 150, bpm: 128, format: 'mp3', vocal_language: 'en' },
+          audio_config: { duration: aceDuration, bpm: aceBpm, format: 'mp3', vocal_language: 'en' },
         }),
         signal: AbortSignal.timeout(240000),
       })
@@ -293,9 +306,108 @@ async function handleAceMusic(
     const result = await makeAceRequest()
 
     if (!result.audioUrl) {
-      const errMsg = result.content || 'ACE Music returned no audio URL. Check API key and credits at api.acemusic.ai.'
-      console.error('[/api/music] ACE request failed:', errMsg)
+      // Fallback 1: non-streaming + thinking
+      console.log('[/api/music] Streaming returned no audio — trying non-streaming fallback')
+      const nbRes = await fetch(ACE_MUSIC_BASE + '/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aceKey },
+        body: JSON.stringify({
+          model: 'acestep/ACE-Step-v1.5',
+          messages: [{ role: 'user', content: taggedContent }],
+          stream: false,
+          thinking: true,
+          audio_config: { duration: aceDuration, bpm: aceBpm, format: 'mp3', vocal_language: 'en' },
+        }),
+        signal: AbortSignal.timeout(240000),
+      })
+      if (nbRes.ok) {
+        const nbData = await nbRes.json() as Record<string, unknown>
+        const choices = nbData.choices as Array<{ message?: { audio?: Array<{ audio_url?: { url?: string } | string }> } }> | undefined
+        const audioArr = choices?.[0]?.message?.audio
+        if (Array.isArray(audioArr)) {
+          for (const item of audioArr) {
+            let u: string | undefined
+            if (typeof item.audio_url === 'string') u = item.audio_url
+            else if (typeof item.audio_url === 'object' && item.audio_url !== null) u = (item.audio_url as Record<string, unknown>).url as string | undefined
+            if (u) { result.audioUrl = u; break }
+          }
+        }
+        if (!result.audioUrl && typeof nbData.audio_url === 'string') result.audioUrl = nbData.audio_url
+        if (!result.audioUrl && Array.isArray(nbData.data) && nbData.data.length > 0) {
+          const d0 = nbData.data[0] as Record<string, unknown>
+          if (typeof d0.audio_url === 'string') result.audioUrl = d0.audio_url as string
+          else if (typeof d0.url === 'string') result.audioUrl = d0.url as string
+        }
+      }
+
+      // Fallback 2: retry without thinking (ACE might have returned image instead)
+      if (!result.audioUrl) {
+        console.log('[/api/music] Non-streaming also returned no audio — retrying without thinking mode')
+        const retryRes = await fetch(ACE_MUSIC_BASE + '/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aceKey },
+          body: JSON.stringify({
+            model: 'acestep/ACE-Step-v1.5',
+            messages: [{ role: 'user', content: taggedContent }],
+            stream: false,
+            audio_config: { duration: aceDuration, bpm: aceBpm, format: 'mp3', vocal_language: 'en' },
+          }),
+          signal: AbortSignal.timeout(240000),
+        })
+        if (retryRes.ok) {
+          const retryData = await retryRes.json() as Record<string, unknown>
+          const choices = retryData.choices as Array<{ message?: { audio?: Array<{ audio_url?: { url?: string } | string }> } }> | undefined
+          const audioArr = choices?.[0]?.message?.audio
+          if (Array.isArray(audioArr)) {
+            for (const item of audioArr) {
+              let u: string | undefined
+              if (typeof item.audio_url === 'string') u = item.audio_url
+              else if (typeof item.audio_url === 'object' && item.audio_url !== null) u = (item.audio_url as Record<string, unknown>).url as string | undefined
+              if (u) { result.audioUrl = u; break }
+            }
+          }
+          if (!result.audioUrl && Array.isArray(retryData.data) && retryData.data.length > 0) {
+            const d0 = retryData.data[0] as Record<string, unknown>
+            if (typeof d0.audio_url === 'string') result.audioUrl = d0.audio_url as string
+            else if (typeof d0.url === 'string') result.audioUrl = d0.url as string
+          }
+        }
+      }
+
+      // Fallback 3: MiniMax music-2.6 — only if all ACE attempts failed
+      if (!result.audioUrl && minimaxKey) {
+        console.log('[/api/music] All ACE attempts failed — falling back to MiniMax music-2.6')
+        const mmRes = await fetch(MINIMAX_BASE + '/music_generation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + minimaxKey },
+          body: JSON.stringify({
+            model: 'music-2.6',
+            prompt: stylePrompt,
+            lyrics: finalLyrics,
+            output_format: 'url',
+            audio_setting: { sample_rate: 44100, bitrate: 256000, format: 'mp3' },
+          }),
+          signal: AbortSignal.timeout(290000),
+        })
+        if (mmRes.ok) {
+          const mmData = await mmRes.json() as { data?: { audio_file?: string; audio?: string; audio_url?: string; url?: string }; base_resp?: { status_code: number; status_msg?: string } }
+          if ((mmData.base_resp?.status_code ?? -1) === 0) {
+            const mmAudio = mmData.data?.audio_file ?? mmData.data?.audio ?? mmData.data?.audio_url ?? mmData.data?.url
+            if (mmAudio) {
+              const mmUrl = await tryPersistAudio(String(mmAudio), userId)
+              send('data: ' + JSON.stringify({ type: 'minimax_music', url: mmUrl, model: 'music-2.6', title: songTitle, style: stylePrompt, lyrics: finalLyrics }) + '\n\n')
+              clearInterval(keepalive)
+              return
+            }
+          }
+        }
+      }
+
+      // All fallbacks exhausted
+      const errMsg = result.content || 'ACE Music returned no audio after all fallback attempts. Check API key and credits at api.acemusic.ai.'
+      console.error('[/api/music] ACE/MiniMax all failed:', errMsg)
       send('data: ' + JSON.stringify({ error: errMsg }) + '\n\n')
+      clearInterval(keepalive)
       return
     }
 
@@ -491,6 +603,7 @@ export async function POST(req: NextRequest) {
 
   let userStyle: string | undefined
   let userLyrics: string | undefined
+  let userDuration: number | undefined
 
   try {
     const body = await req.json()
@@ -499,6 +612,7 @@ export async function POST(req: NextRequest) {
     bodyUserId = body.userId
     userStyle = typeof body.userStyle === 'string' && body.userStyle ? body.userStyle : undefined
     userLyrics = typeof body.userLyrics === 'string' && body.userLyrics ? body.userLyrics : undefined
+    userDuration = typeof body.duration === 'number' && body.duration > 0 ? Math.min(body.duration, 240) : undefined
     if (!rawPrompt) throw new Error('Missing prompt')
   } catch {
     return new Response(JSON.stringify({ error: 'Invalid request body' }), {
@@ -513,7 +627,7 @@ export async function POST(req: NextRequest) {
     async start(controller: any) {
       try {
         if (model === 'ace-step-free') {
-          await handleAceMusic(rawPrompt, userId, controller, userStyle, userLyrics)
+          await handleAceMusic(rawPrompt, userId, controller, userStyle, userLyrics, userDuration)
         } else {
           await handleMiniMax(rawPrompt, model, userId, controller)
         }
