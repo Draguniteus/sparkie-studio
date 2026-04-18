@@ -149,7 +149,11 @@ function WorklogPanel() {
   )
 }
 
-export function IDEPanelInner() {
+interface IDEPanelInnerProps {
+  hideHeader?: boolean
+}
+
+export function IDEPanelInner({ hideHeader = false }: IDEPanelInnerProps) {
   const {
     ideOpen, ideTab, isExecuting, liveCode, files, buildKey,
     setIdeTab, containerStatus, clearTerminalOutput, appendTerminalOutput, setContainerStatus,
@@ -289,7 +293,8 @@ export function IDEPanelInner() {
 
   return (
     <div className="h-full flex flex-col bg-hive-600 border-l border-hive-border">
-      {/* Header */}
+      {/* Header — hidden when used inside MobileIDEPanel (mobile sheet provides its own tab bar) */}
+      {!hideHeader && (
       <div className="flex items-center h-10 px-3 bg-hive-700 border-b border-hive-border shrink-0 gap-1 overflow-x-auto scrollbar-none">
         {tabs.map(t => (
           <button key={t.id} onClick={() => setIdeTab(t.id)}
@@ -316,6 +321,7 @@ export function IDEPanelInner() {
           )}
         </div>
       </div>
+      )}
 
       {/* Panels */}
       <div className="flex-1 overflow-hidden">

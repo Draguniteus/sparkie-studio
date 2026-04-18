@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useSession } from 'next-auth/react'
 import { IDEPanel } from '@/components/layout/IDEPanel'
+import { MobileIDEPanel } from '@/components/layout/MobileIDEPanel'
 import { MainPanel } from '@/components/layout/MainPanel'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { useAppStore } from '@/store/appStore'
@@ -31,7 +32,9 @@ export default function HomeClient() {
   useEffect(() => {
     applyTheme(loadTheme())
     setMounted(true)
-    const check = () => setIsMobile(window.innerWidth < 768)
+    // Mobile/tablet (<1024px) get the bottom-sheet MobileIDEPanel;
+    // desktop (≥1024px) gets the resizable side panel
+    const check = () => setIsMobile(window.innerWidth < 1024)
     check()
     window.addEventListener('resize', check)
     return () => window.removeEventListener('resize', check)
@@ -92,7 +95,8 @@ export default function HomeClient() {
     )
   }
 
-  const showIDE = ideOpen && !isMobile
+  // Desktop: show resizable side panel; Mobile/Tablet: show bottom-sheet
+  const showDesktopIDE = ideOpen && !isMobile
 
   return (
     <div ref={containerRef} className="flex h-[100dvh] w-screen overflow-hidden bg-hive-600">
@@ -108,7 +112,7 @@ export default function HomeClient() {
           <MainPanel />
         </div>
       </div>
-      {showIDE && (
+      {showDesktopIDE && (
         <div
           onMouseDown={onSplitterMouseDown}
           className="relative w-4 shrink-0 cursor-col-resize group flex items-center justify-center"
@@ -122,11 +126,13 @@ export default function HomeClient() {
           </div>
         </div>
       )}
-      {showIDE && (
+      {showDesktopIDE && (
         <div style={{ width: ideWidth }} className="shrink-0 overflow-hidden hidden md:block">
           <IDEPanel />
         </div>
       )}
+      {/* Mobile/Tablet: bottom-sheet Brain panel */}
+      {ideOpen && isMobile && <MobileIDEPanel />}
     </div>
   )
 }
