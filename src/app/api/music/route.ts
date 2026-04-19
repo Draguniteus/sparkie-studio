@@ -302,8 +302,27 @@ async function handleAceMusic(
 
     clearInterval(keepalive)
 
-    // Run a single request — thinking:true gives high quality without batching
-    const result = await makeAceRequest()
+    // Run request with retry — ACE can timeout or hit transient errors
+    const makeAceRequestWithRetry = async (retries = 2): Promise<{ audioUrl: string | undefined; content: string }> => {
+      let lastErr: string = ''
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+          const result = await makeAceRequest()
+          if (result.audioUrl || attempt === retries) return result
+          lastErr = result.content || 'no audio_url in response'
+        } catch (e) {
+          lastErr = e instanceof Error ? e.message : String(e)
+        }
+        if (attempt < retries) {
+          const delay = Math.min(2000 * Math.pow(2, attempt), 8000)
+          console.log(`[/api/music] ACE attempt ${attempt + 1} failed (${lastErr}) — retrying in ${delay}ms…`)
+          await new Promise(r => setTimeout(r, delay))
+        }
+      }
+      return { audioUrl: undefined, content: lastErr }
+    }
+
+    const result = await makeAceRequestWithRetry()
 
     if (!result.audioUrl) {
       // Fallback 1: non-streaming + thinking

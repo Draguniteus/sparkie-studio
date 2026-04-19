@@ -1020,6 +1020,10 @@ export function ChatInput() {
     // Short messages (< 5 words) without explicit build signal → chat
     if (wordCount < 5) return true
 
+    // ── System / deploy / health check keywords → ALWAYS build (tools) ─────
+    // These phrases need tool access — never route to chat-only mode
+    if (/\b(deploy|health check|diagnose|self.diagnose|system status|check (the )?(app|server|deploy|db|database|status|health)|run (a )?diagnostic|list repos|github repos|trigger_deploy|deploy status|audit|self.repair|selfrepair)\b/i.test(t)) return false
+
     return null
   }, [isBuildSession])
 
@@ -2351,7 +2355,7 @@ Promise.all([
 
       // Agent-routed slash commands — these go straight to streamReply with a crafted prompt
       const AGENT_SLASH_MAP: Record<string, string> = {
-        '/diagnose':   'Run a full self-diagnosis: check deployment status, DB connectivity, all tools, memory system, E2B sandbox. Report results clearly with pass/fail for each.',
+        '/diagnose':   'Run a full self-diagnosis: check deployment status, DB connectivity, all tools, memory system, E2B sandbox. Use trigger_deploy for deploy status, write_database to check DB, read_memory to check memory. Report results clearly with pass/fail for each.',
         '/goals':      'Show me all active goals from the sparkie_goals table. Include priority, status, last progress, and any P0 flags.',
         '/rules':      'List all behavior rules from sparkie_behavior_rules. Show condition, action, confidence, and how many times each has been applied.',
         '/recap':      'Summarize everything we\'ve worked on this session in detail. What was accomplished, what changed, what\'s pending.',
@@ -2395,7 +2399,7 @@ Promise.all([
       }
       if (slashCmd === '/fix') {
         const issue = trimmed.slice('/fix'.length).trim()
-        if (issue) { streamReply(chatId, `Find and fix autonomously: ${issue}. Do it yourself without asking me.`); return }
+        if (issue) { streamAgent(chatId, `Find and fix autonomously: ${issue}. Use any tools needed to diagnose and resolve the issue. Report what you found and what you did.`); return }
       }
       if (slashCmd === '/generate') {
         const desc = trimmed.slice('/generate'.length).trim()
@@ -2414,10 +2418,16 @@ Promise.all([
         if (topic) { streamReply(chatId, `Resume the topic: ${topic}. Show me where we left off and continue from there.`); return }
       }
 
-      // Check if it's an agent-routed command
+      // Check if it's an agent-routed command that needs tool access
       const agentPrompt = AGENT_SLASH_MAP[slashCmd]
       if (agentPrompt) {
-        streamReply(chatId, agentPrompt)
+        // These slash commands need tool access — route to streamAgent
+        const TOOL_SLASH_COMMANDS = ['/diagnose', '/deploy', '/logs', '/rollback', '/commit', '/fix', '/brief', '/inbox', '/checkpoint', '/reflect', '/tasks']
+        if (TOOL_SLASH_COMMANDS.includes(slashCmd)) {
+          streamAgent(chatId, agentPrompt)
+        } else {
+          streamReply(chatId, agentPrompt)
+        }
         return
       }
 
@@ -2484,8 +2494,8 @@ Promise.all([
         return
       }
 
-      // FORCE CHAT override — agentic repair/audit tasks must never go to build, even with active project
-      const FORCE_CHAT_SUBMIT = /\b(fix it yourself|find and fix|find the bug|find a bug|fix the bug|fix this bug|diagnose and fix|go through the codebase|audit the codebase|search the codebase|scan the codebase|find every place|find all places|without asking me|do it yourself|autonomously|self.?repair|commit the changes|commit and push|grep for|find the issue|find the error|find the problem|track it down|find where|locate the bug|every file|every route|every place|every function|fail silently|silently failing|codebase|summarize everything|summarize every|tell me everything|what have we built|what did we build|what'?s broken|what is broken|what tools are broken|go fix|just fix it|fix whatever|most broken|highest impact|be honest|tell me the truth|self.?aware)\b/i
+      // FORCE CHAT override — truly autonomous self-request tasks (not user asking Sparkie to do something with tools)
+      const FORCE_CHAT_SUBMIT = /\b(fix it yourself|find and fix|find the bug|find a bug|fix the bug|fix this bug|diagnose and fix|go through the codebase|audit the codebase|search the codebase|scan the codebase|find every place|find all places|without asking me|autonomously|commit the changes|commit and push|grep for|find the issue|find the error|find the problem|track it down|find where|locate the bug|every file|every route|every place|every function|fail silently|silently failing|summarize everything|summarize every|tell me everything|what have we built|what did we build|what tools are broken|go fix|just fix it|fix whatever|most broken|highest impact|self.?aware)\b/i
       if (FORCE_CHAT_SUBMIT.test(userContent)) {
         setLastMode('chat')
         streamReply(chatId, userContent)
