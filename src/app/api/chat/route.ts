@@ -8079,13 +8079,6 @@ Keep each header + thought on its own line. Use multiple short bold-header block
             ...loopMessages.slice(-15) // keep recent context
           ]
         }
-        const strippedPayloadMessages = stripToolIds(payloadMessages)
-        const llmPayload = (tools: typeof validTools, systemOverride?: string) => ({
-          model: 'MiniMax-M2.7',
-          stream: false, temperature: 0.8, max_tokens: 16000,
-          tools,
-          messages: [{ role: 'system', content: systemOverride ?? finalSystemContent }, ...strippedPayloadMessages],
-        })
 
         // Build set of valid tool_call IDs from the current loopMessages before any LLM call
         // so stripToolIds can use it for both the main call and the 400 fallback paths
@@ -8113,6 +8106,14 @@ Keep each header + thought on its own line. Use multiple short bold-header block
             return stripped
           }
           return msg
+        })
+
+        const strippedPayloadMessages = stripToolIds(loopMessages)
+        const llmPayload = (tools: typeof validTools, systemOverride?: string) => ({
+          model: 'MiniMax-M2.7',
+          stream: false, temperature: 0.8, max_tokens: 16000,
+          tools,
+          messages: [{ role: 'system', content: systemOverride ?? finalSystemContent }, ...strippedPayloadMessages],
         })
 
         ;({ response: loopRes, errorText } = await tryLLMCall(llmPayload(effectiveTools), apiKey))
