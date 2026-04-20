@@ -6,17 +6,18 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
 
 const BROKEN_HOST = 'media.sparkiestudio.com'
 
-// GET /api/admin/fix-media-urls?dry_run=true  — report only
-// GET /api/admin/fix-media-urls?fix=true     — actually fix (requires MIGRATE_SECRET)
+// GET /api/admin/fix-media-urls?secret=...&dry_run=true  — report only
+// GET /api/admin/fix-media-urls?secret=...&fix=true     — actually fix
+// GET /api/admin/fix-media-urls?secret=...&inspect=id    — look up a specific record
 export async function GET(req: NextRequest) {
   const secret       = req.nextUrl.searchParams.get('secret')
   const headerSecret = req.headers.get('x-sparkie-secret')
-  const doFix  = req.nextUrl.searchParams.get('fix') === 'true'
-  const dryRun = !doFix
+  const doFix        = req.nextUrl.searchParams.get('fix') === 'true'
+  const dryRun       = !doFix
+  const inspectId    = req.nextUrl.searchParams.get('inspect')
 
   const validSecret = secret === (process.env.MIGRATE_SECRET ?? 'sparkie-migrate')
   const validHeader = headerSecret === process.env.SPARKIE_INTERNAL_SECRET
-  // Allow SPARKIE_INTERNAL_SECRET as ?secret= for easy browser testing
   const validInternalAsSecret = secret === process.env.SPARKIE_INTERNAL_SECRET
 
   if (!validSecret && !validHeader && !validInternalAsSecret) {
@@ -30,13 +31,46 @@ export async function GET(req: NextRequest) {
 
   const client = await pool.connect()
   try {
+    // Inspect mode: look up a specific record and find matching sparkie_assets
+    if (inspectId) {
+      const row = await client.query(`
+        SELECT id::text, content FROM chat_messages WHERE id::text = $1
+        UNION ALL
+        SELECT id::text, content FROM sparkie_assets WHERE id::text = $1
+      `, [inspectId])
+      if (!row.rows.length) {
+        return NextResponse.json({ inspect: inspectId, found: false })
+      }
+      const record = row.rows[0]
+      // Look for any proxy URLs or broken URLs in the content
+      const content = record.content as string
+      const proxyMatches = content.match(/https?:\/\/[^\s'"]+/g) || []
+      // Also look for file_id references in sparkie_assets for any audio with similar name
+      const nameMatch = content.match(/sparkie-[^.|'"\s]+/) || []
+      let relatedAssets: { id: string; name: string; content: string }[] = []
+      if (nameMatch.length) {
+        const assetRows = await client.query(`
+          SELECT id::text, name, content FROM sparkie_assets
+          WHERE name ILIKE $1 AND asset_type = 'audio'
+          LIMIT 5
+        `, [`%${nameMatch[0]}%`])
+        relatedAssets = assetRows.rows
+      }
+      return NextResponse.json({
+        inspect: inspectId,
+        found: true,
+        content_preview: content.slice(0, 500),
+        all_urls: proxyMatches,
+        related_assets: relatedAssets,
+      })
+    }
+
     // Search all text columns in relevant tables for the broken hostname
     const findings: Array<{ table: string; column: string; id: string; preview: string }> = []
 
     const tables = ['chat_messages', 'sparkie_assets', 'sparkie_feed', 'sparkie_radio_tracks']
 
     for (const table of tables) {
-      // Dynamically find text/jsonb columns in this table
       const cols = await client.query(`
         SELECT column_name, data_type
         FROM information_schema.columns
@@ -87,7 +121,7 @@ export async function GET(req: NextRequest) {
         broken_host: BROKEN_HOST,
         records_found: findings.length,
         findings,
-        message: `Found ${findings.length} records with ${BROKEN_HOST}. Add ?fix=true to actually update them.`,
+        note: 'Records previously fixed (no media.sparkiestudio.com remaining) will show 0 here.',
       })
     }
 
@@ -100,20 +134,17 @@ export async function GET(req: NextRequest) {
     for (const { table, column, id } of findings) {
       try {
         if (column === 'content') {
-          // Get the raw content for this record
           const row = await client.query(`
             SELECT content FROM ${table} WHERE id::text = $1
           `, [id])
           if (!row.rows.length) continue
           const rawContent = row.rows[0].content as string
 
-          // Extract filename(s) from broken CDN URLs in this content
           const brokenUrlMatches = rawContent.match(new RegExp(`https://${BROKEN_HOST}/([^?|\\s]+)`, 'g'))
           if (!brokenUrlMatches) continue
 
           for (const brokenUrl of brokenUrlMatches) {
             const filename = brokenUrl.replace(`https://${BROKEN_HOST}/`, '')
-            // Try to find matching file_id from sparkie_assets using the filename (stored in 'name' column)
             let fileId: string | null = null
             try {
               const assetRow = await client.query(`
@@ -128,14 +159,12 @@ export async function GET(req: NextRequest) {
               // sparkie_assets lookup failed — continue without file_id
             }
 
-            // Build new URL: either /api/assets-audio?fid=xxx or /api/assets-image?fid=xxx
             const isAudio = filename.endsWith('.mp3') || filename.endsWith('.wav') || filename.endsWith('.m4a')
             const newBase = isAudio ? `${appUrl}/api/assets-audio` : `${appUrl}/api/assets-image`
             const newUrl = fileId
               ? `${newBase}?fid=${fileId}`
               : `${newBase}?file=${encodeURIComponent(filename)}`
 
-            // Replace this specific broken URL in the content
             const updatedContent = rawContent.replace(brokenUrl, newUrl)
             if (updatedContent === rawContent) continue
 
