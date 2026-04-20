@@ -4377,7 +4377,7 @@ async function executeTool(
                 `INSERT INTO sparkie_assets (user_id, name, content, asset_type, source, file_id, chat_title, chat_id, language) VALUES ($1, $2, $3, 'audio', 'agent', $4, '', '', '')`,
                 [userId, `ace-music-${Date.now()}.mp3`, foundUrl, fid]
               )
-              return `AUDIO_URL:${baseUrl}/api/assets-image?fid=${fid}`
+              return `AUDIO_URL:${baseUrl}/api/assets-audio?fid=${fid}`
             } catch { /* fall back to data URL */ }
           }
           return `AUDIO_URL:${foundUrl}`

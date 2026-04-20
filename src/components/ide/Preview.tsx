@@ -190,7 +190,15 @@ export function Preview() {
   // Always search the flat list of leaf files (handles folder-wrapped builds)
   const flatFiles = flattenFiles(files)
   const [refreshKey, setRefreshKey] = useState(0)
-  const refresh = useCallback(() => setRefreshKey(k => k + 1), [])
+  const [iframeError, setIframeError] = useState<string | null>(null)
+  const refresh = useCallback(() => { setRefreshKey(k => k + 1); setIframeError(null) }, [])
+
+  // Detect missing entry files before rendering — show friendly 404 message
+  const hasIndexHtml = flatFiles.some(f => f.name === 'index.html')
+  const hasSrcMain = flatFiles.some(f => f.name === 'main.tsx' || f.name === 'main.js')
+  const packageJson = flatFiles.find(f => f.name === 'package.json')
+  const isMissingEntry = (previewType === 'html' && !hasIndexHtml) ||
+    (previewType === 'react' && !hasSrcMain && !flatFiles.some(f => f.name.endsWith('.tsx') || f.name.endsWith('.jsx')))
 
   // If WC is running/ready, use its URL
   const isWCActive = ['booting','mounting','installing','starting','ready'].includes(containerStatus)
@@ -311,13 +319,41 @@ export function Preview() {
           </button>
         </div>
         <div className="flex-1 relative overflow-hidden">
-          <iframe key={refreshKey} src={previewUrl || undefined} title="Preview" className="absolute inset-0 w-full h-full border-0" allow="cross-origin-isolated" />
+          <iframe
+            key={refreshKey}
+            src={previewUrl || undefined}
+            title="Preview"
+            className="absolute inset-0 w-full h-full border-0"
+            allow="cross-origin-isolated"
+            onLoad={() => setIframeError(null)}
+            onError={() => setIframeError('Preview failed to load — check your dev server or build configuration.')}
+          />
         </div>
+        {iframeError && (
+          <div className="absolute bottom-2 left-2 right-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg px-3 py-2 text-xs text-yellow-400 flex items-center gap-2">
+            <AlertTriangle size={12} />
+            <span>{iframeError}</span>
+          </div>
+        )}
       </div>
     )
   }
 
-  // ── Static preview (no package.json) ──────────────────────────────────────
+  // ── Static preview (no package.json) or missing entry file ───────────────────
+  if (isMissingEntry) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center text-text-muted p-8 bg-hive-600">
+        <AlertTriangle size={32} className="mb-3 text-yellow-500/50" />
+        <p className="text-sm font-medium text-text-secondary mb-1">Entry File Not Found</p>
+        <p className="text-xs text-center mb-3">
+          {hasIndexHtml === false && 'Create an index.html file in your project to enable preview.'}
+          {hasSrcMain === false && 'Create a src/main.tsx or src/main.js entry file to enable React/JS preview.'}
+        </p>
+        <p className="text-xs text-center text-text-muted">Generated projects need an entry file (index.html, main.tsx, etc.) to preview.</p>
+      </div>
+    )
+  }
+
   if (!previewHtml) {
     return (
       <div className="h-full flex flex-col items-center justify-center text-text-muted p-8 bg-hive-600">
