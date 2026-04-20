@@ -8087,22 +8087,33 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           messages: [{ role: 'system', content: systemOverride ?? finalSystemContent }, ...strippedPayloadMessages],
         })
 
-        // Strip tool_call_id from assistant messages proactively to prevent MiniMax 400
-          // "tool id not found" — happens when tool_call_id is still referenced in context
-          // but the result rolled out of HARD_MESSAGE_CAP window
-          const stripToolIds = (msgs: typeof loopMessages): typeof loopMessages => msgs.map((msg: Record<string, unknown>) => {
-            if (msg.role === 'assistant' && msg.tool_calls) {
-              const stripped = {
-                ...msg,
-                tool_calls: (msg.tool_calls as Array<Record<string, unknown>>).map((tc: Record<string, unknown>) => {
-                  const { id: _id, ...rest } = tc
-                  return rest
-                }),
-              }
-              return stripped
+        // Build set of valid tool_call IDs from the current loopMessages before any LLM call
+        // so stripToolIds can use it for both the main call and the 400 fallback paths
+        const validToolCallIds = new Set<string>()
+        loopMessages.forEach((msg: Record<string, unknown>) => {
+          if (msg.role === 'assistant' && msg.tool_calls) {
+            (msg.tool_calls as Array<{ id: string }>).forEach((tc) => { if (tc.id) validToolCallIds.add(tc.id) })
+          }
+        })
+
+        // Strip tool_call_id from orphaned tool results + strip IDs from tool calls
+        // This prevents MiniMax 400 "tool id not found" when tool IDs roll out of context
+        const stripToolIds = (msgs: typeof loopMessages): typeof loopMessages => msgs.map((msg: Record<string, unknown>) => {
+          if (msg.role === 'tool' && msg.tool_call_id && !validToolCallIds.has(msg.tool_call_id as string)) {
+            return { ...msg, tool_call_id: undefined }
+          }
+          if (msg.role === 'assistant' && msg.tool_calls) {
+            const stripped = {
+              ...msg,
+              tool_calls: (msg.tool_calls as Array<Record<string, unknown>>).map((tc: Record<string, unknown>) => {
+                const { id: _id, ...rest } = tc
+                return rest
+              }),
             }
-            return msg
-          })
+            return stripped
+          }
+          return msg
+        })
 
         ;({ response: loopRes, errorText } = await tryLLMCall(llmPayload(effectiveTools), apiKey))
 
@@ -8149,7 +8160,6 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           const strippedFallbackMessages = sanitizedFallbackMessages
             .map((msg: Record<string, unknown>) => {
               if (msg.role === 'assistant' && msg.tool_calls) {
-                // Remove tool_call_id from each tool call — keep the call but drop the stale ID
                 const stripped = {
                   ...msg,
                   tool_calls: (msg.tool_calls as Array<Record<string, unknown>>).map((tc: Record<string, unknown>) => {
@@ -8162,8 +8172,8 @@ Keep each header + thought on its own line. Use multiple short bold-header block
               return msg
             })
           const fallbackPayloadMessages = strippedFallbackMessages.length > 40
-            ? [sanitizedFallbackMessages[0], ...sanitizedFallbackMessages.slice(-20)]
-            : sanitizedFallbackMessages
+            ? [strippedFallbackMessages[0], ...strippedFallbackMessages.slice(-20)]
+            : strippedFallbackMessages
           const fallbackLlmPayload = (tools: typeof validTools, systemOverride?: string) => ({
             model: 'MiniMax-M2.7',
             stream: false, temperature: 0.8, max_tokens: 16000,
