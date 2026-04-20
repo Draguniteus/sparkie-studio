@@ -193,7 +193,9 @@ function AceMusicPlayer({ message }: { message: Message }) {
   const [showStyle, setShowStyle] = React.useState(false)
   const audioRef = React.useRef<HTMLAudioElement>(null)
 
-  const activeUrl = version === 1 ? message.imageUrl! : (meta.url2 || message.imageUrl!)
+  const activeUrl = version === 1 
+    ? (message.audioUrl || message.imageUrl!) 
+    : (meta.url2 || message.audioUrl || message.imageUrl!)
 
   const togglePlay = () => {
     const a = audioRef.current
@@ -339,8 +341,8 @@ function MessageBubbleInner({ message, userAvatarUrl }: Props) {
 
   const isImage = message.type === "image" && message.imageUrl
   const isVideo = message.type === "video" && message.imageUrl
-  const isAudio = (message.type === "music" || message.type === "speech") && message.imageUrl
-  const isAceMusic = message.type === "ace_music" && message.imageUrl && message.aceMetadata
+  const isAudio = (message.type === "music" || message.type === "speech") && (message.audioUrl || message.imageUrl)
+  const isAceMusic = message.type === "ace_music" && (message.audioUrl || message.imageUrl) && message.aceMetadata
   const isBuildCard = message.type === "build_card" && message.buildCard
   const isPendingTask = !!message.pendingTask
   const isSparkieCard = message.type === "sparkie_card" && message.sparkieCard

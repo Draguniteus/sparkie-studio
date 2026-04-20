@@ -685,7 +685,7 @@ export function ChatInput() {
                 if (sseData.type === "ace_music" && sseData.url) {
                   updateMessage(chatId, assistantMsgId, {
                     content: prompt,
-                    imageUrl: sseData.url as string,
+                    audioUrl: sseData.url as string,
                     imagePrompt: prompt,
                     isStreaming: false,
                     type: "ace_music",
@@ -716,7 +716,7 @@ export function ChatInput() {
                 if (sseData.url) {
                   updateMessage(chatId, assistantMsgId, {
                     content: prompt,
-                    imageUrl: sseData.url as string,
+                    audioUrl: sseData.url as string,
                     imagePrompt: prompt,
                     isStreaming: false,
                     type: "ace_music",
@@ -799,7 +799,7 @@ export function ChatInput() {
               clearInterval(pollInterval)
               updateMessage(chatId, assistantMsgId, {
                 content: prompt,
-                imageUrl: statusData.url,
+                ...(isVideoTask ? { imageUrl: statusData.url } : { audioUrl: statusData.url }),
                 imagePrompt: prompt,
                 isStreaming: false,
                 type: isVideoTask ? "video" : "music",
@@ -849,8 +849,7 @@ export function ChatInput() {
       const isTextResult = mediaType === "lyrics"
       updateMessage(chatId, assistantMsgId, {
         content: isTextResult ? (data.title ? `**${data.title}**\n\n${data.lyrics}` : data.lyrics) : prompt,
-        imageUrl: isTextResult ? undefined : data.url,
-        imagePrompt: isTextResult ? undefined : prompt,
+        ...(isTextResult ? {} : mediaType === "video" ? { imageUrl: data.url, imagePrompt: prompt } : { audioUrl: data.url }),
         isStreaming: false,
         type: isTextResult ? "text" : mediaType,
         model: model,

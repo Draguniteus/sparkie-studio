@@ -553,7 +553,7 @@ async function deploymentHealthSweep(userId: string): Promise<void> {
       `https://api.digitalocean.com/v2/apps/${DO_APP_ID_DEPLOY}/deployments?page=1&per_page=3`,
       {
         headers: { Authorization: `Bearer ${DO_TOKEN}` },
-        signal: AbortSignal.timeout(8000),
+        signal: AbortSignal.timeout(15000),
       }
     )
     if (!res.ok) return
@@ -591,7 +591,7 @@ async function deploymentHealthSweep(userId: string): Promise<void> {
             method: 'POST',
             headers: { Authorization: `Bearer ${DO_TOKEN}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ force_build: true }),
-            signal: AbortSignal.timeout(8000),
+            signal: AbortSignal.timeout(15000),
           }
         )
         await writeWorklog(userId, 'task_executed', `🔁 Auto-retried deployment after transient build failure`, {
@@ -1307,7 +1307,7 @@ async function ambientPerceptionTick(): Promise<void> {
             entity_id: entityId,
             arguments: { timeMin: now.toISOString(), timeMax: in45min.toISOString(), maxResults: 3 },
           }),
-          signal: AbortSignal.timeout(8000),
+          signal: AbortSignal.timeout(15000),
         })
         if (calRes.ok) {
           const calData = await calRes.json() as { data?: { items?: Array<{ summary: string; start?: { dateTime?: string } }> } }

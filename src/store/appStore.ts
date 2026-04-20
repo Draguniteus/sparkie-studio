@@ -81,6 +81,7 @@ export interface Message {
   content: string
   type?: 'text' | 'image' | 'video' | 'build_card' | 'music' | 'speech' | 'ace_music' | 'sparkie_card'
   imageUrl?: string
+  audioUrl?: string  // for music/speech results — stored separately from imageUrl
   imagePrompt?: string
   model?: string
   isStreaming?: boolean
