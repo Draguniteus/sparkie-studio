@@ -6,9 +6,6 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
 
 const BROKEN_HOST = 'media.sparkiestudio.com'
 
-// GET /api/admin/fix-media-urls?secret=...&dry_run=true  — report only
-// GET /api/admin/fix-media-urls?secret=...&fix=true     — actually fix
-// GET /api/admin/fix-media-urls?secret=...&inspect=id    — look up a specific record
 export async function GET(req: NextRequest) {
   const secret       = req.nextUrl.searchParams.get('secret')
   const headerSecret = req.headers.get('x-sparkie-secret')
@@ -24,58 +21,34 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    max: 1,
-  })
-
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1 })
   const client = await pool.connect()
   try {
-    // Inspect mode: look up a specific record and find matching sparkie_assets
     if (inspectId) {
       const row = await client.query(`
         SELECT id::text, content FROM chat_messages WHERE id::text = $1
         UNION ALL
         SELECT id::text, content FROM sparkie_assets WHERE id::text = $1
       `, [inspectId])
-      if (!row.rows.length) {
-        return NextResponse.json({ inspect: inspectId, found: false })
-      }
-      const record = row.rows[0]
-      // Look for any proxy URLs or broken URLs in the content
-      const content = record.content as string
+      if (!row.rows.length) return NextResponse.json({ inspect: inspectId, found: false })
+      const content = row.rows[0].content as string
       const proxyMatches = content.match(/https?:\/\/[^\s'"]+/g) || []
-      // Also look for file_id references in sparkie_assets for any audio with similar name
-      const nameMatch = content.match(/sparkie-[^.|'"\s]+/) || []
-      let relatedAssets: { id: string; name: string; content: string }[] = []
-      if (nameMatch.length) {
-        const assetRows = await client.query(`
-          SELECT id::text, name, content FROM sparkie_assets
-          WHERE name ILIKE $1 AND asset_type = 'audio'
-          LIMIT 5
-        `, [`%${nameMatch[0]}%`])
-        relatedAssets = assetRows.rows
-      }
       return NextResponse.json({
         inspect: inspectId,
         found: true,
-        content_preview: content.slice(0, 500),
+        content_preview: content.slice(0, 600),
         all_urls: proxyMatches,
-        related_assets: relatedAssets,
       })
     }
 
-    // Search all text columns in relevant tables for the broken hostname
     const findings: Array<{ table: string; column: string; id: string; preview: string }> = []
-
     const tables = ['chat_messages', 'sparkie_assets', 'sparkie_feed', 'sparkie_radio_tracks']
 
     for (const table of tables) {
       const cols = await client.query(`
         SELECT column_name, data_type
         FROM information_schema.columns
-        WHERE table_schema = 'public'
-          AND table_name = $1
+        WHERE table_schema = 'public' AND table_name = $1
           AND data_type IN ('text', 'character varying', 'jsonb', 'character')
         ORDER BY ordinal_position
       `, [table])
@@ -85,33 +58,24 @@ export async function GET(req: NextRequest) {
           let rows: { id: string; preview: string }[] = []
           if (data_type === 'jsonb') {
             rows = (await client.query(`
-              SELECT id::text,
-                     substring(content::text, 1, 200) as preview
-              FROM ${table}
-              WHERE content::text ILIKE $1
+              SELECT id::text, substring(content::text, 1, 200) as preview
+              FROM ${table} WHERE content::text ILIKE $1
             `, [`%${BROKEN_HOST}%`])).rows as { id: string; preview: string }[]
           } else {
             rows = (await client.query(`
-              SELECT id::text,
-                     substring(${column_name}::text, 1, 200) as preview
-              FROM ${table}
-              WHERE ${column_name} ILIKE $1
+              SELECT id::text, substring(${column_name}::text, 1, 200) as preview
+              FROM ${table} WHERE ${column_name} ILIKE $1
             `, [`%${BROKEN_HOST}%`])).rows as { id: string; preview: string }[]
           }
           for (const row of rows) {
-            // Extract any broken URLs from the preview to show filenames
             const brokenMatches = (row.preview as string).match(new RegExp(`https://${BROKEN_HOST}/([^?|\\s]+)`, 'g')) || []
             const filenames = brokenMatches.map((u: string) => u.replace(`https://${BROKEN_HOST}/`, ''))
             findings.push({
-              table,
-              column: column_name,
-              id: row.id,
+              table, column: column_name, id: row.id,
               preview: row.preview + (filenames.length ? ` → files: ${filenames.join(', ')}` : ''),
             })
           }
-        } catch {
-          // column might not exist or be queryable — skip
-        }
+        } catch {}
       }
     }
 
@@ -121,73 +85,43 @@ export async function GET(req: NextRequest) {
         broken_host: BROKEN_HOST,
         records_found: findings.length,
         findings,
-        note: 'Records previously fixed (no media.sparkiestudio.com remaining) will show 0 here.',
+        note: 'Records with 0 here = no raw media.sparkiestudio.com URLs remaining. Malformed proxy URLs need inspect mode.',
       })
     }
 
-    // Actually fix: replace broken CDN URL with the app's audio proxy
-    // Strategy: extract filename from broken URL → look up file_id from sparkie_assets → build proper proxy URL
     const appUrl = process.env.NEXTAUTH_URL ?? 'https://sparkie-studio-mhouq.ondigitalocean.app'
     let updated = 0
-    const details: Array<{ id: string; filename: string; file_id: string | null; new_url: string }> = []
+    const details: Array<{ id: string; filename: string; new_url: string }> = []
 
     for (const { table, column, id } of findings) {
       try {
-        if (column === 'content') {
-          const row = await client.query(`
-            SELECT content FROM ${table} WHERE id::text = $1
-          `, [id])
-          if (!row.rows.length) continue
-          const rawContent = row.rows[0].content as string
+        if (column !== 'content') continue
+        const row = await client.query(`SELECT content FROM ${table} WHERE id::text = $1`, [id])
+        if (!row.rows.length) continue
+        const rawContent = row.rows[0].content as string
 
-          const brokenUrlMatches = rawContent.match(new RegExp(`https://${BROKEN_HOST}/([^?|\\s]+)`, 'g'))
-          if (!brokenUrlMatches) continue
+        const brokenUrlMatches = rawContent.match(new RegExp(`https://${BROKEN_HOST}/([^?|\\s]+)`, 'g'))
+        if (!brokenUrlMatches) continue
 
-          for (const brokenUrl of brokenUrlMatches) {
-            const filename = brokenUrl.replace(`https://${BROKEN_HOST}/`, '')
-            let fileId: string | null = null
-            try {
-              const assetRow = await client.query(`
-                SELECT id::text as file_id FROM sparkie_assets
-                WHERE name ILIKE $1 OR content ILIKE $1
-                LIMIT 1
-              `, [`%${filename}%`])
-              if (assetRow.rows.length) {
-                fileId = assetRow.rows[0].file_id
-              }
-            } catch {
-              // sparkie_assets lookup failed — continue without file_id
-            }
+        for (const brokenUrl of brokenUrlMatches) {
+          const filename = brokenUrl.replace(`https://${BROKEN_HOST}/`, '')
+          const isAudio = filename.endsWith('.mp3') || filename.endsWith('.wav') || filename.endsWith('.m4a')
+          const newBase = isAudio ? `${appUrl}/api/assets-audio` : `${appUrl}/api/assets-image`
+          const newUrl = `${newBase}?file=${encodeURIComponent(filename)}`
 
-            const isAudio = filename.endsWith('.mp3') || filename.endsWith('.wav') || filename.endsWith('.m4a')
-            const newBase = isAudio ? `${appUrl}/api/assets-audio` : `${appUrl}/api/assets-image`
-            const newUrl = fileId
-              ? `${newBase}?fid=${fileId}`
-              : `${newBase}?file=${encodeURIComponent(filename)}`
+          const updatedContent = rawContent.replace(brokenUrl, newUrl)
+          if (updatedContent === rawContent) continue
 
-            const updatedContent = rawContent.replace(brokenUrl, newUrl)
-            if (updatedContent === rawContent) continue
-
-            await client.query(`
-              UPDATE ${table} SET ${column} = $1 WHERE id::text = $2
-            `, [updatedContent, id])
-
-            details.push({ id, filename, file_id: fileId, new_url: newUrl })
-            updated++
-          }
+          await client.query(`UPDATE ${table} SET ${column} = $1 WHERE id::text = $2`, [updatedContent, id])
+          details.push({ id, filename, new_url: newUrl })
+          updated++
         }
       } catch (e) {
         console.error(`Failed to update ${table}.${column} id=${id}:`, e)
       }
     }
 
-    return NextResponse.json({
-      fixed: true,
-      broken_host: BROKEN_HOST,
-      records_updated: updated,
-      replacement_base: `${appUrl}/api/assets-audio`,
-      details,
-    })
+    return NextResponse.json({ fixed: true, broken_host: BROKEN_HOST, records_updated: updated, details })
   } finally {
     client.release()
     await pool.end()

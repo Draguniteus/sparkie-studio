@@ -6,7 +6,8 @@ import { query } from '@/lib/db'
 export const runtime = 'nodejs'
 
 // GET /api/assets-audio?fid=<fileId>
-// Serves audio assets from sparkie_assets with correct audio MIME type.
+//   or /api/assets-audio?file=<filename>  (fallback lookup by name)
+//
 // Use this instead of /api/assets-image for audio/video media.
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions)
@@ -14,18 +15,40 @@ export async function GET(req: NextRequest) {
   if (!userId) return new NextResponse('Unauthorized', { status: 401 })
 
   const { searchParams } = new URL(req.url)
-  const fid = searchParams.get('fid')
-  if (!fid) return new NextResponse('fid required', { status: 400 })
+  const fid  = searchParams.get('fid')
+  const file = searchParams.get('file')
+
+  // Must have either fid or file
+  if (!fid && !file) {
+    return new NextResponse('fid or file parameter required', { status: 400 })
+  }
 
   try {
-    const result = await query<{ content: string; asset_type: string }>(
-      `SELECT content, asset_type FROM sparkie_assets WHERE file_id = $1 AND user_id = $2 LIMIT 1`,
-      [fid, userId]
-    )
-    const row = (result.rows as any[])[0]
-    if (!row) return new NextResponse('Not found', { status: 404 })
+    let dataUrl: string | null = null
 
-    const dataUrl: string = row.content
+    if (fid) {
+      // Primary lookup by file_id
+      const result = await query<{ content: string }>(
+        `SELECT content FROM sparkie_assets WHERE file_id = $1 AND user_id = $2 LIMIT 1`,
+        [fid, userId]
+      )
+      const row = (result.rows as any[])[0]
+      if (row) dataUrl = row.content as string
+    } else if (file) {
+      // Fallback lookup by filename (name column) — used by old malformed URLs
+      const result = await query<{ content: string }>(
+        `SELECT content FROM sparkie_assets
+         WHERE user_id = $1
+           AND asset_type = 'audio'
+           AND (name ILIKE $2 OR name ILIKE $3)
+         LIMIT 1`,
+        [userId, `%${file}%`, `%${decodeURIComponent(file)}%`]
+      )
+      const row = (result.rows as any[])[0]
+      if (row) dataUrl = row.content as string
+    }
+
+    if (!dataUrl) return new NextResponse('Not found', { status: 404 })
 
     // If it's already an HTTPS URL (e.g. from Spaces CDN), redirect
     if (dataUrl.startsWith('http')) {
@@ -38,10 +61,8 @@ export async function GET(req: NextRequest) {
       return new NextResponse('Invalid content format', { status: 500 })
     }
 
-    const mimeType = match[1]
+    const mimeType   = match[1]
     const base64Data = match[2]
-
-    // Force audio MIME for audio assets regardless of stored type
     const effectiveMime = mimeType.startsWith('audio/') ? mimeType : 'audio/mpeg'
     const bytes = Buffer.from(base64Data, 'base64')
 
