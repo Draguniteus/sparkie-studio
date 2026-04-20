@@ -65,7 +65,15 @@ export async function GET(req: NextRequest) {
             `, [`%${BROKEN_HOST}%`])).rows as { id: string; preview: string }[]
           }
           for (const row of rows) {
-            findings.push({ table, column: column_name, id: row.id, preview: row.preview })
+            // Extract any broken URLs from the preview to show filenames
+            const brokenMatches = (row.preview as string).match(new RegExp(`https://${BROKEN_HOST}/([^?|\\s]+)`, 'g')) || []
+            const filenames = brokenMatches.map((u: string) => u.replace(`https://${BROKEN_HOST}/`, ''))
+            findings.push({
+              table,
+              column: column_name,
+              id: row.id,
+              preview: row.preview + (filenames.length ? ` → files: ${filenames.join(', ')}` : ''),
+            })
           }
         } catch {
           // column might not exist or be queryable — skip
@@ -84,18 +92,60 @@ export async function GET(req: NextRequest) {
     }
 
     // Actually fix: replace broken CDN URL with the app's audio proxy
+    // Strategy: extract filename from broken URL → look up file_id from sparkie_assets → build proper proxy URL
     const appUrl = process.env.NEXTAUTH_URL ?? 'https://sparkie-studio-mhouq.ondigitalocean.app'
     let updated = 0
+    const details: Array<{ id: string; filename: string; file_id: string | null; new_url: string }> = []
 
     for (const { table, column, id } of findings) {
       try {
-        if (column === 'content' && (table === 'sparkie_assets' || table === 'chat_messages')) {
-          await client.query(`
-            UPDATE ${table}
-            SET ${column} = replace(${column}::text, $1, $2)::text
-            WHERE id::text = $3
-          `, [BROKEN_HOST, `${appUrl}/api/assets-audio`, id])
-          updated++
+        if (column === 'content') {
+          // Get the raw content for this record
+          const row = await client.query(`
+            SELECT content FROM ${table} WHERE id::text = $1
+          `, [id])
+          if (!row.rows.length) continue
+          const rawContent = row.rows[0].content as string
+
+          // Extract filename(s) from broken CDN URLs in this content
+          const brokenUrlMatches = rawContent.match(new RegExp(`https://${BROKEN_HOST}/([^?|\\s]+)`, 'g'))
+          if (!brokenUrlMatches) continue
+
+          for (const brokenUrl of brokenUrlMatches) {
+            const filename = brokenUrl.replace(`https://${BROKEN_HOST}/`, '')
+            // Try to find matching file_id from sparkie_assets using the filename (stored in 'name' column)
+            let fileId: string | null = null
+            try {
+              const assetRow = await client.query(`
+                SELECT id::text as file_id FROM sparkie_assets
+                WHERE name ILIKE $1 OR content ILIKE $1
+                LIMIT 1
+              `, [`%${filename}%`])
+              if (assetRow.rows.length) {
+                fileId = assetRow.rows[0].file_id
+              }
+            } catch {
+              // sparkie_assets lookup failed — continue without file_id
+            }
+
+            // Build new URL: either /api/assets-audio?fid=xxx or /api/assets-image?fid=xxx
+            const isAudio = filename.endsWith('.mp3') || filename.endsWith('.wav') || filename.endsWith('.m4a')
+            const newBase = isAudio ? `${appUrl}/api/assets-audio` : `${appUrl}/api/assets-image`
+            const newUrl = fileId
+              ? `${newBase}?fid=${fileId}`
+              : `${newBase}?file=${encodeURIComponent(filename)}`
+
+            // Replace this specific broken URL in the content
+            const updatedContent = rawContent.replace(brokenUrl, newUrl)
+            if (updatedContent === rawContent) continue
+
+            await client.query(`
+              UPDATE ${table} SET ${column} = $1 WHERE id::text = $2
+            `, [updatedContent, id])
+
+            details.push({ id, filename, file_id: fileId, new_url: newUrl })
+            updated++
+          }
         }
       } catch (e) {
         console.error(`Failed to update ${table}.${column} id=${id}:`, e)
@@ -106,7 +156,8 @@ export async function GET(req: NextRequest) {
       fixed: true,
       broken_host: BROKEN_HOST,
       records_updated: updated,
-      replacement: `${appUrl}/api/assets-audio`,
+      replacement_base: `${appUrl}/api/assets-audio`,
+      details,
     })
   } finally {
     client.release()
