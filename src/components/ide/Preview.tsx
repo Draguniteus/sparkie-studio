@@ -193,13 +193,6 @@ export function Preview() {
   const [iframeError, setIframeError] = useState<string | null>(null)
   const refresh = useCallback(() => { setRefreshKey(k => k + 1); setIframeError(null) }, [])
 
-  // Detect missing entry files before rendering — show friendly 404 message
-  const hasIndexHtml = flatFiles.some(f => f.name === 'index.html')
-  const hasSrcMain = flatFiles.some(f => f.name === 'main.tsx' || f.name === 'main.js')
-  const packageJson = flatFiles.find(f => f.name === 'package.json')
-  const isMissingEntry = (previewType === 'html' && !hasIndexHtml) ||
-    (previewType === 'react' && !hasSrcMain && !flatFiles.some(f => f.name.endsWith('.tsx') || f.name.endsWith('.jsx')))
-
   // If WC is running/ready, use its URL
   const isWCActive = ['booting','mounting','installing','starting','ready'].includes(containerStatus)
   const isWCReady  = containerStatus === 'ready' && previewUrl
@@ -284,6 +277,12 @@ export function Preview() {
   }, [files, isWCActive, refreshKey, activeProjectRoot])
 
   const typeLabel: Record<string,string> = { html:"HTML",react:"React",svg:"SVG",js:"JS",markdown:"Markdown",json:"JSON",code:"Code",cdn:"CDN" }
+
+  // Detect missing entry files — runs AFTER useMemo so previewType is available
+  const hasIndexHtml = flatFiles.some(f => f.name === 'index.html')
+  const hasSrcMain = flatFiles.some(f => f.name === 'main.tsx' || f.name === 'main.js')
+  const isMissingEntry = (previewType === 'html' && !hasIndexHtml) ||
+    (previewType === 'react' && !hasSrcMain && !flatFiles.some(f => f.name.endsWith('.tsx') || f.name.endsWith('.jsx')))
 
   // ── Loading state (WC spinning up) ────────────────────────────────────────
   // CDN projects render instantly via in-iframe Babel — never show WC spinner for them
