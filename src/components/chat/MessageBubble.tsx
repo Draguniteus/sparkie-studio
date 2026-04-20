@@ -459,13 +459,13 @@ function MessageBubbleInner({ message, userAvatarUrl }: Props) {
                     <p className="text-xs font-medium text-text-primary capitalize">{message.type}</p>
                     {message.imagePrompt && <p className="text-[10px] text-text-muted truncate">{message.imagePrompt}</p>}
                   </div>
-                  <a href={message.imageUrl} download={`sparkie-${message.type}.mp3`}
+                  <a href={message.audioUrl || message.imageUrl} download={`sparkie-${message.type}.mp3`}
                     className="p-1.5 rounded-md bg-hive-hover text-text-muted hover:text-text-primary transition-colors" title="Download">
                     <Download size={13} />
                   </a>
                 </div>
                 <audio
-                  src={message.imageUrl}
+                  src={message.audioUrl || message.imageUrl}
                   controls
                   className="w-full"
                   style={{ height: 40, colorScheme: "dark" }}
