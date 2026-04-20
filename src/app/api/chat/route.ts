@@ -3377,7 +3377,7 @@ async function executeTool(
                     `INSERT INTO sparkie_assets (user_id, name, content, asset_type, source, file_id, chat_title, chat_id, language) VALUES ($1, $2, $3, 'audio', 'agent', $4, '', '', '')`,
                     [userId, slug + '.mp3', audioDataUrl, fid]
                   )
-                  return `AUDIO_URL:${baseUrl}/api/assets-image?fid=${fid}|${trackTitle} — Sparkie Records`
+                  return `AUDIO_URL:${baseUrl}/api/assets-audio?fid=${fid}|${trackTitle} — Sparkie Records`
                 } catch { /* fall back to data URL */ }
               }
               return `AUDIO_URL:${audioDataUrl}|${trackTitle} — Sparkie Records`
@@ -8079,13 +8079,30 @@ Keep each header + thought on its own line. Use multiple short bold-header block
             ...loopMessages.slice(-15) // keep recent context
           ]
         }
-        const payloadMessages: typeof loopMessages = loopMessages
+        const strippedPayloadMessages = stripToolIds(payloadMessages)
         const llmPayload = (tools: typeof validTools, systemOverride?: string) => ({
           model: 'MiniMax-M2.7',
           stream: false, temperature: 0.8, max_tokens: 16000,
           tools,
-          messages: [{ role: 'system', content: systemOverride ?? finalSystemContent }, ...payloadMessages],
+          messages: [{ role: 'system', content: systemOverride ?? finalSystemContent }, ...strippedPayloadMessages],
         })
+
+        // Strip tool_call_id from assistant messages proactively to prevent MiniMax 400
+          // "tool id not found" — happens when tool_call_id is still referenced in context
+          // but the result rolled out of HARD_MESSAGE_CAP window
+          const stripToolIds = (msgs: typeof loopMessages): typeof loopMessages => msgs.map((msg: Record<string, unknown>) => {
+            if (msg.role === 'assistant' && msg.tool_calls) {
+              const stripped = {
+                ...msg,
+                tool_calls: (msg.tool_calls as Array<Record<string, unknown>>).map((tc: Record<string, unknown>) => {
+                  const { id: _id, ...rest } = tc
+                  return rest
+                }),
+              }
+              return stripped
+            }
+            return msg
+          })
 
         ;({ response: loopRes, errorText } = await tryLLMCall(llmPayload(effectiveTools), apiKey))
 
@@ -8125,7 +8142,26 @@ Keep each header + thought on its own line. Use multiple short bold-header block
               if (msg.role === 'assistant') return { ...msg, tool_calls: undefined }
               return msg
             })
-          const fallbackPayloadMessages = sanitizedFallbackMessages.length > 40
+
+          // ── PROACTIVE 400 FIX: also strip tool_call_id from assistant messages ──
+          // MiniMax returns "tool id not found" when an assistant message references a tool_call_id
+          // that fell out of the conversation context window. Strip these proactively.
+          const strippedFallbackMessages = sanitizedFallbackMessages
+            .map((msg: Record<string, unknown>) => {
+              if (msg.role === 'assistant' && msg.tool_calls) {
+                // Remove tool_call_id from each tool call — keep the call but drop the stale ID
+                const stripped = {
+                  ...msg,
+                  tool_calls: (msg.tool_calls as Array<Record<string, unknown>>).map((tc: Record<string, unknown>) => {
+                    const { id: _id, ...rest } = tc
+                    return rest
+                  }),
+                }
+                return stripped
+              }
+              return msg
+            })
+          const fallbackPayloadMessages = strippedFallbackMessages.length > 40
             ? [sanitizedFallbackMessages[0], ...sanitizedFallbackMessages.slice(-20)]
             : sanitizedFallbackMessages
           const fallbackLlmPayload = (tools: typeof validTools, systemOverride?: string) => ({
