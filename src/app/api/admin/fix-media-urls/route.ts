@@ -9,11 +9,15 @@ const BROKEN_HOST = 'media.sparkiestudio.com'
 // GET /api/admin/fix-media-urls?dry_run=true  — report only
 // GET /api/admin/fix-media-urls?fix=true     — actually fix (requires MIGRATE_SECRET)
 export async function GET(req: NextRequest) {
-  const secret = req.nextUrl.searchParams.get('secret')
+  const secret      = req.nextUrl.searchParams.get('secret')
+  const headerSecret = req.headers.get('x-sparkie-secret')
   const doFix  = req.nextUrl.searchParams.get('fix') === 'true'
   const dryRun = !doFix
 
-  if (secret !== (process.env.MIGRATE_SECRET ?? 'sparkie-migrate')) {
+  const validSecret = secret === (process.env.MIGRATE_SECRET ?? 'sparkie-migrate')
+  const validHeader = headerSecret === process.env.SPARKIE_INTERNAL_SECRET
+
+  if (!validSecret && !validHeader) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
