@@ -4162,227 +4162,85 @@ async function executeTool(
       }
 
       case 'generate_ace_music': {
-        const { stylePrompt, lyrics = '', title, duration = 90, language = 'en' } = args as {
+        // Call /api/music internally — same robust pipeline as the UI:
+        // lyrics pre-generation → ACE with retries → MiniMax fallback
+        // Returns SSE { type: 'ace_music', url, title, style, lyrics }
+        const { stylePrompt, lyrics = '', title, duration = 90, language: _language } = args as {
           stylePrompt: string; lyrics?: string; title?: string; duration?: number; language?: string
         }
-        const ACE_API_KEY = process.env.ACE_MUSIC_API_KEY ?? ''
-        if (!ACE_API_KEY) {
-          return 'ACE_MUSIC_API_KEY not configured. Get a free key at https://acemusic.ai/playground/api — then add it to DO environment variables.'
-        }
         try {
-          // Build content: stylePrompt as-is, lyrics wrapped if provided
-          const taggedContent = lyrics
-            ? `<prompt>${stylePrompt}</prompt>\n<lyrics>${lyrics}</lyrics>`
-            : `<prompt>${stylePrompt}</prompt>`
-
-          // Use acemusic.ai streaming chat/completions endpoint — SSE mode
-          // Key fixes from working reference:
-          // - model: 'acestep/ACE-Step-v1.5' (correct naming)
-          // - stream: true (required for thinking mode)
-          // - thinking: true (required — without this ACE falls back to image mode)
-          // - audio_config with duration + format + vocal_language (bpm comes from stylePrompt — never hardcode)
-          // - no sample_mode/batch_size (not supported in completion endpoint)
-          const r = await fetch('https://api.acemusic.ai/v1/chat/completions', {
+          // Use the /api/music route — handles retries, fallbacks, lyrics generation, asset saving
+          // model: 'ace-step-free' tells it to use ACE with MiniMax fallback
+          const musicFetch = await fetch(`${baseUrl}/api/music`, {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer ' + ACE_API_KEY,
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              model: 'acestep/ACE-Step-v1.5',
-              messages: [{ role: 'user', content: taggedContent }],
-              stream: true,
-              thinking: true,
-              audio_config: {
-                duration: Math.min(duration, 150),
-                format: 'mp3',
-                vocal_language: language,
-              },
+              prompt: stylePrompt,
+              model: 'ace-step-free',
+              userLyrics: lyrics || undefined,
+              duration: Math.min(duration, 150),
             }),
-            signal: AbortSignal.timeout(240_000),
+            signal: AbortSignal.timeout(560_000), // 600s total (route has 600s maxDuration)
           })
-          let foundUrl: string | undefined
-          let rdr: ReadableStreamDefaultReader | undefined
-          if (!r.ok) {
-            const errText = await r.text().catch(() => 'HTTP ' + r.status)
-            console.error('[/generate_ace_music] ACE streaming error ' + r.status + ':', errText.slice(0, 200))
-            foundUrl = undefined
-          } else {
-          rdr = r.body!.getReader()
-          const dec = new TextDecoder()
-          let buf = ''
 
-          while (true) {
-            const { done, value } = await rdr.read()
+          if (!musicFetch.ok) {
+            return 'Music generation failed: ' + (await musicFetch.text()).slice(0, 200)
+          }
+
+          // Read the SSE stream from /api/music
+          const reader = musicFetch.body!.getReader()
+          const decoder = new TextDecoder()
+          let buffer = ''
+          let audioUrl = ''
+          let songTitle = title || ''
+          let songStyle = stylePrompt.slice(0, 200)
+          let songLyrics = lyrics
+          let errorMsg = ''
+          let done = false
+
+          while (!done) {
+            const { value, done: readDone } = await reader.read()
+            done = readDone
             if (done) break
-            buf += dec.decode(value, { stream: true })
-            const lines = buf.split('\n'); buf = lines.pop() ?? ''
+            buffer += decoder.decode(value, { stream: true })
+            const lines = buffer.split('\n')
+            buffer = lines.pop() ?? ''
             for (const line of lines) {
               if (!line.startsWith('data:')) continue
-              const j = line.slice(5).trim()
-              if (!j || j === '[DONE]') continue
-              let chunk: Record<string, unknown>
-              try { chunk = JSON.parse(j) } catch { continue }
-              // Debug logging (remove in production):
-              if (!foundUrl) {
-                console.log('[/generate_ace_music] ACE chunk keys:', Object.keys(chunk))
-                if (chunk.audio_url) console.log('[/generate_ace_music] chunk.audio_url:', JSON.stringify(chunk.audio_url)?.slice(0, 200))
-                if (chunk.data) console.log('[/generate_ace_music] chunk.data:', JSON.stringify(chunk.data)?.slice(0, 300))
-                if (chunk.choices) console.log('[/generate_ace_music] chunk.choices:', JSON.stringify(chunk.choices)?.slice(0, 300))
-              }
-              // Check top-level chunk.audio_url
-              if (!foundUrl && typeof chunk.audio_url === 'string') {
-                foundUrl = chunk.audio_url
-              }
-              // Check chunk.choices[0].delta.audio (streaming audio in delta — used during streaming response)
-              if (!foundUrl) {
-                const choices = chunk.choices as Array<{ delta?: { audio?: Array<{ audio_url?: { url?: string } | string }> } }> | undefined
-                const audioArr = choices?.[0]?.delta?.audio
-                if (Array.isArray(audioArr)) {
-                  for (const item of audioArr) {
-                    let u: string | undefined
-                    if (typeof item.audio_url === 'string') u = item.audio_url
-                    else if (typeof item.audio_url === 'object' && item.audio_url !== null) u = (item.audio_url as Record<string, unknown>).url as string | undefined
-                    if (u) { foundUrl = u; break }
-                  }
-                }
-              }
-              // Check chunk.choices[0].message.audio (non-streaming audio response format)
-              if (!foundUrl) {
-                const choices = chunk.choices as Array<{ message?: { audio?: Array<{ audio_url?: { url?: string } | string }> } }> | undefined
-                const audioArr = choices?.[0]?.message?.audio
-                if (Array.isArray(audioArr)) {
-                  for (const item of audioArr) {
-                    let u: string | undefined
-                    if (typeof item.audio_url === 'string') u = item.audio_url
-                    else if (typeof item.audio_url === 'object' && item.audio_url !== null) u = (item.audio_url as Record<string, unknown>).url as string | undefined
-                    if (u) { foundUrl = u; break }
-                  }
-                }
-              }
-              // Check chunk.data array (some ACE responses put audio here)
-              if (!foundUrl && Array.isArray(chunk.data) && chunk.data.length > 0) {
-                const d0 = chunk.data[0] as Record<string, unknown>
-                if (typeof d0.audio_url === 'string') foundUrl = d0.audio_url
-                else if (typeof d0.url === 'string') foundUrl = d0.url
-              }
-              if (foundUrl) { rdr.cancel(); break }
-            }
-          }
-          } // end else: only run streaming read when r.ok
-
-          // Fallback 1: non-stream response (with thinking:true for audio mode)
-          if (!foundUrl) {
-            if (rdr) rdr.cancel()
-            const nbRes = await fetch('https://api.acemusic.ai/v1/chat/completions', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + ACE_API_KEY },
-              body: JSON.stringify({
-                model: 'acestep/ACE-Step-v1.5',
-                messages: [{ role: 'user', content: taggedContent }],
-                stream: false,
-                thinking: true,
-                audio_config: { duration: Math.min(duration, 150), bpm: 128, format: 'mp3', vocal_language: language },
-              }),
-              signal: AbortSignal.timeout(240_000),
-            })
-            if (nbRes.ok) {
-              const nbData = await nbRes.json() as Record<string, unknown>
-              const choices = nbData.choices as Array<{ message?: { audio?: Array<{ audio_url?: { url?: string } | string }> } }> | undefined
-              const audioArr = choices?.[0]?.message?.audio
-              if (Array.isArray(audioArr)) {
-                for (const item of audioArr) {
-                  let u: string | undefined
-                  if (typeof item.audio_url === 'string') u = item.audio_url
-                  else if (typeof item.audio_url === 'object' && item.audio_url !== null) u = (item.audio_url as Record<string, unknown>).url as string | undefined
-                  if (u) { foundUrl = u; break }
-                }
-              }
-              if (!foundUrl && typeof nbData.audio_url === 'string') foundUrl = nbData.audio_url
-              if (!foundUrl && Array.isArray(nbData.data) && nbData.data.length > 0) {
-                const d0 = nbData.data[0] as Record<string, unknown>
-                if (typeof d0.audio_url === 'string') foundUrl = d0.audio_url
-                else if (typeof d0.url === 'string') foundUrl = d0.url
-              }
-            }
-          }
-
-          // Fallback 2: if foundUrl is an image (ACE mode mismatch) — retry without thinking
-          if (foundUrl?.startsWith('data:image')) {
-            console.error('[/generate_ace_music] ACE returned IMAGE — retrying without thinking mode')
-            const retryRes = await fetch('https://api.acemusic.ai/v1/chat/completions', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + ACE_API_KEY },
-              body: JSON.stringify({
-                model: 'acestep/ACE-Step-v1.5',
-                messages: [{ role: 'user', content: taggedContent }],
-                stream: false,
-                audio_config: { duration: Math.min(duration, 150), bpm: 128, format: 'mp3', vocal_language: language },
-              }),
-              signal: AbortSignal.timeout(240_000),
-            })
-            if (retryRes.ok) {
-              const retryData = await retryRes.json() as Record<string, unknown>
-              const choices = retryData.choices as Array<{ message?: { audio?: Array<{ audio_url?: { url?: string } | string }> } }> | undefined
-              const audioArr = choices?.[0]?.message?.audio
-              if (Array.isArray(audioArr)) {
-                for (const item of audioArr) {
-                  let u: string | undefined
-                  if (typeof item.audio_url === 'string') u = item.audio_url
-                  else if (typeof item.audio_url === 'object' && item.audio_url !== null) u = (item.audio_url as Record<string, unknown>).url as string | undefined
-                  if (u) { foundUrl = u; break }
-                }
-              }
-              if (!foundUrl && Array.isArray(retryData.data) && retryData.data.length > 0) {
-                const d0 = retryData.data[0] as Record<string, unknown>
-                if (typeof d0.audio_url === 'string') foundUrl = d0.audio_url
-                else if (typeof d0.url === 'string') foundUrl = d0.url
-              }
-            }
-          }
-
-          // Fallback 3: MiniMax music-2.6 — only if ACE returned nothing valid
-          const isValidAudio = foundUrl?.startsWith('data:audio') || foundUrl?.startsWith('https://')
-          if (!isValidAudio) {
-            const minimaxFbKey = process.env.MINIMAX_API_KEY
-            if (minimaxFbKey) {
+              const json = line.slice(5).trim()
+              if (!json || json === '[DONE]') continue
               try {
-                const mmRes = await fetch('https://api.minimax.io/v1/music_generation', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${minimaxFbKey}` },
-                  body: JSON.stringify({
-                    model: 'music-2.6',
-                    lyrics: lyrics?.slice(0, 3500) ?? stylePrompt.slice(0, 3500),
-                    prompt: stylePrompt.slice(0, 2000),
-                    output_format: 'url',
-                    audio_setting: { sample_rate: 44100, bitrate: 128000, format: 'mp3' },
-                  }),
-                  signal: AbortSignal.timeout(120000),
-                })
-                if (mmRes.ok) {
-                  const mmData = await mmRes.json() as { data?: { audio_file?: string; audio?: string }; base_resp?: { status_code: number; status_msg: string } }
-                  if ((mmData.base_resp?.status_code ?? 0) === 0) {
-                    const mmAudio = mmData.data?.audio_file ?? mmData.data?.audio
-                    if (mmAudio) return `AUDIO_URL:${mmAudio}`
-                  }
+                const sseData = JSON.parse(json) as Record<string, unknown>
+                if (sseData.error) {
+                  errorMsg = String(sseData.error)
+                  done = true
+                  break
                 }
-              } catch { /* MiniMax fallback failed */ }
+                if (!audioUrl && typeof sseData.url === 'string' && sseData.url) {
+                  audioUrl = sseData.url
+                  if (typeof sseData.title === 'string' && sseData.title) songTitle = sseData.title
+                  if (typeof sseData.style === 'string' && sseData.style) songStyle = sseData.style
+                  if (typeof sseData.lyrics === 'string' && sseData.lyrics) songLyrics = sseData.lyrics
+                  done = true // got what we need
+                  break
+                }
+              } catch { /* skip malformed SSE lines */ }
             }
-            return `ACE Music and MiniMax music-2.6 both failed. Please try again.`
+          }
+          reader.cancel().catch(() => {})
+
+          if (!audioUrl) {
+            return `Music generation failed: ${errorMsg || 'No audio URL returned'}. Please try again.`
           }
 
-          // Save to assets DB
-          if (userId) {
-            try {
-              const fid = crypto.randomUUID()
-              await query(
-                `INSERT INTO sparkie_assets (user_id, name, content, asset_type, source, file_id, chat_title, chat_id, language) VALUES ($1, $2, $3, 'audio', 'agent', $4, '', '', '')`,
-                [userId, `ace-music-${Date.now()}.mp3`, foundUrl, fid]
-              )
-              return `AUDIO_URL:${baseUrl}/api/assets-audio?fid=${fid}`
-            } catch { /* fall back to data URL */ }
+          if (!songTitle) {
+            songTitle = stylePrompt.slice(0, 50).replace(/\b\w/g, c => c.toUpperCase()).trim() || 'Sparkie Mix'
           }
-          return `AUDIO_URL:${foundUrl}`
+
+          // Return structured data so frontend shows the full music card
+          // Format: 🎵 TITLE | style description | AUDIO_URL:url
+          const safeTitle = songTitle.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim().replace(/\s+/g, '-').slice(0, 50) || 'sparkie-mix'
+          return `🎵 ${songTitle}\n${songStyle}\nAUDIO_URL:${audioUrl}\nSONG_META:${safeTitle}|${songLyrics ? 'has-lyrics' : 'no-lyrics'}`
 
         } catch (e) {
           return 'generate_ace_music error: ' + String(e)
@@ -8083,32 +7941,52 @@ Keep each header + thought on its own line. Use multiple short bold-header block
         }
 
         // Build set of valid tool_call IDs from the current loopMessages before any LLM call
-        // so stripToolIds can use it for both the main call and the 400 fallback paths
+        // Collect all tool_call IDs so we can strip orphaned tool results
+        // Also track which IDs we've seen to handle duplicates
         const validToolCallIds = new Set<string>()
+        const seenToolResultIds = new Set<string>()
         loopMessages.forEach((msg: Record<string, unknown>) => {
           if (msg.role === 'assistant' && msg.tool_calls) {
             (msg.tool_calls as Array<{ id: string }>).forEach((tc) => { if (tc.id) validToolCallIds.add(tc.id) })
           }
         })
 
-        // Strip tool_call_id from orphaned tool results + strip IDs from tool calls
-        // This prevents MiniMax 400 "tool id not found" when tool IDs roll out of context
-        const stripToolIds = (msgs: typeof loopMessages): typeof loopMessages => msgs.map((msg: Record<string, unknown>) => {
-          if (msg.role === 'tool' && msg.tool_call_id && !validToolCallIds.has(msg.tool_call_id as string)) {
-            return { ...msg, tool_call_id: undefined }
-          }
-          if (msg.role === 'assistant' && msg.tool_calls) {
-            const stripped = {
-              ...msg,
-              tool_calls: (msg.tool_calls as Array<Record<string, unknown>>).map((tc: Record<string, unknown>) => {
-                const { id: _id, ...rest } = tc
-                return rest
-              }),
+        // Strip tool_call_id from orphaned tool results + deduplicate all tool IDs
+        // This prevents MiniMax 400 "duplicate tool_call id" when the same ID appears
+        // in multiple tool results, and "tool id not found" when IDs roll out of context
+        const stripToolIds = (msgs: typeof loopMessages): typeof loopMessages => {
+          const seenToolIds = new Set<string>()
+          return msgs.map((msg: Record<string, unknown>) => {
+            // Strip tool_call_id from tool results that are orphaned OR duplicated
+            if (msg.role === 'tool' && msg.tool_call_id) {
+              const id = msg.tool_call_id as string
+              const isOrphaned = !validToolCallIds.has(id)
+              const isDuplicate = seenToolResultIds.has(id)
+              seenToolResultIds.add(id)
+              if (isOrphaned || isDuplicate) {
+                return { ...msg, tool_call_id: undefined }
+              }
             }
-            return stripped
-          }
-          return msg
-        })
+            // Strip id from tool_calls in assistant messages to prevent duplicates
+            if (msg.role === 'assistant' && msg.tool_calls) {
+              const seenIds = new Set<string>()
+              return {
+                ...msg,
+                tool_calls: (msg.tool_calls as Array<Record<string, unknown>>).map((tc: Record<string, unknown>) => {
+                  const tcId = tc.id as string | undefined
+                  if (tcId && (seenIds.has(tcId) || !validToolCallIds.has(tcId))) {
+                    // Duplicate or orphaned — strip the id
+                    const { id: _id, ...rest } = tc
+                    return rest
+                  }
+                  if (tcId) seenIds.add(tcId)
+                  return tc
+                }),
+              }
+            }
+            return msg
+          })
+        }
 
         const strippedPayloadMessages = stripToolIds(loopMessages)
         const llmPayload = (tools: typeof validTools, systemOverride?: string) => ({
@@ -8135,43 +8013,18 @@ Keep each header + thought on its own line. Use multiple short bold-header block
         }
 
         if (!loopRes.ok && loopRes.status === 400) {
-          // Final fallback: 0-tools synthesis — strip orphaned tool_calls AND orphaned tool results
-          // to avoid MiniMax 400 error "tool result's tool id not found (2013)"
+          // Final fallback: 0-tools synthesis — strip ALL tool IDs from tool results
+          // to avoid MiniMax 400 "duplicate tool_call id" and "tool id not found" errors
           console.warn(`[chat] 400 with core tools — falling back to 0-tools synthesis`)
-          // Collect all valid tool_call IDs from assistant messages so we can strip orphaned tool results
-          const validToolCallIds = new Set<string>()
-          loopMessages.forEach((msg: Record<string, unknown>) => {
-            if (msg.role === 'assistant' && msg.tool_calls) {
-              (msg.tool_calls as Array<{ id: string }>).forEach((tc) => { if (tc.id) validToolCallIds.add(tc.id) })
-            }
-          })
-          const sanitizedFallbackMessages = loopMessages
+          const strippedFallbackMessages = stripToolIds(loopMessages)
             .filter((msg: Record<string, unknown>) => {
+              // Drop assistant messages that only had tool_calls and no content
               if (msg.role === 'assistant' && msg.tool_calls && !msg.content) return false
-              // Strip orphaned tool results whose tool_call_id has no matching tool call
-              if (msg.role === 'tool' && msg.tool_call_id && !validToolCallIds.has(msg.tool_call_id as string)) return false
               return true
             })
             .map((msg: Record<string, unknown>) => {
+              // Strip all tool_calls from assistant messages (going 0-tools)
               if (msg.role === 'assistant') return { ...msg, tool_calls: undefined }
-              return msg
-            })
-
-          // ── PROACTIVE 400 FIX: also strip tool_call_id from assistant messages ──
-          // MiniMax returns "tool id not found" when an assistant message references a tool_call_id
-          // that fell out of the conversation context window. Strip these proactively.
-          const strippedFallbackMessages = sanitizedFallbackMessages
-            .map((msg: Record<string, unknown>) => {
-              if (msg.role === 'assistant' && msg.tool_calls) {
-                const stripped = {
-                  ...msg,
-                  tool_calls: (msg.tool_calls as Array<Record<string, unknown>>).map((tc: Record<string, unknown>) => {
-                    const { id: _id, ...rest } = tc
-                    return rest
-                  }),
-                }
-                return stripped
-              }
               return msg
             })
           const fallbackPayloadMessages = strippedFallbackMessages.length > 40

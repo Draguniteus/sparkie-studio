@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 import { pushMediaToGitHub } from '@/lib/github-media'
 
 export const runtime = 'nodejs'
-export const maxDuration = 300
+export const maxDuration = 600
 
 const MINIMAX_BASE = 'https://api.minimax.io/v1'
 const ACE_MUSIC_BASE = 'https://api.acemusic.ai'
@@ -232,13 +232,14 @@ async function handleAceMusic(
           thinking: true,
           audio_config: { duration: aceDuration, bpm: aceBpm, format: 'mp3', vocal_language: 'en' },
         }),
-        signal: AbortSignal.timeout(240000),
+        // Fast-fail on 504: ACE is rejecting — don't wait 4 min, skip to MiniMax immediately
+        signal: AbortSignal.timeout(300000),
       })
       if (!r.ok) {
         const errText = await r.text().catch(() => 'HTTP ' + r.status)
-        let errMsg = 'ACE Music error ' + r.status
-        try { const j = JSON.parse(errText); errMsg = j?.error?.message || j?.message || errMsg } catch { /* noop */ }
-        throw new Error(errMsg)
+        console.error('[/api/music] ACE HTTP error ' + r.status + ':', errText.slice(0, 200))
+        // Return a special marker so caller skips to MiniMax immediately — no wasted retries
+        return { audioUrl: undefined, content: 'SKIP_TO_MINIMAX' }
       }
       const rdr = r.body!.getReader()
       const dec = new TextDecoder()
@@ -304,30 +305,24 @@ async function handleAceMusic(
     clearInterval(keepalive)
 
     // Run request with retry — ACE can timeout or hit transient errors
-    const makeAceRequestWithRetry = async (retries = 2): Promise<{ audioUrl: string | undefined; content: string }> => {
-      let lastErr: string = ''
-      for (let attempt = 0; attempt <= retries; attempt++) {
-        try {
-          const result = await makeAceRequest()
-          if (result.audioUrl || attempt === retries) return result
-          lastErr = result.content || 'no audio_url in response'
-        } catch (e) {
-          lastErr = e instanceof Error ? e.message : String(e)
-        }
-        if (attempt < retries) {
-          const delay = Math.min(2000 * Math.pow(2, attempt), 8000)
-          console.log(`[/api/music] ACE attempt ${attempt + 1} failed (${lastErr}) — retrying in ${delay}ms…`)
-          await new Promise(r => setTimeout(r, delay))
-        }
+    const makeAceRequestWithRetry = async (): Promise<{ audioUrl: string | undefined; content: string }> => {
+      // Try streaming once — if HTTP error, skip to MiniMax immediately (no retries)
+      const result = await makeAceRequest()
+      if (result.audioUrl) return result
+      // No audio URL found or ACE said skip — go to fallback chain
+      if (result.content === 'SKIP_TO_MINIMAX') {
+        console.log('[/api/music] ACE HTTP error — skipping to MiniMax fallback immediately')
+      } else {
+        console.log('[/api/music] ACE streaming returned no audio — trying non-streaming fallback')
       }
-      return { audioUrl: undefined, content: lastErr }
+      return result
     }
 
     const result = await makeAceRequestWithRetry()
 
     if (!result.audioUrl) {
-      // Fallback 1: non-streaming + thinking
-      console.log('[/api/music] Streaming returned no audio — trying non-streaming fallback')
+      // Fallback 1: non-streaming + thinking (30s timeout — fast-fail to MiniMax if stuck)
+      console.log('[/api/music] Streaming returned no audio — trying non-streaming fallback (30s timeout)')
       const nbRes = await fetch(ACE_MUSIC_BASE + '/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aceKey },
@@ -338,7 +333,7 @@ async function handleAceMusic(
           thinking: true,
           audio_config: { duration: aceDuration, bpm: aceBpm, format: 'mp3', vocal_language: 'en' },
         }),
-        signal: AbortSignal.timeout(240000),
+        signal: AbortSignal.timeout(30000),
       })
       if (nbRes.ok) {
         const nbData = await nbRes.json() as Record<string, unknown>
@@ -358,11 +353,14 @@ async function handleAceMusic(
           if (typeof d0.audio_url === 'string') result.audioUrl = d0.audio_url as string
           else if (typeof d0.url === 'string') result.audioUrl = d0.url as string
         }
+      } else if (nbRes.status >= 500) {
+        // ACE server error — skip to MiniMax immediately
+        console.log('[/api/music] ACE non-streaming HTTP ' + nbRes.status + ' — skipping to MiniMax')
       }
 
-      // Fallback 2: retry without thinking (ACE might have returned image instead)
+      // Fallback 2: retry without thinking (30s timeout — ACE might succeed without thinking)
       if (!result.audioUrl) {
-        console.log('[/api/music] Non-streaming also returned no audio — retrying without thinking mode')
+        console.log('[/api/music] Non-streaming also returned no audio — retrying without thinking mode (30s timeout)')
         const retryRes = await fetch(ACE_MUSIC_BASE + '/v1/chat/completions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aceKey },
@@ -372,7 +370,7 @@ async function handleAceMusic(
             stream: false,
             audio_config: { duration: aceDuration, bpm: aceBpm, format: 'mp3', vocal_language: 'en' },
           }),
-          signal: AbortSignal.timeout(240000),
+          signal: AbortSignal.timeout(30000),
         })
         if (retryRes.ok) {
           const retryData = await retryRes.json() as Record<string, unknown>
@@ -391,6 +389,8 @@ async function handleAceMusic(
             if (typeof d0.audio_url === 'string') result.audioUrl = d0.audio_url as string
             else if (typeof d0.url === 'string') result.audioUrl = d0.url as string
           }
+        } else if (retryRes.status >= 500) {
+          console.log('[/api/music] ACE no-thinking HTTP ' + retryRes.status + ' — skipping to MiniMax')
         }
       }
 
