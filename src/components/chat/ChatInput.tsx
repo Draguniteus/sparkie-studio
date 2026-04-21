@@ -698,9 +698,10 @@ export function ChatInput() {
                     },
                   })
                   const mediaChatTitle = useAppStore.getState().chats.find(c => c.id === chatId)?.title || "New Chat"
-                  const safePrompt = prompt.slice(0, 40).replace(/[^a-z0-9 ]/gi, "").trim().replace(/\s+/g, "-") || "music"
+                  const rawTitle = (sseData.title as string) || "Sparkie Mix"
+                  const safeName = rawTitle.toLowerCase().replace(/[^a-z0-9 ]/g, "").trim().replace(/\s+/g, "-").slice(0, 50) || "sparkie-mix"
                   addAsset({
-                    name: `${safePrompt}-ace.mp3`,
+                    name: `${safeName}-ace.mp3`,
                     language: "",
                     content: sseData.url as string,
                     chatId,
@@ -729,9 +730,10 @@ export function ChatInput() {
                     },
                   })
                   const mediaChatTitle = useAppStore.getState().chats.find(c => c.id === chatId)?.title || "New Chat"
-                  const safePrompt = prompt.slice(0, 40).replace(/[^a-z0-9 ]/gi, "").trim().replace(/\s+/g, "-") || "music"
+                  const rawTitle = (sseData.title as string) || prompt.slice(0, 60).replace(/\b\w/g, c => c.toUpperCase()).trim() || "Sparkie Mix"
+                  const safeName = rawTitle.toLowerCase().replace(/[^a-z0-9 ]/g, "").trim().replace(/\s+/g, "-").slice(0, 50) || "sparkie-mix"
                   addAsset({
-                    name: `${safePrompt}.mp3`,
+                    name: `${safeName}.mp3`,
                     language: "",
                     content: sseData.url,
                     chatId,
