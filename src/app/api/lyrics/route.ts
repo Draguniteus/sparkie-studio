@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No lyrics returned from MiniMax' }, { status: 500 })
     }
 
-    return NextResponse.json({ lyrics: lyricsText, title, styleTags, model: 'music-2.5' })
+    return NextResponse.json({ lyrics: lyricsText, title, styleTags, model: 'music-2.6' })
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Lyrics generation failed'
     return NextResponse.json({ error: msg }, { status: 500 })

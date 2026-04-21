@@ -8,14 +8,15 @@ const MINIMAX_BASE = 'https://api.minimax.io/v1'
 const ACE_MUSIC_BASE = 'https://api.acemusic.ai'
 
 const MINIMAX_MODEL_MAP: Record<string, string> = {
-  'music-2.5':     'music-2.5',
-  'music-2.5+':    'music-2.5+',
+  'music-2.6':     'music-2.6',
+  'music-2.5':     'music-2.6',
+  'music-2.5+':    'music-2.6',
   'music-2.0':     'music-2.0',
-  'music-01':      'music-2.5',
+  'music-01':      'music-2.6',
   'music-01-lite': 'music-2.0',
 }
 
-const LYRICS_OPTIMIZER_MODELS = new Set(['music-2.5', 'music-2.5+'])
+const LYRICS_OPTIMIZER_MODELS = new Set(['music-2.6', 'music-2.5', 'music-2.5+'])
 
 function normalizeLyricsTags(lyrics: string): string {
   return lyrics.replace(/\[([^\]]+)\]/g, (_, inner) => {
@@ -486,7 +487,7 @@ async function handleMiniMax(
     return
   }
 
-  const minimaxModel = MINIMAX_MODEL_MAP[model] || 'music-2.5'
+  const minimaxModel = MINIMAX_MODEL_MAP[model] || 'music-2.6'
   const { stylePrompt, lyrics } = parseMusicPrompt(rawPrompt)
   let finalLyrics = lyrics.trim()
   const supportsLyricsOptimizer = LYRICS_OPTIMIZER_MODELS.has(minimaxModel)
@@ -651,7 +652,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
     rawPrompt = body.prompt
-    model = body.model || 'music-2.5'
+    model = body.model || 'music-2.6'
     bodyUserId = body.userId
     userStyle = typeof body.userStyle === 'string' && body.userStyle ? body.userStyle : undefined
     userLyrics = typeof body.userLyrics === 'string' && body.userLyrics ? body.userLyrics : undefined
