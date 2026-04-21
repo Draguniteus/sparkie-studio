@@ -229,7 +229,7 @@ function AceMusicPlayer({ message }: { message: Message }) {
   const progressPct = duration > 0 ? (currentTime / duration) * 100 : 0
 
   return (
-    <div className="w-full max-w-md rounded-2xl overflow-hidden border border-purple-500/30 bg-gradient-to-b from-[#1a0533] to-[#0d0118] shadow-xl shadow-purple-900/30">
+    <div className="w-full rounded-2xl overflow-hidden border border-purple-500/30 bg-gradient-to-b from-[#1a0533] to-[#0d0118] shadow-xl shadow-purple-900/30">
       <div className="px-4 pt-4 pb-2">
         <p className="text-[10px] font-semibold tracking-widest text-honey-400/70 uppercase mb-0.5">Sparkie's Music Studio</p>
         <h3 className="text-lg font-bold text-white leading-tight truncate">{meta.title}</h3>
@@ -372,6 +372,22 @@ function MessageBubbleInner({ message, userAvatarUrl }: Props) {
     useShallow((s) => ({ updateMessage: s.updateMessage, currentChatId: s.currentChatId }))
   )
 
+  // Music card: break OUT of bubble constraint, render full-width alongside avatar
+  if (isAceMusic && !message.isStreaming) {
+    return (
+      <div className="flex gap-3 animate-fade-in">
+        {!isUser && (
+          <div className="w-7 h-7 rounded-lg overflow-hidden shrink-0 mt-0.5 border border-purple-500/30 glow-sparkie-avatar">
+            <img src="/sparkie-avatar.jpg" alt="Sparkie" className="w-full h-full object-cover" />
+          </div>
+        )}
+        <div className="flex-1 min-w-0">
+          <AceMusicPlayer message={message} />
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className={`flex gap-3 animate-fade-in ${isUser ? "justify-end" : ""}`}>
       {!isUser && (
@@ -446,8 +462,6 @@ function MessageBubbleInner({ message, userAvatarUrl }: Props) {
               </div>
               {message.imagePrompt && <p className="text-xs text-text-muted italic">{message.imagePrompt}</p>}
             </div>
-          ) : isAceMusic && !message.isStreaming ? (
-            <AceMusicPlayer message={message} />
           ) : isAudio && !message.isStreaming ? (
             <div className="space-y-2">
               <div className="rounded-xl bg-hive-elevated border border-hive-border p-3">
