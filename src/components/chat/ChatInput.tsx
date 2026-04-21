@@ -683,8 +683,9 @@ export function ChatInput() {
                 }
                 // ACE Music: rich card with title, v1/v2, style, lyrics
                 if (sseData.type === "ace_music" && sseData.url) {
+                  const songTitle = (sseData.title as string) || "your song"
                   updateMessage(chatId, assistantMsgId, {
-                    content: prompt,
+                    content: `Here's your song — "${songTitle}" 🎵`,
                     audioUrl: sseData.url as string,
                     imagePrompt: prompt,
                     isStreaming: false,
@@ -715,8 +716,9 @@ export function ChatInput() {
                   return
                 }
                 if (sseData.url) {
+                  const songTitle2 = (sseData.title as string) || prompt.slice(0, 60) || "your song"
                   updateMessage(chatId, assistantMsgId, {
-                    content: prompt,
+                    content: `Here's your song — "${songTitle2}" 🎵`,
                     audioUrl: sseData.url as string,
                     imagePrompt: prompt,
                     isStreaming: false,
@@ -799,8 +801,9 @@ export function ChatInput() {
 
             if (statusData.status === "done" && statusData.url) {
               clearInterval(pollInterval)
+              const taskLabel2 = isVideoTask ? "Video" : "Song"
               updateMessage(chatId, assistantMsgId, {
-                content: prompt,
+                content: `Here's your ${taskLabel2.toLowerCase()}! 🎵`,
                 ...(isVideoTask ? { imageUrl: statusData.url } : { audioUrl: statusData.url }),
                 imagePrompt: prompt,
                 isStreaming: false,

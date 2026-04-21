@@ -29,8 +29,12 @@ export async function GET(req: NextRequest) {
     // Parse data URL: data:<mime>;base64,<data>
     const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/)
     if (!match) {
-      // Not a data URL — might already be an https URL, redirect
-      if (dataUrl.startsWith('http')) return NextResponse.redirect(dataUrl)
+      // Not a data URL — might already be an https URL, validate and redirect
+      let normalizedUrl = dataUrl.trim()
+      normalizedUrl = normalizedUrl.replace(/^(https?|http)\/+/, '$1://')
+      if (normalizedUrl.startsWith('https://') && !normalizedUrl.includes('undefined')) {
+        return NextResponse.redirect(normalizedUrl)
+      }
       return new NextResponse('Invalid content format', { status: 500 })
     }
     const mimeType = match[1]

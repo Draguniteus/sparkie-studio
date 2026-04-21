@@ -52,7 +52,16 @@ export async function GET(req: NextRequest) {
 
     // If it's already an HTTPS URL (e.g. from Spaces CDN), redirect
     if (dataUrl.startsWith('http')) {
-      return NextResponse.redirect(dataUrl)
+      // Validate and normalize URL — fix malformed schemes like "https//" (missing colon)
+      let normalizedUrl = dataUrl.trim()
+      // Fix "https//" or "http//" → "https://" or "http://"
+      normalizedUrl = normalizedUrl.replace(/^(https?|http)\/+/, '$1://')
+      // Only redirect to valid https URLs
+      if (normalizedUrl.startsWith('https://') && !normalizedUrl.includes('undefined')) {
+        return NextResponse.redirect(normalizedUrl)
+      }
+      // Malformed URL — serve as error instead of redirecting to broken URL
+      return new NextResponse('Invalid audio URL', { status: 500 })
     }
 
     // Parse data URL: data:<mime>;base64,<data>
