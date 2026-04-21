@@ -1026,8 +1026,8 @@ Rule: broken tool → say so honestly → never substitute output type or fake s
 
 ## 🎵 MINIMAX MUSIC — EXACT SPEC
 
-- Model: music-2.5 primary, music-2.0 fallback
-- Body: { model: 'music-2.5', lyrics, output_format: 'url', audio_setting: { sample_rate: 44100, bitrate: 128000, format: 'mp3' } }
+- Model: music-2.6 primary, music-2.0 fallback
+- Body: { model: 'music-2.6', lyrics, output_format: 'url', audio_setting: { sample_rate: 44100, bitrate: 128000, format: 'mp3' } }
 - Audio URL is in: data.audio (NOT audio_file, NOT audioURL, NOT audio_url)
 - output_format='hex' → data.audio = hex bytes; output_format='url' → data.audio = HTTPS URL
 - MiniMax Lyrics: POST /v1/lyrics_generation → { mode: 'write_full_song', prompt? } — NO model field
@@ -1686,7 +1686,7 @@ const SPARKIE_TOOLS = [
     type: 'function',
     function: {
       name: 'generate_music',
-      description: 'MiniMax music-2.5 fallback. Use ONLY if generate_ace_music fails twice. If you already wrote lyrics, pass them directly in the lyrics field to skip AI lyrics generation. Pass a style prompt and optional title.',
+      description: 'MiniMax music-2.6 fallback. Use ONLY if generate_ace_music fails twice. If you already wrote lyrics, pass them directly in the lyrics field to skip AI lyrics generation. Pass a style prompt and optional title.',
       parameters: {
         type: 'object',
         properties: {
@@ -3337,8 +3337,8 @@ async function executeTool(
           } catch (err) { console.error('[generate_music] lyrics-2.5 exception:', err) }
         }
 
-        // Step 2 — Generate music via music-2.5
-        // music-2.5: lyrics is REQUIRED, prompt is optional style description
+        // Step 2 — Generate music via music-2.6
+        // music-2.6: lyrics is REQUIRED, prompt is optional style description
         // Use style_tags from lyrics gen as prompt if available, otherwise use original prompt
         const musicStylePrompt = styleTagsFromLyrics || prompt.slice(0, 2000)
         const musicLyrics = lyricsText || prompt  // fallback: use prompt as lyrics if lyrics gen failed
@@ -3347,7 +3347,7 @@ async function executeTool(
           method: 'POST',
           headers: { Authorization: `Bearer ${minimaxKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: 'music-2.5',
+            model: 'music-2.6',
             lyrics: musicLyrics.slice(0, 3500),
             prompt: musicStylePrompt.slice(0, 2000),
             output_format: 'url',
@@ -3357,7 +3357,7 @@ async function executeTool(
         })
         if (!musicRes.ok) return `Music generation failed: ${musicRes.status}`
         const md = await musicRes.json() as { data?: { audio_file?: string; audio?: string; status?: number }; base_resp?: { status_code: number; status_msg: string } }
-        if ((md.base_resp?.status_code ?? 0) !== 0) { console.error('[generate_music] music-2.5 error:', md.base_resp?.status_code, md.base_resp?.status_msg, '| lyrics length:', musicLyrics.slice(0,3500).length); return `Music generation error: ${md.base_resp?.status_msg ?? 'unknown'}` }
+        if ((md.base_resp?.status_code ?? 0) !== 0) { console.error('[generate_music] music-2.6 error:', md.base_resp?.status_code, md.base_resp?.status_msg, '| lyrics length:', musicLyrics.slice(0,3500).length); return `Music generation error: ${md.base_resp?.status_msg ?? 'unknown'}` }
         const audioUrl = md.data?.audio_file ?? md.data?.audio
         const trackTitle = title
         if (audioUrl) {
@@ -4201,15 +4201,16 @@ async function executeTool(
             }),
             signal: AbortSignal.timeout(240_000),
           })
+          let foundUrl: string | undefined
+          let rdr: ReadableStreamDefaultReader | undefined
           if (!r.ok) {
             const errText = await r.text().catch(() => 'HTTP ' + r.status)
-            let errMsg = 'ACE Music error ' + r.status
-            try { const j = JSON.parse(errText); errMsg = j?.error?.message || j?.message || errMsg } catch { /* noop */ }
-            throw new Error(errMsg)
-          }
-          const rdr = r.body!.getReader()
+            console.error('[/generate_ace_music] ACE streaming error ' + r.status + ':', errText.slice(0, 200))
+            foundUrl = undefined
+          } else {
+          rdr = r.body!.getReader()
           const dec = new TextDecoder()
-          let buf = '', foundUrl: string | undefined
+          let buf = ''
 
           while (true) {
             const { done, value } = await rdr.read()
@@ -4268,10 +4269,11 @@ async function executeTool(
               if (foundUrl) { rdr.cancel(); break }
             }
           }
+          } // end else: only run streaming read when r.ok
 
           // Fallback 1: non-stream response (with thinking:true for audio mode)
           if (!foundUrl) {
-            rdr.cancel()
+            if (rdr) rdr.cancel()
             const nbRes = await fetch('https://api.acemusic.ai/v1/chat/completions', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + ACE_API_KEY },
@@ -4339,7 +4341,7 @@ async function executeTool(
             }
           }
 
-          // Fallback 3: MiniMax music-2.5 — only if ACE returned nothing valid
+          // Fallback 3: MiniMax music-2.6 — only if ACE returned nothing valid
           const isValidAudio = foundUrl?.startsWith('data:audio') || foundUrl?.startsWith('https://')
           if (!isValidAudio) {
             const minimaxFbKey = process.env.MINIMAX_API_KEY
@@ -4349,7 +4351,7 @@ async function executeTool(
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${minimaxFbKey}` },
                   body: JSON.stringify({
-                    model: 'music-2.5',
+                    model: 'music-2.6',
                     lyrics: lyrics?.slice(0, 3500) ?? stylePrompt.slice(0, 3500),
                     prompt: stylePrompt.slice(0, 2000),
                     output_format: 'url',
@@ -4366,7 +4368,7 @@ async function executeTool(
                 }
               } catch { /* MiniMax fallback failed */ }
             }
-            return `ACE Music did not return a valid audio URL (got image or empty). Already tried: (1) streaming + thinking, (2) non-streaming + thinking, (3) non-streaming without thinking, (4) MiniMax music-2.5. All failed.`
+            return `ACE Music and MiniMax music-2.6 both failed. Please try again.`
           }
 
           // Save to assets DB
