@@ -414,7 +414,7 @@ async function handleAceMusic(
             const mmAudio = mmData.data?.audio_file ?? mmData.data?.audio ?? mmData.data?.audio_url ?? mmData.data?.url
             if (mmAudio) {
               const mmUrl = await tryPersistAudio(String(mmAudio), userId)
-              send('data: ' + JSON.stringify({ type: 'minimax_music', url: mmUrl, model: 'music-2.6', title: songTitle, style: stylePrompt, lyrics: finalLyrics }) + '\n\n')
+              send('data: ' + JSON.stringify({ type: 'ace_music', url: mmUrl, model: 'music-2.6', title: songTitle, style: stylePrompt, lyrics: finalLyrics }) + '\n\n')
               clearInterval(keepalive)
               return
             }
@@ -574,9 +574,19 @@ async function handleMiniMax(
       dataPayload?.url ||
       dataPayload?.download_url
 
+    // Derive title from prompt for the Music Studio card
+    const songTitle = rawPrompt.slice(0, 60).replace(/\b\w/g, c => c.toUpperCase()).trim() || 'Sparkie Mix'
+
     if (audioFieldValue && String(audioFieldValue).startsWith('http')) {
       const persistentUrl = await tryPersistAudio(String(audioFieldValue), userId)
-      send('data: ' + JSON.stringify({ url: persistentUrl, model: minimaxModel }) + '\n\n')
+      send('data: ' + JSON.stringify({ 
+        type: 'ace_music', 
+        url: persistentUrl, 
+        model: minimaxModel,
+        title: songTitle,
+        style: stylePrompt.slice(0, 200),
+        lyrics: finalLyrics
+      }) + '\n\n')
       return
     }
 
@@ -584,7 +594,14 @@ async function handleMiniMax(
     if (audioRaw && typeof audioRaw === 'string' && audioRaw.length > 0) {
       if (audioRaw.startsWith('http')) {
         const persistentUrl = await tryPersistAudio(audioRaw, userId)
-        send('data: ' + JSON.stringify({ url: persistentUrl, model: minimaxModel }) + '\n\n')
+        send('data: ' + JSON.stringify({ 
+          type: 'ace_music', 
+          url: persistentUrl, 
+          model: minimaxModel,
+          title: songTitle,
+          style: stylePrompt.slice(0, 200),
+          lyrics: finalLyrics
+        }) + '\n\n')
         return
       } else {
         try {
@@ -592,7 +609,14 @@ async function handleMiniMax(
           if (audioBuf.length === 0) throw new Error('Hex decode produced empty buffer')
           const dataUrl = 'data:audio/mp3;base64,' + audioBuf.toString('base64')
           const persistentUrl = await tryPersistAudio(dataUrl, userId)
-          send('data: ' + JSON.stringify({ url: persistentUrl, model: minimaxModel }) + '\n\n')
+          send('data: ' + JSON.stringify({ 
+            type: 'ace_music', 
+            url: persistentUrl, 
+            model: minimaxModel,
+            title: songTitle,
+            style: stylePrompt.slice(0, 200),
+            lyrics: finalLyrics
+          }) + '\n\n')
           return
         } catch (hexErr) {
           console.error('[/api/music] Hex decode failed:', hexErr)
