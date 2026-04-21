@@ -7954,9 +7954,21 @@ Keep each header + thought on its own line. Use multiple short bold-header block
         // Strip tool_call_id from orphaned tool results + deduplicate all tool IDs
         // This prevents MiniMax 400 "duplicate tool_call id" when the same ID appears
         // in multiple tool results, and "tool id not found" when IDs roll out of context
+        // Also sanitize: strip base64 data: URLs and truncate long AUDIO_URL strings
         const stripToolIds = (msgs: typeof loopMessages): typeof loopMessages => {
           const seenToolIds = new Set<string>()
           return msgs.map((msg: Record<string, unknown>) => {
+            // Sanitize message content: remove base64 data URLs and truncate long audio strings
+            if (typeof msg.content === 'string' && msg.content.length > 500) {
+              let cleaned = msg.content
+                // Replace data:audio/mp3;base64,... with placeholder
+                .replace(/data:audio\/[^;]+;base64,[^\s]+/g, '[🎵 audio]')
+                // Truncate AUDIO_URL:... strings longer than 200 chars (keep title metadata)
+                .replace(/(AUDIO_URL:.{200,})/g, (m) => m.slice(0, 200) + '...[truncated]')
+              // If still too long, truncate to 4000 chars
+              if (cleaned.length > 4000) cleaned = cleaned.slice(0, 4000) + '\n[content truncated due to length]'
+              msg = { ...msg, content: cleaned }
+            }
             // Strip tool_call_id from tool results that are orphaned OR duplicated
             if (msg.role === 'tool' && msg.tool_call_id) {
               const id = msg.tool_call_id as string
@@ -9195,6 +9207,14 @@ When executing multi-step tasks:
         }
       })
       const synthSanitized = finalMessages.map((msg: Record<string, unknown>) => {
+        // Sanitize: strip base64 data URLs and truncate long audio strings
+        if (typeof msg.content === 'string' && msg.content.length > 500) {
+          let cleaned = msg.content
+            .replace(/data:audio\/[^;]+;base64,[^\s]+/g, '[🎵 audio]')
+            .replace(/(AUDIO_URL:.{200,})/g, (m) => m.slice(0, 200) + '...[truncated]')
+          if (cleaned.length > 4000) cleaned = cleaned.slice(0, 4000) + '\n[content truncated due to length]'
+          msg = { ...msg, content: cleaned }
+        }
         if (msg.role === 'assistant') {
           return { ...msg, tool_calls: undefined, content: msg.content }
         }
