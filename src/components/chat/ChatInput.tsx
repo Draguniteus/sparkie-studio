@@ -856,8 +856,14 @@ export function ChatInput() {
         content: isTextResult ? (data.title ? `**${data.title}**\n\n${data.lyrics}` : data.lyrics) : prompt,
         ...(isTextResult ? {} : mediaType === "video" ? { imageUrl: data.url, imagePrompt: prompt } : { audioUrl: data.url }),
         isStreaming: false,
-        type: isTextResult ? "text" : mediaType,
+        type: isTextResult ? "text" : "ace_music",
         model: model,
+        aceMetadata: mediaType === "music" || mediaType === "speech" ? {
+          title: (data.title as string) || prompt.slice(0, 60) || "Sparkie Mix",
+          style: prompt.slice(0, 200),
+          lyrics: (data.lyrics as string) || "",
+          url2: undefined,
+        } : undefined,
       })
       const mediaChatTitle = useAppStore.getState().chats.find(c => c.id === chatId)?.title || "New Chat"
       const mediaExt = mediaType === "video" ? "mp4" : mediaType === "music" ? "mp3" : "png"
