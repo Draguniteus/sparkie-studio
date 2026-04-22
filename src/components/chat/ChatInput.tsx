@@ -807,8 +807,16 @@ export function ChatInput() {
                 ...(isVideoTask ? { imageUrl: statusData.url } : { audioUrl: statusData.url }),
                 imagePrompt: prompt,
                 isStreaming: false,
-                type: isVideoTask ? "video" : "music",
+                type: isVideoTask ? "video" : "ace_music",
                 model: model,
+                ...(isVideoTask ? {} : {
+                  aceMetadata: {
+                    title: statusData.title || prompt.slice(0, 60) || "Sparkie Mix",
+                    style: prompt.slice(0, 200),
+                    lyrics: (statusData.lyrics as string) || "",
+                    url2: undefined,
+                  },
+                }),
               })
               const mediaChatTitle = useAppStore.getState().chats.find(c => c.id === chatId)?.title || "New Chat"
               const safePrompt = prompt.slice(0, 40).replace(/[^a-z0-9 ]/gi, "").trim().replace(/\s+/g, "-") || taskLabel
@@ -1362,17 +1370,40 @@ export function ChatInput() {
         return
       }
       const finalContent = fullContent || "👋"
+
+      // ── Parse AUDIO_URL: from music tool result → promote to full Music Studio card ──
+      // When the LLM calls generate_ace_music or generate_music via /api/chat tools,
+      // the tool result string lands in delta.content as plain text. Parse it and
+      // upgrade the message so MessageBubble renders the full AceMusicPlayer card.
+      // Parse: 🎵 TITLE\nSTYLE\nAUDIO_URL:url\n[SONG_META:...]
+      const audioMatch = finalContent.match(/^🎵\s*([^\n]+)\n([^\n]+)\nAUDIO_URL:([^\n]+)(?:\n|$)/)
+      const extraUpdate: Record<string, unknown> = {}
+      if (audioMatch) {
+        extraUpdate.type = "ace_music"
+        extraUpdate.audioUrl = audioMatch[3].trim()
+        extraUpdate.aceMetadata = {
+          title: audioMatch[1].trim() || "Sparkie Mix",
+          style: audioMatch[2].trim(),
+          lyrics: "",
+          url2: undefined,
+        }
+        // Strip the AUDIO_URL line from displayed content (card shows it instead)
+        extraUpdate.content = finalContent
+          .replace(new RegExp('\nAUDIO_URL:' + audioMatch[3].replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?:\\nSONG_META:[^\\n]+)?', ''), '')
+          .trim()
+      }
+
       // Check if toolTraces were already stamped by the task_chip_clear handler.
       // If yes, just finalize content — don't overwrite the real traces with a placeholder.
       // If no (pure conversational response, no tools called), stamp a minimal trace.
       const alreadyStamped = (useAppStore.getState().chats.find(c => c.id === chatId)
         ?.messages.find(m => m.id === assistantMsgId)?.toolTraces?.length ?? 0) > 0
       if (alreadyStamped) {
-        updateMessage(chatId, assistantMsgId, { content: finalContent, isStreaming: false })
+        updateMessage(chatId, assistantMsgId, { content: finalContent, isStreaming: false, ...extraUpdate })
       } else {
         const convTrace: StepTrace = { icon: 'brain', label: 'Response ready', status: 'done', duration: Date.now() - convStreamStart }
         window.dispatchEvent(new CustomEvent('sparkie_step_trace', { detail: convTrace }))
-        updateMessage(chatId, assistantMsgId, { content: finalContent, isStreaming: false, toolTraces: [convTrace] })
+        updateMessage(chatId, assistantMsgId, { content: finalContent, isStreaming: false, toolTraces: [convTrace], ...extraUpdate })
       }
       saveMessage('assistant', finalContent)
       // ── Worklog framing: log response sent ──

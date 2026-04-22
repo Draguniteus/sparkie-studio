@@ -7297,7 +7297,6 @@ export async function POST(req: NextRequest) {
       'codebase', 'go through', 'find every', 'fix it yourself', 'autonomously',
       'commit the changes', 'push the fix', 'find the bug', 'repair',
       'summarize every', 'tell me everything', 'what have we built',
-      'be honest', 'tell me the truth', "what's broken",
       'remember that', 'save that', 'save this', 'note that', "don't forget",
       'update.*memory', 'forget.*about', 'my name is', 'my favorite',
     ]
@@ -7962,9 +7961,7 @@ Keep each header + thought on its own line. Use multiple short bold-header block
             if (typeof msg.content === 'string' && msg.content.length > 500) {
               let cleaned = msg.content
                 // Replace data:audio/mp3;base64,... with placeholder
-                .replace(/data:audio\/[^;]+;base64,[^\s]+/g, '[🎵 audio]')
-                // Truncate AUDIO_URL:... strings longer than 200 chars (keep title metadata)
-                .replace(/(AUDIO_URL:.{200,})/g, (m) => m.slice(0, 200) + '...[truncated]')
+                .replace(/data:audio\/[^;]+;base64,[^\s]+/g, '[audio]')
               // If still too long, truncate to 4000 chars
               if (cleaned.length > 4000) cleaned = cleaned.slice(0, 4000) + '\n[content truncated due to length]'
               msg = { ...msg, content: cleaned }
@@ -8740,7 +8737,9 @@ Keep each header + thought on its own line. Use multiple short bold-header block
           const hasJsonThisRound = /"type"\s*:\s*"function"\s*,\s*"name"\s*:/.test(rawContent)
           const actionPreamblePattern = /\b(generating now|on it|let me|calling now|doing it now|i'?m (going )?(to )?(make|generate|create|call|run)|stand by|wait(ing)?.*(result|response|finish))/i
           const musicKeywords = /\b(music|song|track|audio|sound)/i
-          if (actionPreamblePattern.test(rawContent) && !hasXmlThisRound && !hasJsonThisRound && round < MAX_TOOL_ROUNDS && musicKeywords.test(rawContent)) {
+          // Only fire music nudge if generate_ace_music hasn't already succeeded this round
+          const alreadyGotMusic = loopMessages.some((m: { content?: string }) => typeof m.content === 'string' && m.content.startsWith('🎵'))
+          if (actionPreamblePattern.test(rawContent) && !hasXmlThisRound && !hasJsonThisRound && round < MAX_TOOL_ROUNDS && musicKeywords.test(rawContent) && !alreadyGotMusic) {
             loopMessages = [...loopMessages, choice.message, {
               role: 'user' as const,
               content: `⚡ SYSTEM (not from Michael): You said you would generate music but did not call the generate_ace_music tool. Call it NOW. Do not describe the action in text — call the tool directly. You have NOT generated the music yet. Call generate_ace_music immediately, then report the result.`
@@ -9210,8 +9209,7 @@ When executing multi-step tasks:
         // Sanitize: strip base64 data URLs and truncate long audio strings
         if (typeof msg.content === 'string' && msg.content.length > 500) {
           let cleaned = msg.content
-            .replace(/data:audio\/[^;]+;base64,[^\s]+/g, '[🎵 audio]')
-            .replace(/(AUDIO_URL:.{200,})/g, (m) => m.slice(0, 200) + '...[truncated]')
+            .replace(/data:audio\/[^;]+;base64,[^\s]+/g, '[audio]')
           if (cleaned.length > 4000) cleaned = cleaned.slice(0, 4000) + '\n[content truncated due to length]'
           msg = { ...msg, content: cleaned }
         }
